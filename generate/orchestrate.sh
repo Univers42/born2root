@@ -315,8 +315,14 @@ else
 fi
 
 # Step 2 — Preseeded ISO
+FORCE_ISO="${FORCE_ISO:-0}"
 PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2> /dev/null | head -n1)
-if [ -n "$PRESEED_ISO" ]; then
+if [ "$FORCE_ISO" = "1" ]; then
+	run_step 1 ${MAKE_CMD} --no-print-directory gen_iso
+	PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2> /dev/null | head -n1)
+	STEP_DETAIL[1]="$PRESEED_ISO"
+	draw_dashboard
+elif [ -n "$PRESEED_ISO" ]; then
 	STEP_STATUS[1]="skip"
 	STEP_DETAIL[1]="$PRESEED_ISO"
 	draw_dashboard

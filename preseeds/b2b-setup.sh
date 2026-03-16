@@ -106,6 +106,14 @@ if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
 		else
 			echo "[WARN] User dlesieur not found — custom shell installed but not set as default"
 		fi
+
+		# Persist desired shell so first-boot can re-apply (if needed)
+		printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\n' "dlesieur" "$CUSTOM_SHELL_DEST" > /etc/b2b_custom_shell.conf 2>/dev/null || true
+		chmod 644 /etc/b2b_custom_shell.conf 2>/dev/null || true
+
+		# Verify and log the result for debugging
+		echo "[INFO] /etc/shells contains custom shell? $(grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells 2>/dev/null && echo yes || echo no)"
+		echo "[INFO] passwd entry: $(getent passwd dlesieur 2>/dev/null || echo '(missing)')"
 	else
 		echo "[WARN] custom shell dest looks unsafe ($CUSTOM_SHELL_DEST) — skipping"
 	fi

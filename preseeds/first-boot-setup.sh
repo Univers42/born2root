@@ -7,6 +7,28 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "=== First-boot setup starting ($(date)) ==="
 
+# Ensure custom shell is the default (if configured during install)
+if [ -f /etc/b2b_custom_shell.conf ]; then
+	# shellcheck disable=SC1091
+	. /etc/b2b_custom_shell.conf 2>/dev/null || true
+	if [ -n "${B2B_CUSTOM_USER:-}" ] && [ -n "${B2B_CUSTOM_SHELL:-}" ] && [ -x "${B2B_CUSTOM_SHELL:-}" ]; then
+		# Register in /etc/shells (needed for some tools, harmless otherwise)
+		if [ -f /etc/shells ]; then
+			grep -qxF "$B2B_CUSTOM_SHELL" /etc/shells || echo "$B2B_CUSTOM_SHELL" >> /etc/shells
+		else
+			echo "$B2B_CUSTOM_SHELL" > /etc/shells
+		fi
+		if id "$B2B_CUSTOM_USER" > /dev/null 2>&1; then
+			usermod -s "$B2B_CUSTOM_SHELL" "$B2B_CUSTOM_USER" 2>/dev/null || true
+			echo "[OK] Default shell enforced on first boot: $B2B_CUSTOM_USER -> $B2B_CUSTOM_SHELL"
+		else
+			echo "[WARN] Custom shell configured but user missing: $B2B_CUSTOM_USER"
+		fi
+	else
+		echo "[WARN] /etc/b2b_custom_shell.conf present but invalid (USER/SHELL missing or SHELL not executable)"
+	fi
+fi
+
 # Wait for network to be fully up
 for i in $(seq 1 30); do
 	if ping -c1 -W2 deb.debian.org > /dev/null 2>&1; then

@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: Invalid date        by ut down the       #+#    #+#              #
-#    Updated: 2026/02/19 13:41:29 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/03/16 17:51:20 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -21,10 +21,20 @@ DISK_DIR     := disk_images
 RM           := rm -rf
 VMS_ISO_TAR  := vms_iso.tar
 
+# Force rebuilding the preseed ISO even if it already exists.
+# `make all` sets this automatically so the ISO always matches the latest scripts/binaries.
+FORCE_ISO ?= 0
+
 # Optional: set a custom default login shell inside the VM.
-# Example:
-#   make gen_iso CUSTOM_SHELL_PATH=sh42/build/bin/hellish
-CUSTOM_SHELL_PATH ?=
+# Default is hellish from the sh42 submodule build.
+# To keep bash, override with an empty value:
+#   make gen_iso CUSTOM_SHELL_PATH=
+CUSTOM_SHELL_PATH ?= sh42/build/bin/hellish
+
+# Normalize to absolute path so ISO builder works from any cwd.
+ifneq ($(strip $(CUSTOM_SHELL_PATH)),)
+CUSTOM_SHELL_PATH := $(abspath $(CUSTOM_SHELL_PATH))
+endif
 
 # Colours (portable — works in bash/dash/zsh)
 C_RESET  := \033[0m
@@ -36,12 +46,18 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all pull deps check_system fix_hwe gen_iso setup_vm start_vm status help \
+.PHONY: all prepare pull shell deps check_system fix_hwe gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm
 
-all: pull
-	@bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE)"
+all: prepare
+	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE)"
+
+# Prepare everything needed for a smooth `make all` experience:
+# - update repo (if this is a git checkout)
+# - init/sync/update submodules
+# - build the sh42 hellish shell with parallel jobs
+prepare: pull shell
 
 pull:
 	@bash -c '\
@@ -57,6 +73,22 @@ pull:
 		fi; \
 		git stash pop -q 2>/dev/null || true; \
 	fi'
+
+
+# Build the custom shell from sh42 (parallel)
+shell:
+	@if [ ! -f sh42/Makefile ]; then \
+		printf "$(C_RED)✗$(C_RESET) sh42 submodule is missing. Run: git submodule update --init --recursive\n"; \
+		exit 1; \
+	fi
+	@printf "$(C_BLUE)▶$(C_RESET) Building sh42 (hellish)...\n"
+	@$(MAKE) -C sh42 OPT=1
+	@if [ -f sh42/build/bin/hellish ]; then \
+		printf "$(C_GREEN)✓$(C_RESET) hellish built: sh42/build/bin/hellish\n"; \
+	else \
+		printf "$(C_RED)✗$(C_RESET) hellish binary missing after build\n"; \
+		exit 1; \
+	fi
 
 # =========@@ Install VirtualBox (cross-distro) @@=============================
 deps:
@@ -149,9 +181,10 @@ check_system:
 fix_hwe:
 	@bash fixes/fix_hwe_kernel.sh
 
+
 # =========@@ Build preseeded ISO @@============================================
-gen_iso:
-	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" bash $(ISO_BUILDER)
+gen_iso: shell
+	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" bash $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:

@@ -1,0 +1,16 @@
+services:
+  debian-shell-lab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEBIAN_TAG: trixie
+    container_name: debian-shell-lab
+    environment:
+      TARGET_USER: dev
+      SHELL_MODE: hellish
+      HELLISH_SRC_DIR: /work/sh42
+    volumes:
+      - ../:/work
+    stdin_open: true
+    tty: true

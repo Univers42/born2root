@@ -2,6 +2,12 @@
 
 set -e # Exit on any error
 
+# Always run relative to repo root (so paths like preseeds/... and sh42/... work
+# regardless of the caller's current directory).
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
+cd "$REPO_ROOT"
+
 # ── Portable downloader (curl preferred, wget fallback) ──────────────────────
 download() {
 	local url="$1" dest="$2"
@@ -36,6 +42,7 @@ ISO_DIR="debian_iso_extract"
 PRESEED_FILE="preseeds/preseed.cfg"
 # Derive the output name from the discovered filename
 OUTPUT_ISO="${ISO_FILENAME%.iso}-preseed.iso"
+FORCE_ISO="${FORCE_ISO:-0}"
 
 echo "  Latest ISO: $ISO_FILENAME"
 echo "  URL:        $URL_IMAGE_ISO"
@@ -44,8 +51,13 @@ echo ""
 
 # ── Check for already-built preseed ISO ──────────────────────────────────────
 if [ -f "$OUTPUT_ISO" ]; then
-	echo "✓ Preseeded ISO already exists: $OUTPUT_ISO"
-	exit 0
+	if [ "$FORCE_ISO" = "1" ]; then
+		echo "↻ FORCE_ISO=1 — rebuilding: $OUTPUT_ISO"
+		rm -f "$OUTPUT_ISO"
+	else
+		echo "✓ Preseeded ISO already exists: $OUTPUT_ISO"
+		exit 0
+	fi
 fi
 
 # ── Download the base ISO if needed ──────────────────────────────────────────
@@ -108,6 +120,11 @@ done
 CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}"
 if [ -n "$CUSTOM_SHELL_PATH" ]; then
 	echo "Copying custom shell to ISO root..."
+	# If relative, resolve against repo root
+	case "$CUSTOM_SHELL_PATH" in
+		/*) : ;;
+		*) CUSTOM_SHELL_PATH="${REPO_ROOT}/${CUSTOM_SHELL_PATH}" ;;
+	esac
 	if [ ! -f "$CUSTOM_SHELL_PATH" ]; then
 		echo "Error: CUSTOM_SHELL_PATH points to a missing file: $CUSTOM_SHELL_PATH" >&2
 		exit 1
