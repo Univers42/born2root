@@ -18,7 +18,7 @@ VM_NAME="debian"
 VM_PATH="$(pwd)/disk_images"
 ISO_PATH="$(pwd)/$PRESEED_ISO"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
-VM_DISK_SIZE=32000 # 32GB in MB
+VM_DISK_SIZE=64000 # 64GB in MB
 
 # ── Smart VM sizing algorithm ────────────────────────────────────────────────
 # Detects host hardware and allocates resources proportionally.
