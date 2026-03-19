@@ -26,10 +26,10 @@ VMS_ISO_TAR  := vms_iso.tar
 FORCE_ISO ?= 0
 
 # Optional: set a custom default login shell inside the VM.
-# Default is hellish from the sh42 submodule build.
-# To keep bash, override with an empty value:
-#   make gen_iso CUSTOM_SHELL_PATH=
-CUSTOM_SHELL_PATH ?= sh42/build/bin/hellish
+# Default keeps /bin/bash (no custom shell payload injected).
+# To set hellish explicitly:
+#   make gen_iso CUSTOM_SHELL_PATH=sh42/build/bin/hellish
+CUSTOM_SHELL_PATH ?=
 
 # Normalize to absolute path so ISO builder works from any cwd.
 ifneq ($(strip $(CUSTOM_SHELL_PATH)),)
@@ -57,7 +57,7 @@ all: prepare
 # - update repo (if this is a git checkout)
 # - init/sync/update submodules
 # - build the sh42 hellish shell with parallel jobs
-prepare: pull shell
+prepare: pull update shell
 
 pull:
 	@bash -c '\
@@ -73,6 +73,9 @@ pull:
 		fi; \
 		git stash pop -q 2>/dev/null || true; \
 	fi'
+
+update:
+	@git submodule update --init --recursive --remote
 
 
 # Build the custom shell from sh42 (parallel)
