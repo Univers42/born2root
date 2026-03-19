@@ -110,7 +110,7 @@ make
   │     └─ Rebuild ISO with modified boot menu (auto-selects automated install)
   │
   ├─ 4. Create VirtualBox VM
-  │     ├─ 2048 MB RAM, 3 CPUs, 32 GB dynamic disk
+  │     ├─ 2048 MB RAM, 3 CPUs, 64 GB dynamic disk
   │     ├─ NAT networking with port forwarding:
   │     │   SSH:4242  HTTP:80  HTTPS:443  Frontend:5173
   │     │   Backend:3000  Docker:5000  MariaDB:3306  Redis:6379

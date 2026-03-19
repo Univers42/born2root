@@ -116,6 +116,35 @@ if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
 		install -m 755 "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST" 2>/dev/null || cp "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST"
 		chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
 
+		# VS Code Remote-SSH bootstrap/tunnel uses non-interactive command sessions.
+		# Keep hellish as default interactive shell, but route non-interactive SSH
+		# commands through bash for compatibility.
+		if [ "$(basename "$CUSTOM_SHELL_DEST")" = "hellish" ]; then
+			CUSTOM_SHELL_REAL="${CUSTOM_SHELL_DEST}.real"
+			if [ ! -x "$CUSTOM_SHELL_REAL" ]; then
+				mv "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
+				chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
+			fi
+			cat > "$CUSTOM_SHELL_DEST" << 'HELLWRAPEOF'
+#!/bin/bash
+REAL_SHELL="${0}.real"
+
+# For VS Code/SSH non-interactive command mode, force bash.
+if [ -n "$SSH_ORIGINAL_COMMAND" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
+	if [ -n "$SSH_ORIGINAL_COMMAND" ]; then
+		exec /bin/bash -lc "$SSH_ORIGINAL_COMMAND"
+	else
+		exec /bin/bash -l
+	fi
+fi
+
+# Interactive login keeps the custom shell behavior.
+exec "$REAL_SHELL" "$@"
+HELLWRAPEOF
+			chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
+			echo "[OK] Installed hellish SSH compatibility wrapper: interactive=hellish, non-interactive=bash"
+		fi
+
 		# Register the shell so chsh/usermod accepts it
 		if [ -f /etc/shells ]; then
 			grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells || echo "$CUSTOM_SHELL_DEST" >> /etc/shells

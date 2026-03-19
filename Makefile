@@ -30,6 +30,8 @@ FORCE_ISO ?= 0
 # To keep bash, override with an empty value:
 #   make gen_iso CUSTOM_SHELL_PATH=
 CUSTOM_SHELL_PATH ?= sh42/build/bin/hellish
+# Note: once connected to the VM via SSH, you can change the default shell for the user (e.g. dlesieur) with:
+# sudo usermod -s /bin/bash dlesieur && getent passwd dlesieur
 
 # Normalize to absolute path so ISO builder works from any cwd.
 ifneq ($(strip $(CUSTOM_SHELL_PATH)),)
@@ -57,7 +59,7 @@ all: prepare
 # - update repo (if this is a git checkout)
 # - init/sync/update submodules
 # - build the sh42 hellish shell with parallel jobs
-prepare: pull shell
+prepare: pull update shell
 
 pull:
 	@bash -c '\
@@ -73,6 +75,9 @@ pull:
 		fi; \
 		git stash pop -q 2>/dev/null || true; \
 	fi'
+
+update:
+	@git submodule update --init --recursive --remote
 
 
 # Build the custom shell from sh42 (parallel)

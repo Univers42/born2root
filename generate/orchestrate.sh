@@ -615,7 +615,8 @@ SSHEOF
 # ── VS Code Remote SSH settings (fix stale SOCKS proxy + banner timeout) ────
 setup_vscode_remote_ssh() {
 	local vscode_settings="$HOME/.config/Code/User/settings.json"
-	[ ! -f "$vscode_settings" ] && return 0
+	mkdir -p "$(dirname "$vscode_settings")"
+	[ -f "$vscode_settings" ] || printf '{}\n' > "$vscode_settings"
 
 	# Use python3 to safely merge JSON settings
 	python3 -c "
