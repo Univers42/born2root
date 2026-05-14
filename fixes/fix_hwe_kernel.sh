@@ -4,8 +4,9 @@
 #
 # Strategy (in order, least invasive first):
 #
-#   1. If VirtualBox 7.1.x is available from Oracle's official APT repo,
-#      upgrade it — 7.1.x supports kernel ≥ 6.13 so no kernel change needed.
+#   1. If VirtualBox 7.1.x is installed or available from Oracle's official
+#      APT repo, use it — 7.1.x supports kernel ≥ 6.13. Then install the
+#      matching running-kernel headers and rebuild/load the host driver.
 #
 #   2. Otherwise, ensure a safe GA kernel (6.8.x) is INSTALLED ALONGSIDE the
 #      current one, set GRUB to boot into it next time, and ask for a reboot.
@@ -50,13 +51,74 @@ printf "${BOLD}  VirtualBox / HWE Kernel Compatibility Fix${NC}\n"
 hr
 
 RUNNING_KERNEL="$(uname -r)"
-VBOX_VER="$(VBoxManage --version 2> /dev/null | cut -d'r' -f1 || echo unknown)"
+
+vbox_version() {
+	local raw version
+	raw="$(VBoxManage --version 2> /dev/null || true)"
+	version="$(printf '%s\n' "$raw" | grep -E '^[0-9]+\.[0-9]+' | tail -1 || true)"
+	if [[ -n "$version" ]]; then
+		printf '%s\n' "${version%%r*}"
+	else
+		printf 'unknown\n'
+	fi
+}
+
+VBOX_VER="$(vbox_version)"
 info "Running kernel : ${RUNNING_KERNEL}"
 info "VirtualBox ver : ${VBOX_VER}"
 
 # ── Helper: major version number of installed VirtualBox ─────────────────────
 vbox_major() {
-	VBoxManage --version 2> /dev/null | grep -oP '^\d+\.\d+' | tr -d '.' || echo 0
+	local version
+	version="$(vbox_version)"
+	if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+		printf '%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+	else
+		printf '0\n'
+	fi
+}
+
+# ── Helper: install headers and rebuild/load the VirtualBox host driver ──────
+ensure_vbox_driver_ready() {
+	hr
+	info "Checking VirtualBox kernel driver..."
+
+	if test -c /dev/vboxdrv; then
+		success "/dev/vboxdrv is ready. 'make start_vm' should work."
+		return 0
+	fi
+
+	if ! command -v VBoxManage &> /dev/null; then
+		die "VBoxManage is not installed. Run 'make deps' or install VirtualBox first."
+	fi
+
+	info "Installing build tools and headers for ${RUNNING_KERNEL}..."
+	apt-get update -qq
+	apt-get install -y "linux-headers-${RUNNING_KERNEL}" build-essential dkms perl
+	dpkg --configure -a
+
+	if [[ -x /sbin/vboxconfig ]]; then
+		info "Rebuilding VirtualBox host modules with /sbin/vboxconfig..."
+		/sbin/vboxconfig
+	elif dpkg -s virtualbox-dkms &> /dev/null; then
+		info "Reinstalling virtualbox-dkms..."
+		apt-get install --reinstall -y virtualbox-dkms
+	else
+		warn "No /sbin/vboxconfig or virtualbox-dkms package found; trying modprobe only."
+	fi
+
+	modprobe vboxdrv 2> /dev/null || true
+	modprobe vboxnetflt 2> /dev/null || true
+	modprobe vboxnetadp 2> /dev/null || true
+
+	if test -c /dev/vboxdrv; then
+		success "VirtualBox kernel driver rebuilt and loaded."
+	else
+		if command -v mokutil &> /dev/null && mokutil --sb-state 2> /dev/null | grep -qi enabled; then
+			warn "Secure Boot is enabled; unsigned VirtualBox modules may be blocked."
+		fi
+		die "VirtualBox driver is still missing. Check /var/log/vbox-setup.log or rerun: sudo /sbin/vboxconfig"
+	fi
 }
 
 # ── STEP 1: Try upgrading VirtualBox to 7.1.x (Oracle repo) ──────────────────
@@ -84,14 +146,8 @@ https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib" \
 		info "Found virtualbox-7.1 — installing..."
 		apt-get remove -y virtualbox virtualbox-7.0 2> /dev/null || true
 		apt-get install -y virtualbox-7.1
-		dpkg --configure -a
-		modprobe vboxdrv 2> /dev/null || true
-		if test -c /dev/vboxdrv; then
-			success "VirtualBox 7.1 installed — /dev/vboxdrv ready. No kernel change needed."
-		else
-			warn "/dev/vboxdrv still absent after upgrade; DKMS may need a rebuild."
-			info "Try: sudo apt install --reinstall virtualbox-dkms && sudo modprobe vboxdrv"
-		fi
+		VBOX_VER="$(vbox_version)"
+		ensure_vbox_driver_ready
 		return 0
 	else
 		warn "virtualbox-7.1 not found in APT cache. Falling back to kernel install."
@@ -220,16 +276,16 @@ mapfile -t ALL_BAD < <(
 )
 
 if [[ "${#ALL_BAD[@]}" -eq 0 ]]; then
-	success "No incompatible HWE kernels found — nothing to do."
-	test -c /dev/vboxdrv && success "/dev/vboxdrv is ready. 'make start_vm' should work."
+	success "No incompatible HWE kernels found."
+	ensure_vbox_driver_ready
 	exit 0
 fi
 
-info "Incompatible kernel package(s) detected:"
+info "New/HWE kernel package(s) detected:"
 for pkg in "${ALL_BAD[@]}"; do
 	ver="${pkg#linux-image-}"
 	if [[ "$ver" == "$RUNNING_KERNEL" ]]; then
-		printf "   ${R}•${NC} %s  ${R}← running, cannot remove yet${NC}\n" "$pkg"
+		printf "   ${Y}•${NC} %s  ${Y}← running${NC}\n" "$pkg"
 	else
 		printf "   ${Y}•${NC} %s\n" "$pkg"
 	fi
@@ -247,8 +303,7 @@ if $RUNNING_IS_BAD; then
 	MAJOR="$(vbox_major)"
 	if [[ "$MAJOR" -ge 71 ]]; then
 		success "VirtualBox ${VBOX_VER} already supports kernel ${RUNNING_KERNEL}."
-		info "Cleaning up any leftover non-running HWE kernels..."
-		remove_non_running_hwe_kernels
+		ensure_vbox_driver_ready
 		exit 0
 	fi
 
@@ -257,7 +312,7 @@ if $RUNNING_IS_BAD; then
 	hr
 
 	if try_upgrade_virtualbox; then
-		remove_non_running_hwe_kernels
+		success "VirtualBox upgraded and host driver is ready."
 	else
 		install_safe_kernel_and_set_grub
 	fi
@@ -266,7 +321,5 @@ else
 	remove_non_running_hwe_kernels
 	hr
 	success "Done."
-	test -c /dev/vboxdrv \
-		&& success "/dev/vboxdrv is ready — 'make start_vm' should work." \
-		|| warn "/dev/vboxdrv missing — try: sudo modprobe vboxdrv"
+	ensure_vbox_driver_ready
 fi

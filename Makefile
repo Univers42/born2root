@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: Invalid date        by ut down the       #+#    #+#              #
-#    Updated: 2026/03/16 17:51:20 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/05/14 16:02:51 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -139,15 +139,24 @@ check_system:
 	ERRORS=0; \
 	KERN=$$(uname -r); \
 	printf "$(C_BLUE)▶$(C_RESET) Pre-flight checks (running kernel: $$KERN)\n"; \
+	VBOX_VER=""; \
+	VBOX_MAJOR=0; \
+	if command -v VBoxManage >/dev/null 2>&1; then \
+		VBOX_VER=$$(VBoxManage --version 2>/dev/null | awk "/^[0-9]+\\.[0-9]+/ {print \$$1; exit}" | cut -d r -f1); \
+		VBOX_MAJOR=$$(printf "%s\n" "$$VBOX_VER" | awk -F. "{if (\$$1 ~ /^[0-9]+$$/) print \$$1 \$$2; else print 0}"); \
+		VBOX_MAJOR=$${VBOX_MAJOR:-0}; \
+	fi; \
 	HWE_PKGS=$$(dpkg -l 2>/dev/null \
 		| awk "/^ii.*linux-image-[0-9]/{print \$$2}" \
 		| grep -E "linux-image-6\.(1[3-9]|[2-9][0-9])\.|linux-image-[7-9]\." \
 		| tr "\n" " "); \
-	if [ -n "$$HWE_PKGS" ]; then \
+	if [ -n "$$HWE_PKGS" ] && [ "$$VBOX_MAJOR" -lt 71 ]; then \
 		printf "$(C_YELLOW)⚠$(C_RESET)  Incompatible HWE kernel(s) installed: $$HWE_PKGS\n"; \
 		printf "$(C_YELLOW)  VirtualBox 7.0.x DKMS cannot build against these kernels and\n$(C_RESET)"; \
 		printf "$(C_YELLOW)  may break entirely even when booting an older kernel.\n$(C_RESET)"; \
 		printf "$(C_YELLOW)  Fix:$(C_RESET) make fix_hwe\n"; \
+	elif [ -n "$$HWE_PKGS" ]; then \
+		printf "$(C_GREEN)✓$(C_RESET) VirtualBox $$VBOX_VER supports installed HWE kernel(s)\n"; \
 	fi; \
 	if ! test -c /dev/vboxdrv 2>/dev/null; then \
 		printf "$(C_RED)✗$(C_RESET) /dev/vboxdrv missing — VirtualBox kernel driver not loaded\n"; \
@@ -156,12 +165,12 @@ check_system:
 			DKMS_BAD=$$(dkms status 2>/dev/null | grep -i vbox | grep -iv installed | head -5); \
 			if [ -n "$$DKMS_BAD" ]; then \
 				printf "$(C_RED)  Broken DKMS entries:$(C_RESET) $$DKMS_BAD\n"; \
-				printf "$(C_YELLOW)  Fix:$(C_RESET) sudo dpkg --configure -a && sudo modprobe vboxdrv\n"; \
+				printf "$(C_YELLOW)  Fix:$(C_RESET) make fix_hwe\n"; \
 			else \
-				printf "$(C_YELLOW)  Run:$(C_RESET) sudo modprobe vboxdrv\n"; \
+				printf "$(C_YELLOW)  Run:$(C_RESET) make fix_hwe\n"; \
 			fi; \
 		else \
-			printf "$(C_YELLOW)  Run:$(C_RESET) sudo modprobe vboxdrv\n"; \
+			printf "$(C_YELLOW)  Run:$(C_RESET) make fix_hwe\n"; \
 		fi; \
 	else \
 		printf "$(C_GREEN)✓$(C_RESET) /dev/vboxdrv OK\n"; \

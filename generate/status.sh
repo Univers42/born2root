@@ -96,8 +96,14 @@ mid
 
 # ── VirtualBox ──
 if command -v VBoxManage > /dev/null 2>&1; then
-	VBOX_VER=$(VBoxManage --version 2> /dev/null)
-	status_row "${GRN}${BLD}✓${RST}" "VirtualBox ......" "${GRN}v${VBOX_VER}${RST}"
+	VBOX_RAW=$(VBoxManage --version 2> /dev/null || true)
+	VBOX_VER=$(printf '%s\n' "$VBOX_RAW" | grep -E '^[0-9]+\.[0-9]+' | tail -1)
+	[ -z "$VBOX_VER" ] && VBOX_VER="unknown"
+	if [ -c /dev/vboxdrv ]; then
+		status_row "${GRN}${BLD}✓${RST}" "VirtualBox ......" "${GRN}v${VBOX_VER}${RST}"
+	else
+		status_row "${YLW}${BLD}⚠${RST}" "VirtualBox ......" "${YLW}v${VBOX_VER} driver missing${RST}"
+	fi
 else
 	status_row "${RED}${BLD}✗${RST}" "VirtualBox ......" "${RED}not installed${RST}"
 fi
