@@ -295,6 +295,7 @@ hr
 # Is the running kernel among the bad ones?
 RUNNING_IS_BAD=false
 for pkg in "${ALL_BAD[@]}"; do
+
 	[[ "${pkg#linux-image-}" == "$RUNNING_KERNEL" ]] && RUNNING_IS_BAD=true && break
 done
 
