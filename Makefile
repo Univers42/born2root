@@ -228,10 +228,12 @@ bstart_vm: check_system
 	if ! VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
 		$(MAKE) --no-print-directory setup_vm; \
 	fi; \
+	SSH_PORT=$$(VBoxManage showvminfo "$(VM_NAME)" --machinereadable 2>/dev/null | grep "^Forwarding" | grep "\"ssh,tcp," | head -1 | cut -d, -f4); \
+	if [ -z "$$SSH_PORT" ]; then SSH_PORT=4242; fi; \
 	bash unlock_vm.sh > vm_boot.log 2>&1 & \
 	printf "Waiting for VM to boot (see vm_boot.log)...\n"; \
 	for i in $$(seq 1 30); do \
-		if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -p 4242 dlesieur@127.0.0.1 exit 2>/dev/null; then \
+		if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -p "$$SSH_PORT" dlesieur@127.0.0.1 exit 2>/dev/null; then \
 			printf "$(C_GREEN)✓ VM is ready!$(C_RESET)\n"; \
 			exit 0; \
 		fi; \

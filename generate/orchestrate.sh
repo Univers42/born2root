@@ -297,6 +297,143 @@ get_host_ip() {
 	fi
 }
 
+# Detect any local listener on a port, including loopback-only services such as
+# the 42 ftpkg service on 127.0.0.1:4242.
+is_host_port_free() {
+	local port="$1"
+	[ -n "$port" ] || return 1
+
+	if command -v ss > /dev/null 2>&1; then
+		if ss -H -ltn 2> /dev/null | awk -v port="$port" '
+			{
+				local_addr = $4
+				if (local_addr ~ ":" port "$")
+					found = 1
+			}
+			END { exit found ? 0 : 1 }
+		'; then
+			return 1
+		fi
+	elif command -v netstat > /dev/null 2>&1; then
+		if netstat -tln 2> /dev/null | awk -v port="$port" '
+			{
+				local_addr = $4
+				if (local_addr ~ ":" port "$")
+					found = 1
+			}
+			END { exit found ? 0 : 1 }
+		'; then
+			return 1
+		fi
+	fi
+
+	if command -v nc > /dev/null 2>&1 && nc -z -w 1 127.0.0.1 "$port" > /dev/null 2>&1; then
+		return 1
+	fi
+	return 0
+}
+
+find_free_port() {
+	local port="$1"
+	local max=100 i=0
+	while [ "$i" -lt "$max" ]; do
+		if is_host_port_free "$port"; then
+			echo "$port"
+			return 0
+		fi
+		port=$((port + 1))
+		i=$((i + 1))
+	done
+	echo "$1"
+}
+
+get_vm_port() {
+	local name="$1"
+	local line
+	line=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| awk -F'"' -v rule="$name" '$1 ~ /^Forwarding/ && $2 ~ "^" rule ",tcp," { print $2; exit }')
+	echo "$line" | cut -d',' -f4
+}
+
+set_vm_nat_forward() {
+	local name="$1"
+	local host_port="$2"
+	local guest_port="$3"
+	local state
+	state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| grep "^VMState=" | cut -d'"' -f2)
+
+	if [ "$state" = "running" ]; then
+		VBoxManage controlvm "${VM_NAME}" natpf1 delete "$name" > /dev/null 2>&1 || true
+		VBoxManage controlvm "${VM_NAME}" natpf1 "$name,tcp,,${host_port},,${guest_port}" > /dev/null
+	else
+		VBoxManage modifyvm "${VM_NAME}" --natpf1 delete "$name" > /dev/null 2>&1 || true
+		VBoxManage modifyvm "${VM_NAME}" --natpf1 "$name,tcp,,${host_port},,${guest_port}" > /dev/null
+	fi
+}
+
+host_port_answers_ssh() {
+	local port="$1"
+	local banner
+	command -v nc > /dev/null 2>&1 || return 1
+	banner=$(printf '\r\n' | nc -w 2 127.0.0.1 "$port" 2> /dev/null | head -1 | tr -d '\r')
+	[ "${banner#SSH-}" != "$banner" ]
+}
+
+host_port_answers_http() {
+	local port="$1"
+	command -v curl > /dev/null 2>&1 || return 1
+	curl -fsSI --max-time 2 "http://127.0.0.1:${port}/" 2> /dev/null | grep -qi '^HTTP/'
+}
+
+ensure_vm_nat_forward() {
+	local name="$1"
+	local guest_port="$2"
+	local preferred_port="$3"
+	local current_port desired_port
+
+	current_port=$(get_vm_port "$name")
+	desired_port="$current_port"
+	if [ -z "$desired_port" ] || ! is_host_port_free "$desired_port"; then
+		desired_port=$(find_free_port "$preferred_port")
+	fi
+
+	if [ -z "$current_port" ] || [ "$desired_port" != "$current_port" ]; then
+		set_vm_nat_forward "$name" "$desired_port" "$guest_port"
+		STEP_DETAIL[2]="${VM_NAME} ${name}:${desired_port}"
+		draw_dashboard
+	fi
+}
+
+ensure_vm_nat_forwarding() {
+	local state
+	state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| grep "^VMState=" | cut -d'"' -f2)
+	if [ "$state" = "running" ]; then
+		local ssh_port new_ssh_port
+		ssh_port=$(get_vm_port ssh)
+		if [ -z "$ssh_port" ] || { ! host_port_answers_ssh "$ssh_port" && host_port_answers_http "$ssh_port"; }; then
+			new_ssh_port=$(find_free_port 4242)
+			set_vm_nat_forward ssh "$new_ssh_port" 4242
+			STEP_DETAIL[2]="${VM_NAME} ssh:${new_ssh_port}"
+			draw_dashboard
+		fi
+		return 0
+	fi
+
+	# When the VM is stopped, VirtualBox NAT is not listening yet, so any occupied
+	# configured host port belongs to another process and must be moved.
+
+	ensure_vm_nat_forward ssh 4242 4242
+	ensure_vm_nat_forward http 80 8082
+	ensure_vm_nat_forward https 443 8443
+	ensure_vm_nat_forward docker 5000 5000
+	ensure_vm_nat_forward mariadb 3306 3306
+	ensure_vm_nat_forward redis 6379 6379
+	ensure_vm_nat_forward frontend 5173 5173
+	ensure_vm_nat_forward backend 3000 3000
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════════
@@ -369,6 +506,8 @@ else
 	STEP_DETAIL[2]="${VM_NAME}"
 	draw_dashboard
 fi
+
+ensure_vm_nat_forwarding
 
 # Step 4 — Start VM (install from ISO)
 VM_STATE=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
@@ -523,32 +662,8 @@ else
 fi
 
 # ── Read actual ports from VM config (no hardcoding) ─────────────────────────
-get_vm_port() {
-	local name="$1"
-	local line
-	line=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
-		| grep "^Forwarding" | grep "\"${name}")
-	# If searching for "http", exclude "https" matches
-	if [ "$name" = "http" ]; then
-		line=$(echo "$line" | grep -v "\"https")
-	fi
-	echo "$line" | head -1 | cut -d',' -f4
-}
-
-# Find a free port for the preseed HTTP server (not used by VM or system)
-find_free_port() {
-	local port="$1"
-	local max=100 i=0
-	while [ "$i" -lt "$max" ]; do
-		if ! (ss -tln 2> /dev/null || netstat -tln 2> /dev/null) | grep -qE "(0\.0\.0\.0|\*|\[::\]):${port}\b"; then
-			echo "$port"
-			return 0
-		fi
-		port=$((port + 1))
-		i=$((i + 1))
-	done
-	echo "$1" # fallback
-}
+# get_vm_port/find_free_port are defined near the top so they can also repair
+# stale NAT rules before the VM starts.
 
 P_SSH=$(get_vm_port ssh)
 P_HTTP=$(get_vm_port http)

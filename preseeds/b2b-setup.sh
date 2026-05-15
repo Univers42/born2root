@@ -133,6 +133,8 @@ REAL_SHELL="${0}.real"
 if [ -n "$SSH_ORIGINAL_COMMAND" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
 	if [ -n "$SSH_ORIGINAL_COMMAND" ]; then
 		exec /bin/bash -lc "$SSH_ORIGINAL_COMMAND"
+	elif [ "$#" -gt 0 ]; then
+		exec /bin/bash "$@"
 	else
 		exec /bin/bash -l
 	fi

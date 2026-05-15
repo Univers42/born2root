@@ -163,7 +163,7 @@ Ctrl+Shift+P → Remote-SSH: Connect to Host → b2b
 ```
 
 The orchestrator automatically:
-- Wrote `~/.ssh/config` with a `b2b` alias pointing to `127.0.0.1:4242`
+- Wrote `~/.ssh/config` with a `b2b` alias pointing to the VM's actual forwarded host port
 - Injected your SSH public key into the VM (no password needed)
 - Configured VS Code settings to prevent the SOCKS proxy timeout bug
 
@@ -391,14 +391,14 @@ sda
 
 | Service | Host Port | VM Port |
 |---------|-----------|---------|
-| SSH | 4242 | 4242 |
-| HTTP | 80 | 80 |
-| HTTPS | 443 | 443 |
-| Vite Frontend | 5173 | 5173 |
-| Backend API | 3000 | 3000 |
-| Docker Registry | 5000 | 5000 |
-| MariaDB | 3306 | 3306 |
-| Redis | 6379 | 6379 |
+| SSH | auto-selected from 4242 | 4242 |
+| HTTP | auto-selected from 8082 | 80 |
+| HTTPS | auto-selected from 8443 | 443 |
+| Vite Frontend | auto-selected from 5173 | 5173 |
+| Backend API | auto-selected from 3000 | 3000 |
+| Docker Registry | auto-selected from 5000 | 5000 |
+| MariaDB | auto-selected from 3306 | 3306 |
+| Redis | auto-selected from 6379 | 6379 |
 
 ---
 
@@ -507,7 +507,8 @@ Your SSH key wasn't injected during install (ISO build issue). Fix it manually:
 
 ```bash
 # Copy your key to the VM (will ask for password ONE time)
-ssh-copy-id -p 4242 dlesieur@127.0.0.1
+SSH_PORT=$(ssh -G b2b 2>/dev/null | awk '$1 == "port" { print $2; exit }')
+ssh-copy-id -p "$SSH_PORT" dlesieur@127.0.0.1
 # Password: tempuser123
 
 # Verify — should NOT ask for password
@@ -526,13 +527,14 @@ VBoxManage controlvm debian poweroff
 Normal — the VM was rebuilt with a new host key. The `~/.ssh/config` already has `StrictHostKeyChecking no` and `UserKnownHostsFile /dev/null` for the `b2b` host, so this shouldn't happen. If it does:
 
 ```bash
-ssh-keygen -R "[127.0.0.1]:4242"
+SSH_PORT=$(ssh -G b2b 2>/dev/null | awk '$1 == "port" { print $2; exit }')
+ssh-keygen -R "[127.0.0.1]:${SSH_PORT}"
 ```
 
 ### Full diagnostic dump (run from host)
 
 ```bash
-ssh -o BatchMode=yes -p 4242 dlesieur@127.0.0.1 '
+ssh -o BatchMode=yes b2b '
 echo "=== UPTIME ===" && uptime
 echo "=== MEMORY ===" && free -m
 echo "=== SSH ===" && systemctl is-active ssh && ss -tlnp | grep 4242

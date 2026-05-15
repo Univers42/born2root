@@ -3,3 +3,4 @@ vms_iso.tar
 disk_images
 *.iso
 *.tar
+*secret*

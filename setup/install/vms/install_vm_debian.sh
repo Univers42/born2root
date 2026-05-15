@@ -86,8 +86,32 @@ BACKEND_PORT=3000
 # Check if a host port is available (no sudo required)
 is_port_free() {
 	local port="$1"
-	if (ss -tln 2> /dev/null || netstat -tln 2> /dev/null) | grep -qE "(0\.0\.0\.0|\*|\[::\]):${port}\b"; then
-		return 1 # port is taken
+	if command -v ss > /dev/null 2>&1; then
+		if ss -H -ltn 2> /dev/null | awk -v port="$port" '
+			{
+				local_addr = $4
+				if (local_addr ~ ":" port "$")
+					found = 1
+			}
+			END { exit found ? 0 : 1 }
+		'; then
+			return 1 # port is taken
+		fi
+	elif command -v netstat > /dev/null 2>&1; then
+		if netstat -tln 2> /dev/null | awk -v port="$port" '
+			{
+				local_addr = $4
+				if (local_addr ~ ":" port "$")
+					found = 1
+			}
+			END { exit found ? 0 : 1 }
+		'; then
+			return 1 # port is taken
+		fi
+	fi
+
+	if command -v nc > /dev/null 2>&1 && nc -z -w 1 127.0.0.1 "$port" > /dev/null 2>&1; then
+		return 1 # port is reachable on localhost
 	fi
 	return 0 # port is free
 }
