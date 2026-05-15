@@ -48,7 +48,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all prepare pull shell deps check_system fix_hwe gen_iso setup_vm start_vm status help \
+.PHONY: all prepare pull shell deps check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm
 
@@ -194,6 +194,9 @@ check_system:
 # =========@@ Fix incompatible HWE kernel (VirtualBox DKMS) @@=================
 fix_hwe:
 	@bash fixes/fix_hwe_kernel.sh
+
+fix_app_ports:
+	@bash fixes/fix_app_nat_forwarding.sh "$(VM_NAME)"
 
 
 # =========@@ Build preseeded ISO @@============================================

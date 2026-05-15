@@ -366,6 +366,18 @@ ufw allow 80/tcp comment 'HTTP'
 ufw allow 443/tcp comment 'HTTPS'
 ufw allow 5173/tcp comment 'Vite Frontend'
 ufw allow 3000/tcp comment 'Backend API'
+ufw allow 3001/tcp comment 'osionos app'
+ufw allow 3002/tcp comment 'osionos Mail'
+ufw allow 3003/tcp comment 'osionos Calendar'
+ufw allow 4000/tcp comment 'osionos bridge API'
+ufw allow 4100/tcp comment 'Mail bridge'
+ufw allow 4200/tcp comment 'Calendar bridge'
+ufw allow 4322/tcp comment 'Website'
+ufw allow 8000/tcp comment 'BaaS gateway'
+ufw allow 8001/tcp comment 'BaaS admin'
+ufw allow 8025/tcp comment 'Local mail inbox'
+ufw allow 8787/tcp comment 'Auth gateway'
+ufw allow 18200/tcp comment 'Vault'
 echo y | ufw enable
 echo "[OK] UFW firewall active"
 

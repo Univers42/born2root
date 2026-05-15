@@ -82,8 +82,35 @@ REDIS_PORT=6379
 FRONTEND_PORT=5173
 BACKEND_PORT=3000
 
+# osionos / ft_transcendence HTTPS proxy ports
+OSIONOS_APP_PORT=3001
+OSIONOS_MAIL_PORT=3002
+OSIONOS_CALENDAR_PORT=3003
+OSIONOS_BRIDGE_PORT=4000
+MAIL_BRIDGE_PORT=4100
+CALENDAR_BRIDGE_PORT=4200
+WEBSITE_PORT=4322
+BAAS_GATEWAY_PORT=8000
+BAAS_ADMIN_PORT=8001
+MAILPIT_PORT=8025
+AUTH_GATEWAY_PORT=8787
+VAULT_PORT=18200
+
 # ── Dynamic port allocation (find free host ports) ───────────────────────────
 # Check if a host port is available (no sudo required)
+RESERVED_HOST_PORTS=""
+
+is_port_reserved() {
+	case " $RESERVED_HOST_PORTS " in
+		*" $1 "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+reserve_host_port() {
+	RESERVED_HOST_PORTS="${RESERVED_HOST_PORTS} $1"
+}
+
 is_port_free() {
 	local port="$1"
 	if command -v ss > /dev/null 2>&1; then
@@ -122,7 +149,8 @@ find_free_port() {
 	local max_tries=100
 	local i=0
 	while [ "$i" -lt "$max_tries" ]; do
-		if is_port_free "$port"; then
+		if ! is_port_reserved "$port" && is_port_free "$port"; then
+			reserve_host_port "$port"
 			echo "$port"
 			return 0
 		fi
@@ -142,6 +170,18 @@ HOST_MARIADB_PORT=$(find_free_port 3306)
 HOST_REDIS_PORT=$(find_free_port 6379)
 HOST_FRONTEND_PORT=$(find_free_port "$FRONTEND_PORT")
 HOST_BACKEND_PORT=$(find_free_port "$BACKEND_PORT")
+HOST_OSIONOS_APP_PORT=$(find_free_port "$OSIONOS_APP_PORT")
+HOST_OSIONOS_MAIL_PORT=$(find_free_port "$OSIONOS_MAIL_PORT")
+HOST_OSIONOS_CALENDAR_PORT=$(find_free_port "$OSIONOS_CALENDAR_PORT")
+HOST_OSIONOS_BRIDGE_PORT=$(find_free_port "$OSIONOS_BRIDGE_PORT")
+HOST_MAIL_BRIDGE_PORT=$(find_free_port "$MAIL_BRIDGE_PORT")
+HOST_CALENDAR_BRIDGE_PORT=$(find_free_port "$CALENDAR_BRIDGE_PORT")
+HOST_WEBSITE_PORT=$(find_free_port "$WEBSITE_PORT")
+HOST_BAAS_GATEWAY_PORT=$(find_free_port "$BAAS_GATEWAY_PORT")
+HOST_BAAS_ADMIN_PORT=$(find_free_port "$BAAS_ADMIN_PORT")
+HOST_MAILPIT_PORT=$(find_free_port "$MAILPIT_PORT")
+HOST_AUTH_GATEWAY_PORT=$(find_free_port "$AUTH_GATEWAY_PORT")
+HOST_VAULT_PORT=$(find_free_port "$VAULT_PORT")
 
 # Create VM folders if they don't exist
 mkdir -p "$VM_PATH/$VM_NAME"
@@ -241,6 +281,18 @@ echo "  MariaDB:  host:${HOST_MARIADB_PORT} -> guest:${MARIADB_PORT}"
 echo "  Redis:    host:${HOST_REDIS_PORT} -> guest:${REDIS_PORT}"
 echo "  Frontend: host:${HOST_FRONTEND_PORT} -> guest:${FRONTEND_PORT}"
 echo "  Backend:  host:${HOST_BACKEND_PORT} -> guest:${BACKEND_PORT}"
+echo "  Website:  host:${HOST_WEBSITE_PORT} -> guest:${WEBSITE_PORT}"
+echo "  osionos app:      host:${HOST_OSIONOS_APP_PORT} -> guest:${OSIONOS_APP_PORT}"
+echo "  osionos mail:     host:${HOST_OSIONOS_MAIL_PORT} -> guest:${OSIONOS_MAIL_PORT}"
+echo "  osionos calendar: host:${HOST_OSIONOS_CALENDAR_PORT} -> guest:${OSIONOS_CALENDAR_PORT}"
+echo "  osionos bridge:   host:${HOST_OSIONOS_BRIDGE_PORT} -> guest:${OSIONOS_BRIDGE_PORT}"
+echo "  Mail bridge:      host:${HOST_MAIL_BRIDGE_PORT} -> guest:${MAIL_BRIDGE_PORT}"
+echo "  Calendar bridge:  host:${HOST_CALENDAR_BRIDGE_PORT} -> guest:${CALENDAR_BRIDGE_PORT}"
+echo "  BaaS gateway:     host:${HOST_BAAS_GATEWAY_PORT} -> guest:${BAAS_GATEWAY_PORT}"
+echo "  BaaS admin:       host:${HOST_BAAS_ADMIN_PORT} -> guest:${BAAS_ADMIN_PORT}"
+echo "  Mailpit:          host:${HOST_MAILPIT_PORT} -> guest:${MAILPIT_PORT}"
+echo "  Auth gateway:     host:${HOST_AUTH_GATEWAY_PORT} -> guest:${AUTH_GATEWAY_PORT}"
+echo "  Vault:            host:${HOST_VAULT_PORT} -> guest:${VAULT_PORT}"
 
 VBoxManage modifyvm "$VM_NAME" --natpf1 "ssh,tcp,,${HOST_SSH_PORT},,${SSH_PORT}" || {
 	echo "Failed to set up NAT port forwarding for SSH"
@@ -272,6 +324,54 @@ VBoxManage modifyvm "$VM_NAME" --natpf1 "frontend,tcp,,${HOST_FRONTEND_PORT},,${
 }
 VBoxManage modifyvm "$VM_NAME" --natpf1 "backend,tcp,,${HOST_BACKEND_PORT},,${BACKEND_PORT}" || {
 	echo "Failed to set up NAT port forwarding for Backend"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "website,tcp,,${HOST_WEBSITE_PORT},,${WEBSITE_PORT}" || {
+	echo "Failed to set up NAT port forwarding for Website"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-app,tcp,,${HOST_OSIONOS_APP_PORT},,${OSIONOS_APP_PORT}" || {
+	echo "Failed to set up NAT port forwarding for osionos app"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-mail,tcp,,${HOST_OSIONOS_MAIL_PORT},,${OSIONOS_MAIL_PORT}" || {
+	echo "Failed to set up NAT port forwarding for osionos Mail"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-calendar,tcp,,${HOST_OSIONOS_CALENDAR_PORT},,${OSIONOS_CALENDAR_PORT}" || {
+	echo "Failed to set up NAT port forwarding for osionos Calendar"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-bridge,tcp,,${HOST_OSIONOS_BRIDGE_PORT},,${OSIONOS_BRIDGE_PORT}" || {
+	echo "Failed to set up NAT port forwarding for osionos bridge"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "mail-bridge,tcp,,${HOST_MAIL_BRIDGE_PORT},,${MAIL_BRIDGE_PORT}" || {
+	echo "Failed to set up NAT port forwarding for Mail bridge"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "calendar-bridge,tcp,,${HOST_CALENDAR_BRIDGE_PORT},,${CALENDAR_BRIDGE_PORT}" || {
+	echo "Failed to set up NAT port forwarding for Calendar bridge"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "baas-gateway,tcp,,${HOST_BAAS_GATEWAY_PORT},,${BAAS_GATEWAY_PORT}" || {
+	echo "Failed to set up NAT port forwarding for BaaS gateway"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "baas-admin,tcp,,${HOST_BAAS_ADMIN_PORT},,${BAAS_ADMIN_PORT}" || {
+	echo "Failed to set up NAT port forwarding for BaaS admin"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "mailpit,tcp,,${HOST_MAILPIT_PORT},,${MAILPIT_PORT}" || {
+	echo "Failed to set up NAT port forwarding for Mailpit"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "auth-gateway,tcp,,${HOST_AUTH_GATEWAY_PORT},,${AUTH_GATEWAY_PORT}" || {
+	echo "Failed to set up NAT port forwarding for Auth gateway"
+	exit 1
+}
+VBoxManage modifyvm "$VM_NAME" --natpf1 "vault,tcp,,${HOST_VAULT_PORT},,${VAULT_PORT}" || {
+	echo "Failed to set up NAT port forwarding for Vault"
 	exit 1
 }
 # Create disk if it does not exist
@@ -323,6 +423,12 @@ echo "  - HTTP:      Host 127.0.0.1:${HOST_HTTP_PORT} -> Guest :${HTTP_PORT}"
 echo "  - HTTPS:     Host 127.0.0.1:${HOST_HTTPS_PORT} -> Guest :${HTTPS_PORT}"
 echo "  - Frontend:  Host 127.0.0.1:${HOST_FRONTEND_PORT} -> Guest :${FRONTEND_PORT}"
 echo "  - Backend:   Host 127.0.0.1:${HOST_BACKEND_PORT} -> Guest :${BACKEND_PORT}"
+echo "  - Website:   Host 127.0.0.1:${HOST_WEBSITE_PORT} -> Guest :${WEBSITE_PORT}"
+echo "  - osionos:   Host 127.0.0.1:${HOST_OSIONOS_APP_PORT}/${HOST_OSIONOS_MAIL_PORT}/${HOST_OSIONOS_CALENDAR_PORT} -> Guest :${OSIONOS_APP_PORT}/${OSIONOS_MAIL_PORT}/${OSIONOS_CALENDAR_PORT}"
+echo "  - Bridges:   Host 127.0.0.1:${HOST_OSIONOS_BRIDGE_PORT}/${HOST_MAIL_BRIDGE_PORT}/${HOST_CALENDAR_BRIDGE_PORT} -> Guest :${OSIONOS_BRIDGE_PORT}/${MAIL_BRIDGE_PORT}/${CALENDAR_BRIDGE_PORT}"
+echo "  - BaaS/Auth: Host 127.0.0.1:${HOST_BAAS_GATEWAY_PORT}/${HOST_AUTH_GATEWAY_PORT} -> Guest :${BAAS_GATEWAY_PORT}/${AUTH_GATEWAY_PORT}"
+echo "  - Mailpit:   Host 127.0.0.1:${HOST_MAILPIT_PORT} -> Guest :${MAILPIT_PORT}"
+echo "  - Vault:     Host 127.0.0.1:${HOST_VAULT_PORT} -> Guest :${VAULT_PORT}"
 echo "  - Docker:    Host 127.0.0.1:${HOST_DOCKER_PORT} -> Guest :${DOCKER_REGISTRY_PORT}"
 echo "  - MariaDB:   Host 127.0.0.1:${HOST_MARIADB_PORT} -> Guest :${MARIADB_PORT}"
 echo "  - Redis:     Host 127.0.0.1:${HOST_REDIS_PORT} -> Guest :${REDIS_PORT}"
@@ -338,6 +444,8 @@ echo "  3. Access Vite Gourmand from host:"
 echo "     Frontend:  http://127.0.0.1:${HOST_FRONTEND_PORT}"
 echo "     Backend:   http://127.0.0.1:${HOST_BACKEND_PORT}/api"
 echo "     API Docs:  http://127.0.0.1:${HOST_BACKEND_PORT}/api/docs"
+echo "     Website:   https://127.0.0.1:${HOST_WEBSITE_PORT}"
+echo "     osionos:   https://127.0.0.1:${HOST_OSIONOS_APP_PORT}"
 echo ""
 echo "  4. Other services from host:"
 echo "     WordPress:       http://127.0.0.1:${HOST_HTTP_PORT}/wordpress"

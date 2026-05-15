@@ -299,6 +299,19 @@ get_host_ip() {
 
 # Detect any local listener on a port, including loopback-only services such as
 # the 42 ftpkg service on 127.0.0.1:4242.
+RESERVED_HOST_PORTS=""
+
+is_host_port_reserved() {
+	case " $RESERVED_HOST_PORTS " in
+		*" $1 "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+reserve_host_port() {
+	RESERVED_HOST_PORTS="${RESERVED_HOST_PORTS} $1"
+}
+
 is_host_port_free() {
 	local port="$1"
 	[ -n "$port" ] || return 1
@@ -337,7 +350,8 @@ find_free_port() {
 	local port="$1"
 	local max=100 i=0
 	while [ "$i" -lt "$max" ]; do
-		if is_host_port_free "$port"; then
+		if ! is_host_port_reserved "$port" && is_host_port_free "$port"; then
+			reserve_host_port "$port"
 			echo "$port"
 			return 0
 		fi
@@ -390,13 +404,20 @@ ensure_vm_nat_forward() {
 	local name="$1"
 	local guest_port="$2"
 	local preferred_port="$3"
-	local current_port desired_port
+	local current_port desired_port state
 
 	current_port=$(get_vm_port "$name")
-	desired_port="$current_port"
-	if [ -z "$desired_port" ] || ! is_host_port_free "$desired_port"; then
-		desired_port=$(find_free_port "$preferred_port")
+	state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| grep "^VMState=" | cut -d'"' -f2)
+
+	if [ -n "$current_port" ]; then
+		if [ "$state" = "running" ] || is_host_port_free "$current_port"; then
+			reserve_host_port "$current_port"
+			return 0
+		fi
 	fi
+
+	desired_port=$(find_free_port "$preferred_port")
 
 	if [ -z "$current_port" ] || [ "$desired_port" != "$current_port" ]; then
 		set_vm_nat_forward "$name" "$desired_port" "$guest_port"
@@ -418,7 +439,6 @@ ensure_vm_nat_forwarding() {
 			STEP_DETAIL[2]="${VM_NAME} ssh:${new_ssh_port}"
 			draw_dashboard
 		fi
-		return 0
 	fi
 
 	# When the VM is stopped, VirtualBox NAT is not listening yet, so any occupied
@@ -432,6 +452,18 @@ ensure_vm_nat_forwarding() {
 	ensure_vm_nat_forward redis 6379 6379
 	ensure_vm_nat_forward frontend 5173 5173
 	ensure_vm_nat_forward backend 3000 3000
+	ensure_vm_nat_forward website 4322 4322
+	ensure_vm_nat_forward osionos-app 3001 3001
+	ensure_vm_nat_forward osionos-mail 3002 3002
+	ensure_vm_nat_forward osionos-calendar 3003 3003
+	ensure_vm_nat_forward osionos-bridge 4000 4000
+	ensure_vm_nat_forward mail-bridge 4100 4100
+	ensure_vm_nat_forward calendar-bridge 4200 4200
+	ensure_vm_nat_forward baas-gateway 8000 8000
+	ensure_vm_nat_forward baas-admin 8001 8001
+	ensure_vm_nat_forward mailpit 8025 8025
+	ensure_vm_nat_forward auth-gateway 8787 8787
+	ensure_vm_nat_forward vault 18200 18200
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -673,6 +705,18 @@ P_MARIADB=$(get_vm_port mariadb)
 P_REDIS=$(get_vm_port redis)
 P_FRONTEND=$(get_vm_port frontend)
 P_BACKEND=$(get_vm_port backend)
+P_WEBSITE=$(get_vm_port website)
+P_OSIONOS_APP=$(get_vm_port osionos-app)
+P_OSIONOS_MAIL=$(get_vm_port osionos-mail)
+P_OSIONOS_CALENDAR=$(get_vm_port osionos-calendar)
+P_OSIONOS_BRIDGE=$(get_vm_port osionos-bridge)
+P_MAIL_BRIDGE=$(get_vm_port mail-bridge)
+P_CALENDAR_BRIDGE=$(get_vm_port calendar-bridge)
+P_BAAS_GATEWAY=$(get_vm_port baas-gateway)
+P_BAAS_ADMIN=$(get_vm_port baas-admin)
+P_MAILPIT=$(get_vm_port mailpit)
+P_AUTH_GATEWAY=$(get_vm_port auth-gateway)
+P_VAULT=$(get_vm_port vault)
 P_PRESEED=$(find_free_port 8080)
 
 # ── Host-side SSH config (keepalives + VM shortcut) ──────────────────────────
@@ -819,12 +863,25 @@ _auto_width \
 	"    Frontend   http://127.0.0.1:${P_FRONTEND}" \
 	"    Backend    http://127.0.0.1:${P_BACKEND}/api" \
 	"    API Docs   http://127.0.0.1:${P_BACKEND}/api/docs" \
+	"    Website             https://127.0.0.1:${P_WEBSITE}" \
+	"    osionos app         https://127.0.0.1:${P_OSIONOS_APP}" \
+	"    osionos bridge API  https://127.0.0.1:${P_OSIONOS_BRIDGE}" \
+	"    Auth gateway        https://127.0.0.1:${P_AUTH_GATEWAY}/api/auth" \
+	"    BaaS gateway        https://127.0.0.1:${P_BAAS_GATEWAY}" \
+	"    Vault               https://127.0.0.1:${P_VAULT}" \
+	"    Local mail inbox    http://127.0.0.1:${P_MAILPIT}" \
+	"    osionos Mail        https://127.0.0.1:${P_OSIONOS_MAIL}" \
+	"    Mail bridge         https://127.0.0.1:${P_MAIL_BRIDGE}" \
+	"    osionos Calendar    https://127.0.0.1:${P_OSIONOS_CALENDAR}" \
+	"    Calendar bridge     https://127.0.0.1:${P_CALENDAR_BRIDGE}" \
 	"    Host LAN IP:   ${HOST_IP}" \
 	"    NAT gateway:   10.0.2.2  (host seen from VM)" \
 	"      cd preseeds && python3 -m http.server ${P_PRESEED}" \
 	"      http://10.0.2.2:${P_PRESEED}/preseed.cfg" \
 	"    SSH      :${P_SSH}    HTTP     :${P_HTTP}    HTTPS    :${P_HTTPS}" \
 	"    Frontend :${P_FRONTEND}  Backend  :${P_BACKEND}  Docker   :${P_DOCKER}" \
+	"    Website  :${P_WEBSITE}  App      :${P_OSIONOS_APP}  Auth     :${P_AUTH_GATEWAY}" \
+	"    BaaS     :${P_BAAS_GATEWAY}  Mailpit  :${P_MAILPIT}  Vault    :${P_VAULT}" \
 	"    MariaDB  :${P_MARIADB}  Redis    :${P_REDIS}" \
 	"      ssh b2b  then  tail -f /var/log/first-boot.log" \
 	"    make status      check current state"
@@ -888,6 +945,20 @@ row "    ${DIM}Backend${RST}    ${BLD}http://127.0.0.1:${P_BACKEND}/api${RST}"
 row "    ${DIM}API Docs${RST}   ${BLD}http://127.0.0.1:${P_BACKEND}/api/docs${RST}"
 blank
 mid
+row "  ${BLD}${WHT}▸ osionos / ft_transcendence Stack${RST}"
+row "    ${DIM}Website${RST}             ${BLD}https://127.0.0.1:${P_WEBSITE}${RST}"
+row "    ${DIM}osionos app${RST}         ${BLD}https://127.0.0.1:${P_OSIONOS_APP}${RST}"
+row "    ${DIM}osionos bridge API${RST}  ${BLD}https://127.0.0.1:${P_OSIONOS_BRIDGE}${RST}"
+row "    ${DIM}Auth gateway${RST}        ${BLD}https://127.0.0.1:${P_AUTH_GATEWAY}/api/auth${RST}"
+row "    ${DIM}BaaS gateway${RST}        ${BLD}https://127.0.0.1:${P_BAAS_GATEWAY}${RST}"
+row "    ${DIM}Vault${RST}               ${BLD}https://127.0.0.1:${P_VAULT}${RST}"
+row "    ${DIM}Local mail inbox${RST}    ${BLD}http://127.0.0.1:${P_MAILPIT}${RST}"
+row "    ${DIM}osionos Mail${RST}        ${BLD}https://127.0.0.1:${P_OSIONOS_MAIL}${RST}"
+row "    ${DIM}Mail bridge${RST}         ${BLD}https://127.0.0.1:${P_MAIL_BRIDGE}${RST}"
+row "    ${DIM}osionos Calendar${RST}    ${BLD}https://127.0.0.1:${P_OSIONOS_CALENDAR}${RST}"
+row "    ${DIM}Calendar bridge${RST}     ${BLD}https://127.0.0.1:${P_CALENDAR_BRIDGE}${RST}"
+blank
+mid
 row "  ${BLD}${WHT}▸ Preseed via HTTP (alternative)${RST}"
 row "    ${DIM}Host LAN IP:${RST}   ${GRN}${HOST_IP}${RST}"
 row "    ${DIM}NAT gateway:${RST}   ${GRN}10.0.2.2${RST}  ${DIM}(host seen from VM)${RST}"
@@ -902,6 +973,8 @@ mid
 row "  ${BLD}${WHT}▸ Port Forwarding (VM NAT)${RST}"
 row "    ${DIM}SSH${RST}      ${WHT}:${P_SSH}${RST}    ${DIM}HTTP${RST}     ${WHT}:${P_HTTP}${RST}    ${DIM}HTTPS${RST}    ${WHT}:${P_HTTPS}${RST}"
 row "    ${DIM}Frontend${RST} ${WHT}:${P_FRONTEND}${RST}  ${DIM}Backend${RST}  ${WHT}:${P_BACKEND}${RST}  ${DIM}Docker${RST}   ${WHT}:${P_DOCKER}${RST}"
+row "    ${DIM}Website${RST}  ${WHT}:${P_WEBSITE}${RST}  ${DIM}App${RST}      ${WHT}:${P_OSIONOS_APP}${RST}  ${DIM}Auth${RST}     ${WHT}:${P_AUTH_GATEWAY}${RST}"
+row "    ${DIM}BaaS${RST}     ${WHT}:${P_BAAS_GATEWAY}${RST}  ${DIM}Mailpit${RST}  ${WHT}:${P_MAILPIT}${RST}  ${DIM}Vault${RST}    ${WHT}:${P_VAULT}${RST}"
 row "    ${DIM}MariaDB${RST}  ${WHT}:${P_MARIADB}${RST}  ${DIM}Redis${RST}    ${WHT}:${P_REDIS}${RST}"
 blank
 mid

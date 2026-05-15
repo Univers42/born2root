@@ -84,6 +84,7 @@ blank
 cmd "make" "Full pipeline: deps > ISO > VM > start" "${BLD}${GRN}"
 cmd "make status" "Show environment status dashboard"
 cmd "make deps" "Install VirtualBox + tools"
+cmd "make fix_app_ports" "Repair VM NAT rules for app stack"
 cmd "make gen_iso" "Download Debian ISO + inject preseed"
 cmd "CUSTOM_SHELL_PATH=…" "Optional: override default shell (empty keeps bash)" "${DIM}"
 cmd "make setup_vm" "Create the VirtualBox VM"

@@ -111,9 +111,11 @@ make
   │
   ├─ 4. Create VirtualBox VM
   │     ├─ 2048 MB RAM, 3 CPUs, 64 GB dynamic disk
-  │     ├─ NAT networking with port forwarding:
+  │     ├─ VirtualBox NAT networking with port forwarding:
   │     │   SSH:4242  HTTP:80  HTTPS:443  Frontend:5173
   │     │   Backend:3000  Docker:5000  MariaDB:3306  Redis:6379
+  │     │   Website:4322  osionos:3001-3003  Bridges:4000/4100/4200
+  │     │   BaaS:8000-8001  Mailpit:8025  Auth:8787  Vault:18200
   │     └─ Attach the custom ISO
   │
   ├─ 5. Boot and install (unattended)
@@ -142,6 +144,7 @@ make
 | `make bstart_vm` | Start headless + auto-unlock encryption |
 | `make poweroff` | Shut down the VM |
 | `make deps` | Install VirtualBox + tools |
+| `make fix_app_ports` | Repair VirtualBox NAT forwarding for the osionos/ft_transcendence app ports |
 | `make gen_iso` | Download Debian ISO + inject preseed |
 | `make setup_vm` | Create the VirtualBox VM |
 | `make clean` | Remove downloaded ISOs |
@@ -396,9 +399,23 @@ sda
 | HTTPS | auto-selected from 8443 | 443 |
 | Vite Frontend | auto-selected from 5173 | 5173 |
 | Backend API | auto-selected from 3000 | 3000 |
+| Website | auto-selected from 4322 | 4322 |
+| osionos app | auto-selected from 3001 | 3001 |
+| osionos Mail | auto-selected from 3002 | 3002 |
+| osionos Calendar | auto-selected from 3003 | 3003 |
+| osionos bridge API | auto-selected from 4000 | 4000 |
+| Mail bridge | auto-selected from 4100 | 4100 |
+| Calendar bridge | auto-selected from 4200 | 4200 |
+| BaaS gateway | auto-selected from 8000 | 8000 |
+| BaaS admin | auto-selected from 8001 | 8001 |
+| Local mail inbox | auto-selected from 8025 | 8025 |
+| Auth gateway | auto-selected from 8787 | 8787 |
+| Vault | auto-selected from 18200 | 18200 |
 | Docker Registry | auto-selected from 5000 | 5000 |
 | MariaDB | auto-selected from 3306 | 3306 |
 | Redis | auto-selected from 6379 | 6379 |
+
+For the full host/VM diagnosis and manual repair commands, see [doc/VM_APP_PORT_FORWARDING.md](doc/VM_APP_PORT_FORWARDING.md).
 
 ---
 
