@@ -56,10 +56,11 @@ all: prepare
 	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE)"
 
 # Prepare everything needed for a smooth `make all` experience:
+# - check + install host dependencies (VirtualBox, xorriso, gcc, libreadline-dev, …)
 # - update repo (if this is a git checkout)
 # - init/sync/update submodules
 # - build the sh42 hellish shell with parallel jobs
-prepare: pull update shell
+prepare: deps pull update shell
 
 pull:
 	@bash -c '\
@@ -106,43 +107,13 @@ shell:
 		exit 1; \
 	fi
 
-# =========@@ Install VirtualBox (cross-distro) @@=============================
+# =========@@ Install host developer dependencies @@==========================
+# Checks for: VirtualBox + ext-pack, xorriso, curl, gcc, libreadline-dev,
+# python3, git, openssh-client, make.
+# Missing packages are installed via `sudo apt install` WITHOUT -y so the
+# user reviews and confirms the apt plan themselves.
 deps:
-	@bash -c '\
-	set -e; \
-	if command -v VBoxManage >/dev/null 2>&1; then \
-		printf "$(C_GREEN)✓$(C_RESET) VirtualBox already installed\n"; \
-		exit 0; \
-	fi; \
-	printf "$(C_YELLOW)Installing VirtualBox...$(C_RESET)\n"; \
-	if command -v apt-get >/dev/null 2>&1; then \
-		sudo apt-get update -qq && sudo apt-get install -y virtualbox; \
-	elif command -v dnf >/dev/null 2>&1; then \
-		sudo dnf install -y VirtualBox; \
-	elif command -v yum >/dev/null 2>&1; then \
-		sudo yum install -y VirtualBox; \
-	elif command -v pacman >/dev/null 2>&1; then \
-		sudo pacman -Sy --noconfirm virtualbox virtualbox-host-modules-arch; \
-	elif command -v zypper >/dev/null 2>&1; then \
-		sudo zypper install -y virtualbox; \
-	elif command -v brew >/dev/null 2>&1; then \
-		brew install --cask virtualbox; \
-	else \
-		printf "$(C_RED)✗ Cannot detect package manager. Install VirtualBox manually.$(C_RESET)\n"; \
-		exit 1; \
-	fi; \
-	for tool in xorriso curl; do \
-		if ! command -v $$tool >/dev/null 2>&1; then \
-			printf "$(C_YELLOW)Installing $$tool...$(C_RESET)\n"; \
-			if   command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y $$tool; \
-			elif command -v dnf     >/dev/null 2>&1; then sudo dnf install -y $$tool; \
-			elif command -v pacman  >/dev/null 2>&1; then sudo pacman -Sy --noconfirm $$tool; \
-			elif command -v zypper  >/dev/null 2>&1; then sudo zypper install -y $$tool; \
-			elif command -v brew    >/dev/null 2>&1; then brew install $$tool; \
-			fi; \
-		fi; \
-	done; \
-	printf "$(C_GREEN)✓$(C_RESET) Dependencies installed\n"'
+	@bash setup/install/check_deps.sh
 
 # =========@@ System compatibility pre-checks @@==============================
 check_system:
