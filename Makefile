@@ -76,8 +76,19 @@ pull:
 		git stash pop -q 2>/dev/null || true; \
 	fi'
 
+LIBFT_LAST_GOOD := 685e57d8
+
 update:
-	@git submodule update --init --recursive --remote
+	@git submodule update --init --recursive
+	@if [ -f sh42/vendor/libft/.git ] || [ -d sh42/vendor/libft/.git ]; then \
+		count=$$(git -C sh42/vendor/libft ls-tree -r HEAD --name-only 2>/dev/null | grep "\.c$$" | wc -l); \
+		if [ "$$count" -lt 10 ]; then \
+			printf "$(C_YELLOW)⚠$(C_RESET)  sh42/vendor/libft upstream wiped sources — restoring last good commit ($(LIBFT_LAST_GOOD))\n"; \
+			git -C sh42/vendor/libft checkout $(LIBFT_LAST_GOOD) -- . 2>/dev/null && \
+				printf "$(C_GREEN)✓$(C_RESET) vendor/libft sources restored\n" || \
+				printf "$(C_RED)✗$(C_RESET) could not restore vendor/libft — build may fail\n"; \
+		fi; \
+	fi
 
 
 # Build the custom shell from sh42 (parallel)
