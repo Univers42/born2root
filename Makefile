@@ -77,19 +77,11 @@ pull:
 		git stash pop -q 2>/dev/null || true; \
 	fi'
 
-LIBFT_LAST_GOOD := 685e57d8
-
+# Sync + update ALL submodules (any depth) to the latest upstream commit, and repair
+# orphan gitlinks (submodule paths an upstream repo committed without a .gitmodules
+# entry, e.g. libft's srcs/memory/ft_malloc). Fully auto-detected — see the script.
 update:
-	@git submodule update --init --recursive
-	@if [ -f sh42/vendor/libft/.git ] || [ -d sh42/vendor/libft/.git ]; then \
-		count=$$(git -C sh42/vendor/libft ls-tree -r HEAD --name-only 2>/dev/null | grep "\.c$$" | wc -l); \
-		if [ "$$count" -lt 10 ]; then \
-			printf "$(C_YELLOW)⚠$(C_RESET)  sh42/vendor/libft upstream wiped sources — restoring last good commit ($(LIBFT_LAST_GOOD))\n"; \
-			git -C sh42/vendor/libft checkout $(LIBFT_LAST_GOOD) -- . 2>/dev/null && \
-				printf "$(C_GREEN)✓$(C_RESET) vendor/libft sources restored\n" || \
-				printf "$(C_RED)✗$(C_RESET) could not restore vendor/libft — build may fail\n"; \
-		fi; \
-	fi
+	@bash setup/update_submodules.sh
 
 
 # Build the custom shell from sh42 (parallel)
