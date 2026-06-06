@@ -294,86 +294,39 @@ echo "  Mailpit:          host:${HOST_MAILPIT_PORT} -> guest:${MAILPIT_PORT}"
 echo "  Auth gateway:     host:${HOST_AUTH_GATEWAY_PORT} -> guest:${AUTH_GATEWAY_PORT}"
 echo "  Vault:            host:${HOST_VAULT_PORT} -> guest:${VAULT_PORT}"
 
-VBoxManage modifyvm "$VM_NAME" --natpf1 "ssh,tcp,,${HOST_SSH_PORT},,${SSH_PORT}" || {
-	echo "Failed to set up NAT port forwarding for SSH"
-	exit 1
+# Idempotently add a NAT port-forward rule: drop any existing rule of the same
+# name first, so re-running setup — or a VM that kept old rules from a previous,
+# partially-removed instance — never aborts with "A NAT rule of this name already
+# exists". Args: <name> <host_port> <guest_port> (all rules are tcp).
+add_natpf() {
+	local name="$1" host_port="$2" guest_port="$3"
+	VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
+	VBoxManage modifyvm "$VM_NAME" --natpf1 "${name},tcp,,${host_port},,${guest_port}" || {
+		echo "Failed to set up NAT port forwarding for ${name}"
+		exit 1
+	}
 }
-VBoxManage modifyvm "$VM_NAME" --natpf1 "http,tcp,,${HOST_HTTP_PORT},,${HTTP_PORT}" || {
-	echo "Failed to set up NAT port forwarding for HTTP"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "https,tcp,,${HOST_HTTPS_PORT},,${HTTPS_PORT}" || {
-	echo "Failed to set up NAT port forwarding for HTTPS"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "docker,tcp,,${HOST_DOCKER_PORT},,${DOCKER_REGISTRY_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Docker Registry"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "mariadb,tcp,,${HOST_MARIADB_PORT},,${MARIADB_PORT}" || {
-	echo "Failed to set up NAT port forwarding for MariaDB"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "redis,tcp,,${HOST_REDIS_PORT},,${REDIS_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Redis"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "frontend,tcp,,${HOST_FRONTEND_PORT},,${FRONTEND_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Frontend"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "backend,tcp,,${HOST_BACKEND_PORT},,${BACKEND_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Backend"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "website,tcp,,${HOST_WEBSITE_PORT},,${WEBSITE_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Website"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-app,tcp,,${HOST_OSIONOS_APP_PORT},,${OSIONOS_APP_PORT}" || {
-	echo "Failed to set up NAT port forwarding for osionos app"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-mail,tcp,,${HOST_OSIONOS_MAIL_PORT},,${OSIONOS_MAIL_PORT}" || {
-	echo "Failed to set up NAT port forwarding for osionos Mail"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-calendar,tcp,,${HOST_OSIONOS_CALENDAR_PORT},,${OSIONOS_CALENDAR_PORT}" || {
-	echo "Failed to set up NAT port forwarding for osionos Calendar"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "osionos-bridge,tcp,,${HOST_OSIONOS_BRIDGE_PORT},,${OSIONOS_BRIDGE_PORT}" || {
-	echo "Failed to set up NAT port forwarding for osionos bridge"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "mail-bridge,tcp,,${HOST_MAIL_BRIDGE_PORT},,${MAIL_BRIDGE_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Mail bridge"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "calendar-bridge,tcp,,${HOST_CALENDAR_BRIDGE_PORT},,${CALENDAR_BRIDGE_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Calendar bridge"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "baas-gateway,tcp,,${HOST_BAAS_GATEWAY_PORT},,${BAAS_GATEWAY_PORT}" || {
-	echo "Failed to set up NAT port forwarding for BaaS gateway"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "baas-admin,tcp,,${HOST_BAAS_ADMIN_PORT},,${BAAS_ADMIN_PORT}" || {
-	echo "Failed to set up NAT port forwarding for BaaS admin"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "mailpit,tcp,,${HOST_MAILPIT_PORT},,${MAILPIT_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Mailpit"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "auth-gateway,tcp,,${HOST_AUTH_GATEWAY_PORT},,${AUTH_GATEWAY_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Auth gateway"
-	exit 1
-}
-VBoxManage modifyvm "$VM_NAME" --natpf1 "vault,tcp,,${HOST_VAULT_PORT},,${VAULT_PORT}" || {
-	echo "Failed to set up NAT port forwarding for Vault"
-	exit 1
-}
+
+add_natpf ssh              "${HOST_SSH_PORT}"              "${SSH_PORT}"
+add_natpf http             "${HOST_HTTP_PORT}"             "${HTTP_PORT}"
+add_natpf https            "${HOST_HTTPS_PORT}"            "${HTTPS_PORT}"
+add_natpf docker           "${HOST_DOCKER_PORT}"           "${DOCKER_REGISTRY_PORT}"
+add_natpf mariadb          "${HOST_MARIADB_PORT}"          "${MARIADB_PORT}"
+add_natpf redis            "${HOST_REDIS_PORT}"            "${REDIS_PORT}"
+add_natpf frontend         "${HOST_FRONTEND_PORT}"         "${FRONTEND_PORT}"
+add_natpf backend          "${HOST_BACKEND_PORT}"          "${BACKEND_PORT}"
+add_natpf website          "${HOST_WEBSITE_PORT}"          "${WEBSITE_PORT}"
+add_natpf osionos-app      "${HOST_OSIONOS_APP_PORT}"      "${OSIONOS_APP_PORT}"
+add_natpf osionos-mail     "${HOST_OSIONOS_MAIL_PORT}"     "${OSIONOS_MAIL_PORT}"
+add_natpf osionos-calendar "${HOST_OSIONOS_CALENDAR_PORT}" "${OSIONOS_CALENDAR_PORT}"
+add_natpf osionos-bridge   "${HOST_OSIONOS_BRIDGE_PORT}"   "${OSIONOS_BRIDGE_PORT}"
+add_natpf mail-bridge      "${HOST_MAIL_BRIDGE_PORT}"      "${MAIL_BRIDGE_PORT}"
+add_natpf calendar-bridge  "${HOST_CALENDAR_BRIDGE_PORT}"  "${CALENDAR_BRIDGE_PORT}"
+add_natpf baas-gateway     "${HOST_BAAS_GATEWAY_PORT}"     "${BAAS_GATEWAY_PORT}"
+add_natpf baas-admin       "${HOST_BAAS_ADMIN_PORT}"       "${BAAS_ADMIN_PORT}"
+add_natpf mailpit          "${HOST_MAILPIT_PORT}"          "${MAILPIT_PORT}"
+add_natpf auth-gateway     "${HOST_AUTH_GATEWAY_PORT}"     "${AUTH_GATEWAY_PORT}"
+add_natpf vault            "${HOST_VAULT_PORT}"            "${VAULT_PORT}"
 # Create disk if it does not exist
 if [ ! -f "$VM_DISK_PATH" ]; then
 	print_header "Creating virtual disk"

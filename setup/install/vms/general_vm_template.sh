@@ -56,9 +56,12 @@ VBoxManage storageattach "$VM_NAME" --storagectl "IDE Controller" --port 0 --dev
 echo "Optimizing VM performance..."
 VBoxManage modifyvm "$VM_NAME" --audio none --usb off --clipboard disabled --draganddrop disabled
 
-# Configure port forwarding for SSH
+# Configure port forwarding for SSH (delete any same-named rule first so a
+# re-run never aborts under `set -e` with "A NAT rule of this name already exists")
 echo "Setting up port forwarding for SSH ($SSH_PORT)..."
+VBoxManage modifyvm "$VM_NAME" --natpf1 delete "guestssh" >/dev/null 2>&1 || true
 VBoxManage modifyvm "$VM_NAME" --natpf1 "guestssh,tcp,,$SSH_PORT,,$SSH_PORT"
+VBoxManage modifyvm "$VM_NAME" --natpf1 delete "HTTP" >/dev/null 2>&1 || true
 VBoxManage modifyvm "$VM_NAME" --natpf1 "HTTP,tcp,,$HTTP_HOST_PORT,,$HTTP_GUEST_PORT"
 # Set boot order to start from CD/DVD
 VBoxManage modifyvm "$VM_NAME" --boot1 dvd --boot2 disk --boot3 none --boot4 none
