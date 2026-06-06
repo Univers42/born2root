@@ -27,6 +27,25 @@ else
 fi
 say() { printf "%b\n" "$*"; }
 
+# Normalize a git URL for comparison: drop a trailing ".git" and trailing slash.
+norm_url() {
+	local u="${1%.git}"
+	printf '%s\n' "${u%/}"
+}
+
+# Space-separated, space-delimited set of normalized origin URLs for every repo we
+# have already entered. Used to break submodule cycles — e.g. a repo accidentally
+# committed as its own submodule (born2root -> born2root), which otherwise makes
+# repair_orphans clone the repo into itself without end.
+VISITED=" "
+
+# True if normalized URL $1 belongs to a repo already on the current branch of the
+# recursion (an ancestor or self) — i.e. following it would create a cycle.
+seen_url() {
+	[ -n "$1" ] || return 1
+	case "$VISITED" in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
 # Print "<sha> <path>" for every gitlink (submodule) in repo $1's HEAD tree.
 gitlinks() {
 	git -C "$1" ls-tree -r HEAD 2>/dev/null \
@@ -62,6 +81,12 @@ repair_orphans() {
 		is_registered "$repo" "$path" && continue
 		say "${Y}⚠${Z}  Orphan gitlink in ${repo#$ROOT/}: ${path} (missing from .gitmodules)"
 		url=$(infer_url "$repo" "$path") || { say "${R}✗${Z} Cannot infer URL for ${path}"; continue; }
+		# A self/ancestor URL means the repo was committed as its own submodule.
+		# Registering it would clone the repo into itself forever — never do that.
+		if seen_url "$(norm_url "$url")"; then
+			say "${Y}⚠${Z}  Skipping self-referential gitlink ${path} -> ${url} (would recurse into the parent repo)"
+			continue
+		fi
 		if ! git ls-remote "$url" >/dev/null 2>&1; then
 			say "${R}✗${Z} Inferred URL not reachable: ${url} — skipping ${path}"
 			continue
@@ -80,7 +105,15 @@ repair_orphans() {
 
 # Update repo $1's direct children to their remote tip, repair orphans, then recurse.
 process_repo() {
-	local repo="$1" path
+	local repo="$1" path origin
+	# Record this repo's origin and refuse to re-enter a repo already on the current
+	# recursion branch, so an A->B->A (or A->A) submodule cycle terminates.
+	origin=$(norm_url "$(git -C "$repo" config --get remote.origin.url 2>/dev/null)")
+	if seen_url "$origin"; then
+		say "${Y}⚠${Z}  Cycle detected at ${repo#$ROOT/} (origin ${origin}) — not recursing"
+		return
+	fi
+	[ -n "$origin" ] && VISITED="${VISITED}${origin} "
 	git -C "$repo" submodule sync >/dev/null 2>&1 || true
 	# Non-recursive on purpose: advances every *registered* direct child to its remote
 	# tip and never aborts on an unregistered deep gitlink (handled by repair_orphans).
