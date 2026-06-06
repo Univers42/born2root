@@ -329,6 +329,16 @@ WantedBy=multi-user.target
 SWEOF
 systemctl enable sshd-watchdog 2> /dev/null || true
 
+# ── Silence systemd-ssh-generator AF_VSOCK warning ─────────────────────────
+# Debian 13 (systemd >= 256) ships systemd-ssh-generator, which on every boot
+# tries to set up SSH-over-AF_VSOCK. VirtualBox guests expose no virtio-vsock
+# device, so it logs "failed to query local AF_VSOCK CID" — harmless noise that
+# looks like a boot failure. We only use sshd on 4242 over NAT, never vsock SSH,
+# so disable the generator the documented way: symlink it to /dev/null.
+mkdir -p /etc/systemd/system-generators
+ln -sf /dev/null /etc/systemd/system-generators/systemd-ssh-generator
+echo "[OK] Disabled systemd-ssh-generator (no AF_VSOCK in VirtualBox)"
+
 systemctl enable ssh || true
 systemctl daemon-reload || true
 systemctl restart ssh || true
