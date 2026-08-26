@@ -2,7 +2,7 @@
 
 set -e # Exit on any error
 
-# Always run relative to repo root (so paths like preseeds/... and sh42/... work
+# Always run relative to repo root (so paths like preseeds/... and dist/... work
 # regardless of the caller's current directory).
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
@@ -115,7 +115,7 @@ done
 
 # Optional: bake a custom login shell into the ISO.
 # Usage:
-#   CUSTOM_SHELL_PATH=sh42/build/bin/hellish make gen_iso
+#   CUSTOM_SHELL_PATH=dist/hellish make gen_iso   (the default; see make shell)
 # If not provided, the VM keeps the default /bin/bash.
 CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}"
 if [ -n "$CUSTOM_SHELL_PATH" ]; then
@@ -138,8 +138,11 @@ if [ -n "$CUSTOM_SHELL_PATH" ]; then
 	printf '%s\n' "$CUSTOM_SHELL_NAME" > "$ISO_DIR/custom_shell.name"
 	echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
 	echo "    dest: $CUSTOM_SHELL_DEST"
-	# Optional: include the register script for parity with your Makefile
-	REGISTER_SCRIPT="sh42/vendor/scripts/register_shell.sh"
+	# Optional extra: upstream's own shell-registration helper, if a hellish
+	# source tree happens to be checked out beside us. Not required — b2b-setup.sh
+	# appends to /etc/shells and runs usermod itself — so its absence is normal
+	# now that the sh42 submodule is gone.
+	REGISTER_SCRIPT="hellish/vendor/scripts/register_shell.sh"
 	if [ -f "$REGISTER_SCRIPT" ]; then
 		cp "$REGISTER_SCRIPT" "$ISO_DIR/register_shell.sh"
 		chmod 755 "$ISO_DIR/register_shell.sh" || true

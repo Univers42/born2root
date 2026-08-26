@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Test script to verify hellish container builds and works
+# Test script to verify the shipped hellish binary works in the container.
+# The container installs dist/hellish (downloaded by `make shell`); it does not
+# compile anything.
 
 set -e
 
@@ -18,11 +20,11 @@ docker compose -f docker-compose.yml run --rm \
   -e SHELL_MODE=bash debian-shell-lab /bin/bash -c "whoami && pwd && echo 'Bash works!'"
 echo "✓ Bash execution passed"
 
-# Test 3: Build and test hellish with simple command (non-interactive)
-echo "[3/4] Testing container builds and runs hellish (non-interactive)..."
+# Test 3: Install and run the shipped hellish (non-interactive)
+echo "[3/4] Testing container installs and runs hellish (non-interactive)..."
 docker compose -f docker-compose.yml run --rm \
   -e SHELL_MODE=hellish debian-shell-lab /bin/echo "Hellish shell available"
-echo "✓ Hellish built and available in container"
+echo "✓ Hellish installed and available in container"
 
 # Test 4: Attempt interactive test
 echo "[4/4] Interactive shell test (type 'exit' to return)..."

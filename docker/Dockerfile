@@ -2,22 +2,28 @@ ARG DEBIAN_TAG=trixie
 FROM debian:${DEBIAN_TAG}
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV ASAN_OPTIONS=halt_on_error=1:abort_on_error=1:detect_leaks=1
-ENV UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1
-ENV LSAN_OPTIONS=verbosity=1:log_threads=1
-# Baked-in default so the init script always knows where sh42 lives,
-# even if docker-compose forgets to pass HELLISH_SRC_DIR.
-ENV HELLISH_SRC_DIR=/work/sh42
 
+# The hellish binary to install, as seen from inside the container. The repo
+# root is bind-mounted at /work, so this is the same artifact `make shell`
+# downloads on the host and bakes into the ISO.
+#
+# This container used to COMPILE hellish from the sh42 submodule. That
+# submodule is gone: born2root now downloads the published release binary
+# instead of building it. Compiling here would have tested something we no
+# longer ship. What is worth testing is whether the binary that DOES ship runs
+# on Debian trixie — the exact distro the VM installs — so that is what this
+# image now does.
+ENV HELLISH_BIN_SRC=/work/dist/hellish
+
+# Runtime only. gcc/g++/make/git and libreadline-dev were here to build hellish
+# from source; nothing is compiled any more. libreadline8t64 is the trixie
+# package that provides libreadline.so.8, which the release binary links
+# against (alongside libtinfo.so.6, pulled in as a dependency).
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		bash \
 		ca-certificates \
-		gcc \
-		g++ \
-		git \
-		libreadline-dev \
-		make \
+		libreadline8t64 \
 		passwd \
 		procps \
 		util-linux \
@@ -30,58 +36,40 @@ set -e
 TARGET_USER="${TARGET_USER:-dev}"
 HELLISH_BIN="/usr/local/bin/hellish"
 SHELL_MODE="${SHELL_MODE:-hellish}"
-# BUILD_DIR is resolved inside build_hellish() so it survives stale image caches.
-BUILD_DIR="/work/sh42"
+BIN_SRC="${HELLISH_BIN_SRC:-/work/dist/hellish}"
 
-build_hellish() {
-	# Resolve BUILD_DIR: honour HELLISH_SRC_DIR when it points at the right
-	# project (has src/core/shell.c), otherwise fall back to /work/sh42.
-	local resolved="${HELLISH_SRC_DIR:-/work/sh42}"
-	if [ ! -f "$resolved/src/core/shell.c" ] && [ -f "/work/sh42/src/core/shell.c" ]; then
-		echo "[init] WARNING: HELLISH_SRC_DIR='$resolved' does not look like the sh42 project; using /work/sh42" >&2
-		resolved="/work/sh42"
-	fi
-	BUILD_DIR="$resolved"
-	echo "[init] Building hellish from source in $BUILD_DIR ..."
-	if [ ! -f "$BUILD_DIR/Makefile" ]; then
-		echo "[init] ERROR: No Makefile found in $BUILD_DIR" >&2
-		return 1
-	fi
-	cd "$BUILD_DIR"
-	# Initialize vendor submodules (e.g. libft) if they weren't pulled on the host.
-	if command -v git > /dev/null 2>&1 && [ -f ".gitmodules" ]; then
-		echo "[init] Initializing submodules in $BUILD_DIR ..."
-		git config --global --add safe.directory "$BUILD_DIR" 2>/dev/null || true
-		git submodule update --init --recursive 2>&1 || true
-	fi
-	# CRITICAL: The host (e.g. Arch Linux) may have pre-built artifacts on the
-	# volume mount. Those binaries are linked against the HOST's glibc/readline
-	# and will crash inside this Debian container (ABI mismatch causes ~90 TB
-	# mmap → "Out of space" infinite loop). Always clean and rebuild from source
-	# so the binary is linked against THIS container's libraries.
-	if [ -f "$BUILD_DIR/build/bin/hellish" ]; then
-		echo "[init] Cleaning host build artifacts (ABI mismatch prevention)..."
-		make fclean 2>&1 | tail -5 || true
-	fi
-	# OPT=1: use release flags (-O3) instead of -fsanitize=address,leak which
-	# require libasan that is not installed in this container image.
-	make OPT=1 -j"$(nproc)" 2>&1 | tail -30
-	if [ ! -x "$BUILD_DIR/build/bin/hellish" ]; then
-		echo "[init] ERROR: build produced no executable" >&2
-		return 1
-	fi
-	echo "[init] Build OK"
-}
-
+# Copy the shipped binary in and register it as a valid login shell.
+#
+# It is COPIED, not symlinked to the bind mount: chsh/usermod want a real path
+# under the container's own root, and a copy also means the container keeps
+# working if the host rebuilds dist/ underneath it mid-session.
 install_hellish() {
-	cp "$BUILD_DIR/build/bin/hellish" "$HELLISH_BIN"
+	if [ ! -f "$BIN_SRC" ]; then
+		echo "[init] ERROR: no hellish binary at $BIN_SRC" >&2
+		echo "[init]        Run 'make shell' in the repo root first — it" >&2
+		echo "[init]        downloads the release binary to dist/hellish." >&2
+		return 1
+	fi
+	echo "[init] Installing hellish from $BIN_SRC ..."
+	cp "$BIN_SRC" "$HELLISH_BIN"
 	chmod 0755 "$HELLISH_BIN"
+
+	# Fail loudly on an ABI mismatch rather than handing the user a login shell
+	# that dies on open. The release binary is glibc-linked, so it runs on
+	# Debian/Ubuntu but NOT on a musl distro like Alpine; catching that here
+	# beats discovering it when `su - dev` drops you nowhere.
+	if ! "$HELLISH_BIN" -c 'exit 0' > /dev/null 2>&1; then
+		echo "[init] ERROR: $HELLISH_BIN will not run in this container." >&2
+		ldd "$HELLISH_BIN" 2>&1 | sed 's/^/[init]        /' >&2
+		return 1
+	fi
+
 	grep -qxF "$HELLISH_BIN" /etc/shells 2>/dev/null || echo "$HELLISH_BIN" >> /etc/shells
+	echo "[init] hellish OK: $("$HELLISH_BIN" --version 2>/dev/null | head -1)"
 }
 
 set_shell_hellish() {
-	build_hellish || exit 1
-	install_hellish
+	install_hellish || exit 1
 	if command -v chsh > /dev/null 2>&1; then
 		chsh -s "$HELLISH_BIN" "$TARGET_USER" || true
 	fi
@@ -105,11 +93,10 @@ case "$SHELL_MODE" in
 		set_shell_bash
 		;;
 	auto)
-		if build_hellish 2>/dev/null; then
-			install_hellish
+		if install_hellish 2>/dev/null; then
 			set_shell_hellish
 		else
-			echo "[init] Build failed; falling back to /bin/bash"
+			echo "[init] hellish unavailable; falling back to /bin/bash"
 			set_shell_bash
 		fi
 		;;

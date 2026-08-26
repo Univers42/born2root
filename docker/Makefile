@@ -5,7 +5,7 @@ SERVICE := debian-shell-lab
 
 help:
 	@echo "Docker lab commands:"
-	@echo "  make -C docker shell         # Build + open hellish shell"
+	@echo "  make -C docker shell         # Open hellish (from dist/hellish)"
 	@echo "  make -C docker bash-shell    # Open bash shell in container"
 	@echo "  make -C docker image-shell   # Raw bash (skip init script)"
 	@echo "  make -C docker rebuild       # Rebuild image from scratch"
@@ -17,7 +17,7 @@ help:
 	@echo "  make -C docker re            # Quick rebuild (same as rebuild)"
 	@echo "  make -C docker logs          # Follow container logs"
 	@echo "  make -C docker ps            # Show lab container status"
-	@echo "  make -C docker check-shell   # Verify hellish works inside container"
+	@echo "  make -C docker check-shell   # Verify dist/hellish runs on Debian trixie"
 	@echo "  make -C docker cleanup       # Free disk space"
 	@echo "  make -C docker disk-check    # Show disk status"
 
@@ -49,21 +49,28 @@ ps:
 config:
 	$(COMPOSE) config
 
+# The 15GB floor here was sized for COMPILING hellish in the container (object
+# trees, LTO temporaries, a vendored libft build). Nothing is compiled any more
+# — the image is a runtime-only Debian plus a copied-in binary — so the guard
+# is now just enough headroom to pull the base image and start a container.
 shell:
+	@test -x ../dist/hellish || { \
+		echo "dist/hellish is missing — run 'make shell' in the repo root first."; \
+		exit 1; }
 	@avail=$$(df /home | awk 'NR==2 {print $$4}'); \
-	if [ "$$avail" -lt 15728640 ]; then \
+	if [ "$$avail" -lt 2097152 ]; then \
 		echo ""; \
 		echo "╔════════════════════════════════════════════════════════════════╗"; \
 		echo "║  INSUFFICIENT DISK SPACE - CANNOT START CONTAINER              ║"; \
 		echo "╚════════════════════════════════════════════════════════════════╝"; \
 		echo ""; \
-		echo "Current: $$((avail/1024))MB free (need 15GB minimum)"; \
+		echo "Current: $$((avail/1024))MB free (need 2GB minimum)"; \
 		echo ""; \
 		echo "RUN THIS FIRST: make -C docker cleanup"; \
 		echo ""; \
 		exit 1; \
 	fi
-	@echo "[docker] Building and starting hellish shell..."
+	@echo "[docker] Starting hellish shell (dist/hellish)..."
 	$(COMPOSE) run --rm --service-ports -e SHELL_MODE=hellish $(SERVICE)
 
 hellish: shell
@@ -77,16 +84,27 @@ auto-shell:
 image-shell:
 	$(COMPOSE) run --rm --entrypoint bash $(SERVICE)
 
+# Verify the binary that ACTUALLY ships in the ISO — dist/hellish, downloaded
+# from the hellish release by `make shell` — runs on Debian trixie. That is the
+# same distro the VM installs, so this is a direct rehearsal of the VM's login
+# shell: it catches a missing libreadline.so.8 or a too-new glibc floor before
+# the ISO is ever built. (It used to compile sh42 from source in here; that
+# submodule is gone, and building a binary is not what we needed to test.)
 check-shell:
-	@echo "[container] Building and verifying hellish..."
-	$(COMPOSE) run --rm -e SHELL_MODE=hellish --entrypoint bash $(SERVICE) -lc '\
+	@echo "[container] Verifying the shipped hellish binary on Debian trixie..."
+	@test -x ../dist/hellish || { \
+		echo "dist/hellish is missing — run 'make shell' in the repo root first."; \
+		exit 1; }
+	$(COMPOSE) run --rm --entrypoint bash $(SERVICE) -lc '\
 		set -e; \
-		cd /work/sh42 && make -j$$(nproc) && \
-		echo "--- binary info ---" && \
-		ls -l /work/sh42/build/bin/hellish && \
-		ldd /work/sh42/build/bin/hellish | grep -E "not found|readline" || true && \
-		echo "--- quick test ---" && \
-		echo "echo hello" | /work/sh42/build/bin/hellish -c "echo works" && \
+		echo "--- distro ---"; . /etc/os-release; echo "$$PRETTY_NAME"; \
+		echo "--- binary info ---"; ls -l /work/dist/hellish; \
+		echo "--- shared libs ---"; ldd /work/dist/hellish; \
+		if ldd /work/dist/hellish | grep -q "not found"; then \
+			echo "FAIL: unresolved shared library in this distro"; exit 1; \
+		fi; \
+		echo "--- quick test ---"; \
+		test "$$(/work/dist/hellish -c "echo works")" = "works"; \
 		echo "--- OK ---"'
 
 cleanup:

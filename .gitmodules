@@ -1,4 +1,0 @@
-[submodule "sh42"]
-	path = sh42
-	url = git@github.com:Univers42/hellish.git
-	branch = main

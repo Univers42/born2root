@@ -4,3 +4,6 @@ disk_images
 *.iso
 *.tar
 *secret*
+
+# Downloaded hellish release binary (setup/fetch_hellish.sh)
+dist/

@@ -26,10 +26,19 @@ VMS_ISO_TAR  := vms_iso.tar
 FORCE_ISO ?= 0
 
 # Optional: set a custom default login shell inside the VM.
-# Default is hellish from the sh42 submodule build.
+# Default is the hellish binary downloaded from the upstream GitHub release
+# (see setup/fetch_hellish.sh) — no submodule, no compile.
 # To keep bash, override with an empty value:
 #   make gen_iso CUSTOM_SHELL_PATH=
-CUSTOM_SHELL_PATH ?= sh42/build/bin/hellish
+CUSTOM_SHELL_PATH ?= dist/hellish
+
+# Which hellish release to bake in. Empty = always resolve the newest release.
+# Pin a tag to freeze it (and to skip the GitHub API entirely):
+#   make all HELLISH_VERSION=v2.7.6
+HELLISH_VERSION ?=
+# Force a re-download even when the cached copy already matches:
+#   make shell HELLISH_REFRESH=1
+HELLISH_REFRESH ?=
 # Note: once connected to the VM via SSH, you can change the default shell for the user (e.g. dlesieur) with:
 # sudo usermod -s /bin/bash dlesieur && getent passwd dlesieur
 
@@ -58,10 +67,19 @@ all: prepare
 # Prepare everything needed for a smooth `make all` experience:
 # - check + install host dependencies (VirtualBox, xorriso, gcc, libreadline-dev, …)
 # - update repo (if this is a git checkout)
-# - init/sync/update submodules
-# - build the sh42 hellish shell with parallel jobs
-prepare: deps pull update shell
+# - download the latest published hellish release binary
+#
+# There is no submodule step any more: sh42 was the only one, and its whole
+# nested tree — libft, ft_malloc, philosopher, scripts — existed purely to
+# compile a binary we now download. A fresh clone needs no submodules and no
+# SSH key (.gitmodules used git@github.com:); the release is plain HTTPS.
+prepare: deps pull shell
 
+# NOTE on the stash dance: `git stash pop` WITHOUT --index restores your work
+# to the working tree but throws the index away, silently un-staging everything
+# you had staged before running make. --index puts the staged/unstaged split
+# back; the bare pop is kept only as a fallback for the case where --index
+# cannot reapply cleanly.
 pull:
 	@bash -c '\
 	if [ -d .git ]; then \
@@ -74,30 +92,34 @@ pull:
 			git pull origin main 2>/dev/null || \
 				printf "$(C_YELLOW)⚠$(C_RESET)  git pull failed (working offline?)\n"; \
 		fi; \
-		git stash pop -q 2>/dev/null || true; \
+		git stash pop --index -q 2>/dev/null \
+			|| git stash pop -q 2>/dev/null || true; \
 	fi'
 
 # Sync + update ALL submodules (any depth) to the latest upstream commit, and repair
 # orphan gitlinks (submodule paths an upstream repo committed without a .gitmodules
 # entry, e.g. libft's srcs/memory/ft_malloc). Fully auto-detected — see the script.
+#
+# NOTE: no longer part of `prepare`, and this repo now registers NO submodules
+# (sh42 was removed in favour of the downloaded hellish release). Kept as
+# generic machinery in case one is ever added back; it is a no-op today.
 update:
 	@bash setup/update_submodules.sh
 
 
-# Build the custom shell from sh42 (parallel)
+# Fetch the custom shell: download the published hellish release binary.
+# This replaced a full submodule checkout + ~550-file compile. The asset is
+# the same one `hellish --update` pulls, verified against its published
+# SHA-256 before it is allowed near the ISO.
+#
+# To build from source instead, clone hellish yourself and point the ISO at it:
+#   git clone --recursive https://github.com/Univers42/hellish
+#   make -C hellish all OPT=1        # `all` matters: its default goal is `help`
+#   make all CUSTOM_SHELL_PATH=hellish/build/bin/hellish
 shell:
-	@if [ ! -f sh42/Makefile ]; then \
-		printf "$(C_RED)✗$(C_RESET) sh42 submodule is missing. Run: git submodule update --init --recursive\n"; \
-		exit 1; \
-	fi
-	@printf "$(C_BLUE)▶$(C_RESET) Building sh42 (hellish)...\n"
-	@$(MAKE) -C sh42 OPT=1
-	@if [ -f sh42/build/bin/hellish ]; then \
-		printf "$(C_GREEN)✓$(C_RESET) hellish built: sh42/build/bin/hellish\n"; \
-	else \
-		printf "$(C_RED)✗$(C_RESET) hellish binary missing after build\n"; \
-		exit 1; \
-	fi
+	@HELLISH_VERSION="$(HELLISH_VERSION)" HELLISH_REFRESH="$(HELLISH_REFRESH)" \
+		OUT_BIN="$(CUSTOM_SHELL_PATH)" bash setup/fetch_hellish.sh
+
 
 # =========@@ Install host developer dependencies @@==========================
 # Checks for: VirtualBox + ext-pack, xorriso, curl, gcc, libreadline-dev,
