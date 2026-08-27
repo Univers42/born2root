@@ -189,6 +189,11 @@ assertion that something *should* work.
   `libnss3` Firefox already ships. Chromium instead pins the same CA by SPKI in
   its launcher, scoped to a dedicated profile directory, so normal browsing is
   untouched. A running Firefox needs a restart to pick up the new trust.
+- **Chrome does not read Firefox's certificate store.** It uses NSS's shared
+  database (`~/.pki/nssdb`, and `~/snap/chromium/*/.pki/nssdb` for the snap,
+  which cannot see `~/.pki`). With the CA only in the Firefox profiles, Chrome
+  reached the site and then refused it with `ERR_CERT_AUTHORITY_INVALID`.
+  `host_access` populates every one of those stores.
 - **Chrome refuses a `file://` PAC URL** that comes from the desktop proxy
   setting — it does not error, it silently falls back to no proxy, so the domain
   fails there with `DNS_PROBE_FINISHED_NXDOMAIN` while every other check passes.

@@ -296,6 +296,27 @@ PYEOF
 	rm -rf "$tmpdir"
 fi
 
+# Chrome does not read Firefox's certificate store; it uses NSS's shared
+# database. Without the CA there it reaches the site and then refuses it with
+# ERR_CERT_AUTHORITY_INVALID.
+if [ -n "${certutil_bin:-}" ]; then
+	chrome_ca=0; chrome_dirs=0
+	for dir in "$HOME/.pki/nssdb" "$HOME"/snap/chromium/current/.pki/nssdb \
+		"$HOME"/snap/chromium/common/.pki/nssdb; do
+		[ -d "$dir" ] || continue
+		chrome_dirs=$((chrome_dirs + 1))
+		"$certutil_bin" -L -d "sql:$dir" 2> /dev/null \
+			| grep -q "Inception Local CA" && chrome_ca=$((chrome_ca + 1))
+	done
+	if [ "$chrome_dirs" -eq 0 ]; then
+		warn "no Chrome NSS store found on this host"
+	elif [ "$chrome_ca" -eq "$chrome_dirs" ]; then
+		pass "local CA trusted in ${chrome_ca}/${chrome_dirs} Chrome NSS store(s)"
+	else
+		fail "local CA missing from $((chrome_dirs - chrome_ca))/${chrome_dirs} Chrome store(s) — ERR_CERT_AUTHORITY_INVALID"
+	fi
+fi
+
 # ── 6. Chromium: the bare, portless subject URL ─────────────────────────────
 head_ "Chromium / Chrome — bare https://${DOMAIN}"
 launcher="$HOME/.local/bin/inception-browser"
@@ -316,7 +337,6 @@ else
 			--disable-dev-shm-usage --no-first-run \
 			--user-data-dir="$tmpdir" \
 			--host-resolver-rules="$rules" \
-			--ignore-certificate-errors \
 			--dump-dom "https://${DOMAIN}/" 2> /dev/null)
 		rm -rf "$tmpdir"
 		if printf '%s' "$dom" | grep -qi '<title'; then
@@ -334,9 +354,9 @@ fi
 printf "\n"
 if [ "$FAILED" -eq 0 ]; then
 	printf "${C_GREEN}${C_BOLD}  All required checks passed.${C_RESET}\n\n"
-	printf "    Chromium   ${C_BOLD}inception-browser${C_RESET}  ${C_DIM}→ https://%s${C_RESET}\n" "$DOMAIN"
-	printf "    Firefox    ${C_BOLD}https://%s:%s${C_RESET}\n" "$DOMAIN" "$P_HTTPS"
-	printf "    Bonus      ${C_BOLD}http://%s:%s${C_RESET}\n\n" "$DOMAIN" "$P_STATIC"
+	printf "    Any browser  ${C_BOLD}https://%s${C_RESET}   ${C_DIM}(no port, trusted certificate)${C_RESET}\n" "$DOMAIN"
+	printf "    Bonus site   ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"
+	printf "    Direct       ${C_BOLD}https://%s:%s${C_RESET}   ${C_DIM}(bypasses the proxy)${C_RESET}\n\n" "$DOMAIN" "$P_HTTPS"
 	exit 0
 fi
 printf "${C_RED}${C_BOLD}  %d check(s) failed.${C_RESET}\n\n" "$FAILED"

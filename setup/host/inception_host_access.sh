@@ -386,6 +386,52 @@ warn_if_firefox_running() {
 	printf "    then reopen it. Everything is already written to disk.\n"
 }
 
+# Chrome and Chromium do not read Firefox's certificate store; they use NSS's
+# shared database instead. Without the CA there, plain Chrome reaches the site
+# and then refuses it with ERR_CERT_AUTHORITY_INVALID. The snap build cannot see
+# ~/.pki (snap confinement hides dot-directories in $HOME) and keeps its own
+# copy under ~/snap/chromium, so both are populated when present.
+chrome_nss_dirs() {
+	printf '%s\n' "$HOME/.pki/nssdb"
+	local d
+	for d in "$HOME"/snap/chromium/current/.pki/nssdb \
+		"$HOME"/snap/chromium/common/.pki/nssdb; do
+		[ -d "$(dirname "$(dirname "$d")")" ] && printf '%s\n' "$d"
+	done
+}
+
+install_ca_into_chrome() {
+	local certutil_bin n=0 dir
+	fetch_ca_cert || return 0
+	certutil_bin=$(find_certutil) || return 0
+	while read -r dir; do
+		[ -n "$dir" ] || continue
+		mkdir -p "$dir" 2> /dev/null || continue
+		# A profile that has never stored a certificate has no database yet.
+		"$certutil_bin" -L -d "sql:$dir" > /dev/null 2>&1 \
+			|| "$certutil_bin" -N --empty-password -d "sql:$dir" > /dev/null 2>&1
+		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" > /dev/null 2>&1
+		if "$certutil_bin" -A -n "$CA_NICKNAME" -t "C,," -d "sql:$dir" \
+			-i "$CA_FILE" > /dev/null 2>&1; then
+			n=$((n + 1))
+		fi
+	done < <(chrome_nss_dirs)
+	if [ "$n" -gt 0 ]; then
+		ok "Chrome: local CA trusted in $n NSS store(s) — no certificate warning"
+	else
+		warn "Chrome: could not add the CA — it will warn about the certificate"
+	fi
+}
+
+undo_ca_from_chrome() {
+	local certutil_bin dir
+	certutil_bin=$(find_certutil 2> /dev/null) || return 0
+	while read -r dir; do
+		[ -d "$dir" ] || continue
+		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" > /dev/null 2>&1
+	done < <(chrome_nss_dirs)
+}
+
 # ── Chromium / Chrome ───────────────────────────────────────────────────────
 # Preference order is deliberate: the Chromium snap is what these campus images
 # ship and what was verified working here. Keep this list identical to the one
@@ -571,6 +617,7 @@ DESKTOPEOF
 }
 
 undo_chromium() {
+	undo_ca_from_chrome
 	rm -f "$LAUNCHER" "$DESKTOP_FILE"
 	# CHROME_PROFILE is only resolved during configure, so clear both candidates.
 	rm -rf "$HOME/.local/share/inception-browser"
@@ -628,6 +675,7 @@ install_proxy_service "$P_HTTPS" "$P_STATIC" "$P_HTTP" && PROXY_OK=1 || PROXY_OK
 
 configure_firefox
 install_ca_into_firefox
+install_ca_into_chrome
 configure_chromium "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 configure_curl_wrapper "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 [ "$PROXY_OK" = "1" ] && configure_desktop_proxy
