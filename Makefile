@@ -21,6 +21,13 @@ DISK_DIR     := disk_images
 RM           := rm -rf
 VMS_ISO_TAR  := vms_iso.tar
 
+# Inception (the project that runs *inside* this VM). LOGIN drives the
+# subject-mandated domain; SRC optionally points `make inception` at a
+# host-side copy of the repo instead of cloning from GitHub.
+LOGIN        ?= dlesieur
+DOMAIN       ?= $(LOGIN).42.fr
+SRC          ?=
+
 # Force rebuilding the preseed ISO even if it already exists.
 # `make all` sets this automatically so the ISO always matches the latest scripts/binaries.
 FORCE_ISO ?= 0
@@ -59,7 +66,8 @@ C_CYAN   := \033[36m
 # =========@@ Main target @@===================================================
 .PHONY: all prepare pull shell deps extpack check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
-        list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm
+        list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
+        host_access host_access_undo inception verify_access
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -78,6 +86,7 @@ MAKE_BIN := $(MAKE)
 
 all: prepare
 	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh
 
 # Prepare everything needed for a smooth `make all` experience:
 # - check + install host dependencies (VirtualBox, xorriso, gcc, libreadline-dev, …)
@@ -339,6 +348,30 @@ fclean: clean rm_disk_image
 	$(RM) $(DISK_DIR)
 
 re: fclean all
+
+# =========@@ Inception: host access to $(DOMAIN) @@===========================
+# The subject requires the site to answer on $(DOMAIN). That name resolves only
+# where something is told to resolve it: inside the VM that is the guest's own
+# /etc/hosts, and on a 42 campus machine there is no root to add a host-side
+# entry. host_access teaches the two installed browsers to resolve it
+# themselves — no proxy, no SSH tunnel, no root. See the script's header.
+host_access:
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh
+
+host_access_undo:
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh --undo
+
+# Clone (or upload) Inception into the VM, build it, wire up the host, verify.
+#   make inception                    clone github.com/Univers42/inception
+#   make inception SRC=/path/to/repo  push a local working tree up instead
+inception:
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
+		bash setup/host/deploy_inception.sh
+
+# Prove it from the host: NAT rules, TLS/SNI, the WordPress redirect trap, and
+# a real headless browser load of the bare https://$(DOMAIN) URL.
+verify_access:
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/verify_inception_access.sh
 
 # =========@@ Help @@==========================================================
 help:

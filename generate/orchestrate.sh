@@ -478,6 +478,10 @@ ensure_vm_nat_forwarding() {
 	ensure_vm_nat_forward ssh 4242 4242
 	ensure_vm_nat_forward http 80 8082
 	ensure_vm_nat_forward https 443 8443
+	# Inception's bonus static site. 'https' above already covers the
+	# WordPress/NGINX container (guest 443), which is why there is no
+	# separate inception-https rule.
+	ensure_vm_nat_forward inception-static 8090 8090
 	ensure_vm_nat_forward docker 5000 5000
 	ensure_vm_nat_forward mariadb 3306 3306
 	ensure_vm_nat_forward redis 6379 6379
@@ -984,6 +988,17 @@ Host *
     ConnectionAttempts 3
     ConnectTimeout 15
 SSHEOF
+	fi
+
+	# Every rebuild gives the VM a new host key on the same 127.0.0.1:<port>,
+	# so ssh refuses to connect with REMOTE HOST IDENTIFICATION HAS CHANGED.
+	# The `b2b` alias below dodges it via UserKnownHostsFile=/dev/null, but a
+	# direct `ssh -p <port> dlesieur@127.0.0.1` — and scp, and VS Code — still
+	# trip over the stale entry. Drop it here instead of making the user run
+	# ssh-keygen -R by hand after every `make re`.
+	if [ -f "$ssh_dir/known_hosts" ]; then
+		ssh-keygen -q -f "$ssh_dir/known_hosts" -R "[127.0.0.1]:${P_SSH}" > /dev/null 2>&1 || true
+		rm -f "$ssh_dir/known_hosts.old"
 	fi
 
 	# Add VM-specific shortcut
