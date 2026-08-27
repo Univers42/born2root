@@ -46,6 +46,8 @@ CONNECT_TIMEOUT = 10
 class Config:
     domain = ""
     portmap = {}
+    listen_port = 8118
+    pac_path = "/inception.pac"
 
 
 def relay(a, b):
@@ -150,6 +152,13 @@ class Handler(socketserver.StreamRequestHandler):
 
     # ── http:// -> absolute-URI request ─────────────────────────────────────
     def do_plain(self, method, target, version):
+        # Chrome refuses a file:// PAC URL coming from the desktop proxy
+        # settings, so the proxy serves its own PAC over http instead. This is
+        # an origin-form request (a plain GET /path) rather than the absolute
+        # URI a proxied request carries, which is how the two are told apart.
+        if target == Config.pac_path:
+            self.serve_pac()
+            return
         if not target.lower().startswith("http://"):
             self.fail(400, "expected an absolute URI")
             return
@@ -195,6 +204,25 @@ class Handler(socketserver.StreamRequestHandler):
             return
         relay(self.connection, remote)
 
+    def serve_pac(self):
+        body = (
+            "function FindProxyForURL(url, host) {\n"
+            '    if (host === "%s" || dnsDomainIs(host, ".%s"))\n'
+            '        return "PROXY 127.0.0.1:%d; DIRECT";\n'
+            '    return "DIRECT";\n'
+            "}\n" % (Config.domain, Config.domain, Config.listen_port)
+        ).encode("utf-8")
+        try:
+            self.wfile.write(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: application/x-ns-proxy-autoconfig\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                b"Connection: close\r\n\r\n" + body
+            )
+            self.wfile.flush()
+        except OSError:
+            pass
+
     def fail(self, code, message):
         try:
             body = message.encode("utf-8")
@@ -226,6 +254,7 @@ def main():
     args = ap.parse_args()
 
     Config.domain = args.domain
+    Config.listen_port = args.port
     for entry in args.map:
         asked, _, actual = entry.partition(":")
         try:

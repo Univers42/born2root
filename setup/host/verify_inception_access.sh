@@ -130,6 +130,28 @@ else
 fi
 rm -f "$ca_tmp"
 
+# Chrome takes its PAC from the desktop proxy setting and refuses a file:// URL
+# there, so the proxy serves the PAC itself over http. If this endpoint is not
+# answering, Chrome silently falls back to no proxy and the domain fails with
+# NXDOMAIN while every other check here still passes.
+pac=$(curl -s --max-time 10 "http://127.0.0.1:${PROXY_PORT}/inception.pac" 2> /dev/null)
+if printf '%s' "$pac" | grep -q "FindProxyForURL" \
+	&& printf '%s' "$pac" | grep -q "$DOMAIN"; then
+	pass "PAC served over http for Chrome and the desktop"
+else
+	fail "PAC endpoint http://127.0.0.1:${PROXY_PORT}/inception.pac is not answering"
+fi
+
+if command -v gsettings > /dev/null 2>&1; then
+	gs_mode=$(gsettings get org.gnome.system.proxy mode 2> /dev/null | tr -d "'")
+	gs_url=$(gsettings get org.gnome.system.proxy autoconfig-url 2> /dev/null | tr -d "'")
+	if [ "$gs_mode" = "auto" ] && [ "$gs_url" = "http://127.0.0.1:${PROXY_PORT}/inception.pac" ]; then
+		pass "desktop proxy points at that PAC (plain Chrome picks it up)"
+	else
+		warn "desktop proxy is '${gs_mode}' — plain Chrome needs it, or use inception-browser"
+	fi
+fi
+
 # The proxy must serve this domain and nothing else.
 other=$(curl -s --proxy "127.0.0.1:${PROXY_PORT}" --max-time 10 \
 	-o /dev/null -w '%{http_code}' "http://example.com/" 2> /dev/null)
@@ -227,7 +249,15 @@ if command -v firefox > /dev/null 2>&1 && command -v python3 > /dev/null 2>&1 &&
 	# and snap Firefox silently fails to load a profile placed in one.
 	tmpdir=$(mktemp -d "$HOME/b2b-ffverify.XXXXXX")
 	mkdir -p "$tmpdir/profile"
-	printf 'user_pref("network.dns.localDomains", "%s");\n' "$DOMAIN" > "$tmpdir/profile/user.js"
+	# network.proxy.type 0 = no proxy at all. Without it the scratch profile
+	# inherits the desktop's PAC, the request goes to the Inception proxy, and
+	# the proxy correctly refuses the probe's random port — which would look
+	# like the resolver pref failing when it is working fine. This check must
+	# isolate resolution, so it opts out of the proxy entirely.
+	{
+		printf 'user_pref("network.dns.localDomains", "%s");\n' "$DOMAIN"
+		printf 'user_pref("network.proxy.type", 0);\n'
+	} > "$tmpdir/profile/user.js"
 
 	# Port 0 lets the kernel pick a free one, so a busy port cannot fail the run.
 	python3 - "$tmpdir" << 'PYEOF' &

@@ -195,8 +195,10 @@ UNITEOF
 
 	systemctl --user daemon-reload > /dev/null 2>&1
 	systemctl --user reset-failed inception-proxy.service > /dev/null 2>&1 || true
-	if systemctl --user enable --now inception-proxy.service > /dev/null 2>&1 \
-		|| systemctl --user restart inception-proxy.service > /dev/null 2>&1; then
+	# enable --now is a no-op on an already-running unit, so it would keep an
+	# older copy of the proxy alive after an upgrade. Always restart.
+	systemctl --user enable inception-proxy.service > /dev/null 2>&1
+	if systemctl --user restart inception-proxy.service > /dev/null 2>&1; then
 		local i
 		for i in 1 2 3 4 5 6 7 8 9 10; do
 			port_is_free "$PROXY_PORT" || break   # bound = it is up
@@ -233,25 +235,33 @@ configure_desktop_proxy() {
 	local mode current
 	mode=$(gsettings get org.gnome.system.proxy mode 2> /dev/null | tr -d "'")
 	current=$(gsettings get org.gnome.system.proxy autoconfig-url 2> /dev/null | tr -d "'")
-	if [ "$mode" != "none" ] && [ "$current" != "file://$DESKTOP_PAC" ]; then
+	if [ "$mode" != "none" ] \
+		&& [ "$current" != "http://127.0.0.1:${PROXY_PORT}/inception.pac" ] \
+		&& [ "$current" != "file://$DESKTOP_PAC" ]; then
 		warn "desktop proxy already set to '$mode' — left alone; use inception-browser for Chrome"
 		return 0
 	fi
-	mkdir -p "$(dirname "$DESKTOP_PAC")"
-	pac_body > "$DESKTOP_PAC"
-	gsettings set org.gnome.system.proxy autoconfig-url "file://$DESKTOP_PAC" 2> /dev/null
+	# Chrome refuses a file:// PAC URL that comes from the desktop proxy
+	# settings — it silently falls back to no proxy, which is why the domain
+	# still failed there with NXDOMAIN. The proxy serves the same PAC over
+	# http, which Chrome accepts.
+	gsettings set org.gnome.system.proxy autoconfig-url \
+		"http://127.0.0.1:${PROXY_PORT}/inception.pac" 2> /dev/null
 	gsettings set org.gnome.system.proxy mode 'auto' 2> /dev/null
-	ok "desktop proxy points at the PAC — plain Chrome gets the bare URL too"
+	rm -f "$DESKTOP_PAC" 2> /dev/null
+	ok "desktop proxy points at the PAC over http — plain Chrome gets the bare URL"
 }
 
 undo_desktop_proxy() {
 	command -v gsettings > /dev/null 2>&1 || return 0
 	local current
 	current=$(gsettings get org.gnome.system.proxy autoconfig-url 2> /dev/null | tr -d "'")
-	if [ "$current" = "file://$DESKTOP_PAC" ]; then
+	case "$current" in
+		"file://$DESKTOP_PAC" | http://127.0.0.1:*/inception.pac)
 		gsettings set org.gnome.system.proxy mode 'none' 2> /dev/null
-		gsettings set org.gnome.system.proxy autoconfig-url '' 2> /dev/null
-	fi
+			gsettings set org.gnome.system.proxy autoconfig-url '' 2> /dev/null
+			;;
+	esac
 	rm -f "$DESKTOP_PAC"
 }
 

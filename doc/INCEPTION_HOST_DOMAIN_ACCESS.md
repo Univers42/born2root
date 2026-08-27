@@ -189,6 +189,15 @@ assertion that something *should* work.
   `libnss3` Firefox already ships. Chromium instead pins the same CA by SPKI in
   its launcher, scoped to a dedicated profile directory, so normal browsing is
   untouched. A running Firefox needs a restart to pick up the new trust.
+- **Chrome refuses a `file://` PAC URL** that comes from the desktop proxy
+  setting — it does not error, it silently falls back to no proxy, so the domain
+  fails there with `DNS_PROBE_FINISHED_NXDOMAIN` while every other check passes.
+  The proxy therefore serves the PAC itself over
+  `http://127.0.0.1:<port>/inception.pac`, which Chrome accepts, and that is
+  what the desktop setting points at. Firefox keeps a `file://` copy inside each
+  profile, so its configuration does not depend on the proxy being up to be read.
+- **Both browsers must be restarted** after `make host_access`: Firefox reads
+  `user.js` only at profile start, and Chrome reads the proxy setting at launch.
 - **Snap confinement.** Snap's `home` interface only grants access to
   *non-hidden* paths in `$HOME`. A snap browser cannot use `~/.local/share` for
   a profile, so the launcher places it under `~/snap/<name>/common/` when the
