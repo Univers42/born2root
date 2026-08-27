@@ -94,6 +94,48 @@ else
 	warn "could not find absolute asset URLs to check"
 fi
 
+# ── 4b. The bare, portless URL ──────────────────────────────────────────────
+# Nothing may bind host port 443 here, so https://<domain> can only work if a
+# local proxy rewrites the port. Check the proxy is up and that the bare URL
+# resolves, connects and validates through it.
+head_ "Bare https://${DOMAIN} (no port)"
+PROXY_PORT=$(sed -n 's/.*--port \([0-9]\+\).*/\1/p' \
+	"$HOME/.config/systemd/user/inception-proxy.service" 2> /dev/null | head -1)
+: "${PROXY_PORT:=8118}"
+
+if systemctl --user is-active inception-proxy.service > /dev/null 2>&1; then
+	pass "proxy service active on 127.0.0.1:${PROXY_PORT}"
+else
+	fail "inception-proxy.service is not running — run: make host_access"
+fi
+
+# Fetch the CA so the check can demand a genuinely valid chain rather than -k.
+ca_tmp=$(mktemp)
+ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	-o LogLevel=ERROR -o ConnectTimeout=8 "$SSH_ALIAS" \
+	'cat ~/Documents/inception/secrets/ca.crt' > "$ca_tmp" 2> /dev/null
+if [ -s "$ca_tmp" ]; then
+	res=$(curl -s --proxy "127.0.0.1:${PROXY_PORT}" --cacert "$ca_tmp" --max-time 20 \
+		-o /dev/null -w '%{http_code}:%{ssl_verify_result}' "https://${DOMAIN}/")
+	case "$res" in
+		200:0) pass "https://${DOMAIN}/ → 200 with a fully valid certificate (no -k)" ;;
+		200:*) warn "https://${DOMAIN}/ → 200 but TLS verify result ${res#*:}" ;;
+		*)     fail "https://${DOMAIN}/ → ${res%%:*} through the proxy" ;;
+	esac
+else
+	res=$(curl -ks --proxy "127.0.0.1:${PROXY_PORT}" --max-time 20 \
+		-o /dev/null -w '%{http_code}' "https://${DOMAIN}/")
+	[ "$res" = "200" ] && pass "https://${DOMAIN}/ → 200 through the proxy" \
+		|| fail "https://${DOMAIN}/ → ${res:-no response} through the proxy"
+fi
+rm -f "$ca_tmp"
+
+# The proxy must serve this domain and nothing else.
+other=$(curl -s --proxy "127.0.0.1:${PROXY_PORT}" --max-time 10 \
+	-o /dev/null -w '%{http_code}' "http://example.com/" 2> /dev/null)
+[ "$other" = "403" ] && pass "proxy refuses every other host (example.com → 403)" \
+	|| warn "proxy returned ${other:-nothing} for example.com — expected 403"
+
 # ── 5. Firefox ──────────────────────────────────────────────────────────────
 head_ "Firefox"
 found=0; configured=0
@@ -103,7 +145,9 @@ for root in "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox
 	for d in "$root"/*/; do
 		[ -f "${d}prefs.js" ] || [ -f "${d}times.json" ] || continue
 		found=$((found + 1))
-		if grep -q "network.dns.localDomains.*${DOMAIN}" "${d}user.js" 2> /dev/null; then
+		if grep -q "network.dns.localDomains.*${DOMAIN}" "${d}user.js" 2> /dev/null \
+			&& grep -q 'network.proxy.autoconfig_url' "${d}user.js" 2> /dev/null \
+			&& [ -f "${d}inception.pac" ]; then
 			configured=$((configured + 1))
 		fi
 	done
@@ -166,8 +210,7 @@ if [ -n "$ff_pid" ] && [ "$configured" -gt 0 ]; then
 		done
 		if [ "$ff_started" -lt "$newest_userjs" ]; then
 			fail "the running Firefox started before the pref was written — it has not read it"
-			printf "      ${C_DIM}quit Firefox completely and reopen it, or set${C_RESET}\n"
-			printf "      ${C_DIM}network.dns.localDomains = %s in about:config${C_RESET}\n" "$DOMAIN"
+			printf "      ${C_DIM}quit Firefox completely — every window — and reopen it${C_RESET}\n"
 		else
 			pass "the running Firefox started after the pref was written"
 		fi

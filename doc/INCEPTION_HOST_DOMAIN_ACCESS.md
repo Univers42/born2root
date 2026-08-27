@@ -65,6 +65,21 @@ here before anything was built on top of them:
 |---|---|---|
 | Firefox | pref `network.dns.localDomains` | `https://dlesieur.42.fr:8443` |
 | Chromium / Chrome | flag `--host-resolver-rules` | `https://dlesieur.42.fr` |
+| Any browser | local proxy + PAC (below) | `https://dlesieur.42.fr` |
+
+Resolution alone is not enough for the **bare** URL, because it fixes the name
+and not the port: Firefox then asks for `127.0.0.1:443` and gets *connection
+refused*, since `ip_unprivileged_port_start` is 1024 and nothing running as this
+user may bind 443. `setup/host/inception_proxy.py` closes that gap. A proxied
+request carries the intended host *and port* inside the request, so the proxy
+sends `CONNECT dlesieur.42.fr:443` to the forwarded high port while the URL bar,
+the SNI name and the `Host` header all still say the real domain on 443 — which
+is why both the certificate and WordPress see exactly what they expect. It runs
+as a `systemd --user` service, and the generated PAC routes *only* this domain
+through it (`DIRECT` for everything else, with `DIRECT` as a fallback so a
+stopped proxy degrades instead of breaking the browser). Verified with a real
+headless Firefox: a request to the bare URL arrived in the guest's nginx log
+with a fully valid certificate and no error bypass.
 
 `setup/host/inception_host_access.sh` writes the Firefox pref into a delimited,
 idempotent block in every profile's `user.js` (classic, snap and flatpak paths),

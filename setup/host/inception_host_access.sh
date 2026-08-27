@@ -63,6 +63,12 @@ GUEST_HTTP=80
 BEGIN_MARK="// >>> born2root: Inception host access — auto-generated, do not edit >>>"
 END_MARK="// <<< born2root: Inception host access <<<"
 
+PROXY_PORT="${INCEPTION_PROXY_PORT:-8118}"
+PROXY_DIR="$HOME/.local/share/born2root"
+PROXY_BIN="$PROXY_DIR/inception_proxy.py"
+PROXY_UNIT="$HOME/.config/systemd/user/inception-proxy.service"
+PAC_NAME="inception.pac"
+DESKTOP_PAC="$HOME/.config/born2root/$PAC_NAME"
 LAUNCHER="$HOME/.local/bin/inception-browser"
 CURL_WRAPPER="$HOME/.local/bin/inception-curl"
 DESKTOP_FILE="$HOME/.local/share/applications/inception-browser.desktop"
@@ -115,6 +121,145 @@ ensure_forward() {
 	fi
 	existing=$(get_forward_port "$name")
 	printf '%s' "${existing:-$pref}"
+}
+
+# ── The local port-rewriting proxy ──────────────────────────────────────────
+# Firefox can be told to resolve a name (network.dns.localDomains) but not to
+# change the port, so the bare https://<domain> ends up at 127.0.0.1:443 —
+# which nothing may bind here, because ip_unprivileged_port_start is 1024.
+# A proxied request carries the intended host AND port inside the request, so a
+# proxy can send it to the forwarded high port while the URL, the SNI name and
+# the Host header all still say the real domain on 443.
+port_is_free() {
+	python3 - "$1" 2> /dev/null << 'PYEOF'
+import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PYEOF
+}
+
+# Reuse the port already in the unit if there is one, so a re-run does not move
+# the proxy out from under a browser that is configured for it.
+pick_proxy_port() {
+	local existing candidate
+	if [ -f "$PROXY_UNIT" ]; then
+		existing=$(sed -n 's/.*--port \([0-9]\+\).*/\1/p' "$PROXY_UNIT" | head -1)
+		if [ -n "$existing" ]; then
+			printf '%s' "$existing"
+			return 0
+		fi
+	fi
+	for candidate in "$PROXY_PORT" 8119 3128 8888 18118; do
+		if port_is_free "$candidate"; then
+			printf '%s' "$candidate"
+			return 0
+		fi
+	done
+	printf '%s' "$PROXY_PORT"
+}
+
+install_proxy_service() {
+	local https_port="$1" static_port="$2" http_port="$3"
+	local src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/inception_proxy.py"
+	if [ ! -f "$src" ]; then
+		warn "inception_proxy.py missing — the bare URL will not work"
+		return 1
+	fi
+	command -v python3 > /dev/null 2>&1 || { warn "no python3 — skipping the proxy"; return 1; }
+
+	# Copied out of the repo so the service keeps working if the checkout moves.
+	mkdir -p "$PROXY_DIR"
+	install -m 0755 "$src" "$PROXY_BIN"
+
+	mkdir -p "$(dirname "$PROXY_UNIT")"
+	cat > "$PROXY_UNIT" << UNITEOF
+[Unit]
+Description=Inception local proxy (bare https://${DOMAIN} on an unprivileged host)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/env python3 ${PROXY_BIN} --port ${PROXY_PORT} --domain ${DOMAIN} \
+    --map 443:${https_port} --map 80:${http_port} \
+    --map ${static_port}:${static_port} --map ${https_port}:${https_port}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+UNITEOF
+
+	systemctl --user daemon-reload > /dev/null 2>&1
+	systemctl --user reset-failed inception-proxy.service > /dev/null 2>&1 || true
+	if systemctl --user enable --now inception-proxy.service > /dev/null 2>&1 \
+		|| systemctl --user restart inception-proxy.service > /dev/null 2>&1; then
+		local i
+		for i in 1 2 3 4 5 6 7 8 9 10; do
+			port_is_free "$PROXY_PORT" || break   # bound = it is up
+			sleep 0.5
+		done
+		if port_is_free "$PROXY_PORT"; then
+			warn "proxy service did not come up on ${PROXY_PORT}"
+			return 1
+		fi
+		ok "local proxy running on 127.0.0.1:${PROXY_PORT} (systemd --user, restarts on login)"
+		return 0
+	fi
+	warn "could not start the proxy service"
+	return 1
+}
+
+# Only this domain is proxied; everything else stays DIRECT. The trailing
+# DIRECT is a fallback, so a stopped proxy degrades to a normal connection
+# rather than breaking the browser.
+pac_body() {
+	cat << PACEOF
+function FindProxyForURL(url, host) {
+    if (host === "${DOMAIN}" || dnsDomainIs(host, ".${DOMAIN}"))
+        return "PROXY 127.0.0.1:${PROXY_PORT}; DIRECT";
+    return "DIRECT";
+}
+PACEOF
+}
+
+# Chrome and the rest of the desktop read GNOME's proxy setting. Only touched
+# when nothing else has configured it, so an existing proxy is never clobbered.
+configure_desktop_proxy() {
+	command -v gsettings > /dev/null 2>&1 || return 0
+	local mode current
+	mode=$(gsettings get org.gnome.system.proxy mode 2> /dev/null | tr -d "'")
+	current=$(gsettings get org.gnome.system.proxy autoconfig-url 2> /dev/null | tr -d "'")
+	if [ "$mode" != "none" ] && [ "$current" != "file://$DESKTOP_PAC" ]; then
+		warn "desktop proxy already set to '$mode' — left alone; use inception-browser for Chrome"
+		return 0
+	fi
+	mkdir -p "$(dirname "$DESKTOP_PAC")"
+	pac_body > "$DESKTOP_PAC"
+	gsettings set org.gnome.system.proxy autoconfig-url "file://$DESKTOP_PAC" 2> /dev/null
+	gsettings set org.gnome.system.proxy mode 'auto' 2> /dev/null
+	ok "desktop proxy points at the PAC — plain Chrome gets the bare URL too"
+}
+
+undo_desktop_proxy() {
+	command -v gsettings > /dev/null 2>&1 || return 0
+	local current
+	current=$(gsettings get org.gnome.system.proxy autoconfig-url 2> /dev/null | tr -d "'")
+	if [ "$current" = "file://$DESKTOP_PAC" ]; then
+		gsettings set org.gnome.system.proxy mode 'none' 2> /dev/null
+		gsettings set org.gnome.system.proxy autoconfig-url '' 2> /dev/null
+	fi
+	rm -f "$DESKTOP_PAC"
+}
+
+undo_proxy_service() {
+	systemctl --user disable --now inception-proxy.service > /dev/null 2>&1
+	rm -f "$PROXY_UNIT" "$PROXY_BIN"
+	systemctl --user daemon-reload > /dev/null 2>&1
+	ok "local proxy service stopped and removed"
 }
 
 # ── Firefox ─────────────────────────────────────────────────────────────────
@@ -174,6 +319,12 @@ configure_firefox() {
 			# The site is HTTPS on a self-signed local CA. Leaving HTTPS-only
 			# mode to auto-upgrade the plain-HTTP bonus site would break it.
 			printf 'user_pref("dom.security.https_only_mode", false);\n'
+			# The PAC lives inside the profile because snap confinement blocks
+			# a snap Firefox from reading hidden paths elsewhere in $HOME.
+			pac_body > "$profile/$PAC_NAME"
+			printf 'user_pref("network.proxy.type", 2);\n'
+			printf 'user_pref("network.proxy.autoconfig_url", "file://%s/%s");\n' \
+				"$profile" "$PAC_NAME"
 			printf '%s\n' "$END_MARK"
 		} >> "$userjs"
 		n=$((n + 1))
@@ -197,6 +348,7 @@ undo_firefox() {
 		# An empty user.js is indistinguishable from none; remove it so the
 		# profile is left exactly as it was found.
 		[ -s "$userjs" ] || rm -f "$userjs"
+		rm -f "$profile/$PAC_NAME"
 		[ -n "$certutil_bin" ] && "$certutil_bin" -D -n "$CA_NICKNAME" \
 			-d "sql:$profile" > /dev/null 2>&1
 		n=$((n + 1))
@@ -218,11 +370,10 @@ warn_if_firefox_running() {
 	[ -n "$pid" ] || return 0
 	printf "\n  ${C_YELLOW}${C_BOLD}Firefox is running and will NOT pick this up yet.${C_RESET}\n"
 	printf "  ${C_DIM}user.js is only read when a profile starts, so the pref is inert${C_RESET}\n"
-	printf "  ${C_DIM}until Firefox restarts. Either:${C_RESET}\n\n"
-	printf "    ${C_BOLD}a)${C_RESET} quit Firefox completely (every window) and reopen it, or\n"
-	printf "    ${C_BOLD}b)${C_RESET} set it live, no restart: open ${C_BOLD}about:config${C_RESET}, search\n"
-	printf "       ${C_BOLD}network.dns.localDomains${C_RESET} and set it to ${C_BOLD}%s${C_RESET}\n" "$DOMAIN"
-	printf "\n  ${C_DIM}Either way user.js keeps it applied for every future start.${C_RESET}\n"
+	printf "  ${C_DIM}until it restarts, and that now covers the proxy settings too,${C_RESET}\n"
+	printf "  ${C_DIM}so about:config is no longer a shortcut worth taking.${C_RESET}\n\n"
+	printf "    ${C_BOLD}Quit Firefox completely${C_RESET} — every window, the process must exit —\n"
+	printf "    then reopen it. Everything is already written to disk.\n"
 }
 
 # ── Chromium / Chrome ───────────────────────────────────────────────────────
@@ -444,6 +595,8 @@ printf "\n${C_BOLD}Inception host access${C_RESET} ${C_DIM}(domain: %s)${C_RESET
 if [ "$ACTION" = "undo" ]; then
 	undo_firefox
 	undo_chromium
+	undo_desktop_proxy
+	undo_proxy_service
 	rm -f "$CURL_WRAPPER"
 	printf "\n  Host is back to its original state. NAT rules were left alone\n"
 	printf "  (delete them with: VBoxManage controlvm %s natpf1 delete <name>).\n\n" "$VM_NAME"
@@ -460,16 +613,25 @@ else
 	warn "VM '$VM_NAME' not registered yet — assuming default ports"
 fi
 
+PROXY_PORT=$(pick_proxy_port)
+install_proxy_service "$P_HTTPS" "$P_STATIC" "$P_HTTP" && PROXY_OK=1 || PROXY_OK=0
+
 configure_firefox
 install_ca_into_firefox
 configure_chromium "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 configure_curl_wrapper "$P_HTTPS" "$P_STATIC" "$P_HTTP"
+[ "$PROXY_OK" = "1" ] && configure_desktop_proxy
 
 printf "\n  ${C_BOLD}Open from this host:${C_RESET}\n"
-printf "    Chromium   ${C_BOLD}inception-browser${C_RESET}   ${C_DIM}→ https://%s${C_RESET}\n" "$DOMAIN"
-printf "    Firefox    ${C_BOLD}https://%s:%s${C_RESET}\n" "$DOMAIN" "$P_HTTPS"
-printf "    Bonus site ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"
-printf "    Terminal   ${C_BOLD}inception-curl -k https://%s/${C_RESET}\n" "$DOMAIN"
+if [ "$PROXY_OK" = "1" ]; then
+	printf "    Any browser  ${C_BOLD}https://%s${C_RESET}   ${C_DIM}(no port)${C_RESET}\n" "$DOMAIN"
+	printf "    Bonus site   ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"
+else
+	printf "    Chromium     ${C_BOLD}inception-browser${C_RESET}   ${C_DIM}→ https://%s${C_RESET}\n" "$DOMAIN"
+	printf "    Firefox      ${C_BOLD}https://%s:%s${C_RESET}\n" "$DOMAIN" "$P_HTTPS"
+	printf "    Bonus site   ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"
+fi
+printf "    Terminal     ${C_BOLD}inception-curl https://%s/${C_RESET}\n" "$DOMAIN"
 if [ "$CA_TRUSTED" = "1" ]; then
 	printf "\n  ${C_DIM}The local CA is trusted in both browsers — no certificate warning.${C_RESET}\n"
 else
