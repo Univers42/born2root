@@ -125,7 +125,10 @@ host key on the same `127.0.0.1:4242`, so a direct
 `ssh -p 4242 dlesieur@127.0.0.1` (and scp, and VS Code) failed with
 `REMOTE HOST IDENTIFICATION HAS CHANGED` until `ssh-keygen -R` was run by hand.
 `ssh b2b` never hit it because its generated config sets
-`UserKnownHostsFile /dev/null`.
+`UserKnownHostsFile /dev/null`. The new key is then recorded with
+`ssh-keyscan`, because dropping the stale one on its own only trades the scary
+warning for a confirmation prompt — or, under `BatchMode` (scp, VS Code, any
+script), an outright *Host key verification failed*.
 
 ---
 

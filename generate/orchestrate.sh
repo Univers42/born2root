@@ -1000,6 +1000,20 @@ SSHEOF
 		ssh-keygen -q -f "$ssh_dir/known_hosts" -R "[127.0.0.1]:${P_SSH}" > /dev/null 2>&1 || true
 		rm -f "$ssh_dir/known_hosts.old"
 	fi
+	# Dropping the stale key removes the scary warning, but leaves no key at all:
+	# ssh then either prompts to confirm the fingerprint or, under BatchMode
+	# (scp, VS Code, any script), fails outright with "Host key verification
+	# failed". Record the new key now so direct connections just work. sshd is up
+	# by this point — this runs after the LUKS unlock — and scanning a VM on
+	# loopback is the same trust assumption the b2b alias already makes.
+	if command -v ssh-keyscan > /dev/null 2>&1; then
+		local scanned
+		scanned=$(ssh-keyscan -T 10 -p "${P_SSH}" 127.0.0.1 2> /dev/null)
+		if [ -n "$scanned" ]; then
+			printf '%s\n' "$scanned" >> "$ssh_dir/known_hosts"
+			chmod 600 "$ssh_dir/known_hosts"
+		fi
+	fi
 
 	# Add VM-specific shortcut
 	cat >> "$ssh_config" << SSHEOF
