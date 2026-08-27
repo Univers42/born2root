@@ -161,11 +161,19 @@ assertion that something *should* work.
   `network.dns.localDomains` live in `about:config`. `make verify_access` fails
   when it detects this, because a scratch-profile test always passes and would
   otherwise hide it.
-- **The certificate warning is expected in Firefox.** The CA is local and
-  self-signed, as the subject intends, and the host does not trust it. Click
-  through once per profile. The Chromium launcher does not warn: it pins that
-  exact CA via `--ignore-certificate-errors-spki-list`, scoped to its own
-  dedicated profile directory, so nothing about your normal browsing changes.
+- **The certificate is not wrong, and neither browser warns any more.** The
+  server certificate is issued in the guest by inception's `make certs`
+  (`CN=<domain>`, SAN covering the domain, `localhost` and `127.0.0.1`) and
+  verifies cleanly against the project's own CA. Firefox's full-page *"Someone
+  pretending to be the site"* warning means only that this CA is unknown to
+  *that host* — not that the certificate is bad. Firefox keeps its own store and
+  ignores the system one, so `host_access` adds the CA to each profile's
+  `cert9.db` with NSS's `certutil`. That tool lives in `libnss3-tools`, which
+  needs root to install — but the package downloads and unpacks as an ordinary
+  user (cached in `~/.cache/born2root/nss`) and links against the system
+  `libnss3` Firefox already ships. Chromium instead pins the same CA by SPKI in
+  its launcher, scoped to a dedicated profile directory, so normal browsing is
+  untouched. A running Firefox needs a restart to pick up the new trust.
 - **Snap confinement.** Snap's `home` interface only grants access to
   *non-hidden* paths in `$HOME`. A snap browser cannot use `~/.local/share` for
   a profile, so the launcher places it under `~/snap/<name>/common/` when the

@@ -116,6 +116,33 @@ else
 	fail "only ${configured}/${found} profile(s) configured — run: make host_access"
 fi
 
+# Firefox keeps its own certificate store and ignores the system one, so the
+# local CA has to be in cert9.db or every visit opens on a full-page security
+# warning — which reads as "the certificate is wrong" rather than "this CA is
+# unknown here", and is what the warning actually means.
+certutil_bin=""
+for c in certutil "$HOME/.cache/born2root/nss/usr/bin/certutil"; do
+	command -v "$c" > /dev/null 2>&1 && { certutil_bin=$(command -v "$c"); break; }
+	[ -x "$c" ] && { certutil_bin="$c"; break; }
+done
+if [ -n "$certutil_bin" ] && [ "$found" -gt 0 ]; then
+	ca_ok=0
+	for root in "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox" \
+		"$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"; do
+		[ -d "$root" ] || continue
+		for d in "$root"/*/; do
+			[ -f "${d}prefs.js" ] || [ -f "${d}times.json" ] || continue
+			"$certutil_bin" -L -d "sql:${d%/}" 2> /dev/null \
+				| grep -q "Inception Local CA" && ca_ok=$((ca_ok + 1))
+		done
+	done
+	if [ "$ca_ok" -eq "$found" ]; then
+		pass "local CA trusted in ${ca_ok}/${found} profile(s) — no security warning"
+	else
+		fail "local CA missing from $((found - ca_ok))/${found} profile(s) — Firefox will warn"
+	fi
+fi
+
 # A scratch profile always starts fresh and therefore always loads the pref —
 # which means the check below proves the MECHANISM, not the browser the user is
 # actually looking at. A Firefox that was already running when user.js was

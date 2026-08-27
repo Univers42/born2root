@@ -78,6 +78,8 @@ info() { printf "  ${C_BLUE}▶${C_RESET} %s\n" "$*"; }
 ACTION=configure
 [ "${1:-}" = "--undo" ] && ACTION=undo
 
+trap '[ -n "$CA_FILE" ] && rm -f "$CA_FILE"' EXIT
+
 # ── VirtualBox NAT forwarding ───────────────────────────────────────────────
 have_vm() {
 	command -v VBoxManage > /dev/null 2>&1 \
@@ -185,7 +187,8 @@ configure_firefox() {
 }
 
 undo_firefox() {
-	local n=0 profile userjs
+	local n=0 profile userjs certutil_bin
+	certutil_bin=$(find_certutil 2> /dev/null) || certutil_bin=""
 	while read -r profile; do
 		userjs="$profile/user.js"
 		[ -f "$userjs" ] || continue
@@ -194,6 +197,8 @@ undo_firefox() {
 		# An empty user.js is indistinguishable from none; remove it so the
 		# profile is left exactly as it was found.
 		[ -s "$userjs" ] || rm -f "$userjs"
+		[ -n "$certutil_bin" ] && "$certutil_bin" -D -n "$CA_NICKNAME" \
+			-d "sql:$profile" > /dev/null 2>&1
 		n=$((n + 1))
 	done < <(firefox_profiles)
 	ok "Firefox: managed block removed from $n profile(s)"
@@ -253,25 +258,95 @@ chromium_profile_dir() {
 	printf '%s' "$HOME/.local/share/inception-browser"
 }
 
+# The local CA lives in the guest, where inception's `make certs` issued it.
+# Fetched once and reused: the SPKI pin for Chromium, and the DER/PEM for
+# Firefox's certificate store.
+CA_FILE=""
+fetch_ca_cert() {
+	[ -n "$CA_FILE" ] && [ -s "$CA_FILE" ] && return 0
+	local tmp
+	tmp=$(mktemp) || return 1
+	if timeout 25 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+		-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 b2b \
+		'cat ~/Documents/inception/secrets/ca.crt' > "$tmp" 2> /dev/null \
+		&& [ -s "$tmp" ]; then
+		CA_FILE="$tmp"
+		return 0
+	fi
+	rm -f "$tmp"
+	return 1
+}
+
 # Pin the exact CA instead of blanket --ignore-certificate-errors when the CA is
 # reachable: the launcher then trusts this one local CA and nothing else.
 ca_spki_pin() {
-	local ca_tmp pin
 	command -v openssl > /dev/null 2>&1 || return 1
-	ca_tmp=$(mktemp) || return 1
-	if ! timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=8 b2b \
-		'cat ~/Documents/inception/secrets/ca.crt' > "$ca_tmp" 2> /dev/null \
-		|| [ ! -s "$ca_tmp" ]; then
-		rm -f "$ca_tmp"
-		return 1
-	fi
-	pin=$(openssl x509 -in "$ca_tmp" -pubkey -noout 2> /dev/null \
+	fetch_ca_cert || return 1
+	local pin
+	pin=$(openssl x509 -in "$CA_FILE" -pubkey -noout 2> /dev/null \
 		| openssl pkey -pubin -outform der 2> /dev/null \
 		| openssl dgst -sha256 -binary 2> /dev/null \
-		| base64) || { rm -f "$ca_tmp"; return 1; }
-	rm -f "$ca_tmp"
+		| base64) || return 1
 	[ -n "$pin" ] || return 1
 	printf '%s' "$pin"
+}
+
+# Firefox keeps its own certificate store (cert9.db) and ignores the system one,
+# so the CA has to be added with NSS's certutil. That lives in libnss3-tools,
+# which is not installed here and needs root to install — but the package can be
+# downloaded and unpacked as an ordinary user, and the binary then links against
+# the system libnss3 that Firefox itself already provides.
+CERTUTIL_CACHE="$HOME/.cache/born2root/nss"
+find_certutil() {
+	if command -v certutil > /dev/null 2>&1; then
+		command -v certutil
+		return 0
+	fi
+	if [ -x "$CERTUTIL_CACHE/usr/bin/certutil" ]; then
+		printf '%s' "$CERTUTIL_CACHE/usr/bin/certutil"
+		return 0
+	fi
+	command -v apt-get > /dev/null 2>&1 && command -v dpkg-deb > /dev/null 2>&1 || return 1
+	local dl
+	dl=$(mktemp -d) || return 1
+	if ( cd "$dl" && timeout 120 apt-get download libnss3-tools > /dev/null 2>&1 ) \
+		&& ls "$dl"/libnss3-tools_*.deb > /dev/null 2>&1; then
+		mkdir -p "$CERTUTIL_CACHE"
+		dpkg-deb -x "$dl"/libnss3-tools_*.deb "$CERTUTIL_CACHE" > /dev/null 2>&1
+	fi
+	rm -rf "$dl"
+	[ -x "$CERTUTIL_CACHE/usr/bin/certutil" ] || return 1
+	printf '%s' "$CERTUTIL_CACHE/usr/bin/certutil"
+}
+
+CA_NICKNAME="Inception Local CA"
+CA_TRUSTED=0
+install_ca_into_firefox() {
+	local certutil_bin n=0 profile
+	if ! fetch_ca_cert; then
+		warn "Firefox: CA not published yet — the certificate warning will still appear"
+		return 0
+	fi
+	if ! certutil_bin=$(find_certutil); then
+		warn "Firefox: no certutil — accept the certificate warning once per profile"
+		return 0
+	fi
+	while read -r profile; do
+		[ -n "$profile" ] || continue
+		# Delete first so a reissued CA replaces the old one instead of leaving
+		# two entries with the same nickname behind.
+		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$profile" > /dev/null 2>&1
+		if "$certutil_bin" -A -n "$CA_NICKNAME" -t "C,," -d "sql:$profile" \
+			-i "$CA_FILE" > /dev/null 2>&1; then
+			n=$((n + 1))
+		fi
+	done < <(firefox_profiles)
+	if [ "$n" -gt 0 ]; then
+		CA_TRUSTED=1
+		ok "Firefox: local CA trusted in $n profile(s) — no certificate warning"
+	else
+		warn "Firefox: could not add the CA — accept the warning once per profile"
+	fi
 }
 
 configure_chromium() {
@@ -386,6 +461,7 @@ else
 fi
 
 configure_firefox
+install_ca_into_firefox
 configure_chromium "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 configure_curl_wrapper "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 
@@ -394,6 +470,11 @@ printf "    Chromium   ${C_BOLD}inception-browser${C_RESET}   ${C_DIM}→ https:
 printf "    Firefox    ${C_BOLD}https://%s:%s${C_RESET}\n" "$DOMAIN" "$P_HTTPS"
 printf "    Bonus site ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"
 printf "    Terminal   ${C_BOLD}inception-curl -k https://%s/${C_RESET}\n" "$DOMAIN"
-printf "\n  ${C_DIM}Its certificate warning is expected — the CA is local and self-signed.${C_RESET}\n"
+if [ "$CA_TRUSTED" = "1" ]; then
+	printf "\n  ${C_DIM}The local CA is trusted in both browsers — no certificate warning.${C_RESET}\n"
+else
+	printf "\n  ${C_DIM}Firefox will warn about the certificate: the CA is local and${C_RESET}\n"
+	printf "  ${C_DIM}self-signed, and could not be added to its store. Accept it once.${C_RESET}\n"
+fi
 warn_if_firefox_running
 printf "\n"
