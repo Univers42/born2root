@@ -90,8 +90,8 @@ cmd "make shell" "Download latest hellish release"
 cmd "HELLISH_VERSION=…" "Pin a hellish release (default: latest)" "${DIM}"
 cmd "CUSTOM_SHELL_PATH=…" "Override default shell (empty = bash)" "${DIM}"
 cmd "make setup_vm" "Create the VirtualBox VM"
-cmd "make start_vm" "Start the VM (GUI mode)"
-cmd "make bstart_vm" "Start headless + unlock encryption"
+cmd "make start_vm" "Start headless + unlock encryption (default)"
+cmd "make gui_vm" "Start with the VirtualBox window (console access)"
 blank
 mid
 blank

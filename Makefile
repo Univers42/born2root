@@ -59,7 +59,7 @@ C_CYAN   := \033[36m
 # =========@@ Main target @@===================================================
 .PHONY: all prepare pull shell deps check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms \
-        list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm
+        list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm
 
 all: prepare
 	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE)"
@@ -205,8 +205,16 @@ setup_vm:
 
 # =========@@ Start an existing VM @@===========================================
 start_vm: check_system
-	@bash -c '\
-	if ! VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
+	@if ! VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
+		printf "$(C_RED)✗$(C_RESET) VM \"$(VM_NAME)\" does not exist. Run: make setup_vm\n"; \
+		exit 1; \
+	fi
+	@VM_NAME="$(VM_NAME)" bash unlock_vm.sh
+
+# Escape hatch: opens the VirtualBox window. Use when you need the console --
+# to watch the installer, or to type the passphrase by hand.
+gui_vm: check_system
+	@if ! VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
 		printf "$(C_RED)✗$(C_RESET) VM \"$(VM_NAME)\" does not exist. Run: make setup_vm\n"; \
 		exit 1; \
 	fi; \
@@ -215,31 +223,15 @@ start_vm: check_system
 		printf "$(C_GREEN)✓$(C_RESET) VM is already running\n"; \
 	else \
 		VBoxManage startvm "$(VM_NAME)" --type gui; \
-	fi'
+	fi
 
 # =========@@ Status @@========================================================
 status:
 	@bash generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
 
 # =========@@ Headless boot with unlock @@======================================
-bstart_vm: check_system
-	@bash -c '\
-	if ! VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
-		$(MAKE) --no-print-directory setup_vm; \
-	fi; \
-	SSH_PORT=$$(VBoxManage showvminfo "$(VM_NAME)" --machinereadable 2>/dev/null | grep "^Forwarding" | grep "\"ssh,tcp," | head -1 | cut -d, -f4); \
-	if [ -z "$$SSH_PORT" ]; then SSH_PORT=4242; fi; \
-	bash unlock_vm.sh > vm_boot.log 2>&1 & \
-	printf "Waiting for VM to boot (see vm_boot.log)...\n"; \
-	for i in $$(seq 1 30); do \
-		if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -p "$$SSH_PORT" dlesieur@127.0.0.1 exit 2>/dev/null; then \
-			printf "$(C_GREEN)✓ VM is ready!$(C_RESET)\n"; \
-			exit 0; \
-		fi; \
-		printf "."; \
-		sleep 2; \
-	done; \
-	printf "\n$(C_YELLOW)⚠ SSH not responding yet — VM may still be booting$(C_RESET)\n"'
+# start_vm is headless already; kept so existing habits and docs keep working.
+bstart_vm: start_vm
 
 # =========@@ Power off @@=====================================================
 poweroff:

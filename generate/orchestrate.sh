@@ -191,6 +191,11 @@ draw_dashboard() {
 				color="${GRN}"
 				label="ready"
 				;;
+			warn)
+				icon="⚠"
+				color="${YLW}"
+				label="attention"
+				;;
 			fail)
 				icon="✗"
 				color="${RED}"
@@ -297,68 +302,23 @@ get_host_ip() {
 	fi
 }
 
-# Detect any local listener on a port, including loopback-only services such as
-# the 42 ftpkg service on 127.0.0.1:4242.
-RESERVED_HOST_PORTS=""
+# Host port allocation (detects local listeners, including loopback-only ones
+# such as the 42 ftpkg service on 127.0.0.1:4242). Shared with the VM installer
+# so both agree on which host ports are free and never hand out one twice.
+. "$(dirname "${BASH_SOURCE[0]}")/../utils/host_ports.sh"
 
-is_host_port_reserved() {
-	case " $RESERVED_HOST_PORTS " in
-		*" $1 "*) return 0 ;;
-		*) return 1 ;;
-	esac
-}
+# LUKS unlock helpers (resolve_passphrase / send_passphrase / wait_for_ssh).
+# Sourcing defines functions only, so this starts nothing.
+. "$(dirname "${BASH_SOURCE[0]}")/../unlock_vm.sh"
 
-reserve_host_port() {
-	RESERVED_HOST_PORTS="${RESERVED_HOST_PORTS} $1"
-}
-
-is_host_port_free() {
-	local port="$1"
-	[ -n "$port" ] || return 1
-
-	if command -v ss > /dev/null 2>&1; then
-		if ss -H -ltn 2> /dev/null | awk -v port="$port" '
-			{
-				local_addr = $4
-				if (local_addr ~ ":" port "$")
-					found = 1
-			}
-			END { exit found ? 0 : 1 }
-		'; then
-			return 1
-		fi
-	elif command -v netstat > /dev/null 2>&1; then
-		if netstat -tln 2> /dev/null | awk -v port="$port" '
-			{
-				local_addr = $4
-				if (local_addr ~ ":" port "$")
-					found = 1
-			}
-			END { exit found ? 0 : 1 }
-		'; then
-			return 1
-		fi
-	fi
-
-	if command -v nc > /dev/null 2>&1 && nc -z -w 1 127.0.0.1 "$port" > /dev/null 2>&1; then
-		return 1
-	fi
-	return 0
-}
-
-find_free_port() {
-	local port="$1"
-	local max=100 i=0
-	while [ "$i" -lt "$max" ]; do
-		if ! is_host_port_reserved "$port" && is_host_port_free "$port"; then
-			reserve_host_port "$port"
-			echo "$port"
-			return 0
-		fi
-		port=$((port + 1))
-		i=$((i + 1))
-	done
-	echo "$1"
+# Answer the guest's LUKS prompt without printing: draw_dashboard owns the
+# terminal here, so progress goes through STEP_DETAIL instead of stdout.
+unlock_booted_vm() {
+	local pass port
+	pass=$(resolve_passphrase 2> /dev/null) || return 1
+	port=$(get_vm_ssh_port)
+	: "${port:=4242}"
+	unlock_loop "$port" "$pass"
 }
 
 get_vm_port() {
@@ -417,7 +377,7 @@ ensure_vm_nat_forward() {
 		fi
 	fi
 
-	desired_port=$(find_free_port "$preferred_port")
+	resolve_host_port desired_port "$preferred_port"
 
 	if [ -z "$current_port" ] || [ "$desired_port" != "$current_port" ]; then
 		set_vm_nat_forward "$name" "$desired_port" "$guest_port"
@@ -434,7 +394,7 @@ ensure_vm_nat_forwarding() {
 		local ssh_port new_ssh_port
 		ssh_port=$(get_vm_port ssh)
 		if [ -z "$ssh_port" ] || { ! host_port_answers_ssh "$ssh_port" && host_port_answers_http "$ssh_port"; }; then
-			new_ssh_port=$(find_free_port 4242)
+			resolve_host_port new_ssh_port 4242
 			set_vm_nat_forward ssh "$new_ssh_port" 4242
 			STEP_DETAIL[2]="${VM_NAME} ssh:${new_ssh_port}"
 			draw_dashboard
@@ -549,7 +509,7 @@ if [ "$VM_STATE" = "running" ]; then
 	STEP_DETAIL[3]="already running"
 	draw_dashboard
 else
-	run_step 3 VBoxManage startvm "${VM_NAME}" --type gui
+	run_step 3 VBoxManage startvm "${VM_NAME}" --type headless
 	STEP_DETAIL[3]="installing..."
 	draw_dashboard
 fi
@@ -684,9 +644,19 @@ if [ "$BOOT1" = "dvd" ]; then
 	STEP_DETAIL[3]="install done, booting from disk..."
 	draw_dashboard
 	sleep 2
-	VBoxManage startvm "${VM_NAME}" --type gui 2> /dev/null || true
-	STEP_STATUS[3]="done"
-	STEP_DETAIL[3]="booted from disk ✓"
+	VBoxManage startvm "${VM_NAME}" --type headless 2> /dev/null || true
+
+	# Booting from disk now stops at the guest's LUKS prompt. Type the passphrase
+	# in from the host so the run stays headless.
+	STEP_DETAIL[3]="unlocking LUKS..."
+	draw_dashboard
+	if unlock_booted_vm; then
+		STEP_STATUS[3]="done"
+		STEP_DETAIL[3]="booted from disk ✓"
+	else
+		STEP_STATUS[3]="warn"
+		STEP_DETAIL[3]="booted, LUKS unlock timed out"
+	fi
 	draw_dashboard
 else
 	STEP_DETAIL[3]="booted from disk"
@@ -694,7 +664,7 @@ else
 fi
 
 # ── Read actual ports from VM config (no hardcoding) ─────────────────────────
-# get_vm_port/find_free_port are defined near the top so they can also repair
+# get_vm_port/resolve_host_port are defined near the top so they can also repair
 # stale NAT rules before the VM starts.
 
 P_SSH=$(get_vm_port ssh)
@@ -717,7 +687,7 @@ P_BAAS_ADMIN=$(get_vm_port baas-admin)
 P_MAILPIT=$(get_vm_port mailpit)
 P_AUTH_GATEWAY=$(get_vm_port auth-gateway)
 P_VAULT=$(get_vm_port vault)
-P_PRESEED=$(find_free_port 8080)
+resolve_host_port P_PRESEED 8080
 
 # ── Host-side SSH config (keepalives + VM shortcut) ──────────────────────────
 setup_host_ssh_config() {

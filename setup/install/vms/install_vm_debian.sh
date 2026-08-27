@@ -97,91 +97,32 @@ AUTH_GATEWAY_PORT=8787
 VAULT_PORT=18200
 
 # ── Dynamic port allocation (find free host ports) ───────────────────────────
-# Check if a host port is available (no sudo required)
-RESERVED_HOST_PORTS=""
+. "$SCRIPT_DIR/utils/host_ports.sh"
 
-is_port_reserved() {
-	case " $RESERVED_HOST_PORTS " in
-		*" $1 "*) return 0 ;;
-		*) return 1 ;;
-	esac
-}
-
-reserve_host_port() {
-	RESERVED_HOST_PORTS="${RESERVED_HOST_PORTS} $1"
-}
-
-is_port_free() {
-	local port="$1"
-	if command -v ss > /dev/null 2>&1; then
-		if ss -H -ltn 2> /dev/null | awk -v port="$port" '
-			{
-				local_addr = $4
-				if (local_addr ~ ":" port "$")
-					found = 1
-			}
-			END { exit found ? 0 : 1 }
-		'; then
-			return 1 # port is taken
-		fi
-	elif command -v netstat > /dev/null 2>&1; then
-		if netstat -tln 2> /dev/null | awk -v port="$port" '
-			{
-				local_addr = $4
-				if (local_addr ~ ":" port "$")
-					found = 1
-			}
-			END { exit found ? 0 : 1 }
-		'; then
-			return 1 # port is taken
-		fi
-	fi
-
-	if command -v nc > /dev/null 2>&1 && nc -z -w 1 127.0.0.1 "$port" > /dev/null 2>&1; then
-		return 1 # port is reachable on localhost
-	fi
-	return 0 # port is free
-}
-
-# Find a free port starting from a preferred one, incrementing until one works
-find_free_port() {
-	local port="$1"
-	local max_tries=100
-	local i=0
-	while [ "$i" -lt "$max_tries" ]; do
-		if ! is_port_reserved "$port" && is_port_free "$port"; then
-			reserve_host_port "$port"
-			echo "$port"
-			return 0
-		fi
-		port=$((port + 1))
-		i=$((i + 1))
-	done
-	echo "Error: Could not find a free port starting from $1" >&2
-	return 1
-}
-
-# Resolve actual host ports (may differ from defaults if ports are taken)
-HOST_SSH_PORT=$(find_free_port "$SSH_PORT")
-HOST_HTTP_PORT=$(find_free_port 8082)
-HOST_HTTPS_PORT=$(find_free_port 8443)
-HOST_DOCKER_PORT=$(find_free_port 5000)
-HOST_MARIADB_PORT=$(find_free_port 3306)
-HOST_REDIS_PORT=$(find_free_port 6379)
-HOST_FRONTEND_PORT=$(find_free_port "$FRONTEND_PORT")
-HOST_BACKEND_PORT=$(find_free_port "$BACKEND_PORT")
-HOST_OSIONOS_APP_PORT=$(find_free_port "$OSIONOS_APP_PORT")
-HOST_OSIONOS_MAIL_PORT=$(find_free_port "$OSIONOS_MAIL_PORT")
-HOST_OSIONOS_CALENDAR_PORT=$(find_free_port "$OSIONOS_CALENDAR_PORT")
-HOST_OSIONOS_BRIDGE_PORT=$(find_free_port "$OSIONOS_BRIDGE_PORT")
-HOST_MAIL_BRIDGE_PORT=$(find_free_port "$MAIL_BRIDGE_PORT")
-HOST_CALENDAR_BRIDGE_PORT=$(find_free_port "$CALENDAR_BRIDGE_PORT")
-HOST_WEBSITE_PORT=$(find_free_port "$WEBSITE_PORT")
-HOST_BAAS_GATEWAY_PORT=$(find_free_port "$BAAS_GATEWAY_PORT")
-HOST_BAAS_ADMIN_PORT=$(find_free_port "$BAAS_ADMIN_PORT")
-HOST_MAILPIT_PORT=$(find_free_port "$MAILPIT_PORT")
-HOST_AUTH_GATEWAY_PORT=$(find_free_port "$AUTH_GATEWAY_PORT")
-HOST_VAULT_PORT=$(find_free_port "$VAULT_PORT")
+# Resolve the actual host ports (they differ from the defaults when a port is
+# already taken on this host). resolve_host_port assigns into the named variable
+# so each pick is reserved against the following ones: two services landing on
+# the same host port is what VirtualBox refuses to forward.
+resolve_host_port HOST_SSH_PORT              "$SSH_PORT"
+resolve_host_port HOST_HTTP_PORT             8082
+resolve_host_port HOST_HTTPS_PORT            8443
+resolve_host_port HOST_DOCKER_PORT           5000
+resolve_host_port HOST_MARIADB_PORT          3306
+resolve_host_port HOST_REDIS_PORT            6379
+resolve_host_port HOST_FRONTEND_PORT         "$FRONTEND_PORT"
+resolve_host_port HOST_BACKEND_PORT          "$BACKEND_PORT"
+resolve_host_port HOST_OSIONOS_APP_PORT      "$OSIONOS_APP_PORT"
+resolve_host_port HOST_OSIONOS_MAIL_PORT     "$OSIONOS_MAIL_PORT"
+resolve_host_port HOST_OSIONOS_CALENDAR_PORT "$OSIONOS_CALENDAR_PORT"
+resolve_host_port HOST_OSIONOS_BRIDGE_PORT   "$OSIONOS_BRIDGE_PORT"
+resolve_host_port HOST_MAIL_BRIDGE_PORT      "$MAIL_BRIDGE_PORT"
+resolve_host_port HOST_CALENDAR_BRIDGE_PORT  "$CALENDAR_BRIDGE_PORT"
+resolve_host_port HOST_WEBSITE_PORT          "$WEBSITE_PORT"
+resolve_host_port HOST_BAAS_GATEWAY_PORT     "$BAAS_GATEWAY_PORT"
+resolve_host_port HOST_BAAS_ADMIN_PORT       "$BAAS_ADMIN_PORT"
+resolve_host_port HOST_MAILPIT_PORT          "$MAILPIT_PORT"
+resolve_host_port HOST_AUTH_GATEWAY_PORT     "$AUTH_GATEWAY_PORT"
+resolve_host_port HOST_VAULT_PORT            "$VAULT_PORT"
 
 # Create VM folders if they don't exist
 mkdir -p "$VM_PATH/$VM_NAME"
@@ -298,8 +239,21 @@ echo "  Vault:            host:${HOST_VAULT_PORT} -> guest:${VAULT_PORT}"
 # name first, so re-running setup — or a VM that kept old rules from a previous,
 # partially-removed instance — never aborts with "A NAT rule of this name already
 # exists". Args: <name> <host_port> <guest_port> (all rules are tcp).
+NATPF_HOST_PORTS=""
 add_natpf() {
 	local name="$1" host_port="$2" guest_port="$3"
+
+	# Self-check: two rules on one host port is exactly what VirtualBox rejects
+	# with "A NAT rule for this host port and this host IP already exists". Name
+	# the offending rule here instead of leaving a bare VBoxManage error.
+	case " $NATPF_HOST_PORTS " in
+		*" $host_port "*)
+			echo "Internal error: rule '${name}' reuses host port ${host_port}" >&2
+			exit 1
+			;;
+	esac
+	NATPF_HOST_PORTS="${NATPF_HOST_PORTS} ${host_port}"
+
 	VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
 	VBoxManage modifyvm "$VM_NAME" --natpf1 "${name},tcp,,${host_port},,${guest_port}" || {
 		echo "Failed to set up NAT port forwarding for ${name}"
