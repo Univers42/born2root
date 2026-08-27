@@ -12,9 +12,21 @@ having no clean solution. It did have one — see [§3](#3-the-fix).
 ## 1. How to use it
 
 ```bash
+make fresh        # everything: rebuild the VM, clone and build Inception,
+                  # wire this host up, verify the whole chain
+```
+
+or the two halves separately:
+
+```bash
 make all          # builds the VM and wires up host access automatically
 make inception    # clones Inception into the VM, builds it, verifies from the host
 ```
+
+The only manual step is **starting the browsers afterwards**. Firefox reads
+`user.js` at profile start and Chrome reads its proxy settings and certificate
+store at launch, so a browser that was already open when the build ran will not
+see any of it. Close them before you build, or quit and reopen them after.
 
 Then, from the host:
 

@@ -67,7 +67,7 @@ C_CYAN   := \033[36m
 .PHONY: all prepare pull shell deps extpack check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
-        host_access host_access_undo inception verify_access
+        host_access host_access_undo inception verify_access fresh
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -348,6 +348,15 @@ fclean: clean rm_disk_image
 	$(RM) $(DISK_DIR)
 
 re: fclean all
+
+# =========@@ One command, from nothing to a working site @@===================
+# Destroys the VM, reinstalls Debian from the preseed, clones Inception into it,
+# builds the stack, wires this host up and verifies the whole chain.
+# $(MAKE) is deliberately not spelled out here — see the MAKE_BIN note above.
+fresh:
+	@$(MAKE_BIN) rm_disk_image
+	@$(MAKE_BIN) all
+	@$(MAKE_BIN) inception
 
 # =========@@ Inception: host access to $(DOMAIN) @@===========================
 # The subject requires the site to answer on $(DOMAIN). That name resolves only
