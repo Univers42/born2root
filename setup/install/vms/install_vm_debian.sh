@@ -193,6 +193,20 @@ VBoxManage modifyvm "$VM_NAME" \
 	exit 1
 }
 
+# ── Serial console: the headless install's only window ──────────────────────
+# The run is headless end to end, so nothing renders the VGA console. Wire
+# COM1 to a file and the Debian installer (booted with console=ttyS0, see
+# generate/create_custom_iso.sh) writes every step into it as plain text.
+# That file is what `make console` tails and what the orchestrator parses to
+# report the real install stage instead of guessing from elapsed time.
+print_header "Wiring serial console to a log file"
+SERIAL_LOG="$VM_PATH/$VM_NAME/serial.log"
+: > "$SERIAL_LOG"
+VBoxManage modifyvm "$VM_NAME" --uart1 0x3F8 4 --uartmode1 file "$SERIAL_LOG" || {
+	echo "Warning: could not attach serial console (install progress will be time-only)"
+}
+echo "  Serial console: $SERIAL_LOG"
+
 # ── Fix git clone / large download hanging at ~44% ──────────────────────────
 # VirtualBox NAT engine has small default TCP socket send/receive buffers
 # (64 KB) which cause stalls on large HTTPS transfers like git clone.
@@ -255,10 +269,32 @@ add_natpf() {
 	NATPF_HOST_PORTS="${NATPF_HOST_PORTS} ${host_port}"
 
 	VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
-	VBoxManage modifyvm "$VM_NAME" --natpf1 "${name},tcp,,${host_port},,${guest_port}" || {
-		echo "Failed to set up NAT port forwarding for ${name}"
-		exit 1
-	}
+
+	# Twenty of these run back to back, and VBoxSVC does not always release the
+	# machine's write lock before the next one asks for it — the result is
+	# "The machine 'debian' already has a lock request pending", which used to
+	# abort the whole build a few seconds before the install would have started.
+	# It is purely a timing problem, so retry it.
+	local attempt out
+	for attempt in 1 2 3 4 5 6; do
+		if out=$(VBoxManage modifyvm "$VM_NAME" \
+				--natpf1 "${name},tcp,,${host_port},,${guest_port}" 2>&1); then
+			return 0
+		fi
+		case "$out" in
+			*"lock request pending"*|*VBOX_E_INVALID_OBJECT_STATE*)
+				sleep 2
+				;;
+			*)
+				echo "Failed to set up NAT port forwarding for ${name}"
+				printf '%s\n' "$out" >&2
+				exit 1
+				;;
+		esac
+	done
+	echo "Failed to set up NAT port forwarding for ${name} after ${attempt} attempts"
+	printf '%s\n' "$out" >&2
+	exit 1
 }
 
 add_natpf ssh              "${HOST_SSH_PORT}"              "${SSH_PORT}"

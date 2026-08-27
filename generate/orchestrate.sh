@@ -28,7 +28,16 @@ cleanup() {
 	printf "${SHOW_CUR}"
 	rm -rf "$LOG_DIR"
 	if [ "$sig" = "INT" ] || [ "$sig" = "TERM" ]; then
-		printf "\n${YLW}${BLD}  ⚠  Interrupted by user${RST}\n\n"
+		# Ctrl+C stops this dashboard, not the VM: VirtualBox runs it in its own
+		# process. Saying so avoids the obvious wrong conclusion — that the
+		# install was cancelled and has to be started over from scratch.
+		printf "\n${YLW}${BLD}  ⚠  Dashboard stopped — the VM keeps running${RST}\n"
+		if VBoxManage list runningvms 2> /dev/null | grep -q "\"${VM_NAME}\""; then
+			printf "${DIM}     watch it     make console\n"
+			printf "     reattach     make all\n"
+			printf "     stop the VM  make poweroff${RST}\n"
+		fi
+		printf "\n"
 		exit 130
 	fi
 }
@@ -37,7 +46,20 @@ trap 'cleanup INT' INT
 trap 'cleanup TERM' TERM
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
-W=60 # default inner visible width — recalculated before summary
+W=60 # default inner visible width — recalculated below and before the summary
+
+# Widen the dashboard to the terminal. The step rows carry live detail now (the
+# preseed ISO's filename, the installer's current stage and percentage), and at
+# a fixed 60 columns all of that gets cut off right where it stops being useful.
+_dashboard_width() {
+	local term_w
+	term_w=$(tput cols 2> /dev/null || echo 100)
+	W=$((term_w - 6))
+	[ "$W" -lt 60 ] && W=60
+	# Past ~92 the box is wider than anything it has to say.
+	[ "$W" -gt 92 ] && W=92
+	return 0
+}
 
 top() {
 	printf "  ${CYN}╭"
@@ -134,10 +156,18 @@ crow() {
 }
 
 # ── Step tracking ────────────────────────────────────────────────────────────
-STEPS=("VirtualBox" "Preseeded ISO" "VM Setup" "VM Start")
-STEP_STATUS=("pending" "pending" "pending" "pending")
-STEP_DETAIL=("" "" "" "")
+# "OS Install" and "First Boot" are separate steps on purpose. They used to be
+# one "VM Start" row, and because starting a headless VM returns the moment the
+# VM is up, that row went green the second the installer began booting — the
+# dashboard read "VM Start done" for the next 20 minutes while Debian was still
+# partitioning. A step is only allowed to say "done" once the thing it names has
+# actually finished.
+STEPS=("VirtualBox" "Preseeded ISO" "VM Setup" "OS Install" "First Boot")
+STEP_STATUS=("pending" "pending" "pending" "pending" "pending")
+STEP_DETAIL=("" "" "" "" "")
 DASHBOARD_LINES=0
+S_INSTALL=3
+S_BOOT=4
 
 # Braille spinner (static frame per step — no background process)
 SPIN_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
@@ -203,11 +233,22 @@ draw_dashboard() {
 				;;
 		esac
 
-		local det_str=""
-		[ -n "$det" ] && det_str=" ${DIM}${det}${RST}"
-
 		local padded_name
 		padded_name=$(printf "%-16s" "$name")
+
+		# Fit the detail to whatever space is left on the row. Without this a
+		# long detail (the preseed ISO filename, a serial-console install stage)
+		# runs straight through the box's right border.
+		local det_str=""
+		if [ -n "$det" ]; then
+			# 2 lead + icon + 2 gap + 16 name + 1 gap + label + 1 gap
+			local avail=$((W - 5 - 16 - 1 - ${#label} - 1))
+			[ "$avail" -lt 8 ] && avail=8
+			if [ "${#det}" -gt "$avail" ]; then
+				det="${det:0:$((avail - 1))}…"
+			fi
+			det_str=" ${DIM}${det}${RST}"
+		fi
 
 		printf "${CLR}"
 		row "  ${color}${BLD}${icon}${RST}  ${color}${padded_name}${RST} ${color}${label}${RST}${det_str}"
@@ -252,8 +293,10 @@ stop_spinner() {
 
 # Override trap now that stop_spinner is defined (cleanup() already calls stop_spinner)
 
-# ── Run step in FOREGROUND with animated spinner ─────────────────────────────
-run_step() {
+# ── Run a step's command in the FOREGROUND with an animated spinner ─────────
+# On failure both helpers print the command's log and abort the run; they differ
+# only in what success means for the step, so run_step defers the work here.
+run_phase() {
 	local idx="$1"
 	shift
 	local log="${LOG_DIR}/step_${idx}.log"
@@ -274,10 +317,7 @@ run_step() {
 	# Kill spinner, update state, redraw
 	stop_spinner
 
-	if [ "$rc" -eq 0 ]; then
-		STEP_STATUS[$idx]="done"
-		draw_dashboard
-	else
+	if [ "$rc" -ne 0 ]; then
 		STEP_STATUS[$idx]="fail"
 		draw_dashboard
 		printf "\n${RED}${BLD}  ── Error log: ${STEPS[$idx]} ──${RST}\n${DIM}"
@@ -289,6 +329,23 @@ run_step() {
 		printf "${RST}\n"
 		exit 1
 	fi
+	# Deliberately still "working": the caller decides when the step is over.
+	draw_dashboard
+}
+
+# The command IS the whole step, so a clean exit means the step is finished.
+run_step() {
+	local idx="$1"
+	run_phase "$@"
+	STEP_STATUS[$idx]="done"
+	draw_dashboard
+}
+
+# Set a step's status and detail in one call, then redraw.
+set_step() {
+	STEP_STATUS[$1]="$2"
+	STEP_DETAIL[$1]="$3"
+	draw_dashboard
 }
 
 # ── Detect host IP (cross-platform) ─────────────────────────────────────────
@@ -313,11 +370,25 @@ get_host_ip() {
 
 # Answer the guest's LUKS prompt without printing: draw_dashboard owns the
 # terminal here, so progress goes through STEP_DETAIL instead of stdout.
+#
+# unlock_loop can spend up to VM_UNLOCK_TIMEOUT (240s) waiting for sshd. It only
+# sleeps through unlock_sleep, which exists as an override point — hooking it is
+# what keeps the dashboard alive during that wait instead of leaving a frozen
+# spinner that looks like a hang.
+UNLOCK_T0=0
+unlock_sleep() {
+	sleep "$1"
+	local e=$(( $(date +%s) - UNLOCK_T0 ))
+	STEP_DETAIL[$S_BOOT]="unlocking LUKS, waiting for sshd... ${e}s"
+	draw_dashboard
+}
+
 unlock_booted_vm() {
 	local pass port
 	pass=$(resolve_passphrase 2> /dev/null) || return 1
 	port=$(get_vm_ssh_port)
 	: "${port:=4242}"
+	UNLOCK_T0=$(date +%s)
 	unlock_loop "$port" "$pass"
 }
 
@@ -430,6 +501,7 @@ ensure_vm_nat_forwarding() {
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 printf "${HIDE_CUR}\n"
+_dashboard_width
 draw_dashboard true
 
 # Step 1 — VirtualBox
@@ -501,17 +573,151 @@ fi
 
 ensure_vm_nat_forwarding
 
-# Step 4 — Start VM (install from ISO)
+# ── Serial console: the headless install's progress feed ────────────────────
+# The VM writes COM1 to a file (setup/install/vms/install_vm_debian.sh) and the
+# installer is booted with console=ttyS0 (generate/create_custom_iso.sh), so
+# that file carries the installer's own text — "Installing the base system
+# ... 70%" and so on. Reading it is what lets a headless run report the real
+# stage instead of "it has been running for N minutes, probably fine".
+# An older VM created before the serial port existed simply has no log; every
+# caller below degrades to elapsed time rather than failing.
+get_serial_log() {
+	VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| awk -F'"' '/^uartmode1=/ {print $2}' \
+		| awk -F, '$1 == "file" { sub(/^file,/, "", $0); print }'
+}
+SERIAL_LOG=$(get_serial_log)
+
+# Latest installer step, condensed to one short line — or nothing.
+#
+# What the serial line carries depends on how d-i decided to present itself:
+#
+#   * On a serial console the installer wraps itself in GNU screen. Its UI is
+#     then a full-screen newt/dialog app — cursor positioning, not text — so
+#     stripping the ANSI leaves nothing readable, and screen repaints a status
+#     bar ("[ 0 start (1*installer) 2 shell … ][ Aug 27 16:17 ]") every minute,
+#     which is therefore always the newest line in the log. Reporting *that* as
+#     the install stage is worse than reporting nothing.
+#   * Kernel messages arrive on the same line and are line-oriented, but a
+#     driver probe from three minutes ago is not "the current stage" either.
+#
+# So only a genuine d-i progress line counts. Anything else returns non-zero and
+# the caller falls back to elapsed time, which is at least true.
+install_stage() {
+	[ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
+	local line label pct
+	line=$(tail -c 8000 "$SERIAL_LOG" 2> /dev/null \
+		| tr '\r' '\n' \
+		| sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b[()][B0]//g' -e 's/[^[:print:]]//g' \
+		| grep -vE '\]\[ *[A-Z][a-z]{2} +[0-9]+ +[0-9]{2}:[0-9]{2} *\]' \
+		| grep -vE '\([0-9]+\*(installer|shell|log|start)\)' \
+		| grep -vE '^\[ *[0-9]+\.[0-9]+\]' \
+		| grep -E '\.\.\..*[0-9]+%' \
+		| tail -n1)
+	[ -n "$line" ] || return 1
+
+	label=${line%%...*}
+	label=$(printf '%s' "$label" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+	[ -n "$label" ] || return 1
+	pct=$(printf '%s' "$line" | grep -oE '[0-9]+%' | tail -n1)
+	printf '%s %s' "$label" "$pct"
+}
+
+# Attach COM1 to a file on a VM that does not have one yet. VMs created before
+# the serial console existed are otherwise permanently blind: no console, and
+# `make console` has nothing to read. Requires the VM to be powered off, so this
+# is called at the one point in the run where that is guaranteed.
+ensure_serial_console() {
+	[ -z "$(get_serial_log)" ] || return 0
+	local cfg dir
+	cfg=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| grep "^CfgFile=" | cut -d'"' -f2)
+	[ -n "$cfg" ] || return 1
+	dir=$(dirname "$cfg")
+	VBoxManage modifyvm "${VM_NAME}" --uart1 0x3F8 4 \
+		--uartmode1 file "${dir}/serial.log" 2> /dev/null || return 1
+	SERIAL_LOG=$(get_serial_log)
+}
+
+# Seconds this VM has been in its current state (i.e. how long it has actually
+# been running), from VirtualBox's own clock. Ctrl+C kills the dashboard but not
+# the VM, so on a reattach "how long has this script been watching" and "how far
+# along is the install" are two very different numbers — the checks below want
+# the second one.
+vm_running_seconds() {
+	local since epoch
+	since=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| grep "^VMStateChangeTime=" | cut -d'"' -f2)
+	[ -n "$since" ] || return 1
+	# VirtualBox reports UTC with nanoseconds; date wants neither.
+	since=${since%.*}
+	epoch=$(date -u -d "${since/T/ }" +%s 2> /dev/null) || return 1
+	echo $(($(date +%s) - epoch))
+}
+
+# Has the installer finished, even though VirtualBox still says "running"?
+#
+# The preseed ends with exit/halt + exit/poweroff, but busybox's halt in the d-i
+# environment does not always raise a real ACPI power button, so the VM can sit
+# in VMState="running" at 0% CPU forever with "reboot: System halted" on a screen
+# nobody is watching. The fallback for that is "CPU has been idle for two solid
+# minutes", which cannot fire before the 10-minute mark and cannot tell a halted
+# VM from a stalled one. The serial console says it outright, so ask it first.
+install_halted() {
+	[ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
+	tail -c 4000 "$SERIAL_LOG" 2> /dev/null \
+		| grep -qE 'reboot: (System halted|Power down)|System halted|Requesting system halt'
+}
+
+# What the OS Install row should say right now: the installer's own words when
+# the serial console is available, elapsed time when it is not.
+install_detail() {
+	local elapsed="$1"
+	local stage mins secs
+	mins=$((elapsed / 60))
+	secs=$((elapsed % 60))
+	if stage=$(install_stage); then
+		printf '%s  [%dm%02ds]' "$stage" "$mins" "$secs"
+	else
+		printf 'installing... %dm%02ds' "$mins" "$secs"
+	fi
+}
+
+# Step 4 — Install Debian from the preseeded ISO (headless)
+# Boot off DVD means the installer is still the thing that has to run; boot off
+# disk means a previous run already finished it and only the first boot is left.
+BOOT1=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+	| grep "^boot1=" | cut -d'"' -f2)
 VM_STATE=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
 	| grep "^VMState=" | cut -d'"' -f2)
-if [ "$VM_STATE" = "running" ]; then
-	STEP_STATUS[3]="skip"
-	STEP_DETAIL[3]="already running"
-	draw_dashboard
+
+if [ "$BOOT1" != "dvd" ] && install_wrote_data; then
+	set_step $S_INSTALL skip "already installed"
+elif [ "$BOOT1" != "dvd" ]; then
+	# Boot order says "installed" but the disk is empty. That combination is what
+	# a previous run leaves behind when the installer failed after the boot order
+	# had already been switched — and trusting it means skipping the install,
+	# booting an empty disk, and then blaming the LUKS unlock for timing out.
+	# Put the ISO back and install properly.
+	set_step $S_INSTALL working "disk is empty — reinstalling..."
+	VBoxManage storageattach "${VM_NAME}" --storagectl "IDE Controller" \
+		--port 0 --device 0 --type dvddrive --medium "$PRESEED_ISO" 2> /dev/null || true
+	VBoxManage modifyvm "${VM_NAME}" --boot1 dvd --boot2 disk --boot3 none --boot4 none 2> /dev/null || true
+	BOOT1=dvd
+	[ -n "$SERIAL_LOG" ] && [ -w "$SERIAL_LOG" ] && : > "$SERIAL_LOG"
+	VBoxManage startvm "${VM_NAME}" --type headless > /dev/null 2>&1 || true
+elif [ "$VM_STATE" = "running" ]; then
+	# A previous run was interrupted (Ctrl+C kills this script, not the VM) —
+	# reattach to the install already in flight instead of restarting it.
+	set_step $S_INSTALL working "reattaching to running VM..."
 else
-	run_step 3 VBoxManage startvm "${VM_NAME}" --type headless
-	STEP_DETAIL[3]="installing..."
-	draw_dashboard
+	# Truncate first: the serial log is the completion signal (install_halted
+	# greps it for "System halted"), and a "System halted" left over from the
+	# previous install would otherwise declare this one finished before it has
+	# even begun.
+	[ -n "$SERIAL_LOG" ] && [ -w "$SERIAL_LOG" ] && : > "$SERIAL_LOG"
+	run_phase $S_INSTALL VBoxManage startvm "${VM_NAME}" --type headless
+	set_step $S_INSTALL working "installer booting..."
 fi
 
 # ── Wait for VM to fully unlock after poweroff ──────────────────────────────
@@ -570,9 +776,22 @@ switch_boot_to_disk() {
 wait_for_install() {
 	local timeout=2400 # 40 minutes max (installs can be slow on shared storage)
 	local elapsed=0
-	local zero_cpu_count=0 # consecutive checks with ~0% CPU
+	local zero_cpu_count=0 # consecutive VM polls with ~0% CPU
 	local min_elapsed=600  # don't check CPU in first 10 min (install is busy)
 	local metrics_available=false
+
+	# The dashboard ticks every 2s so the spinner actually spins and the serial
+	# console's stage line stays current; VBoxManage is only asked for VM state
+	# every VM_POLL seconds, since spawning it is far from free.
+	local tick=2
+	local vm_poll=10
+	local since_poll=$vm_poll # poll immediately on the first pass
+
+	# Time already spent installing before this dashboard attached. Without it a
+	# reattach after Ctrl+C would restart the clock at zero and re-serve the full
+	# 10-minute grace period before the halt heuristic is even allowed to look.
+	local prior=0
+	prior=$(vm_running_seconds 2> /dev/null) || prior=0
 
 	# Try to enable metrics (not all VBox installations support this)
 	if VBoxManage metrics setup --period 5 --samples 3 "${VM_NAME}" 2> /dev/null; then
@@ -580,59 +799,89 @@ wait_for_install() {
 	fi
 
 	while [ $elapsed -lt $timeout ]; do
-		sleep 10
-		elapsed=$((elapsed + 10))
-		local state
-		state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
-			| grep "^VMState=" | cut -d'"' -f2)
+		sleep $tick
+		elapsed=$((elapsed + tick))
+		since_poll=$((since_poll + tick))
 
-		# Clean poweroff detected — the installer finished and ACPI worked
-		if [ "$state" = "poweroff" ] || [ "$state" = "aborted" ]; then
+		# Checked every tick: it is a local file read, and reacting within
+		# seconds is the whole point of having the marker.
+		if install_halted; then
+			set_step $S_INSTALL working "installer halted, powering off..."
+			VBoxManage controlvm "${VM_NAME}" poweroff 2> /dev/null || true
+			wait_for_vm_unlock
 			return 0
 		fi
 
-		# Only attempt CPU-based halt detection if metrics are ACTUALLY working
-		# Without real metrics we CANNOT distinguish "install busy" from "halted"
-		# so we just wait for the VM to reach poweroff state on its own.
-		if [ "$state" = "running" ] && [ $elapsed -gt $min_elapsed ] && [ "$metrics_available" = true ]; then
-			local cpu_pct
-			cpu_pct=$(VBoxManage metrics query "${VM_NAME}" CPU/Load/User 2> /dev/null \
-				| tail -1 | awk '{print $NF}' | tr -d '%' | cut -d. -f1)
-			if [ -n "$cpu_pct" ] && [ "$cpu_pct" -eq 0 ] 2> /dev/null; then
-				zero_cpu_count=$((zero_cpu_count + 1))
-			elif [ -n "$cpu_pct" ]; then
-				zero_cpu_count=0
-			fi
-			if [ $zero_cpu_count -ge 12 ]; then
-				STEP_DETAIL[3]="VM halted (0% CPU for 2min), forcing poweroff..."
-				draw_dashboard
-				VBoxManage controlvm "${VM_NAME}" poweroff 2> /dev/null || true
-				wait_for_vm_unlock
+		if [ $since_poll -ge $vm_poll ]; then
+			since_poll=0
+			local state
+			state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+				| grep "^VMState=" | cut -d'"' -f2)
+
+			# Clean poweroff detected — the installer finished and ACPI worked
+			if [ "$state" = "poweroff" ] || [ "$state" = "aborted" ]; then
 				return 0
 			fi
+
+			# Only attempt CPU-based halt detection if metrics are ACTUALLY working
+			# Without real metrics we CANNOT distinguish "install busy" from "halted"
+			# so we just wait for the VM to reach poweroff state on its own.
+			if [ "$state" = "running" ] && [ $((elapsed + prior)) -gt $min_elapsed ] && [ "$metrics_available" = true ]; then
+				local cpu_pct
+				cpu_pct=$(VBoxManage metrics query "${VM_NAME}" CPU/Load/User 2> /dev/null \
+					| tail -1 | awk '{print $NF}' | tr -d '%' | cut -d. -f1)
+				if [ -n "$cpu_pct" ] && [ "$cpu_pct" -eq 0 ] 2> /dev/null; then
+					zero_cpu_count=$((zero_cpu_count + 1))
+				elif [ -n "$cpu_pct" ]; then
+					zero_cpu_count=0
+				fi
+				if [ $zero_cpu_count -ge 12 ]; then
+					set_step $S_INSTALL working "installer halted, forcing poweroff..."
+					VBoxManage controlvm "${VM_NAME}" poweroff 2> /dev/null || true
+					wait_for_vm_unlock
+					return 0
+				fi
+			fi
 		fi
-		local mins=$((elapsed / 60))
-		local secs=$((elapsed % 60))
-		STEP_DETAIL[3]="installing... ${mins}m${secs}s"
+
+		STEP_DETAIL[$S_INSTALL]=$(install_detail $((elapsed + prior)))
 		draw_dashboard
 	done
-	STEP_DETAIL[3]="timeout reached, forcing poweroff..."
-	draw_dashboard
+	# Timed out. Returning 0 here made the caller stamp the step "Debian
+	# installed in ~43m" over an install that had written 4 MB to a 64 GB disk —
+	# the exact "says done when it isn't" failure this dashboard exists to stop.
+	set_step $S_INSTALL warn "timeout after $((timeout / 60))m, forcing poweroff..."
 	VBoxManage controlvm "${VM_NAME}" poweroff 2> /dev/null || true
 	wait_for_vm_unlock
-	return 0
+	return 1
 }
 
-# Only wait if the VM was just started for installation (DVD boot)
-BOOT1=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
-	| grep "^boot1=" | cut -d'"' -f2)
+# Sanity check: did the installer actually write a system to the disk? A Debian
+# base install is gigabytes; a VDI still near its empty size means the installer
+# booted and then did nothing, which is otherwise invisible from the outside.
+install_wrote_data() {
+	local vdi bytes
+	vdi=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+		| grep '"SATA Controller-0-0"' | cut -d'"' -f4)
+	[ -n "$vdi" ] && [ -f "$vdi" ] || return 1
+	bytes=$(stat -c %s "$vdi" 2> /dev/null) || return 1
+	# 512 MB: far below any real install, far above an empty dynamic VDI.
+	[ "$bytes" -gt 536870912 ]
+}
+
 if [ "$BOOT1" = "dvd" ]; then
-	STEP_DETAIL[3]="installing (this takes ~10-20 min)..."
-	draw_dashboard
-	wait_for_install
-	STEP_DETAIL[3]="switching boot to disk..."
-	draw_dashboard
+	# Back-date to when the VM actually started, not to when this dashboard
+	# attached — otherwise a run that reattached after Ctrl+C reports a 20-minute
+	# install as having taken two.
+	INSTALL_PRIOR=$(vm_running_seconds 2> /dev/null) || INSTALL_PRIOR=0
+	INSTALL_START=$(($(date +%s) - INSTALL_PRIOR))
+	set_step $S_INSTALL working "installing (this takes ~10-20 min)..."
+	INSTALL_OK=true
+	wait_for_install || INSTALL_OK=false
+
+	set_step $S_INSTALL working "switching boot to disk..."
 	wait_for_vm_unlock
+	ensure_serial_console
 	switch_boot_to_disk
 	new_boot=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
 		| grep "^boot1=" | cut -d'"' -f2)
@@ -641,26 +890,44 @@ if [ "$BOOT1" = "dvd" ]; then
 		switch_boot_to_disk
 	fi
 
-	STEP_DETAIL[3]="install done, booting from disk..."
-	draw_dashboard
-	sleep 2
-	VBoxManage startvm "${VM_NAME}" --type headless 2> /dev/null || true
-
-	# Booting from disk now stops at the guest's LUKS prompt. Type the passphrase
-	# in from the host so the run stays headless.
-	STEP_DETAIL[3]="unlocking LUKS..."
-	draw_dashboard
-	if unlock_booted_vm; then
-		STEP_STATUS[3]="done"
-		STEP_DETAIL[3]="booted from disk ✓"
-	else
-		STEP_STATUS[3]="warn"
-		STEP_DETAIL[3]="booted, LUKS unlock timed out"
+	# Only now has the thing this step is named after actually happened — and
+	# only if it really did. Both the clock and the disk have to agree.
+	INSTALL_MINS=$((($(date +%s) - INSTALL_START) / 60))
+	if [ "$INSTALL_OK" != true ]; then
+		set_step $S_INSTALL fail "install timed out after ~${INSTALL_MINS}m"
+		printf "\n${RED}${BLD}  ── The installer never finished ──${RST}\n"
+		printf "${DIM}    Look at what it was doing:  make console\n"
+		printf "    Or at its screen:           VBoxManage controlvm %s screenshotpng /tmp/vm.png${RST}\n\n" "${VM_NAME}"
+		exit 1
 	fi
-	draw_dashboard
+	if ! install_wrote_data; then
+		set_step $S_INSTALL fail "installer wrote nothing to the disk"
+		printf "\n${RED}${BLD}  ── The disk is still empty ──${RST}\n"
+		printf "${DIM}    The installer booted but never installed. Usually this means it\n"
+		printf "    stopped on a prompt nothing answered. Check with: make console${RST}\n\n"
+		exit 1
+	fi
+	set_step $S_INSTALL done "Debian installed in ~${INSTALL_MINS}m"
+fi
+
+# Step 5 — First boot off the disk, unlocked from the host
+# Booting from disk stops at the guest's LUKS prompt long before networking
+# exists, so the passphrase is typed into the VM's virtual keyboard from here
+# (unlock_vm.sh). That keypress is what keeps the whole run headless: no
+# VirtualBox window is ever opened, not even to unlock the disk.
+BOOT_STATE=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
+	| grep "^VMState=" | cut -d'"' -f2)
+if [ "$BOOT_STATE" != "running" ]; then
+	set_step $S_BOOT working "booting from disk..."
+	sleep 2
+	VBoxManage startvm "${VM_NAME}" --type headless > /dev/null 2>&1 || true
+fi
+
+set_step $S_BOOT working "unlocking LUKS, waiting for sshd..."
+if unlock_booted_vm; then
+	set_step $S_BOOT done "booted and unlocked ✓"
 else
-	STEP_DETAIL[3]="booted from disk"
-	draw_dashboard
+	set_step $S_BOOT warn "LUKS unlock timed out — see: make console"
 fi
 
 # ── Read actual ports from VM config (no hardcoding) ─────────────────────────
@@ -810,13 +1077,17 @@ printf "${SHOW_CUR}\n"
 
 # Compute responsive box width from the longest content line
 _auto_width \
-	"  ▸ What happens now" \
-	"    The VM boots the preseeded ISO and installs Debian" \
-	"    automatically (partitioning, SSH, WordPress, etc)." \
+	"  ▸ Where things stand" \
+	"    Debian is installed and the VM is booted from disk with" \
+	"    the encrypted volume already unlocked — no window needed." \
+	"    Watch it any time with  make console" \
+	"    The run did not finish cleanly — see the step marked above." \
+	"    The details below are reference, not a report of what happened." \
+	"    Look at the VM with  make console  ·  state: make status" \
 	"    root password      temproot123" \
 	"    user (dlesieur)    tempuser123" \
 	"    disk encryption    tempencrypt123" \
-	"    1. Disk passphrase:  tempencrypt123" \
+	"    1. make start_vm  — headless, types the passphrase for you" \
 	"    SSH        ssh b2b   (shortcut — auto-configured)" \
 	"    or         ssh -p ${P_SSH} dlesieur@127.0.0.1" \
 	"    WordPress  http://127.0.0.1:${P_HTTP}/wordpress" \
@@ -830,6 +1101,7 @@ _auto_width \
 	"    Login      http://127.0.0.1:${P_HTTP}/wordpress/wp-login.php" \
 	"    Creds      admin / admin123wp!" \
 	"    DB         wordpress (wpuser / wppass123)" \
+	"    Plugin     Tech Blog Toolkit (tutorials, syntax highlighting)" \
 	"    Frontend   http://127.0.0.1:${P_FRONTEND}" \
 	"    Backend    http://127.0.0.1:${P_BACKEND}/api" \
 	"    API Docs   http://127.0.0.1:${P_BACKEND}/api/docs" \
@@ -857,12 +1129,38 @@ _auto_width \
 	"    make status      check current state"
 
 top
-crow "${GRN}${BLD}✓  All Steps Completed${RST}"
+# The banner reports what the steps actually say. It used to be hard-coded to
+# "✓ All Steps Completed", so a run whose First Boot row read "⚠ LUKS unlock
+# timed out" still ended by announcing success and telling the reader the volume
+# was "already unlocked" — contradicting a warning printed four lines above it.
+B2B_FAILED=0
+B2B_WARNED=0
+for _st in "${STEP_STATUS[@]}"; do
+	case "$_st" in
+		fail) B2B_FAILED=1 ;;
+		warn) B2B_WARNED=1 ;;
+	esac
+done
+
+if [ "$B2B_FAILED" = 1 ]; then
+	crow "${RED}${BLD}✗  Finished with errors${RST}"
+elif [ "$B2B_WARNED" = 1 ]; then
+	crow "${YLW}${BLD}⚠  Finished — needs attention${RST}"
+else
+	crow "${GRN}${BLD}✓  All Steps Completed${RST}"
+fi
 mid
 blank
-row "  ${BLD}${WHT}▸ What happens now${RST}"
-row "    The VM boots the preseeded ISO and installs Debian"
-row "    automatically (partitioning, SSH, WordPress, etc)."
+row "  ${BLD}${WHT}▸ Where things stand${RST}"
+if [ "$B2B_FAILED" = 1 ] || [ "$B2B_WARNED" = 1 ]; then
+	row "    ${YLW}The run did not finish cleanly — see the step marked above.${RST}"
+	row "    The details below are reference, not a report of what happened."
+	row "    ${DIM}Look at the VM with${RST}  ${BLD}make console${RST}${DIM}  ·  state:${RST} ${BLD}make status${RST}"
+else
+	row "    Debian is installed and the VM is booted from disk with"
+	row "    the encrypted volume already unlocked — no window needed."
+	row "    ${DIM}Watch it any time with${RST}  ${BLD}make console${RST}"
+fi
 blank
 mid
 row "  ${BLD}${WHT}▸ Credentials${RST}"
@@ -871,8 +1169,8 @@ row "    ${DIM}user (dlesieur)${RST}    ${GRN}tempuser123${RST}"
 row "    ${DIM}disk encryption${RST}    ${GRN}tempencrypt123${RST}"
 blank
 mid
-row "  ${BLD}${WHT}▸ After Reboot${RST}"
-row "    ${YLW}1.${RST} Disk passphrase:  ${GRN}tempencrypt123${RST}"
+row "  ${BLD}${WHT}▸ After a reboot${RST}"
+row "    ${YLW}1.${RST} ${BLD}make start_vm${RST}  ${DIM}— headless, types the passphrase for you${RST}"
 row "    ${YLW}2.${RST} Log in:  ${GRN}dlesieur${RST} / ${GRN}tempuser123${RST}"
 blank
 mid
@@ -961,3 +1259,8 @@ row "    ${BLU}make re${RST}          destroy and rebuild"
 blank
 bot
 printf "\n"
+
+# Exit non-zero when a step failed, so `make all` reports failure to the shell
+# instead of returning 0 after printing a red banner.
+[ "$B2B_FAILED" = 1 ] && exit 1
+exit 0

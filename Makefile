@@ -57,12 +57,27 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all prepare pull shell deps check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
-        clean fclean re poweroff list_vms prune_vms \
+.PHONY: all prepare pull shell deps extpack check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+        clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm
 
+# Plain `make` prints the help instead of building. Building this project means
+# downloading an ISO, creating a VM and running a ~20-minute install — too much
+# to kick off by accident from a bare `make`. Use `make all` to build.
+.DEFAULT_GOAL := help
+
+# The orchestrator needs to invoke make for its sub-steps, so it is handed the
+# make command as an argument. That argument must NOT be written as $(MAKE):
+# GNU make scans the *unexpanded* recipe text for the literal string "$(MAKE)"
+# and, on finding it, runs that line even under -n / -t / -q — the recursion
+# escape hatch. With $(MAKE) spelled out here, `make -n all` was not a dry run
+# at all: it really executed the orchestrator, which really touched VirtualBox.
+# Assigning it to another variable first leaves no "$(MAKE)" in the recipe, so
+# -n behaves the way anyone typing it expects.
+MAKE_BIN := $(MAKE)
+
 all: prepare
-	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE)"
+	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"
 
 # Prepare everything needed for a smooth `make all` experience:
 # - check + install host dependencies (VirtualBox, xorriso, gcc, libreadline-dev, …)
@@ -128,6 +143,19 @@ shell:
 # user reviews and confirms the apt plan themselves.
 deps:
 	@bash setup/install/check_deps.sh
+
+# =========@@ VirtualBox Extension Pack (optional) @@=========================
+# Deliberately NOT part of `make deps` / `make all`. The pack installs into
+# /usr/lib/virtualbox, so it needs root, and a sudo prompt in the middle of the
+# build is a trap: sudo asks for "password for dlesieur", which is also the VM's
+# username, so the VM password gets typed in and the whole build looks broken.
+#
+# Nothing here uses the pack either. It adds USB 2.0/3.0 passthrough, VRDP,
+# NVMe, PXE boot and VDI-level disk encryption; this VM runs on NAT networking,
+# a SATA disk, guest-side LUKS and a serial console. Install it only if you want
+# those extras:
+extpack:
+	@INSTALL_EXTPACK=1 bash setup/install/check_deps.sh
 
 # =========@@ System compatibility pre-checks @@==============================
 check_system:
@@ -228,6 +256,21 @@ gui_vm: check_system
 # =========@@ Status @@========================================================
 status:
 	@bash generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
+
+# =========@@ Serial console @@================================================
+# The whole pipeline is headless, so nothing ever renders the VM's screen. The
+# VM's COM1 is wired to a file instead (see setup/install/vms/install_vm_debian.sh)
+# and the guest is booted with console=ttyS0, so that file is the VM's console
+# as plain text: the installer's progress during `make all`, the kernel's boot
+# messages afterwards.
+#
+#   make console      follow it live (Ctrl+C stops watching, not the VM)
+#   make serial_log   print what is in it and exit
+console:
+	@bash generate/serial_console.sh "$(VM_NAME)" follow
+
+serial_log:
+	@bash generate/serial_console.sh "$(VM_NAME)" dump
 
 # =========@@ Headless boot with unlock @@======================================
 # start_vm is headless already; kept so existing habits and docs keep working.

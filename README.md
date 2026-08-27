@@ -3,10 +3,14 @@
 > One command to build a complete Born2beRoot Debian VM with SSH, WordPress, Docker, and VS Code Remote SSH that actually works.
 
 ```
-make
+make all
 ```
 
 That's it. Go grab a coffee. Come back to a fully configured VM.
+
+Plain `make` prints the help instead — building downloads an ISO, creates a VM
+and runs a ~20-minute install, which is more than a bare `make` should start by
+accident.
 
 ---
 
@@ -14,7 +18,7 @@ That's it. Go grab a coffee. Come back to a fully configured VM.
 
 - [What Is This](#what-is-this)
 - [Quick Start](#quick-start)
-- [What `make` Does (Step by Step)](#what-make-does)
+- [What `make all` Does (Step by Step)](#what-make-does)
 - [Makefile Commands](#makefile-commands)
 - [Connecting with VS Code Remote SSH](#connecting-with-vs-code-remote-ssh)
 - [⚠️ Known Issue: VS Code SSH Drops After 15 Minutes](#known-issue-vscode-ssh-drops)
@@ -62,7 +66,7 @@ Everything is scripted. `make re` destroys everything and rebuilds from scratch.
 ```bash
 git clone https://github.com/LESdylan/setup_arch_linux.git
 cd setup_arch_linux
-make
+make all
 ```
 
 The orchestrator will:
@@ -75,12 +79,116 @@ The orchestrator will:
 
 ### First Boot
 
-After installation finishes:
+`make all` already does this: it powers the VM back on off the disk, types the
+LUKS passphrase into the virtual keyboard from the host, and waits for sshd. No
+VirtualBox window is opened at any point in the pipeline.
 
-1. Start the VM: `make start_vm` (GUI) or `make bstart_vm` (headless)
-2. Enter the LUKS passphrase: `tempencrypt123`
-3. Wait ~30 seconds for SSH to be ready
-4. Connect: `ssh b2b`
+To boot it yourself later:
+
+1. Start the VM: `make start_vm` (headless, unlocks the disk for you)
+2. Connect: `ssh b2b`
+
+The disk passphrase is `tempencrypt123` (see `vm_pass.txt`, or set `VM_PASS` to
+keep it out of the repo). You only type it by hand if you deliberately open the
+console with `make gui_vm`.
+
+### Watching a headless VM
+
+Nothing renders the VM's screen, so its COM1 is wired to a file and both the
+installer and the installed system boot with `console=ttyS0`. That file is the
+VM's console as plain text:
+
+```bash
+make console      # follow it live — Ctrl+C stops watching, not the VM
+make serial_log   # print it and exit
+```
+
+This is also what the `make all` dashboard reads: the `OS Install` row shows the
+installer's own words ("Installing the base system 70%"), not a guess based on
+elapsed time.
+
+### "Encryption: disabled" — why that line is not about your disk
+
+`VBoxManage showvminfo debian` reports:
+
+```
+Encryption:                  disabled
+```
+
+That refers to **VirtualBox's own VDI encryption** (`VBoxManage encryptmedium`) —
+a host-side layer that encrypts the `.vdi` container file. This project does not
+use it, and does not need it.
+
+The Born2beRoot requirement is **LUKS inside the guest**, which is very much on:
+
+```
+$ lsblk
+└─sda5                  part  crypto_LUKS   62G
+  └─sda5_crypt          crypt LVM2_member   62G
+    ├─LVMGroup-root     lvm   ext4         9.5G /
+    ...
+
+$ sudo cryptsetup luksDump /dev/sda5
+Version:        2
+  cipher: aes-xts-plain64
+  PBKDF:  argon2id
+```
+
+The two are independent, and only the second one gates the boot. Boot the VM
+without sending the passphrase and it stops dead at `Please unlock disk
+sda5_crypt:` — sshd never comes up, no matter how long you wait.
+
+### The VirtualBox Extension Pack is optional
+
+`make deps` reports it as absent and moves on:
+
+```
+· VirtualBox Extension Pack not installed (optional — make extpack)
+```
+
+That is not a problem to fix. The pack adds USB 2.0/3.0 passthrough, VRDP,
+NVMe, PXE boot and VDI-level disk encryption. This VM uses NAT networking, a
+SATA disk, guest-side LUKS and a serial console — none of which touch it.
+
+It is kept out of `make all` on purpose. Installing it writes to
+`/usr/lib/virtualbox`, so it needs root, and a sudo prompt in the middle of the
+build is a trap: sudo asks for `[sudo] password for dlesieur`, and `dlesieur` is
+*also* the VM's username, so the VM password gets typed in and the build looks
+broken when nothing is wrong.
+
+If you want the extras:
+
+```bash
+make extpack
+```
+
+It says plainly whose password it wants, asks exactly once, and prints the real
+error if it fails instead of hiding it.
+
+### Why the unlock uses `keyboardputstring`, not `addencpassword`
+
+`VBoxManage controlvm <vm> addencpassword` is the VDI-encryption command: it
+takes a *password file* and feeds `encryptmedium`'s host-side layer. It cannot
+reach the guest's LUKS prompt, because that prompt is drawn by the guest's own
+initramfs — long before networking, guest additions, or any other host↔guest
+channel exists.
+
+The one channel that does exist at that moment is the **virtual keyboard**:
+
+```bash
+VBoxManage controlvm debian keyboardputstring "$passphrase"
+VBoxManage controlvm debian keyboardputscancode 1c 9c   # Enter: make + break
+```
+
+That is what `unlock_vm.sh` sends, and it is what keeps the whole pipeline
+headless. Two details it gets right and that are easy to get wrong:
+
+- **The scancode is `1c 9c`, not `1c`.** `1c` alone is key-down; without the
+  `9c` break code the Enter key stays held down.
+- **Readiness is the SSH *banner*, not an open port.** VirtualBox's NAT
+  forwarder accepts connections on the host port whether or not the guest is
+  listening, so a bare "port is open" check reports success against a VM that is
+  still sitting locked.
 
 ### Connect with VS Code
 
@@ -91,10 +199,10 @@ After installation finishes:
 ---
 
 <a name="what-make-does"></a>
-## What `make` Does (Step by Step)
+## What `make all` Does (Step by Step)
 
 ```
-make
+make all
   │
   ├─ 1. Check/install dependencies (VirtualBox, xorriso, curl)
   │
@@ -137,13 +245,18 @@ make
 
 | Command | Description |
 |---------|-------------|
-| `make` | **Full pipeline** — build everything from zero |
+| `make` | Print the help (the default goal) |
+| `make all` | **Full pipeline** — build everything from zero |
 | `make re` | **Destroy and rebuild** — clean slate |
 | `make status` | Show environment status dashboard |
-| `make start_vm` | Start the VM (GUI mode) |
-| `make bstart_vm` | Start headless + auto-unlock encryption |
+| `make start_vm` | Start headless + auto-unlock encryption |
+| `make bstart_vm` | Alias for `make start_vm` |
+| `make console` | Follow the headless VM's serial console live |
+| `make serial_log` | Print the serial console log and exit |
+| `make gui_vm` | Escape hatch: open the VirtualBox window |
 | `make poweroff` | Shut down the VM |
 | `make deps` | Install VirtualBox + tools |
+| `make extpack` | Install the VirtualBox Extension Pack (optional) |
 | `make fix_app_ports` | Repair VirtualBox NAT forwarding for the osionos/ft_transcendence app ports |
 | `make gen_iso` | Download Debian ISO + inject preseed |
 | `make setup_vm` | Create the VirtualBox VM |
@@ -159,7 +272,7 @@ make
 <a name="connecting-with-vs-code-remote-ssh"></a>
 ## Connecting with VS Code Remote SSH
 
-After `make` completes, your host is already configured. Just:
+After `make all` completes, your host is already configured. Just:
 
 ```
 Ctrl+Shift+P → Remote-SSH: Connect to Host → b2b
@@ -265,7 +378,7 @@ print('Done! Reload VS Code (Ctrl+Shift+P → Developer: Reload Window)')
 "
 ```
 
-> **Note:** `make` already does this automatically. This section is for people who configured their VS Code manually or are hitting this issue on an existing setup.
+> **Note:** `make all` already does this automatically. This section is for people who configured their VS Code manually or are hitting this issue on an existing setup.
 
 For the full deep dive (12 hours of debugging distilled into one doc), see [`doc/SSH_VSCODE_FIX.md`](doc/SSH_VSCODE_FIX.md).
 
@@ -486,8 +599,11 @@ The VM isn't running or SSH isn't ready yet.
 # Check VM status
 make status
 
-# Start the VM
+# Start the VM (headless, unlocks the disk itself)
 make start_vm
+
+# See what the VM is actually doing
+make console
 
 # Wait for SSH (check every 2 seconds)
 while ! ssh -o ConnectTimeout=2 -o BatchMode=yes b2b exit 2>/dev/null; do

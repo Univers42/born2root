@@ -44,6 +44,58 @@ PRESEED_FILE="preseeds/preseed.cfg"
 OUTPUT_ISO="${ISO_FILENAME%.iso}-preseed.iso"
 FORCE_ISO="${FORCE_ISO:-0}"
 
+# ── Serial console for the headless install ─────────────────────────────────
+# `make all` never opens a VirtualBox window, so without this the installer
+# talks to a VGA screen nobody is looking at and the only progress signal the
+# host has is "the VM is still running". Booting d-i with console=ttyS0 sends
+# the whole install — every step, every percentage — down COM1, which the VM
+# is configured to spool into disk_images/<vm>/serial.log (see
+# setup/install/vms/install_vm_debian.sh). That file is the terminal-side
+# window into the install: `make console` tails it, and the orchestrator reads
+# it to report the actual stage.
+#
+# Order matters: the LAST console= wins as /dev/console, so ttyS0 must come
+# after tty0 for d-i's UI to land on the serial port. tty0 is kept first so
+# kernel messages still reach the VGA buffer, which keeps `VBoxManage controlvm
+# <vm> screenshotpng` useful as a fallback when something goes wrong early.
+# DEFAULT OFF, and that default is load-bearing. Booting d-i with console=ttyS0
+# makes it wrap itself in GNU screen and drive a full-screen newt UI down the
+# serial line. Measured consequences, on a real run:
+#   * no readable progress — screen's status bar is the only plain text, so the
+#     dashboard reported the status bar as the install stage;
+#   * and worse, the automated install stopped dead. It sat for 40 minutes and
+#     wrote 4 MB to a 64 GB disk, i.e. it never installed at all.
+# The VGA console path is the one that completes in ~10-20 minutes unattended,
+# so that is what ships. SERIAL_CONSOLE=1 is kept for debugging an install
+# interactively over serial, where the screen wrapper is a feature.
+#
+# This only affects the INSTALLER. The installed system still mirrors its
+# console to COM1 (see preseeds/b2b-setup.sh), which is what `make console`
+# reads and which works — that path was verified end to end.
+SERIAL_CONSOLE="${SERIAL_CONSOLE:-0}"
+if [ "$SERIAL_CONSOLE" = "1" ]; then
+	CONSOLE_ARGS="console=tty0 console=ttyS0,115200n8"
+else
+	CONSOLE_ARGS=""
+fi
+
+# Shared by the BIOS (isolinux) and EFI (grub) entries so the two can never
+# drift apart — a mismatch here means the install behaves differently depending
+# on which firmware path booted it, which is painful to diagnose.
+# Preseed is inside the initrd (auto-detected by d-i), so no preseed/file= here.
+# locale/country/keymap are belt-and-suspenders for questions asked before the
+# preseed is read.
+DI_CMDLINE="auto=true priority=critical DEBIAN_FRONTEND=noninteractive locale=en_US.UTF-8 language=en country=ES keymap=es hostname=dlesieur domain= vga=788 ${CONSOLE_ARGS}"
+
+# Trailing args after the "---" separator. `quiet` is dropped on the serial path
+# so the boot can be followed; on the VGA path it matches the cmdline that has
+# actually completed an unattended install here.
+if [ "$SERIAL_CONSOLE" = "1" ]; then
+	DI_TAIL="---"
+else
+	DI_TAIL="--- quiet"
+fi
+
 echo "  Latest ISO: $ISO_FILENAME"
 echo "  URL:        $URL_IMAGE_ISO"
 echo "  Output:     $OUTPUT_ISO"
@@ -77,10 +129,28 @@ if [ ! -f "$PRESEED_FILE" ]; then
 	exit 1
 fi
 
+# Remove a previous extraction. xorriso reproduces the ISO's read-only modes, so
+# the tree has to be made writable before it can be deleted — and on the NFS
+# home this repo lives on, a large recursive delete can still come back EACCES
+# on the first pass while the server catches up. One retry clears it; without
+# this the whole build died on a wall of "rm: Permission denied" lines.
+purge_dir() {
+	local dir="$1" attempt
+	[ -e "$dir" ] || return 0
+	for attempt in 1 2 3; do
+		chmod -R u+w "$dir" 2> /dev/null || true
+		rm -rf "$dir" 2> /dev/null
+		[ -e "$dir" ] || return 0
+		sleep 2
+	done
+	echo "Error: could not remove $dir (files still held open, or a stale NFS handle)." >&2
+	echo "       Remove it by hand and re-run:  rm -rf $dir" >&2
+	return 1
+}
+
 # Create extraction directory
 echo "Extracting ISO to $ISO_DIR..."
-chmod -R u+w "$ISO_DIR" 2> /dev/null || true
-rm -rf "$ISO_DIR"
+purge_dir "$ISO_DIR"
 mkdir -p "$ISO_DIR"
 
 # Use xorriso (most portable for ISO manipulation), fallback to bsdtar, then 7z
@@ -208,7 +278,24 @@ echo "Updating BIOS boot menu (isolinux)..."
 # 1. isolinux.cfg — set a 1-second timeout so it auto-boots
 ISOLINUX_MAIN="$ISO_DIR/isolinux/isolinux.cfg"
 if [ -f "$ISOLINUX_MAIN" ]; then
-	cat > "$ISOLINUX_MAIN" << 'EOF'
+	# vesamenu.c32 draws nothing on a serial line, so the serial build bypasses
+	# it and boots the txt.cfg entry directly. The VGA build keeps the menu
+	# module, which is what the ISO that installs successfully here uses —
+	# untested variations on the boot path are expensive to debug (a failure
+	# costs a 20-minute install to notice).
+	if [ "$SERIAL_CONSOLE" = "1" ]; then
+		cat > "$ISOLINUX_MAIN" << 'EOF'
+# D-I config version 2.0
+path 
+serial 0 115200
+include menu.cfg
+default install
+prompt 0
+timeout 10
+EOF
+		echo "  ✓ isolinux.cfg  → serial console, boots 'install' directly"
+	else
+		cat > "$ISOLINUX_MAIN" << 'EOF'
 # D-I config version 2.0
 path 
 include menu.cfg
@@ -216,7 +303,8 @@ default vesamenu.c32
 prompt 0
 timeout 10
 EOF
-	echo "  ✓ isolinux.cfg  → timeout 10 (1s)"
+		echo "  ✓ isolinux.cfg  → timeout 10 (1s)"
+	fi
 fi
 
 # 2. txt.cfg — our automated install entry (marked as menu default)
@@ -224,13 +312,13 @@ fi
 # locale/country/keymap on cmdline as belt-and-suspenders for pre-preseed Qs.
 ISOLINUX_TXT="$ISO_DIR/isolinux/txt.cfg"
 if [ -f "$ISOLINUX_TXT" ]; then
-	cat > "$ISOLINUX_TXT" << 'EOF'
+	cat > "$ISOLINUX_TXT" << EOF
 default install
 label install
     menu label ^Automated Install
     menu default
     kernel /install.amd/vmlinuz
-    append auto=true priority=critical DEBIAN_FRONTEND=noninteractive locale=en_US.UTF-8 language=en country=ES keymap=es hostname=dlesieur domain= vga=788 initrd=/install.amd/initrd.gz --- quiet
+    append ${DI_CMDLINE} initrd=/install.amd/initrd.gz ${DI_TAIL}
 EOF
 	echo "  ✓ txt.cfg       → Automated Install (default)"
 fi
@@ -257,19 +345,26 @@ if [ -f "$GRUB_CFG" ]; then
 	cp "$GRUB_CFG" "$GRUB_CFG.bak"
 
 	# Create new GRUB config with auto-install as default
-	cat > "$GRUB_CFG" << 'GRUBEOF'
+	GRUB_SERIAL=""
+	if [ "$SERIAL_CONSOLE" = "1" ]; then
+		GRUB_SERIAL="serial --unit=0 --speed=115200
+terminal_input serial console
+terminal_output serial console"
+	fi
+	cat > "$GRUB_CFG" << GRUBEOF
+${GRUB_SERIAL}
 set default=0
 set timeout=1
 
 menuentry 'Automated Install' {
     set background_color=black
-    linux    /install.amd/vmlinuz auto=true priority=critical DEBIAN_FRONTEND=noninteractive locale=en_US.UTF-8 language=en country=ES keymap=es hostname=dlesieur domain= vga=788 --- quiet
+    linux    /install.amd/vmlinuz ${DI_CMDLINE} ${DI_TAIL}
     initrd   /install.amd/initrd.gz
 }
 
 menuentry 'Install' {
     set background_color=black
-    linux    /install.amd/vmlinuz vga=788 --- quiet
+    linux    /install.amd/vmlinuz ${CONSOLE_ARGS} ---
     initrd   /install.amd/initrd.gz
 }
 GRUBEOF

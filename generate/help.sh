@@ -1,6 +1,6 @@
 #!/bin/bash
 # Born2beRoot — Makefile help
-# Called by: make help
+# Called by: make help (the default goal — plain `make` lands here)
 set -e
 
 # ── Colours ──────────────────────────────────────────────────────────────────
@@ -12,10 +12,13 @@ YLW='\033[33m'
 RED='\033[31m'
 CYN='\033[36m'
 WHT='\033[97m'
-BLU='\033[34m'
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
-W=60 # inner visible width between │ chars
+# Adaptive width: the descriptions here are full sentences, and at a hard 60
+# columns several of them used to run straight through the right border.
+W=$(( $(tput cols 2> /dev/null || echo 100) - 6 ))
+[ "$W" -lt 64 ] && W=64
+[ "$W" -gt 78 ] && W=78
 
 top() {
 	printf "  ${CYN}╭"
@@ -33,13 +36,15 @@ bot() {
 	printf "╯${RST}\n"
 }
 
+# Visible length, ignoring colour escapes. Everything drawn here is width-1,
+# so counting characters is the right measure.
+_vlen() {
+	printf '%b' "$1" | sed 's/\x1b\[[0-9;]*m//g' | wc -m
+}
+
 row() {
-	local content="$1"
-	local stripped
-	stripped=$(printf '%b' "$content" | sed 's/\x1b\[[0-9;]*m//g')
-	local vlen
-	vlen=$(printf '%s' "$stripped" | wc -m)
-	local pad=$((W - vlen))
+	local content="$1" pad
+	pad=$((W - $(_vlen "$content")))
 	[ "$pad" -lt 0 ] && pad=0
 	printf "  ${CYN}│${RST}"
 	printf '%b' "$content"
@@ -48,16 +53,11 @@ row() {
 }
 
 crow() {
-	local content="$1"
-	local stripped
-	stripped=$(printf '%b' "$content" | sed 's/\x1b\[[0-9;]*m//g')
-	local vlen
-	vlen=$(printf '%s' "$stripped" | wc -m)
-	local total_pad=$((W - vlen))
-	local lpad=$((total_pad / 2))
-	local rpad=$((total_pad - lpad))
-	[ "$lpad" -lt 0 ] && lpad=0
-	[ "$rpad" -lt 0 ] && rpad=0
+	local content="$1" total lpad rpad
+	total=$((W - $(_vlen "$content")))
+	[ "$total" -lt 0 ] && total=0
+	lpad=$((total / 2))
+	rpad=$((total - lpad))
 	printf "  ${CYN}│${RST}"
 	printf '%*s' "$lpad" ""
 	printf '%b' "$content"
@@ -67,13 +67,39 @@ crow() {
 
 blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
 
-# Helper: command + description
+# Pad to a visible width. bash's printf '%-18s' pads by BYTES, so a name
+# holding a multibyte character (VM_NAME=…) came out three columns short and
+# the description column went ragged.
+NAMEW=18
+_pad() {
+	local s="$1" n
+	n=$(printf '%s' "$s" | wc -m)
+	printf '%s' "$s"
+	[ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
+	return 0
+}
+
+# Section heading. Closes the previous section with a blank line first, so the
+# last command of a group never sits flush against the divider.
+sec() {
+	blank
+	mid
+	blank
+	row "  ${BLD}${WHT}▸ $1${RST}"
+	blank
+}
+
+# One command + what it does. The description gets whatever the name column
+# leaves, and is trimmed rather than allowed to break the border.
 cmd() {
 	local name="$1" desc="$2" color="${3:-${BLD}}"
-	local padded_name
-	padded_name=$(printf "%-18s" "$name")
-	row "  ${color}${padded_name}${RST} ${desc}"
+	local avail=$((W - 2 - NAMEW - 1))
+	[ "$(printf '%s' "$desc" | wc -m)" -gt "$avail" ] && desc="${desc:0:$((avail - 1))}…"
+	row "  ${color}$(_pad "$name")${RST} ${desc}"
 }
+
+# An indented continuation line under a command.
+note() { row "  $(_pad '')  ${DIM}$1${RST}"; }
 
 # ═════════════════════════════════════════════════════════════════════════════
 printf "\n"
@@ -81,30 +107,57 @@ top
 crow "${BLD}${WHT}Born2beRoot  ─  Makefile Help${RST}"
 mid
 blank
-cmd "make" "Full pipeline: deps > ISO > VM > start" "${BLD}${GRN}"
-cmd "make status" "Show environment status dashboard"
-cmd "make deps" "Install VirtualBox + tools"
-cmd "make fix_app_ports" "Repair VM NAT rules for app stack"
-cmd "make gen_iso" "Download Debian ISO + inject preseed"
-cmd "make shell" "Download latest hellish release"
-cmd "HELLISH_VERSION=…" "Pin a hellish release (default: latest)" "${DIM}"
-cmd "CUSTOM_SHELL_PATH=…" "Override default shell (empty = bash)" "${DIM}"
+row "  A headless Debian VM: preseeded install, LUKS-encrypted LVM,"
+row "  unlocked and driven entirely from this terminal."
+row "  ${DIM}No VirtualBox window is ever opened.${RST}"
+
+sec "Build it"
+cmd "make all" "Build everything from zero (~20 min)" "${BLD}${GRN}"
+note "deps → ISO → VM → install → boot → unlock"
+cmd "make re" "Destroy the VM and build it again" "${BLD}${YLW}"
+
+sec "Use it"
+cmd "ssh b2b" "Log in (shortcut added to ~/.ssh/config)" "${BLD}${GRN}"
+cmd "make start_vm" "Boot headless and unlock the LUKS disk"
+cmd "make poweroff" "Shut the VM down"
+cmd "make status" "Where everything stands right now"
+
+sec "See what the headless VM is doing"
+cmd "make console" "Follow the VM's serial console live"
+note "Ctrl+C stops watching, not the VM"
+cmd "make serial_log" "Print the serial console log and exit"
+cmd "make gui_vm" "Escape hatch: open the VirtualBox window"
+
+sec "Rebuild one piece"
+cmd "make deps" "Install VirtualBox + host tools"
+cmd "make gen_iso" "Download Debian ISO + inject the preseed"
 cmd "make setup_vm" "Create the VirtualBox VM"
-cmd "make start_vm" "Start headless + unlock encryption (default)"
-cmd "make gui_vm" "Start with the VirtualBox window (console access)"
-blank
-mid
-blank
-cmd "make poweroff" "Shut down the VM"
-cmd "make list_vms" "List all VirtualBox VMs"
-cmd "make rm_disk_image" "Delete the VM completely" "${BLD}${RED}"
-cmd "make prune_vms" "Delete ALL VMs" "${BLD}${RED}"
-blank
-mid
-blank
+cmd "make shell" "Download the latest hellish release"
+cmd "make fix_app_ports" "Repair the VM's NAT port forwards"
+cmd "make extpack" "VirtualBox Extension Pack (optional)"
+note "not used here; needs your host sudo password"
+
+sec "When something is wrong"
+cmd "make check_system" "Pre-flight: vboxdrv, kernel, VS Code"
+cmd "make fix_hwe" "Rebuild VirtualBox against your kernel"
+note "for: /dev/vboxdrv missing, DKMS failures"
+cmd "make console" "Read the VM's console — usually says why"
+
+sec "Tear down"
 cmd "make clean" "Remove downloaded ISOs"
-cmd "make fclean" "Remove ISOs + disk images"
-cmd "make re" "Full clean rebuild"
+cmd "make fclean" "Remove ISOs + disk images + the VM"
+cmd "make list_vms" "List all VirtualBox VMs"
+cmd "make rm_disk_image" "Delete this VM completely" "${BLD}${RED}"
+cmd "make prune_vms" "Delete EVERY VM on this host" "${BLD}${RED}"
+
+sec "Settings (append to any target)"
+cmd "VM_NAME=…" "Which VM to act on (default: debian)" "${DIM}"
+cmd "VM_PASS=…" "LUKS passphrase (default: vm_pass.txt)" "${DIM}"
+cmd "HELLISH_VERSION=…" "Pin a hellish release (default: latest)" "${DIM}"
+cmd "CUSTOM_SHELL_PATH=" "Empty = keep bash as the login shell" "${DIM}"
+cmd "FORCE_ISO=1" "Rebuild the ISO even if one exists" "${DIM}"
+blank
+row "    ${DIM}e.g.${RST}  ${BLD}make all VM_NAME=test VM_PASS=hunter2${RST}"
 blank
 bot
 printf "\n"

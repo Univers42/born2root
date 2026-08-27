@@ -696,6 +696,41 @@ echo "[INFO] Reinstalling GRUB to $BOOT_DISK"
 # Reinstall GRUB to MBR
 grub-install "$BOOT_DISK" 2>&1 || echo "[WARN] grub-install failed (may be OK in chroot)"
 
+### ─── SERIAL CONSOLE ON THE INSTALLED SYSTEM ─────────────────────────────────
+# The host never opens a VirtualBox window, so mirror the boot to COM1, which
+# VirtualBox spools into disk_images/<vm>/serial.log on the host — that is what
+# `make console` tails. It turns "the VM is running but I cannot see anything"
+# into a readable boot log.
+#
+# ORDER IS LOAD-BEARING: the LAST console= on the command line becomes
+# /dev/console, and the initramfs reads the LUKS passphrase from /dev/console.
+# The host answers that prompt by typing on the VM's *virtual keyboard*
+# (VBoxManage controlvm keyboardputstring, see unlock_vm.sh), and those
+# keystrokes arrive on tty0, not on the serial line. So tty0 must come last:
+# with ttyS0 last the prompt would move to a serial port nothing types into and
+# the VM would sit locked forever.
+echo "--- Enabling serial console mirror (tty0 stays primary) ---"
+if [ -f /etc/default/grub ]; then
+	SERIAL_ARGS="console=ttyS0,115200n8 console=tty0"
+	if ! grep -q 'console=ttyS0' /etc/default/grub; then
+		# Only the kernel command line is touched. GRUB_TERMINAL="console serial"
+		# would also put GRUB's own menu on the serial port, but if GRUB's serial
+		# init does not come up the bootloader can end up drawing to nothing at
+		# all — a black screen and an unbootable VM, diagnosable only by a
+		# 40-minute rebuild. The kernel's console= is what produces the boot log
+		# `make console` reads, so the menu buys nothing for the risk.
+		#
+		# Strip "quiet" too: on a headless box the boot messages are the only
+		# way to see how far the boot got.
+		sed -i \
+			-e "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"${SERIAL_ARGS}\"|" \
+			/etc/default/grub
+		echo "[OK] serial console mirror configured"
+	else
+		echo "[OK] serial console already configured"
+	fi
+fi
+
 # Regenerate grub.cfg — critical to pick up any kernel changes
 update-grub 2>&1 || echo "[WARN] update-grub failed (may be OK in chroot)"
 
