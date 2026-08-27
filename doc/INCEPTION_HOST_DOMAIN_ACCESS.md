@@ -154,6 +154,13 @@ assertion that something *should* work.
 
 ## 6. Notes and caveats
 
+- **Firefox must be restarted after `make host_access`.** `user.js` is read only
+  when a profile starts, so a Firefox that was already running when the pref was
+  written never sees it and reports the domain as *Server Not Found* — identical
+  to having configured nothing. Quit it completely and reopen, or set
+  `network.dns.localDomains` live in `about:config`. `make verify_access` fails
+  when it detects this, because a scratch-profile test always passes and would
+  otherwise hide it.
 - **The certificate warning is expected in Firefox.** The CA is local and
   self-signed, as the subject intends, and the host does not trust it. Click
   through once per profile. The Chromium launcher does not warn: it pins that

@@ -116,6 +116,37 @@ else
 	fail "only ${configured}/${found} profile(s) configured — run: make host_access"
 fi
 
+# A scratch profile always starts fresh and therefore always loads the pref —
+# which means the check below proves the MECHANISM, not the browser the user is
+# actually looking at. A Firefox that was already running when user.js was
+# written never read it and shows "Server Not Found". That combination once
+# reported "all checks passed" over a genuinely broken browser, so check it
+# explicitly and fail.
+ff_pid=$(pgrep -f '/firefox/firefox' 2> /dev/null | head -1)
+if [ -n "$ff_pid" ] && [ "$configured" -gt 0 ]; then
+	ff_elapsed=$(ps -o etimes= -p "$ff_pid" 2> /dev/null | tr -d ' ')
+	if [ -n "$ff_elapsed" ]; then
+		ff_started=$(( $(date +%s) - ff_elapsed ))
+		newest_userjs=0
+		for root in "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox" \
+			"$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"; do
+			[ -d "$root" ] || continue
+			for f in "$root"/*/user.js; do
+				[ -f "$f" ] || continue
+				m=$(stat -c %Y "$f" 2> /dev/null) || continue
+				[ "$m" -gt "$newest_userjs" ] && newest_userjs=$m
+			done
+		done
+		if [ "$ff_started" -lt "$newest_userjs" ]; then
+			fail "the running Firefox started before the pref was written — it has not read it"
+			printf "      ${C_DIM}quit Firefox completely and reopen it, or set${C_RESET}\n"
+			printf "      ${C_DIM}network.dns.localDomains = %s in about:config${C_RESET}\n" "$DOMAIN"
+		else
+			pass "the running Firefox started after the pref was written"
+		fi
+	fi
+fi
+
 # End-to-end proof rather than a claim. Firefox is pointed at the REAL domain on
 # a throwaway port served by a listener started here on the host: if the request
 # arrives, Firefox genuinely resolved that exact name by itself. Testing against

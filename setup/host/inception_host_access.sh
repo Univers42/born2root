@@ -199,6 +199,27 @@ undo_firefox() {
 	ok "Firefox: managed block removed from $n profile(s)"
 }
 
+# Firefox reads user.js once, at profile startup. A Firefox that was already
+# running when we wrote the pref will never see it, and reports the domain as
+# "Server Not Found" exactly as if nothing had been configured — so say so
+# instead of leaving a silent trap.
+firefox_main_pid() {
+	pgrep -f '/firefox/firefox' 2> /dev/null | head -1
+}
+
+warn_if_firefox_running() {
+	local pid
+	pid=$(firefox_main_pid)
+	[ -n "$pid" ] || return 0
+	printf "\n  ${C_YELLOW}${C_BOLD}Firefox is running and will NOT pick this up yet.${C_RESET}\n"
+	printf "  ${C_DIM}user.js is only read when a profile starts, so the pref is inert${C_RESET}\n"
+	printf "  ${C_DIM}until Firefox restarts. Either:${C_RESET}\n\n"
+	printf "    ${C_BOLD}a)${C_RESET} quit Firefox completely (every window) and reopen it, or\n"
+	printf "    ${C_BOLD}b)${C_RESET} set it live, no restart: open ${C_BOLD}about:config${C_RESET}, search\n"
+	printf "       ${C_BOLD}network.dns.localDomains${C_RESET} and set it to ${C_BOLD}%s${C_RESET}\n" "$DOMAIN"
+	printf "\n  ${C_DIM}Either way user.js keeps it applied for every future start.${C_RESET}\n"
+}
+
 # ── Chromium / Chrome ───────────────────────────────────────────────────────
 # Preference order is deliberate: the Chromium snap is what these campus images
 # ship and what was verified working here. Keep this list identical to the one
@@ -373,5 +394,6 @@ printf "    Chromium   ${C_BOLD}inception-browser${C_RESET}   ${C_DIM}→ https:
 printf "    Firefox    ${C_BOLD}https://%s:%s${C_RESET}\n" "$DOMAIN" "$P_HTTPS"
 printf "    Bonus site ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"
 printf "    Terminal   ${C_BOLD}inception-curl -k https://%s/${C_RESET}\n" "$DOMAIN"
-printf "\n  ${C_DIM}Firefox must be fully restarted to pick up the new pref.${C_RESET}\n"
-printf "  ${C_DIM}Its certificate warning is expected — the CA is local and self-signed.${C_RESET}\n\n"
+printf "\n  ${C_DIM}Its certificate warning is expected — the CA is local and self-signed.${C_RESET}\n"
+warn_if_firefox_running
+printf "\n"
