@@ -76,12 +76,30 @@ done
 ok "guest reachable: $(vm_ssh 'hostname' 2>/dev/null)"
 
 # ── 2. Toolchain the build needs ────────────────────────────────────────────
-step "Checking guest toolchain"
-missing=$(vm_ssh 'for c in git docker openssl make rsync; do command -v $c >/dev/null 2>&1 || echo $c; done' 2> /dev/null)
-[ -z "$missing" ] || die "guest is missing: $missing (first-boot provisioning incomplete)"
-if ! vm_ssh 'docker info >/dev/null 2>&1'; then
-	die "guest docker daemon not usable by ${GUEST_USER} (docker group not applied?)"
-fi
+# sshd comes up well before the guest is actually provisioned: first-boot
+# installs Docker, adds the user to the docker group and fetches wp-cli, which
+# takes a couple of minutes. Connecting the moment ssh answers and then failing
+# because docker is not there yet is a race, not a real error — so wait for it.
+step "Waiting for guest provisioning (docker, git, openssl, make, rsync)"
+provision_deadline=$(( $(date +%s) + ${PROVISION_TIMEOUT:-900} ))
+reported=""
+while :; do
+	missing=$(vm_ssh 'for c in git docker openssl make rsync; do command -v $c >/dev/null 2>&1 || echo $c; done' 2> /dev/null)
+	if [ -z "$missing" ] && vm_ssh 'docker info >/dev/null 2>&1'; then
+		break
+	fi
+	if [ "$(date +%s)" -ge "$provision_deadline" ]; then
+		die "guest still not provisioned (missing: ${missing:-docker daemon}). Check: ssh ${SSH_ALIAS} sudo tail /var/log/first-boot.log"
+	fi
+	# Report what is still missing, but only when it changes, so the wait reads
+	# as progress instead of a wall of identical lines.
+	state="${missing:-docker daemon not ready}"
+	if [ "$state" != "$reported" ]; then
+		printf "  ${C_YELLOW}…${C_RESET} still waiting on: %s\n" "$(printf '%s' "$state" | tr '\n' ' ')"
+		reported="$state"
+	fi
+	sleep 10
+done
 ok "git, docker, openssl, make, rsync all present and docker is usable"
 
 # ── 3. Get the sources into the guest ───────────────────────────────────────
