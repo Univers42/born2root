@@ -75,7 +75,24 @@ send_passphrase() {
 }
 
 # Indirection so tests can stub the clock and run the loop instantly.
-unlock_sleep() { sleep "$1"; }
+# Sleep between polls. orchestrate.sh replaces this wholesale so it can keep its
+# dashboard alive; standalone (make start_vm) it also reports progress.
+#
+# Without that report the script prints one line and then says nothing for up to
+# VM_UNLOCK_TIMEOUT seconds — four minutes of silence that is indistinguishable
+# from a hang, which is exactly how it gets interrupted a few seconds before it
+# would have succeeded.
+UNLOCK_ELAPSED=0
+unlock_sleep() {
+	sleep "$1"
+	UNLOCK_ELAPSED=$(( UNLOCK_ELAPSED + $1 ))
+	# Only animate on a terminal: a redrawn line becomes thousands of lines in a
+	# log or a pipe.
+	if [ -t 1 ]; then
+		printf '\r  \033[2m…%3ds elapsed, %d passphrase send(s), waiting for sshd (up to %ds)\033[0m' \
+			"$UNLOCK_ELAPSED" "${UNLOCK_SENDS_SO_FAR:-0}" "$VM_UNLOCK_TIMEOUT"
+	fi
+}
 
 # Poll for sshd continuously while re-sending the passphrase on a schedule.
 # Polling and sending are interleaved deliberately: a send that misses the prompt
@@ -93,6 +110,7 @@ unlock_loop() {
 		if [ "$elapsed" -ge "$next_send" ]; then
 			send_passphrase "$pass" || return 1
 			sends=$((sends + 1))
+			UNLOCK_SENDS_SO_FAR=$sends
 			next_send=$((elapsed + VM_UNLOCK_RESEND))
 		fi
 		unlock_sleep 2
@@ -127,10 +145,12 @@ main() {
 
 	echo "Waiting ${VM_UNLOCK_DELAY}s for the LUKS prompt, then unlocking..."
 	if unlock_loop "$port" "$pass"; then
+		[ -t 1 ] && printf '\r\033[K'
 		echo "✓ $VM_NAME unlocked and booted (ssh on :$port, ${UNLOCK_SENDS} send(s))"
 		return 0
 	fi
 
+	[ -t 1 ] && printf '\r\033[K'
 	echo "✗ $VM_NAME did not come up within ${VM_UNLOCK_TIMEOUT}s." >&2
 	echo "  See the console with: VBoxManage controlvm $VM_NAME screenshotpng /tmp/vm.png" >&2
 	return 1
