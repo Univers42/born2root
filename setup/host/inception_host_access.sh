@@ -469,13 +469,17 @@ chromium_profile_dir() {
 # Fetched once and reused: the SPKI pin for Chromium, and the DER/PEM for
 # Firefox's certificate store.
 CA_FILE=""
+# The clone location is not fixed: Inception may sit in ~/Documents/inception,
+# in ~/inception, or wherever INCEPTION_DIR points. Hardcoding one path meant
+# the CA silently could not be found and the browsers kept warning.
+CA_FIND_CMD='for p in "$INCEPTION_DIR/secrets/ca.crt" "$HOME/Documents/inception/secrets/ca.crt" "$HOME/inception/secrets/ca.crt"; do [ -r "$p" ] && { cat "$p"; exit 0; }; done; p=$(find "$HOME" -maxdepth 4 -name ca.crt -path "*secrets*" 2>/dev/null | head -1); [ -n "$p" ] && cat "$p"'
 fetch_ca_cert() {
 	[ -n "$CA_FILE" ] && [ -s "$CA_FILE" ] && return 0
 	local tmp
 	tmp=$(mktemp) || return 1
 	if timeout 25 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
 		-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 b2b \
-		'cat ~/Documents/inception/secrets/ca.crt' > "$tmp" 2> /dev/null \
+		"$CA_FIND_CMD" > "$tmp" 2> /dev/null \
 		&& [ -s "$tmp" ]; then
 		CA_FILE="$tmp"
 		return 0

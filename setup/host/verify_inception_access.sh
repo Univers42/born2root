@@ -113,7 +113,7 @@ fi
 ca_tmp=$(mktemp)
 ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	-o LogLevel=ERROR -o ConnectTimeout=8 "$SSH_ALIAS" \
-	'cat ~/Documents/inception/secrets/ca.crt' > "$ca_tmp" 2> /dev/null
+	'for p in "$HOME/Documents/inception/secrets/ca.crt" "$HOME/inception/secrets/ca.crt"; do [ -r "$p" ] && { cat "$p"; exit 0; }; done; p=$(find "$HOME" -maxdepth 4 -name ca.crt -path "*secrets*" 2>/dev/null | head -1); [ -n "$p" ] && cat "$p"' > "$ca_tmp" 2> /dev/null
 if [ -s "$ca_tmp" ]; then
 	res=$(curl -s --proxy "127.0.0.1:${PROXY_PORT}" --cacert "$ca_tmp" --max-time 20 \
 		-o /dev/null -w '%{http_code}:%{ssl_verify_result}' "https://${DOMAIN}/")
