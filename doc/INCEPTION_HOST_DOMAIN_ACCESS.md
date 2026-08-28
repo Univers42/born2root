@@ -23,10 +23,14 @@ make all          # builds the VM and wires up host access automatically
 make inception    # clones Inception into the VM, builds it, verifies from the host
 ```
 
-The only manual step is **starting the browsers afterwards**. Firefox reads
-`user.js` at profile start and Chrome reads its proxy settings and certificate
-store at launch, so a browser that was already open when the build ran will not
-see any of it. Close them before you build, or quit and reopen them after.
+There is no manual step. A browser that was already open when the build ran
+cannot see the new configuration — Firefox reads `user.js` only at profile start,
+Chrome its proxy settings and certificate store only at launch — so
+`setup/host/restart_browsers.sh` restarts them at the end, preserving their
+sessions (Firefox via the same one-shot `resume_session_once` flag it uses for
+its own updates, Chrome via `--restore-last-session`). It runs only once the
+configuration is complete, so `make all` on its own never triggers it. Opt out
+with `INCEPTION_NO_BROWSER_RESTART=1`.
 
 Then, from the host:
 

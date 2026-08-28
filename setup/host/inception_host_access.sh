@@ -696,5 +696,12 @@ else
 	printf "\n  ${C_DIM}Firefox will warn about the certificate: the CA is local and${C_RESET}\n"
 	printf "  ${C_DIM}self-signed, and could not be added to its store. Accept it once.${C_RESET}\n"
 fi
-warn_if_firefox_running
+# Only restart once there is a complete configuration to pick up. During
+# `make all` the VM has no Inception yet, so no CA could be fetched and a
+# restart then would just force a second one after `make inception`.
+if [ "$CA_TRUSTED" = "1" ]; then
+	bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/restart_browsers.sh"
+else
+	warn_if_firefox_running
+fi
 printf "\n"
