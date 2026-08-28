@@ -45,7 +45,12 @@ fi
 # The guest sends CR line endings and ANSI positioning; strip both so the log
 # reads as plain text in a normal terminal.
 clean() {
-	tr '\r' '\n' | sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b[()][B0]//g'
+	# The guest ends lines with CRLF, so turning every CR into a newline
+	# double-spaces the entire log. Drop the CR that belongs to a CRLF pair
+	# first, then treat any remaining bare CR — progress redraws — as a newline.
+	sed -e 's/\r$//' \
+		| tr '\r' '\n' \
+		| sed -e 's/\x1b\[[0-9;?]*[a-zA-Z]//g' -e 's/\x1b[()][B0]//g'
 }
 
 case "$MODE" in

@@ -667,6 +667,16 @@ vm_running_seconds() {
 # nobody is watching. The fallback for that is "CPU has been idle for two solid
 # minutes", which cannot fire before the 10-minute mark and cannot tell a halted
 # VM from a stalled one. The serial console says it outright, so ask it first.
+# The preseed's finish-install hook writes this to the serial port once the
+# install is genuinely finished (see preseeds/preseed.cfg). Unlike the kernel
+# messages install_halted() looks for, it arrives even though d-i is NOT booted
+# with console=ttyS0 — which stays off because it makes d-i wrap itself in GNU
+# screen and stall (generate/create_custom_iso.sh explains at length).
+install_complete_signalled() {
+	[ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
+	grep -q 'B2B-INSTALL-COMPLETE' "$SERIAL_LOG" 2> /dev/null
+}
+
 install_halted() {
 	[ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
 	tail -c 4000 "$SERIAL_LOG" 2> /dev/null \
@@ -781,6 +791,12 @@ wait_for_install() {
 	local timeout=2400 # 40 minutes max (installs can be slow on shared storage)
 	local elapsed=0
 	local zero_cpu_count=0 # consecutive VM polls with ~0% CPU
+	local complete_at=""   # elapsed time when the install signalled completion
+	# d-i still has to unmount and halt after the finish-install hooks run, so
+	# do not yank the power the instant the marker appears. Twenty seconds is
+	# far longer than that takes and still ~2 minutes faster than the CPU
+	# heuristic it replaces.
+	local complete_grace=20
 	local min_elapsed=600  # don't check CPU in first 10 min (install is busy)
 	local metrics_available=false
 
@@ -809,6 +825,18 @@ wait_for_install() {
 
 		# Checked every tick: it is a local file read, and reacting within
 		# seconds is the whole point of having the marker.
+		if [ -z "$complete_at" ] && install_complete_signalled; then
+			complete_at=$elapsed
+			STEP_DETAIL[$S_INSTALL]="install finished, letting d-i unmount..."
+			draw_dashboard
+		fi
+		if [ -n "$complete_at" ] && [ $((elapsed - complete_at)) -ge $complete_grace ]; then
+			set_step $S_INSTALL working "install complete, powering off..."
+			VBoxManage controlvm "${VM_NAME}" poweroff 2> /dev/null || true
+			wait_for_vm_unlock
+			return 0
+		fi
+
 		if install_halted; then
 			set_step $S_INSTALL working "installer halted, powering off..."
 			VBoxManage controlvm "${VM_NAME}" poweroff 2> /dev/null || true
