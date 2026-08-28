@@ -1051,6 +1051,10 @@ Host b2b vm born2beroot
     HostName 127.0.0.1
     Port ${P_SSH}
     User dlesieur
+    # Lets \`open <file>\` inside the headless VM display on this host: a guest
+    # port tunnels back to the agent set up by setup/host/setup_open_from_vm.sh.
+    # Harmless when that agent is not running — ssh just warns once.
+    RemoteForward 127.0.0.1:7654 127.0.0.1:7654
     ServerAliveInterval 15
     ServerAliveCountMax 6
     TCPKeepAlive yes

@@ -67,7 +67,8 @@ C_CYAN   := \033[36m
 .PHONY: all prepare pull shell deps extpack check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
-        host_access host_access_undo inception verify_access fresh
+        host_access host_access_undo inception verify_access fresh \
+        open_from_vm open_from_vm_undo
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -381,6 +382,17 @@ inception:
 # a real headless browser load of the bare https://$(DOMAIN) URL.
 verify_access:
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/verify_inception_access.sh
+
+# =========@@ Open files from the headless VM on this host @@==================
+# The VM has no graphical session, so `xdg-open en.subject.pdf` in there has
+# nothing to draw on. This sets up a small host agent plus the reverse tunnel
+# `ssh b2b` already carries, and installs an `open` command inside the VM.
+#   in the VM:  open en.subject.pdf     -> it opens on this host's screen
+open_from_vm:
+	@bash setup/host/setup_open_from_vm.sh
+
+open_from_vm_undo:
+	@bash setup/host/setup_open_from_vm.sh --undo
 
 # =========@@ Help @@==========================================================
 help:

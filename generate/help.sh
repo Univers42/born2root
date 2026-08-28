@@ -134,6 +134,7 @@ note "SRC=<dir> uploads a local copy instead"
 cmd "make host_access" "Let this host reach the .42.fr domain"
 cmd "make verify_access" "Prove the domain works from the host"
 cmd "make host_access_undo" "Undo the host-side browser wiring"
+cmd "make open_from_vm" "'open <file>' in the VM, shown here"
 note "Chromium gets the bare URL; Firefox adds :8443"
 
 sec "Rebuild one piece"
