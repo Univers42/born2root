@@ -482,6 +482,16 @@ ensure_vm_nat_forwarding() {
 	# WordPress/NGINX container (guest 443), which is why there is no
 	# separate inception-https rule.
 	ensure_vm_nat_forward inception-static 8090 8090
+	# Bonus services. Adminer lands on host 8081 rather than 8080, which this
+	# script already reserves for the preseed server (resolve_host_port P_PRESEED).
+	ensure_vm_nat_forward inception-adminer 8080 8081
+	# FTP: the control port plus the whole passive range, or a directory listing
+	# connects and then hangs — the data channel has nowhere to land. Host port 21
+	# is privileged and unbindable as this user, hence 2121.
+	ensure_vm_nat_forward inception-ftp 21 2121
+	for _p in 21000 21001 21002 21003 21004 21005 21006 21007 21008 21009 21010; do
+		ensure_vm_nat_forward "inception-ftp-pasv-${_p}" "$_p" "$_p"
+	done
 	ensure_vm_nat_forward docker 5000 5000
 	ensure_vm_nat_forward mariadb 3306 3306
 	ensure_vm_nat_forward redis 6379 6379

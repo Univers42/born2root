@@ -54,6 +54,9 @@ DOMAIN="${INCEPTION_DOMAIN:-${USER:-dlesieur}.42.fr}"
 PREF_HTTPS_PORT="${INCEPTION_HTTPS_PORT:-8443}"
 PREF_STATIC_PORT="${INCEPTION_STATIC_PORT:-8090}"
 PREF_HTTP_PORT="${INCEPTION_HTTP_PORT:-8082}"
+# Bonus: Adminer, so it is reachable at http://<domain>:8081 like everything
+# else rather than only as an IP:port.
+PREF_ADMINER_PORT="${INCEPTION_ADMINER_PORT:-8081}"
 
 # Guest-side ports the Inception stack listens on.
 GUEST_HTTPS=443
@@ -185,6 +188,7 @@ After=network.target
 [Service]
 ExecStart=/usr/bin/env python3 ${PROXY_BIN} --port ${PROXY_PORT} --domain ${DOMAIN} \
     --map 443:${https_port} --map 80:${http_port} \
+    --map ${P_ADMINER:-8081}:${P_ADMINER:-8081} \
     --map ${static_port}:${static_port} --map ${https_port}:${https_port}
 Restart=always
 RestartSec=3
@@ -575,6 +579,7 @@ configure_chromium() {
 	rules="MAP ${DOMAIN}:443 127.0.0.1:${https_port}"
 	rules="${rules},MAP ${DOMAIN}:80 127.0.0.1:${http_port}"
 	rules="${rules},MAP ${DOMAIN}:${static_port} 127.0.0.1:${static_port}"
+	[ -n "${P_ADMINER:-}" ] && rules="${rules},MAP ${DOMAIN}:${P_ADMINER} 127.0.0.1:${P_ADMINER}"
 
 	if pin=$(ca_spki_pin); then
 		cert_flag="--ignore-certificate-errors-spki-list=${pin}"
@@ -668,7 +673,8 @@ if have_vm; then
 	P_HTTPS=$(ensure_forward https "$PREF_HTTPS_PORT" "$GUEST_HTTPS")
 	P_STATIC=$(ensure_forward inception-static "$PREF_STATIC_PORT" "$GUEST_STATIC")
 	P_HTTP=$(ensure_forward http "$PREF_HTTP_PORT" "$GUEST_HTTP")
-	ok "NAT forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}"
+	P_ADMINER=$(ensure_forward inception-adminer "$PREF_ADMINER_PORT" 8080)
+	ok "NAT forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}  adminer→${P_ADMINER}"
 else
 	P_HTTPS="$PREF_HTTPS_PORT"; P_STATIC="$PREF_STATIC_PORT"; P_HTTP="$PREF_HTTP_PORT"
 	warn "VM '$VM_NAME' not registered yet — assuming default ports"
