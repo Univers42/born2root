@@ -529,6 +529,19 @@ echo "[OK] Third-party tools check complete"
 #
 # Neither is allowed to fail the boot. They are re-runnable by hand, and the
 # Makefile exposes them as `make nvim` / `make hellish_plugins` over SSH.
+# Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
+# `npm install -g`: the prefix has to point at /opt before anything is
+# installed, or the packages land in /usr/lib/node_modules and are stranded
+# off PATH when the prefix moves afterwards.
+echo "--- Pointing machine-wide tooling at /opt ---"
+if [ -f /root/install_global_scope.sh ]; then
+	chmod +x /root/install_global_scope.sh 2>/dev/null || true
+	bash /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log \
+		|| echo "[WARN] global scope setup reported errors"
+else
+	echo "[SKIP] /root/install_global_scope.sh not present"
+fi
+
 echo "--- Installing Neovim + kickstart.nvim ---"
 if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
 	# kickstart clones ~30 plugins, Mason pulls language servers and treesitter
@@ -572,6 +585,40 @@ if [ -f /root/install_hellish_plugins.sh ]; then
 	fi
 else
 	echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+fi
+
+### ─── 4c. Herdr, Claude Code, and the optional local AI ────────────────────
+# Both are additive and neither may fail the boot. AI_MODE is baked into this
+# script by the ISO builder; it defaults to "off", so a stock build installs
+# and downloads nothing here.
+echo "--- Installing Herdr + Claude Code ---"
+if [ -f /root/install_devtools.sh ]; then
+	chmod +x /root/install_devtools.sh 2>/dev/null || true
+	if check_disk_space / 500; then
+		bash /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log \
+			|| echo "[WARN] devtools install reported errors"
+	else
+		echo "[SKIP] devtools — insufficient disk space"
+	fi
+else
+	echo "[SKIP] /root/install_devtools.sh not present"
+fi
+
+B2B_AI_MODE="${B2B_AI_MODE:-off}"
+if [ "$B2B_AI_MODE" = "off" ]; then
+	echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
+elif [ -f /root/install_ai.sh ]; then
+	echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
+	chmod +x /root/install_ai.sh 2>/dev/null || true
+	# A model is gigabytes; refuse rather than filling the volume it lands on.
+	if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
+		AI_MODE="$B2B_AI_MODE" bash /root/install_ai.sh 2>&1 | tee -a /var/log/b2b-provision.log \
+			|| echo "[WARN] AI install reported errors"
+	else
+		echo "[SKIP] AI — not enough free space on /opt for a model"
+	fi
+else
+	echo "[SKIP] AI — /root/install_ai.sh not present"
 fi
 
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────

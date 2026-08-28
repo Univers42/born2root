@@ -183,12 +183,33 @@ for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do
 	fi
 done
 
+# AI_MODE has to travel INSIDE the ISO: first-boot-setup.sh runs from @reboot
+# cron, which inherits nothing from this build. So the chosen mode is stamped
+# into the copy of the script that ships, rather than passed as an environment
+# variable that would silently be empty at boot.
+AI_MODE="${AI_MODE:-off}"
+case "$AI_MODE" in
+	off | client | local) ;;
+	*)
+		echo "Error: AI_MODE must be off, client or local (got '$AI_MODE')" >&2
+		exit 1
+		;;
+esac
+if [ -f "$ISO_DIR/first-boot-setup.sh" ]; then
+	sed -i "s|^B2B_AI_MODE=\"\${B2B_AI_MODE:-off}\"|B2B_AI_MODE=\"\${B2B_AI_MODE:-${AI_MODE}}\"|" \
+		"$ISO_DIR/first-boot-setup.sh"
+	echo "  ✓ AI_MODE=${AI_MODE} baked into first-boot-setup.sh"
+fi
+
 # Post-install provisioners. These are NOT run from the d-i chroot: both need a
 # real network and working dpkg triggers (npm, pip, git clone), which is exactly
 # what hangs in-target. late_command drops them in /root and first-boot-setup.sh
 # runs them on the first real boot.
 echo "Copying post-install provisioners to ISO root..."
 for PROVISIONER in \
+	setup/install/tools/install_global_scope.sh \
+	setup/install/tools/install_devtools.sh \
+	setup/install/ai/install_ai.sh \
 	setup/install/nvim/install_nvim.sh \
 	setup/install/nvim/install_nvim_extras.sh \
 	setup/install/hellish/install_hellish_plugins.sh; do

@@ -34,6 +34,18 @@ set -u
 # cron on first boot. Only the first is guaranteed to carry /usr/local/bin,
 # which is where this script puts nvim and where npm puts its globals.
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# The npm prefix is moved to /opt by install_global_scope.sh, and npm's own
+# bin directory is NOT on the default PATH. Without this line a package this
+# script installs itself (tree-sitter, claude) is invisible to the very next
+# `command -v` that checks for it -- installed, working, and reported missing.
+# Ask npm where it actually is rather than hardcoding the location.
+if command -v npm >/dev/null 2>&1; then
+	_npm_prefix=$(npm config get prefix --global 2>/dev/null)
+	case "$_npm_prefix" in
+		/*) [ -d "${_npm_prefix}/bin" ] && PATH="${_npm_prefix}/bin:$PATH" ;;
+	esac
+	unset _npm_prefix
+fi
 export PATH
 
 # ── Configuration ───────────────────────────────────────────────────────────

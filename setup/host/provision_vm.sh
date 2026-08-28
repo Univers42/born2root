@@ -164,13 +164,18 @@ setup_sudo() {
 # Forward only the variables the guest scripts document, and quote them, so a
 # value with a space cannot turn into extra shell words on the far side.
 build_env() {
-	local prefix="$1" var out=""
+	# Accepts several space-separated prefixes, because a script's knobs do not
+	# always share one: install_devtools.sh reads both HERDR_* and INSTALL_*.
+	local prefixes="$1" prefix var out=""
+	for prefix in $prefixes; do
 	for var in $(compgen -v | grep "^${prefix}" || true); do
 		# Skip empties: `make nvim` always passes NVIM_VERSION, blank when the
 		# user did not override it, and forwarding NVIM_VERSION='' would make
 		# the guest script's ${NVIM_VERSION:-default} pointless noise.
 		[ -n "${!var}" ] || continue
+		case " $out " in *" ${var}="*) continue ;; esac
 		out+="${var}=$(printf '%q' "${!var}") "
+	done
 	done
 	printf '%s' "$out"
 }
@@ -244,20 +249,50 @@ case "$ACTION" in
 			install_hellish_plugins.sh HELLISH_ "hellishrc plugin framework"
 		ok "hellishrc plugin provisioning finished"
 		;;
+	global)
+		run_provisioner setup/install/tools/install_global_scope.sh \
+			install_global_scope.sh GLOBAL_ "machine-wide scope on /opt"
+		ok "global scope configured"
+		;;
+	devtools)
+		run_provisioner setup/install/tools/install_devtools.sh \
+			install_devtools.sh "HERDR_ INSTALL_ DEVTOOLS_" "Herdr + Claude Code"
+		ok "devtools provisioning finished"
+		;;
+	ai)
+		[ -n "${AI_MODE:-}" ] || die "set AI_MODE=client or AI_MODE=local (see setup/install/ai/install_ai.sh)"
+		run_provisioner setup/install/ai/install_ai.sh \
+			install_ai.sh AI_ "AI (AI_MODE=${AI_MODE})"
+		ok "AI provisioning finished"
+		;;
 	health)
 		show_health
 		;;
 	all)
+		# Order matters: the npm prefix has to move to /opt BEFORE anything
+		# runs `npm install -g`, or those packages are stranded at the old
+		# prefix and fall off PATH when it changes.
+		run_provisioner setup/install/tools/install_global_scope.sh \
+			install_global_scope.sh GLOBAL_ "machine-wide scope on /opt"
 		NVIM_BOOTSTRAP=0 run_provisioner setup/install/nvim/install_nvim.sh \
 			install_nvim.sh NVIM_ "Neovim + kickstart.nvim"
 		run_provisioner setup/install/nvim/install_nvim_extras.sh \
 			install_nvim_extras.sh NVIM_ "the Neovim extras layer"
 		run_provisioner setup/install/hellish/install_hellish_plugins.sh \
 			install_hellish_plugins.sh HELLISH_ "hellishrc plugin framework"
+		run_provisioner setup/install/tools/install_devtools.sh \
+			install_devtools.sh "HERDR_ INSTALL_ DEVTOOLS_" "Herdr + Claude Code"
+		# AI is opt-in: without AI_MODE this step does nothing at all.
+		if [ -n "${AI_MODE:-}" ] && [ "${AI_MODE}" != "off" ]; then
+			run_provisioner setup/install/ai/install_ai.sh \
+				install_ai.sh AI_ "AI (AI_MODE=${AI_MODE})"
+		else
+			info "AI_MODE unset or off — skipping the AI step"
+		fi
 		show_health
 		ok "provisioning finished"
 		;;
 	*)
-		die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | hellish | health | all)"
+		die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | hellish | global | devtools | ai | health | all)"
 		;;
 esac

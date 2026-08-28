@@ -26,6 +26,8 @@ accident.
 - [Credentials](#credentials)
 - [What's Inside the VM](#whats-inside-the-vm)
 - [The Neovim Setup](#the-neovim-setup)
+- [Disk Layout & Growing a Partition](#disk-layout)
+- [Herdr, Claude Code & Optional AI](#tools-and-ai)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -270,6 +272,9 @@ make all
 | `make nvim` | Neovim (latest upstream) + kickstart + the whole plugin layer |
 | `make hellish_plugins` | The hellishrc plugin framework |
 | `make nvim_health` | Print `:checkhealth` from inside the VM |
+| `make devtools` | Herdr (persistent terminal panes) + Claude Code |
+| `make ai AI_MODE=local` | Ollama + a model sized to the VM's RAM |
+| `make global_scope` | Put npm globals and AI models on `/opt` |
 | `make help` | Show this help in the terminal |
 
 > **`make all` does not reinstall the OS on an existing VM.**
@@ -745,6 +750,137 @@ The warnings that remain are all expected on a headless server:
 > back empty. The same report with `TERM=xterm-256color` has zero errors. The
 > installer sets a sane `TERM` for exactly this reason — but if you are checking
 > by hand, do it from a real terminal, or set `TERM` yourself.
+
+---
+
+<a name="disk-layout"></a>
+## Disk Layout & Growing a Partition
+
+The VM is a **120 GB** dynamically-allocated disk. That number is a ceiling, not
+an allocation: an untouched disk is ~2 MB on the host and only grows as the
+guest writes, so the size costs nothing until it is used.
+
+| Mount | Size | Holds |
+|-------|------|-------|
+| `/boot` | 500 MB | kernel, unencrypted (required) |
+| `/` | 20 GB | base system, apt packages |
+| swap | 4 GB | — |
+| `/home` | 40 GB | user data, projects, per-user editor state |
+| `/opt` | 15 GB | **machine-wide scope** — see below |
+| `/var` | 20 GB | Docker images, containers, build cache |
+| `/srv` | 2 GB | service data (lighttpd) |
+| `/tmp` | 3 GB | build artefacts |
+| `/var/log` | 3 GB | system + Docker logs |
+| *unallocated* | **~12 GB** | **deliberately free, for `lvextend`** |
+
+### The unallocated space is the point
+
+Every logical volume is **pinned**. Nothing uses partman's `-1` ("grow to fill
+the disk"), which is what `/var/log` used to do — and which left the volume
+group with **zero free extents**. On that layout, "give `/home` more space"
+meant rebuilding the VM.
+
+With ~12 GB free in the group, any volume can be grown **in place, while
+mounted**:
+
+```bash
+sudo lvextend -L +5G /dev/LVMGroup/home
+sudo resize2fs /dev/LVMGroup/home     # ext4 grows online, no reboot
+df -h /home                            # bigger already
+sudo vgs                               # what is left in the pool
+```
+
+A fixed bigger number helps once; free extents help every time.
+
+Both are tunable at build time (a new VM only — an existing disk is kept):
+
+```bash
+make re DISK_SIZE_MB=250000     # bigger disk
+make re VM_RAM_MB=6144          # more RAM than the 25%-of-host default
+```
+
+### Machine-wide scope: `/opt`, not `/` or `/home`
+
+Three kinds of data usually get conflated. `/home` is user data, `/` is what
+dpkg manages — and the third kind, machine-wide extras that dpkg does *not*
+manage, has no natural home and defaults into `/`:
+
+- npm globals → `/usr/lib/node_modules`
+- Ollama models → `/usr/share/ollama/.ollama/models`
+
+Both are on a root filesystem sized for apt. One 5 GB model fills it, and a
+full `/` breaks dpkg and GRUB — the exact cascading failure this project's
+preseed comments already warn about.
+
+`setup/install/tools/install_global_scope.sh` gives `/opt` its own volume and
+points those paths at it: `/opt/npm-global`, `/opt/ai/models`, plus
+`/opt/nvim-*` which already lived there. Per-user Neovim state
+(`~/.local/share/nvim`) stays per-user — it is small, nvim needs write access,
+and sharing it only creates permission problems.
+
+---
+
+<a name="tools-and-ai"></a>
+## Herdr, Claude Code & Optional AI
+
+### Herdr — persistent terminal panes
+
+[Herdr](https://herdr.dev) is a single ~10 MB Rust binary that splits into a
+persistent background server and a TUI client: panes, splits and workspaces
+that keep running when the client detaches.
+
+```bash
+herdr                  # attach (or start)
+# ctrl+b q             detach — panes keep running
+ssh b2b && herdr       # reattach later, from anywhere
+```
+
+**This is also the answer to window tiling here.** A tiling window manager
+(Krohnkite and friends) is a KWin script, so it needs X.org or Wayland — and
+the subject is explicit that installing a graphics server scores **0**. Herdr
+gives the tiled-pane workflow entirely inside the terminal, with nothing
+installed that could put the grade at risk.
+
+### Claude Code
+
+`npm install -g @anthropic-ai/claude-code`, landing in `/opt/npm-global` so it
+does not consume `/`. Run `claude` in the VM.
+
+### Optional AI — `AI_MODE`
+
+Off by default: a stock build installs and downloads **nothing**, so evaluation
+is unaffected.
+
+| `AI_MODE` | What it does |
+|-----------|--------------|
+| `off` *(default)* | Nothing installed, no space used |
+| `client` | Ollama CLI pointed at an endpoint elsewhere — `10.0.2.2:11434` is the **host** under VirtualBox NAT. No models in the VM. |
+| `local` | Ollama server + a model stored on `/opt/ai/models` |
+
+```bash
+make ai AI_MODE=local                 # on a built VM
+make re VM_RAM_MB=6144 AI_MODE=local  # from scratch, with enough RAM
+```
+
+**The model is computed from measured RAM, never guessed:**
+
+| Usable RAM | Model |
+|---|---|
+| < 3 GB | *none — refuses, and says why* |
+| 3–5 GB | `qwen3:1.7b` |
+| 5–8 GB | `qwen3:4b` |
+| 8–12 GB | `qwen3:8b` |
+| ≥ 20 GB | `qwen3:14b` |
+
+> **A 27B model cannot run here, at any quantization.** Qwen 3.8 27B needs
+> ~17 GB at Q4; this host has 7.8 GB *in total*. That is arithmetic, not tuning.
+> A model that does not fit does not run slowly — it thrashes: the kernel
+> evicts weight pages as fast as it faults them in, and a VM also running
+> Docker and MariaDB becomes unusable. So `AI_MODE=local` **refuses** rather
+> than pulling something that cannot work, and tells you what to raise.
+
+With the default 2 GB VM, `AI_MODE=local` installs Ollama and pulls no model.
+Raise `VM_RAM_MB` first.
 
 ---
 

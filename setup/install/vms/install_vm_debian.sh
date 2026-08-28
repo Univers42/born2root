@@ -29,7 +29,16 @@ esac
 VM_PATH="$(pwd)/disk_images"
 ISO_PATH="$(pwd)/$PRESEED_ISO"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
-VM_DISK_SIZE=64000 # 64GB in MB
+# Disk size in MB. The VDI is DYNAMICALLY allocated, so this is a ceiling, not
+# an allocation: an untouched disk is ~2 MB on the host and only grows as the
+# guest writes. A bigger number therefore costs nothing until it is used, which
+# is why 120 GB is a safe default even on a shared filesystem.
+#
+# The partition recipe in preseeds/preseed.cfg pins every logical volume and
+# deliberately leaves ~12 GB unallocated in the volume group, so raising this
+# number adds to that free pool rather than to any one filesystem. Grow the
+# volume that actually needs it afterwards with lvextend + resize2fs.
+VM_DISK_SIZE="${DISK_SIZE_MB:-122880}" # 120GB in MB
 
 # ── Smart VM sizing algorithm ────────────────────────────────────────────────
 # Detects host hardware and allocates resources proportionally.
@@ -59,10 +68,35 @@ auto_size_vm() {
 	fi
 	: "${host_cpus:=4}"
 
-	# Allocate 25% RAM, clamp [2048, 8192]
+	# Allocate 25% RAM, clamp [2048, 8192].
+	#
+	# VM_RAM_MB overrides the whole calculation. It exists because the automatic
+	# share is sized to keep the HOST responsive, which is the right default but
+	# the wrong answer for a couple of real cases: running a local model
+	# (setup/install/ai/install_ai.sh picks a model from this number, and on the
+	# 2048 floor it correctly refuses to pull one at all), or several editors
+	# with language servers at once. Raising it starves the host, so it is a
+	# deliberate opt-in rather than a bigger default.
 	VM_MEMORY=$((host_ram_mb / 4))
 	[ "$VM_MEMORY" -lt 2048 ] && VM_MEMORY=2048
 	[ "$VM_MEMORY" -gt 8192 ] && VM_MEMORY=8192
+	if [ -n "${VM_RAM_MB:-}" ]; then
+		case "$VM_RAM_MB" in
+			'' | *[!0-9]*)
+				echo "Warning: VM_RAM_MB='$VM_RAM_MB' is not a number — using ${VM_MEMORY}MB" >&2
+				;;
+			*)
+				if [ "$VM_RAM_MB" -lt 1024 ]; then
+					echo "Warning: VM_RAM_MB=${VM_RAM_MB} is below 1024 — using ${VM_MEMORY}MB" >&2
+				else
+					VM_MEMORY="$VM_RAM_MB"
+					if [ "$VM_MEMORY" -gt "$host_ram_mb" ]; then
+						echo "Warning: VM_RAM_MB=${VM_MEMORY} exceeds the host's ${host_ram_mb}MB" >&2
+					fi
+				fi
+				;;
+		esac
+	fi
 
 	# Allocate 50% CPUs, clamp [2, 8]
 	VM_CPUS=$((host_cpus / 2))

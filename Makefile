@@ -56,6 +56,28 @@ HELLISH_REFRESH ?=
 NVIM_VERSION ?=
 # Which users inside the VM get a kickstart config (space separated).
 NVIM_USERS ?=
+
+# Disk size for a NEW VM, in MB. The VDI is dynamically allocated, so this is a
+# ceiling and not an allocation — an untouched 120GB disk is ~2MB on the host.
+# The partition recipe pins every volume and leaves ~12GB unallocated in the
+# volume group, so raising this grows that free pool; give it to a specific
+# filesystem afterwards with lvextend + resize2fs.
+# Only affects a VM being created: an existing disk is kept.
+DISK_SIZE_MB ?= 122880
+
+# Override the VM's RAM (MB). Default is 25% of host RAM clamped to [2048,8192],
+# which is sized to keep the HOST responsive. Raise it for a local model — the
+# 2048 floor is below what any model needs, and AI_MODE=local will say so.
+#   make re VM_RAM_MB=6144 AI_MODE=local
+VM_RAM_MB ?=
+
+# Optional AI, baked into the ISO so first boot honours it (default: off).
+#   off     nothing installed, nothing downloaded
+#   client  Ollama CLI pointed at an endpoint elsewhere (10.0.2.2 = the host)
+#   local   Ollama server + a model chosen to FIT this VM's RAM
+# The model is computed, never guessed: a 27B model needs ~17GB and will be
+# refused rather than left to thrash swap. See setup/install/ai/install_ai.sh.
+AI_MODE ?= off
 # Note: once connected to the VM via SSH, you can change the default shell for the user (e.g. dlesieur) with:
 # sudo usermod -s /bin/bash dlesieur && getent passwd dlesieur
 
@@ -78,7 +100,7 @@ C_CYAN   := \033[36m
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access fresh \
-        nvim hellish_plugins provision nvim_health
+        nvim hellish_plugins provision nvim_health global_scope devtools ai
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -96,7 +118,9 @@ C_CYAN   := \033[36m
 MAKE_BIN := $(MAKE)
 
 all: prepare
-	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"
+	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh
 
 # Prepare everything needed for a smooth `make all` experience:
@@ -245,11 +269,13 @@ fix_app_ports:
 
 # =========@@ Build preseeded ISO @@============================================
 gen_iso: shell
-	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" bash $(ISO_BUILDER)
+	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
+		AI_MODE="$(AI_MODE)" bash $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
-	@VM_NAME="$(VM_NAME)" bash $(VM_SCRIPT) "$(VM_NAME)"
+	@VM_NAME="$(VM_NAME)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		bash $(VM_SCRIPT) "$(VM_NAME)"
 
 # =========@@ Start an existing VM @@===========================================
 start_vm: check_system
@@ -417,6 +443,20 @@ provision:
 
 nvim_health:
 	@bash setup/host/provision_vm.sh "$(VM_NAME)" health
+
+# Machine-wide tooling on /opt instead of / and /home (npm globals, AI models).
+global_scope:
+	@bash setup/host/provision_vm.sh "$(VM_NAME)" global
+
+# Herdr (persistent terminal panes over SSH) + Claude Code.
+devtools:
+	@bash setup/host/provision_vm.sh "$(VM_NAME)" devtools
+
+# Optional AI. Does nothing unless AI_MODE is client or local:
+#   make ai AI_MODE=local        a model sized to this VM's RAM
+#   make ai AI_MODE=client       talk to Ollama on the host (10.0.2.2)
+ai:
+	@AI_MODE="$(AI_MODE)" bash setup/host/provision_vm.sh "$(VM_NAME)" ai
 
 # =========@@ Help @@==========================================================
 help:
