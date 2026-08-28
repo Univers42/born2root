@@ -1011,13 +1011,20 @@ vim.api.nvim_create_autocmd('VimEnter', {
   group = vim.api.nvim_create_augroup('b2b-startup', { clear = true }),
   nested = true,
   callback = function()
+    -- BOTH decisions are made BEFORE anything is touched, and that ordering is
+    -- the whole bug this comment exists to prevent coming back: start_page()
+    -- sets buftype=nofile on the current buffer, and should_open_tree()'s
+    -- guard rejects a non-empty buftype. Asking it afterwards therefore always
+    -- answered "no" -- the start page appeared, the tree silently never did.
     local greet = should_greet()
+    local tree = should_open_tree()
+
     if greet then pcall(M.start_page) end
 
     -- The tree goes up last and focus is handed straight back, so the cursor
     -- ends up in the file you asked for -- not in the sidebar, which is the
     -- thing that makes auto-opened trees infuriating.
-    if should_open_tree() and vim.fn.exists ':Neotree' == 2 then
+    if tree and vim.fn.exists ':Neotree' == 2 then
       local win = vim.api.nvim_get_current_win()
       pcall(vim.cmd, 'Neotree show left')
       if vim.api.nvim_win_is_valid(win) then vim.api.nvim_set_current_win(win) end
@@ -1195,8 +1202,19 @@ install_blink_fuzzy() {
 
 	# The binary must match the checked-out tag, so read it from the checkout
 	# rather than assuming the newest release.
-	tag=$(git -C "$plugin" describe --tags --exact-match 2>/dev/null \
-		|| git -C "$plugin" describe --tags 2>/dev/null | sed 's/-[0-9]*-g[0-9a-f]*$//')
+	#
+	# Read it AS THE OWNING USER. This function runs as root while the plugin
+	# tree belongs to $user, and git >= 2.35 refuses to operate on a repository
+	# owned by somebody else ("detected dubious ownership") -- it exits non-zero
+	# and prints nothing, so as root every one of these commands came back empty
+	# and the lib was silently skipped with "cannot determine the tag". Verified:
+	# the identical command run as the user returns v1.10.2.
+	local git_as="runuser -u ${user} --"
+	[ "$user" = "root" ] && git_as=""
+	tag=$($git_as git -C "$plugin" describe --tags --exact-match 2>/dev/null) \
+		|| tag=$($git_as git -C "$plugin" tag --points-at HEAD 2>/dev/null | head -n1)
+	[ -n "$tag" ] || tag=$($git_as git -C "$plugin" describe --tags 2>/dev/null \
+		| sed 's/-[0-9]*-g[0-9a-f]*$//')
 	if [ -z "$tag" ]; then
 		warn "${user}: cannot determine the blink.cmp tag — skipping its fuzzy lib"
 		return 0

@@ -676,6 +676,62 @@ echo "=== Born2beRoot MANDATORY configuration complete ($(date)) ==="
 # They are now installed by first-boot-setup.sh with disk space guards.
 # ═══════════════════════════════════════════════════════════════════════════
 
+### ─── FREE THE SPARE EXTENTS ─────────────────────────────────────────────────
+# The partition recipe declares a decoy volume, `spare`, purely to stop partman
+# handing the disk's leftover space to /var/log. See preseeds/preseed.cfg for
+# the measurement that made this necessary: with every volume pinned and no -1
+# anywhere, partman still inflated the last volume to fill the group and left
+# VFree = 0.
+#
+# `spare` is method{ keep }: never formatted, never mounted, never referenced in
+# fstab. Removing it here returns its extents to the volume group as FREE
+# space, which is the whole point -- it is what makes this possible later:
+#
+#     sudo lvextend -L +5G /dev/LVMGroup/home
+#     sudo resize2fs /dev/LVMGroup/home
+#
+# Guarded rather than assumed: only remove a volume that exists, is not mounted,
+# and is not in fstab. A wrong lvremove here would destroy a real filesystem.
+echo "[INFO] Releasing the 'spare' volume back to the volume group"
+if command -v lvremove > /dev/null 2>&1; then
+	# Ask LVM whether the volume exists rather than looking for a device node:
+	# this runs under in-target, where /dev is the installer's and the node for
+	# a never-activated LV may simply not be there.
+	SPARE_FOUND=""
+	if lvs --noheadings -o lv_name LVMGroup 2> /dev/null | tr -d ' ' | grep -qx spare; then
+		SPARE_FOUND=yes
+	fi
+
+	if [ -z "$SPARE_FOUND" ]; then
+		echo "[INFO] No 'spare' volume found — nothing to release"
+	else
+		# It arrives formatted and mounted at /mnt/spare (see preseed.cfg for
+		# why it cannot simply be left unformatted). Undo that in order:
+		# fstab first, so a failure part-way cannot leave the machine trying to
+		# mount a volume that no longer exists — which would drop the next boot
+		# into an emergency shell.
+		if grep -q '[[:space:]]/mnt/spare[[:space:]]' /etc/fstab 2> /dev/null; then
+			sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab
+			echo "[OK] removed /mnt/spare from /etc/fstab"
+		fi
+
+		umount /mnt/spare > /dev/null 2>&1 || true
+		rmdir /mnt/spare > /dev/null 2>&1 || true
+
+		if mount | grep -q "LVMGroup-spare"; then
+			echo "[WARN] 'spare' is still mounted — leaving it alone"
+		elif lvremove -f LVMGroup/spare > /dev/null 2>&1; then
+			FREE=$(vgs --noheadings -o vg_free --units g LVMGroup 2> /dev/null | tr -d ' ')
+			echo "[OK] 'spare' removed — ${FREE:-?} now free in LVMGroup for lvextend"
+		else
+			echo "[WARN] lvremove of 'spare' failed — the space stays allocated to it"
+			echo "[WARN] Remove it later with: sudo lvremove -f LVMGroup/spare"
+		fi
+	fi
+else
+	echo "[WARN] lvremove unavailable — 'spare' left in place"
+fi
+
 ### ─── GRUB SAFETY NET ────────────────────────────────────────────────────────
 # After all package installs (which may have upgraded kernel/initramfs/grub),
 # ensure GRUB is properly installed and grub.cfg is regenerated.

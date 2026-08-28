@@ -529,6 +529,66 @@ echo "[OK] Third-party tools check complete"
 #
 # Neither is allowed to fail the boot. They are re-runnable by hand, and the
 # Makefile exposes them as `make nvim` / `make hellish_plugins` over SSH.
+### ─── 3c. UFW — configure and enable it for real ────────────────────────────
+# b2b-setup.sh already runs the `ufw allow` rules, but it runs them in the d-i
+# CHROOT, and they do not survive: measured on a fresh build, /etc/ufw/user.rules
+# contained no rule for 4242 and /etc/ufw/ufw.conf still said ENABLED=no, while
+# `systemctl is-active ufw` cheerfully reported "active". The service was up and
+# the firewall was doing nothing -- the worst of both worlds, because every
+# obvious check says it is fine.
+#
+# The cause is the usual one for this project: ufw needs a running kernel with
+# netfilter to load a ruleset, and the installer chroot has neither. So the
+# rules are applied HERE, on the first real boot, where they take effect and
+# persist. Born2beRoot requires the firewall to be on with only 4242 open, so
+# this is mandatory-part correctness, not a nicety.
+echo "--- Configuring UFW ---"
+if command -v ufw > /dev/null 2>&1; then
+	ufw --force reset > /dev/null 2>&1 || true
+	ufw default deny incoming > /dev/null 2>&1 || true
+	ufw default allow outgoing > /dev/null 2>&1 || true
+
+	# 4242 is the subject's requirement; the rest are the bonus web stack and
+	# the app ports the NAT forwards already expose.
+	ufw allow 4242/tcp comment 'SSH' > /dev/null 2>&1 || true
+	for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
+		ufw allow "${p}/tcp" > /dev/null 2>&1 || true
+	done
+
+	ufw --force enable > /dev/null 2>&1 || true
+	systemctl enable ufw > /dev/null 2>&1 || true
+
+	# Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
+	# what actually decides whether packets are filtered, unlike systemd's view.
+	if ufw status 2> /dev/null | grep -q "Status: active"; then
+		echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
+	else
+		echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
+	fi
+else
+	echo "[SKIP] ufw not installed"
+fi
+
+# Fallback for the 'spare' volume. b2b-setup.sh normally removes it during the
+# install, but that runs under in-target where LVM tooling is the installer's.
+# Here the real system is up, so if it is still around, release it now --
+# otherwise the free extents the partition layout is designed around never
+# materialise and `lvextend` has nothing to take.
+if command -v lvremove > /dev/null 2>&1 \
+	&& lvs --noheadings -o lv_name LVMGroup 2>/dev/null | tr -d ' ' | grep -qx spare; then
+	echo "--- Releasing the leftover 'spare' volume ---"
+	sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab 2>/dev/null || true
+	umount /mnt/spare >/dev/null 2>&1 || true
+	rmdir /mnt/spare >/dev/null 2>&1 || true
+	if ! mount | grep -q LVMGroup-spare; then
+		if lvremove -f LVMGroup/spare >/dev/null 2>&1; then
+			echo "[OK] spare removed — $(vgs --noheadings -o vg_free --units g LVMGroup 2>/dev/null | tr -d ' ') free for lvextend"
+		else
+			echo "[WARN] could not remove 'spare'; run: sudo lvremove -f LVMGroup/spare"
+		fi
+	fi
+fi
+
 # Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
 # `npm install -g`: the prefix has to point at /opt before anything is
 # installed, or the packages land in /usr/lib/node_modules and are stranded

@@ -216,16 +216,27 @@ UNITEOF
 		loginctl enable-linger "$user" 2>/dev/null \
 			|| warn "${user}: could not enable lingering — sessions will die at logout"
 
-		# `systemctl --user` needs the user's own bus, which a root shell is not
-		# attached to; run it as them against their runtime dir.
+		# Enabling a user unit is just a symlink into default.target.wants, so
+		# create it directly. `systemctl --user enable` cannot do it here: it
+		# needs the user's session bus, and at FIRST BOOT nobody has logged in,
+		# so /run/user/<uid> does not exist yet. Verified on a fresh build --
+		# the unit file was written, the command failed, and the service was
+		# left `disabled` forever, because nothing ever retried it.
+		local wants="${home}/.config/systemd/user/default.target.wants"
+		mkdir -p "$wants"
+		ln -sf ../herdr.service "${wants}/herdr.service"
+		chown -R "${user}:${group}" "${home}/.config/systemd" 2>/dev/null || true
+		log "${user}: herdr service enabled (starts at boot, survives SSH drops)"
+
+		# If the user DOES happen to have a live session, start it now too so
+		# it works without waiting for a reboot.
 		local uid; uid=$(id -u "$user")
-		if runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
-			systemctl --user enable --now herdr.service >/dev/null 2>&1; then
-			log "${user}: herdr server enabled (persists across SSH drops)"
-		else
-			# Common and harmless during first boot: /run/user/<uid> only exists
-			# once the user has logged in. Lingering makes it start next login.
-			log "${user}: herdr service installed; it will start on next login"
+		if [ -d "/run/user/${uid}" ]; then
+			runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
+				systemctl --user daemon-reload >/dev/null 2>&1 || true
+			runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
+				systemctl --user start herdr.service >/dev/null 2>&1 \
+				&& log "${user}: herdr server started" || true
 		fi
 	done
 }
