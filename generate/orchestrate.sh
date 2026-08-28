@@ -1002,7 +1002,18 @@ resolve_host_port P_PRESEED 8080
 setup_host_ssh_config() {
 	local ssh_dir="$HOME/.ssh"
 	local ssh_config="$ssh_dir/config"
-	local marker="# Born2beRoot VM (auto-generated)"
+	# The marker and the alias are scoped to VM_NAME so a second machine built
+	# beside an existing one gets its own block instead of overwriting it. The
+	# canonical "debian" VM keeps the historic marker and the bare `b2b` alias,
+	# so existing configs, docs and habits are untouched.
+	local marker alias_line
+	if [ "${VM_NAME}" = "debian" ]; then
+		marker="# Born2beRoot VM (auto-generated)"
+		alias_line="Host b2b vm born2beroot"
+	else
+		marker="# Born2beRoot VM (auto-generated) [${VM_NAME}]"
+		alias_line="Host b2b-${VM_NAME} ${VM_NAME}"
+	fi
 
 	mkdir -p "$ssh_dir"
 	chmod 700 "$ssh_dir"
@@ -1010,8 +1021,16 @@ setup_host_ssh_config() {
 	chmod 600 "$ssh_config"
 
 	# Remove any previous Born2beRoot block
-	if grep -q "$marker" "$ssh_config" 2> /dev/null; then
-		sed -i "/${marker}/,/^$/d" "$ssh_config"
+	if grep -qxF "$marker" "$ssh_config" 2> /dev/null; then
+		# Two escaping concerns here:
+		#  - the scoped marker contains [ ] and . , which sed would read as a
+		#    bracket expression / any-char instead of literals;
+		#  - the plain "debian" marker is a PREFIX of every scoped marker, so an
+		#    unanchored address would make a rebuild of "debian" also delete the
+		#    block belonging to "debian-nvim". Hence the ^...$ anchors.
+		local marker_re
+		marker_re=$(printf '%s' "$marker" | sed 's/[][\.*^$\/]/\\&/g')
+		sed -i "/^${marker_re}$/,/^$/d" "$ssh_config"
 	fi
 
 	# Ensure global keepalive defaults exist at the top
@@ -1057,7 +1076,7 @@ SSHEOF
 	cat >> "$ssh_config" << SSHEOF
 
 ${marker}
-Host b2b vm born2beroot
+${alias_line}
     HostName 127.0.0.1
     Port ${P_SSH}
     User dlesieur
@@ -1072,7 +1091,7 @@ Host b2b vm born2beroot
 
 SSHEOF
 	echo "  ✓ Host SSH config updated (~/.ssh/config)"
-	echo "    → 'ssh b2b' connects directly to the VM"
+	echo "    → 'ssh ${alias_line#Host }' connects directly to the VM (first alias listed)"
 }
 
 # ── VS Code Remote SSH settings (fix stale SOCKS proxy + banner timeout) ────

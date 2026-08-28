@@ -46,6 +46,16 @@ HELLISH_VERSION ?=
 # Force a re-download even when the cached copy already matches:
 #   make shell HELLISH_REFRESH=1
 HELLISH_REFRESH ?=
+
+# Neovim provisioning (see setup/install/nvim/install_nvim.sh).
+# Debian 13 ships neovim 0.10.4; kickstart.nvim's master branch is built on
+# `vim.pack`, which only exists from 0.12 — so the upstream release tarball is
+# installed under /opt instead of the distro package. Pinned for reproducible
+# builds; NVIM_VERSION=latest tracks the newest release instead.
+#   make nvim NVIM_VERSION=latest
+NVIM_VERSION ?=
+# Which users inside the VM get a kickstart config (space separated).
+NVIM_USERS ?=
 # Note: once connected to the VM via SSH, you can change the default shell for the user (e.g. dlesieur) with:
 # sudo usermod -s /bin/bash dlesieur && getent passwd dlesieur
 
@@ -67,7 +77,8 @@ C_CYAN   := \033[36m
 .PHONY: all prepare pull shell deps extpack check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
-        host_access host_access_undo inception verify_access fresh
+        host_access host_access_undo inception verify_access fresh \
+        nvim hellish_plugins provision nvim_health
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -238,7 +249,7 @@ gen_iso: shell
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
-	@bash $(VM_SCRIPT)
+	@VM_NAME="$(VM_NAME)" bash $(VM_SCRIPT) "$(VM_NAME)"
 
 # =========@@ Start an existing VM @@===========================================
 start_vm: check_system
@@ -381,6 +392,31 @@ inception:
 # a real headless browser load of the bare https://$(DOMAIN) URL.
 verify_access:
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/verify_inception_access.sh
+
+# =========@@ Editor + shell provisioning @@===================================
+# `make all` already bakes both of these into the ISO and runs them at first
+# boot. These targets are the other half: applying them over SSH to a VM that
+# is ALREADY built, so the scripts can be iterated on without a 20-minute
+# rebuild, and so a machine that predates them can catch up.
+#
+#   make nvim                      Neovim (latest upstream) + kickstart.nvim
+#   make nvim NVIM_VERSION=latest  ...tracking the newest release
+#   make hellish_plugins           the hellishrc plugin framework
+#   make provision                 both, then print the health report
+#   make nvim_health               just re-print :checkhealth from the VM
+nvim:
+	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
+		bash setup/host/provision_vm.sh "$(VM_NAME)" nvim
+
+hellish_plugins:
+	@bash setup/host/provision_vm.sh "$(VM_NAME)" hellish
+
+provision:
+	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
+		bash setup/host/provision_vm.sh "$(VM_NAME)" all
+
+nvim_health:
+	@bash setup/host/provision_vm.sh "$(VM_NAME)" health
 
 # =========@@ Help @@==========================================================
 help:

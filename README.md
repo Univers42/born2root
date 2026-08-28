@@ -25,6 +25,7 @@ accident.
 - [⚠️ Known Issue: Docker Permission Denied](#known-issue-docker-permission-denied)
 - [Credentials](#credentials)
 - [What's Inside the VM](#whats-inside-the-vm)
+- [The Neovim Setup](#the-neovim-setup)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -247,7 +248,7 @@ make all
 |---------|-------------|
 | `make` | Print the help (the default goal) |
 | `make all` | **Full pipeline** — build everything from zero |
-| `make re` | **Destroy and rebuild** — clean slate |
+| `make re` | **Destroy and rebuild** — clean slate (see the note below) |
 | `make status` | Show environment status dashboard |
 | `make start_vm` | Start headless + auto-unlock encryption |
 | `make bstart_vm` | Alias for `make start_vm` |
@@ -265,7 +266,21 @@ make all
 | `make rm_disk_image` | Delete the VM completely |
 | `make prune_vms` | Delete ALL VirtualBox VMs |
 | `make list_vms` | List all VirtualBox VMs |
+| `make provision` | Re-run the Neovim + hellishrc install inside a built VM |
+| `make nvim` | Neovim (latest upstream) + kickstart + the whole plugin layer |
+| `make hellish_plugins` | The hellishrc plugin framework |
+| `make nvim_health` | Print `:checkhealth` from inside the VM |
 | `make help` | Show this help in the terminal |
+
+> **`make all` does not reinstall the OS on an existing VM.**
+> `setup/install/vms/install_vm_debian.sh` keeps the disk image if one is
+> already there (*"Virtual disk already exists - Keeping existing disk"*), so on
+> a machine that has been built before, `make all` re-creates the VM around the
+> **old** disk and boots the system that was already on it. That is deliberate —
+> it is what makes a re-run after a failed step cheap — but it means that to
+> actually reinstall Debian you need **`make re`** (or `make rm_disk_image`
+> first), which deletes the disk. Watch the VDI size to tell them apart: a real
+> reinstall starts from a ~2 MB empty disk.
 
 ---
 
@@ -479,6 +494,8 @@ docker run --rm hello-world
 - ✅ Custom LVM partition layout per subject requirements
 
 ### Extra (Quality of Life)
+- ✅ **Neovim (latest upstream) + kickstart.nvim + a full IDE plugin layer** — see [The Neovim Setup](#the-neovim-setup)
+- ✅ **hellishrc plugin framework** (`~/.hellish/` — `conf list`, `hxp list`, `help_conf`)
 - ✅ tmux with auto-attach (SSH sessions survive disconnects)
 - ✅ Git configured for NAT (large clone fix)
 - ✅ Developer tools (build-essential, python3, curl, vim, htop, etc.)
@@ -529,6 +546,205 @@ sda
 | Redis | auto-selected from 6379 | 6379 |
 
 For the full host/VM diagnosis and manual repair commands, see [doc/VM_APP_PORT_FORWARDING.md](doc/VM_APP_PORT_FORWARDING.md).
+
+---
+
+<a name="the-neovim-setup"></a>
+## The Neovim Setup
+
+The VM ships a complete Neovim environment, installed automatically on first
+boot. Nothing to run by hand — `ssh b2b`, type `nvim`, and it is there.
+
+### Why not `apt install neovim`
+
+Debian 13 ships **Neovim 0.10.4**. The `kickstart.nvim` config this is built on
+uses **`vim.pack`**, Neovim's built-in plugin manager, which did not exist
+before **0.12** — on 0.10 the config errors out on its first plugin line. There
+is no backport and no official Debian package for 0.12, so the build installs
+the upstream release tarball under `/opt/nvim-<version>`, symlinks it to
+`/usr/local/bin/nvim`, and registers it as the system `editor`/`vi`/`vim`
+alternative. dpkg's world is left completely untouched.
+
+```
+nvim --version          # NVIM v0.12.5
+apt-cache policy neovim # Candidate: 0.10.4-8   ← what Debian would have given you
+```
+
+### Layout
+
+The kickstart checkout is kept **pristine**, so `git -C ~/.config/nvim pull`
+keeps working forever. Everything added on top lives in files kickstart does
+not own — Neovim sources `plugin/*.lua` from the config directory automatically,
+after `init.lua`:
+
+```
+~/.config/nvim/
+├── init.lua                      unmodified kickstart.nvim
+└── plugin/
+    ├── 00-b2b-local.lua          providers, clipboard, machine-local settings
+    ├── 10-b2b-plugins.lua        the plugin layer + :B2BExtras
+    ├── 20-b2b-keymaps.lua        the VS Code bindings
+    ├── 30-b2b-sessions.lua       sessions / "workspaces"
+    └── 40-b2b-startup.lua        the file tree + start page
+```
+
+All five are listed in `.git/info/exclude`, so `git status` in the kickstart
+checkout stays clean.
+
+### What you see when you open it
+
+`nvim` opens with the **file tree on the left** and a start page listing the
+keybindings — so the editor looks configured, and the bindings are discoverable
+without going back to this README.
+
+Every plugin in the table below loads on startup; most of them are *passive*
+(indent guides, rainbow parentheses, git signs in the gutter, the tab bar) and
+simply appear once there is a file on screen. That is worth saying explicitly,
+because before `40-b2b-startup.lua` existed a bare `nvim` showed the **stock
+Neovim splash screen** and looked completely unconfigured — everything was
+loaded, nothing was visible.
+
+**The tree deliberately does not open** for `nvim -d` (diffs), for more than one
+file argument, for man pages, or — most importantly — when git invokes Neovim as
+its editor. `nvim` is this VM's `$EDITOR`, so `git commit` runs it; a sidebar
+over a commit message leaves an extra window git then waits on. That case is
+detected from `GIT_EXEC_PATH`/`GIT_INDEX_FILE` rather than by matching
+filenames, with the usual `COMMIT_EDITMSG`/`MERGE_MSG`/`git-rebase-todo` names
+as a backstop. During a commit you get committia.vim's split diff instead.
+
+`:B2BStart` reopens the start page at any time.
+
+### What is installed on top of kickstart
+
+Following [itsjfx's "5 weeks of Neovim" write-up](https://itsjfx.com/), which is
+what this setup is modelled on:
+
+| Need | Plugin |
+|------|--------|
+| Buffer manager (the VS Code tab bar) | [barbar.nvim](https://github.com/romgrk/barbar.nvim) |
+| Directory manager | [oil.nvim](https://github.com/stevearc/oil.nvim) (edit a directory as a buffer) |
+| Sidebar | [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim) |
+| Colorizer | [nvim-colorizer.lua](https://github.com/catgoose/nvim-colorizer.lua) |
+| Session manager | [vim-obsession](https://github.com/tpope/vim-obsession) + the `vw` command |
+| Rainbow parentheses | [rainbow-delimiters.nvim](https://github.com/HiPhish/rainbow-delimiters.nvim) |
+| Indentation guides | [indent-blankline.nvim](https://github.com/lukas-reineke/indent-blankline.nvim) |
+| Movement | [leap.nvim](https://github.com/ggandor/leap.nvim), [quick-scope](https://github.com/unblevable/quick-scope), [mini.move](https://github.com/nvim-mini/mini.nvim) |
+| Git | [vim-fugitive](https://github.com/tpope/vim-fugitive), [vim-flog](https://github.com/rbong/vim-flog), [vim-gh-line](https://github.com/ruanyl/vim-gh-line) (+ kickstart's gitsigns) |
+| Fuzzy finding | [fzf](https://github.com/junegunn/fzf) + [fzf.vim](https://github.com/junegunn/fzf.vim), beside kickstart's telescope |
+| Quality of life | [bullets.vim](https://github.com/bullets-vim/bullets.vim), [mini.cursorword](https://github.com/nvim-mini/mini.nvim), [committia.vim](https://github.com/rhysd/committia.vim), [vim-easy-align](https://github.com/junegunn/vim-easy-align), [nvim-treesitter-context](https://github.com/nvim-treesitter/nvim-treesitter-context), [rainbow_csv](https://github.com/mechatroner/rainbow_csv), [vim-repeat](https://github.com/tpope/vim-repeat) |
+
+**Two deliberate substitutions**, both because the post's choice is now dead:
+
+- **Rainbow parentheses** — the post uses lincheney's fork of `nvim-ts-rainbow`.
+  That fork *and* its upstream were **archived in 2023** and target the old
+  nvim-treesitter API; kickstart tracks nvim-treesitter's `main` branch, where
+  neither loads at all. `rainbow-delimiters.nvim` is the maintained successor.
+- **bullets.vim** — `dkarter/bullets.vim` now redirects to `bullets-vim/bullets.vim`.
+
+Run **`:B2BExtras`** inside Neovim to see exactly what loaded and what did not.
+
+### Keybindings
+
+The VS Code muscle memory, kept for the transition. Each has a native
+equivalent — delete the line from `20-b2b-keymaps.lua` when it starts feeling
+redundant.
+
+| Key | Does | Native equivalent |
+|-----|------|-------------------|
+| `Ctrl+P` | Quick open file | `<leader>sf` |
+| `Ctrl+Shift+F` | Search across files | `<leader>sg` |
+| `Ctrl+/` | Toggle comment | `gcc` / `gc` |
+| `Ctrl+B` | Toggle the sidebar | `:Neotree toggle` |
+| `Ctrl+S` | Save | `:w` |
+| `Alt+,` / `Alt+.` | Previous / next buffer | `:bprev` / `:bnext` |
+| `Alt+<` / `Alt+>` | Move the buffer left / right | — |
+| `Alt+1`…`Alt+9` | Jump to buffer N | — |
+| `Alt+c` | Close buffer | `:bd` |
+| `-` | Open the parent directory (oil) | — |
+| `ga` | Align a selection | — |
+| `<leader>gs` / `<leader>gl` | Fugitive status / Flog graph | — |
+| `<leader>zf` / `<leader>zg` | fzf files / ripgrep | `<leader>sf` / `<leader>sg` |
+
+Three of these are famous for "not working", and all three are handled:
+
+- **`Ctrl+/`** — terminals traditionally transmit it as `Ctrl+_`. Both are mapped.
+- **`Ctrl+S`** — the tty eats it as XOFF (flow control) before Neovim sees it.
+  `/etc/profile.d/nvim-extras.sh` runs `stty -ixon` for interactive shells.
+- **`Ctrl+Shift+F`** — most terminals genuinely cannot send it. It is mapped for
+  the ones that can; `<leader>sg` always works.
+
+### Sessions — the VS Code "workspace" equivalent
+
+`:mksession` writes a one-shot snapshot. `vim-obsession` turns it into a *live*
+session file that keeps rewriting itself as you open buffers and change
+directory, which is what people actually mean by a workspace.
+
+| | |
+|---|---|
+| `<leader>sS` | Start (or rename) a session for this project |
+| `<leader>sX` | Stop recording — the file stays, it just stops updating |
+| `<leader>sF` | Pick a saved session and load it |
+| `:B2BSession <name>` | Same, with the name on the command line |
+| `vw` | From the shell: list every session and the directory it was recorded in |
+| `vw <name>` | Open that session |
+
+Sessions live in `~/.nvim-sessions/`.
+
+`vw` is after [itsjfx's original](https://github.com/itsjfx/dotfiles/blob/master/bin/vw),
+with one change: the original ships a **zsh** completion, and this VM's login
+shell is **hellish**, which has no programmable completion at all (`complete`
+and `compgen` are not implemented — see its own `rc.d/70-completion.hsh`). So
+`vw` with no arguments *lists* the sessions instead, which is the same
+information the zsh completion showed in its descriptions. A bash completion is
+installed at `/etc/bash_completion.d/vw` for anyone using bash.
+
+### Working remotely — the part that makes this worth it
+
+Everything runs inside **tmux on the VM**, so a session survives the SSH
+connection dropping *and* survives closing the laptop:
+
+```bash
+ssh b2b                 # tmux auto-attaches
+vw myproject            # or just: nvim
+# ... close the laptop, go home, open it again ...
+ssh b2b                 # exactly where you left off
+```
+
+The installer appends a Neovim block to `~/.tmux.conf`: true colour
+(`tmux-256color` + `Tc` overrides, without which every colourscheme renders in
+16 colours), `escape-time 10` (the default 500 ms is what makes leaving insert
+mode feel laggy, and `:checkhealth` flags it), focus events, and a 50k
+scrollback.
+
+### Health
+
+```bash
+make nvim_health        # from the host
+:checkhealth            # from inside nvim
+```
+
+The full report is written to `~/.local/state/nvim/checkhealth.log` at install
+time. A healthy VM reports **0 errors**. The node and python3 providers are
+installed (the latter in its own venv, because Debian marks the system python3
+as PEP 668 externally-managed); the perl and ruby providers are switched **off**
+on purpose, since nothing here uses them and leaving them unset makes
+`:checkhealth` warn forever.
+
+The warnings that remain are all expected on a headless server:
+
+| Warning | Why it is fine |
+|---------|----------------|
+| `No clipboard tool found` | There is no X display on a headless VM. xclip *is* installed; with no `$DISPLAY` Neovim cannot use it, so `00-b2b-local.lua` turns `clipboard` off rather than let every yank stall on a failing xclip. |
+| `Go/cargo/luarocks/Ruby/java/julia: not available` | Mason listing optional language runtimes. They only matter if you install a language server that needs one. |
+| `gio not found` | An optional glib2 helper. Nothing here uses it. |
+
+> **If you run `:checkhealth` over a non-interactive SSH command you will see
+> errors that are not real.** `TERM=dumb` (what a non-interactive SSH session
+> gets) makes Neovim's terminal check fail with
+> `command failed: { "infocmp", "-L" }` and makes a couple of plugin checks come
+> back empty. The same report with `TERM=xterm-256color` has zero errors. The
+> installer sets a sane `TERM` for exactly this reason — but if you are checking
+> by hand, do it from a real terminal, or set `TERM` yourself.
 
 ---
 

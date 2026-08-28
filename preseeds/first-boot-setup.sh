@@ -521,6 +521,59 @@ apt-get clean 2>/dev/null || true
 
 echo "[OK] Third-party tools check complete"
 
+### ─── 4b. Neovim + kickstart.nvim, and the hellishrc plugin framework ───────
+# Both are staged in /root by the preseed late_command. They run HERE, not in
+# the d-i chroot, because both need a real network and working dpkg triggers:
+# npm, pip and git clone are precisely the operations that hang in-target and
+# take the rest of the configuration down with them.
+#
+# Neither is allowed to fail the boot. They are re-runnable by hand, and the
+# Makefile exposes them as `make nvim` / `make hellish_plugins` over SSH.
+echo "--- Installing Neovim + kickstart.nvim ---"
+if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
+	# kickstart clones ~30 plugins, Mason pulls language servers and treesitter
+	# compiles parsers — call it 2 GB of headroom to be safe.
+	if check_disk_space / 2000; then
+		chmod +x /root/install_nvim.sh 2>/dev/null || true
+		# Bootstrap is skipped HERE and done once by the extras script below:
+		# downloading kickstart's plugins and then immediately downloading the
+		# extras on top would pay the cold-cache cost twice.
+		if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 bash /root/install_nvim.sh 2>&1 \
+			| tee -a /var/log/b2b-nvim-install.log; then
+			echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
+		else
+			echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
+		fi
+
+		if [ -f /root/install_nvim_extras.sh ]; then
+			echo "--- Installing the Neovim extras layer ---"
+			chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
+			if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 bash /root/install_nvim_extras.sh 2>&1 \
+				| tee -a /var/log/b2b-nvim-install.log; then
+				echo "[OK] Neovim extras installed"
+			else
+				echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+			fi
+		fi
+	else
+		echo "[SKIP] Neovim — insufficient disk space"
+	fi
+else
+	echo "[SKIP] Neovim — /root/install_nvim.sh not present"
+fi
+
+echo "--- Installing hellishrc plugin framework ---"
+if [ -f /root/install_hellish_plugins.sh ]; then
+	chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+	if HELLISH_USERS="dlesieur" bash /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+		echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
+	else
+		echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
+	fi
+else
+	echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+fi
+
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────
 sed -i '/first-boot-setup/d' /etc/crontab
 rm -f /root/first-boot-setup.sh

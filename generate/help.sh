@@ -136,6 +136,14 @@ cmd "make verify_access" "Prove the domain works from the host"
 cmd "make host_access_undo" "Undo the host-side browser wiring"
 note "Chromium gets the bare URL; Firefox adds :8443"
 
+sec "Editor + shell inside the VM"
+cmd "make provision" "Neovim + kickstart + extras + hellishrc" "${BLD}${GRN}"
+note "Already done at first boot; this re-runs it"
+cmd "make nvim" "Neovim (latest upstream) + all plugins"
+note "Debian ships 0.10; kickstart needs 0.12"
+cmd "make hellish_plugins" "The hellishrc plugin framework"
+cmd "make nvim_health" "Print :checkhealth from inside the VM"
+
 sec "Rebuild one piece"
 cmd "make deps" "Install VirtualBox + host tools"
 cmd "make gen_iso" "Download Debian ISO + inject the preseed"
@@ -164,6 +172,8 @@ cmd "VM_PASS=…" "LUKS passphrase (default: vm_pass.txt)" "${DIM}"
 cmd "HELLISH_VERSION=…" "Pin a hellish release (default: latest)" "${DIM}"
 cmd "CUSTOM_SHELL_PATH=" "Empty = keep bash as the login shell" "${DIM}"
 cmd "FORCE_ISO=1" "Rebuild the ISO even if one exists" "${DIM}"
+cmd "NVIM_VERSION=…" "Pin Neovim (default: a tested release)" "${DIM}"
+cmd "NVIM_USERS=…" "Which VM users get the config" "${DIM}"
 blank
 row "    ${DIM}e.g.${RST}  ${BLD}make all VM_NAME=test VM_PASS=hunter2${RST}"
 blank

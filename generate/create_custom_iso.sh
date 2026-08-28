@@ -183,6 +183,24 @@ for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do
 	fi
 done
 
+# Post-install provisioners. These are NOT run from the d-i chroot: both need a
+# real network and working dpkg triggers (npm, pip, git clone), which is exactly
+# what hangs in-target. late_command drops them in /root and first-boot-setup.sh
+# runs them on the first real boot.
+echo "Copying post-install provisioners to ISO root..."
+for PROVISIONER in \
+	setup/install/nvim/install_nvim.sh \
+	setup/install/nvim/install_nvim_extras.sh \
+	setup/install/hellish/install_hellish_plugins.sh; do
+	if [ -f "$PROVISIONER" ]; then
+		cp "$PROVISIONER" "$ISO_DIR/$(basename "$PROVISIONER")"
+		chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true
+		echo "  ✓ $(basename "$PROVISIONER")"
+	else
+		echo "  ✗ WARNING: $PROVISIONER not found"
+	fi
+done
+
 # Optional: bake a custom login shell into the ISO.
 # Usage:
 #   CUSTOM_SHELL_PATH=dist/hellish make gen_iso   (the default; see make shell)

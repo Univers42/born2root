@@ -14,7 +14,18 @@ if [ -z "$PRESEED_ISO" ]; then
 fi
 
 # Variables
-VM_NAME="debian"
+#
+# VM_NAME is taken from the environment or $1 so a second machine can be built
+# beside an existing one. This USED to be hardcoded to "debian", which made the
+# stale-VM removal below delete the running Born2beRoot VM no matter what name
+# the caller asked for -- `make all VM_NAME=other` still wiped "debian".
+VM_NAME="${VM_NAME:-${1:-debian}}"
+case "$VM_NAME" in
+	'' | *[!A-Za-z0-9._-]*)
+		echo "Error: invalid VM_NAME '$VM_NAME' (allowed: letters, digits, . _ -)" >&2
+		exit 1
+		;;
+esac
 VM_PATH="$(pwd)/disk_images"
 ISO_PATH="$(pwd)/$PRESEED_ISO"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
