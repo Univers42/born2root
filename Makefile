@@ -6,7 +6,7 @@
 #    By: dlesieur <dlesieur@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: Invalid date        by ut down the       #+#    #+#              #
-#    Updated: 2026/05/14 16:02:51 by dlesieur         ###   ########.fr        #
+#    Updated: 2026/08/29 16:54:29 by dlesieur         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -14,10 +14,10 @@
 
 # =========@@ Config @@=========================================================
 VM_NAME      ?= debian
+VM_PATH	     ?= $(CURDIR)/disk_images
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
 PRESEED_FILE := preseeds/preseed.cfg
-DISK_DIR     := disk_images
 RM           := rm -rf
 VMS_ISO_TAR  := vms_iso.tar
 
@@ -274,7 +274,8 @@ gen_iso: shell
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
-	@VM_NAME="$(VM_NAME)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
 		bash $(VM_SCRIPT) "$(VM_NAME)"
 
 # =========@@ Start an existing VM @@===========================================
@@ -349,7 +350,7 @@ pop_iso:
 rm_disk_image:
 	@if VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
 		state=$$(VBoxManage showvminfo "$(VM_NAME)" --machinereadable 2>/dev/null \
-		        | grep '^VMState=' | cut -d'"' -f2); \
+			| grep '^VMState=' | cut -d'"' -f2); \
 		if [ "$$state" = "running" ] || [ "$$state" = "paused" ] || [ "$$state" = "stuck" ]; then \
 			printf "$(C_YELLOW)▶$(C_RESET) Powering off VM \"$(VM_NAME)\"...\n"; \
 			VBoxManage controlvm "$(VM_NAME)" poweroff 2>/dev/null || true; \
@@ -364,12 +365,13 @@ rm_disk_image:
 		else \
 			printf "$(C_RED)✗$(C_RESET) Failed to unregister VM — forcing cleanup\n"; \
 			VBoxManage unregistervm "$(VM_NAME)" 2>/dev/null || true; \
-			rm -rf "$(DISK_DIR)/$(VM_NAME)" 2>/dev/null || true; \
+			rm -rf "$(VM_PATH)/$(VM_NAME)" 2>/dev/null || true; \
 			printf "$(C_GREEN)✓$(C_RESET) VM \"$(VM_NAME)\" force-removed\n"; \
 		fi; \
 	else \
 		echo "VM '$(VM_NAME)' does not exist."; \
 	fi
+
 
 prune_vms:
 	@for vm in $$(VBoxManage list vms 2>/dev/null | awk '{print $$1}' | tr -d '"'); do \
@@ -383,6 +385,7 @@ clean:
 
 fclean: clean rm_disk_image
 	$(RM) $(DISK_DIR)
+	$(RM) "$(VM_PATH)/$(VM_NAME)"
 
 re: fclean all
 

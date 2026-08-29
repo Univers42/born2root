@@ -26,7 +26,13 @@ case "$VM_NAME" in
 		exit 1
 		;;
 esac
-VM_PATH="$(pwd)/disk_images"
+# default: project-local storage
+VM_PATH="${VM_PATH:-$(pwd)/disk_images}"
+if ! mkdir -p "$VM_PATH"; then
+	echo "Error: cannot create VM storage directory: $VM_PATH" >&2
+	exit 1
+fi
+
 ISO_PATH="$(pwd)/$PRESEED_ISO"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
 # Disk size in MB. The VDI is DYNAMICALLY allocated, so this is a ceiling, not
