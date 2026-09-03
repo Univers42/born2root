@@ -16,6 +16,7 @@
 # USAGE
 #   bash setup/host/provision_vm.sh <vm-name> nvim
 #   bash setup/host/provision_vm.sh <vm-name> hellish
+#   bash setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
 #   bash setup/host/provision_vm.sh <vm-name> health          # print checkhealth
 #   bash setup/host/provision_vm.sh <vm-name> all
 #
@@ -249,6 +250,13 @@ case "$ACTION" in
 			install_hellish_plugins.sh HELLISH_ "hellishrc plugin framework"
 		ok "hellishrc plugin provisioning finished"
 		;;
+	shell)
+		# Upstream's own installer, run inside the VM: the current hellish
+		# release plus the plugin framework, with --yes taking every default.
+		run_provisioner setup/install/hellish/install_hellish_upstream.sh \
+			install_hellish_upstream.sh HELLISH_ "hellish from upstream"
+		ok "hellish (upstream) provisioning finished"
+		;;
 	global)
 		run_provisioner setup/install/tools/install_global_scope.sh \
 			install_global_scope.sh GLOBAL_ "machine-wide scope on /opt"
@@ -293,6 +301,6 @@ case "$ACTION" in
 		ok "provisioning finished"
 		;;
 	*)
-		die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | hellish | global | devtools | ai | health | all)"
+		die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | hellish | shell | global | devtools | ai | health | all)"
 		;;
 esac

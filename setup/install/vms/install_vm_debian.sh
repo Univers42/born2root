@@ -379,6 +379,14 @@ else
 	print_header "Virtual disk already exists - Keeping existing disk"
 fi
 
+# Record the machine that owns this disk. The repo lives on a shared NFS home,
+# so the same disk_images/ directory is visible from every workstation -- but
+# the VM only ever runs on one of them. Destructive targets read this stamp so
+# a run here cannot silently delete a VM that belongs to another machine.
+printf '%s (kernel %s, %s)\n' "$(hostname -f 2> /dev/null || hostname)" \
+	"$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" \
+	> "$VM_PATH/$VM_NAME/.built-on" 2> /dev/null || true
+
 # Add controllers and attach devices
 print_header "Setting up storage controllers"
 VBoxManage storagectl "$VM_NAME" --name "SATA Controller" --add sata --controller IntelAHCI || {

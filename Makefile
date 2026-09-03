@@ -14,6 +14,15 @@
 
 # =========@@ Config @@=========================================================
 VM_NAME      ?= debian
+# Which hypervisor executes the VM. The GUEST is identical either way -- same
+# preseeded ISO, same LUKS+LVM layout, same b2b-setup.sh, same first boot --
+# so this only decides what runs the machine, never what is inside it.
+#   auto        pick whatever this machine can actually do, and ask only when
+#               both are available and there is a terminal to ask on
+#   virtualbox  the original path; needs the vboxdrv kernel module (root)
+#   qemu        KVM; needs no module, only access to /dev/kvm, so it works as
+#               an ordinary user on machines where VirtualBox cannot
+BACKEND      ?= auto
 VM_PATH	     ?= $(CURDIR)/disk_images
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
@@ -96,11 +105,12 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all prepare pull shell deps extpack check_system fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all prepare pull shell deps extpack check_system check_driver guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
-        host_access host_access_undo inception verify_access fresh \
-        nvim hellish_plugins provision nvim_health global_scope devtools ai
+        host_access host_access_undo inception verify_access verif_access fresh \
+        nvim hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
+        qemu_install qemu_start qemu_stop qemu_status qemu_console verify_guest
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -118,10 +128,52 @@ C_CYAN   := \033[36m
 MAKE_BIN := $(MAKE)
 
 all: prepare
-	@CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
+	@backend=$$(BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
+	if [ "$$backend" = "qemu" ]; then \
+		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \
+		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" \
+			bash setup/host/qemu_pipeline.sh; \
+	else \
+		$(MAKE_BIN) --no-print-directory check_driver && \
+		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
-		bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"
+			bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
+	fi
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh
+
+# Which backend would `make all` pick right now, and why?
+backend:
+	@BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)" >/dev/null
+
+# =========@@ QEMU/KVM backend @@=============================================
+# The same VM, run by QEMU instead of VirtualBox. Useful on its own when you
+# want to drive the phases by hand rather than through `make all`.
+QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
+	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)"
+
+qemu_install:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh create
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh install
+
+qemu_start:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh start
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+
+qemu_stop:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh stop
+
+qemu_status:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh status
+
+qemu_console:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh console
+
+# Prove the guest is the same whichever backend built it: partitions, LUKS,
+# LVM, UFW, the policy files and the login shell all come from the preseeded
+# ISO. Run it on both and diff the output.
+verify_guest:
+	@BACKEND_LABEL="$(BACKEND)" bash setup/host/verify_guest_parity.sh
 
 # Prepare everything needed for a smooth `make all` experience:
 # - check + install host dependencies (VirtualBox, xorriso, gcc, libreadline-dev, …)
@@ -259,6 +311,53 @@ check_system:
 	fi; \
 	printf "$(C_GREEN)✓$(C_RESET) All pre-flight checks passed\n"'
 
+# =========@@ Can THIS machine run a VM at all? @@=============================
+# The VirtualBox kernel driver is per-machine state. A 42 home directory is on
+# NFS and follows you between workstations; vboxdrv does not. So a clone that
+# builds on one machine can be unable to start a VM on the next one with
+# nothing in the repo having changed -- and the old failure mode for that was a
+# green "VirtualBox ready" row followed a minute later by a wall of VBoxManage
+# errors, because `VBoxManage --version` prints its "module is not loaded"
+# warning on stdout and it got captured as the version string.
+#
+# This says so up front instead, names the machine, and never changes anything.
+#   make check_driver              diagnose this machine
+#   make all SKIP_DRIVER_CHECK=1   proceed anyway (the VM start will still fail)
+check_driver:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
+		bash setup/host/check_vbox_driver.sh
+
+# =========@@ Whose VM is this? @@============================================
+# disk_images/ is inside the shared home, so every workstation sees the same
+# disk -- but only one of them is running the VM. install_vm_debian.sh stamps
+# the owning machine into disk_images/<vm>/.built-on, and every destructive
+# path (rm_disk_image, and therefore fclean / re / fresh) goes through this
+# guard first, so a build started on the wrong machine cannot silently delete
+# a VM that is in use on another one. Override deliberately with FORCE_HOST=1.
+#
+# Only a disk that actually holds an installed system (>100MB) is protected. A
+# freshly created VDI is ~2MB and holds nothing, so a build that got as far as
+# creating the disk and then failed does not leave a guard behind to trip over.
+guard_host:
+	@stamp="$(VM_PATH)/$(VM_NAME)/.built-on"; \
+	vdi="$(VM_PATH)/$(VM_NAME)/$(VM_NAME).vdi"; \
+	sz=0; [ -f "$$vdi" ] && sz=$$(stat -c %s "$$vdi" 2>/dev/null || echo 0); \
+	if [ -r "$$stamp" ] && [ "$$sz" -gt 104857600 ]; then \
+		owner=$$(head -n1 "$$stamp" | awk '{print $$1}'); \
+		me=$$(hostname -f 2>/dev/null || hostname); \
+		if [ -n "$$owner" ] && [ "$$owner" != "$$me" ] && [ "$(FORCE_HOST)" != "1" ]; then \
+			printf "$(C_RED)✗$(C_RESET) Refusing to destroy VM \"$(VM_NAME)\" — it belongs to another machine.\n\n"; \
+			printf "    built on : %s\n" "$$(head -n1 "$$stamp")"; \
+			printf "    you are  : %s\n" "$$me"; \
+			printf "    disk     : %s MB of installed system\n" "$$((sz / 1048576))"; \
+			printf "\n  Your home is shared over NFS, so this is the SAME disk that machine\n"; \
+			printf "  uses. Deleting it here would destroy a working VM over there.\n\n"; \
+			printf "  Deliberately override by adding $(C_BOLD)FORCE_HOST=1$(C_RESET) to your command,\n"; \
+			printf "  e.g.  $(C_BOLD)make re FORCE_HOST=1$(C_RESET)\n\n"; \
+			exit 1; \
+		fi; \
+	fi
+
 # =========@@ Fix incompatible HWE kernel (VirtualBox DKMS) @@=================
 fix_hwe:
 	@bash fixes/fix_hwe_kernel.sh
@@ -347,7 +446,7 @@ pop_iso:
 	 mv tmp_$(VMS_ISO_TAR) $(VMS_ISO_TAR)
 
 # =========@@ Destroy helpers @@===============================================
-rm_disk_image:
+rm_disk_image: guard_host
 	@if VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
 		state=$$(VBoxManage showvminfo "$(VM_NAME)" --machinereadable 2>/dev/null \
 			| grep '^VMState=' | cut -d'"' -f2); \
@@ -356,11 +455,11 @@ rm_disk_image:
 			VBoxManage controlvm "$(VM_NAME)" poweroff 2>/dev/null || true; \
 			sleep 3; \
 			i=0; while [ $$i -lt 10 ]; do \
-				if VBoxManage modifyvm "$(VM_NAME)" --description "" 2>/dev/null; then break; fi; \
+				if VBoxManage modifyvm "$(VM_NAME)" --description "" >/dev/null 2>&1; then break; fi; \
 				sleep 1; i=$$((i+1)); \
 			done; \
 		fi; \
-		if VBoxManage unregistervm "$(VM_NAME)" --delete 2>/dev/null; then \
+		if VBoxManage unregistervm "$(VM_NAME)" --delete >/dev/null 2>&1; then \
 			printf "$(C_GREEN)✓$(C_RESET) VM \"$(VM_NAME)\" removed\n"; \
 		else \
 			printf "$(C_RED)✗$(C_RESET) Failed to unregister VM — forcing cleanup\n"; \
@@ -375,7 +474,7 @@ rm_disk_image:
 
 prune_vms:
 	@for vm in $$(VBoxManage list vms 2>/dev/null | awk '{print $$1}' | tr -d '"'); do \
-		VBoxManage unregistervm "$$vm" --delete 2>/dev/null; \
+		VBoxManage unregistervm "$$vm" --delete >/dev/null 2>&1; \
 	done; \
 	printf "$(C_GREEN)✓$(C_RESET) All VMs removed\n"
 
@@ -384,7 +483,7 @@ clean:
 	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed.iso debian_iso_extract
 
 fclean: clean rm_disk_image
-	$(RM) $(DISK_DIR)
+	$(RM) $(VM_PATH)
 	$(RM) "$(VM_PATH)/$(VM_NAME)"
 
 re: fclean all
@@ -422,6 +521,12 @@ inception:
 verify_access:
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/verify_inception_access.sh
 
+# Common misspelling. `make` has no "did you mean", so a typo here fails with a
+# bare "No rule to make target" right after host_access printed all-green --
+# which reads as the setup having broken, when nothing has. Same reasoning as
+# the bstart_vm alias above.
+verif_access: verify_access
+
 # =========@@ Editor + shell provisioning @@===================================
 # `make all` already bakes both of these into the ISO and runs them at first
 # boot. These targets are the other half: applying them over SSH to a VM that
@@ -439,6 +544,15 @@ nvim:
 
 hellish_plugins:
 	@bash setup/host/provision_vm.sh "$(VM_NAME)" hellish
+
+# Re-run upstream's hellish installer inside a VM that is already built:
+#   curl -fsSL .../hellish/main/install.sh | sh
+# driven with --yes, so every question takes its default instead of needing
+# answers piped in. Installs the current release + the plugin framework, then
+# re-applies the SSH-compatibility wrapper. `make all` already does this on
+# first boot; this is for iterating without a rebuild.
+shell_vm:
+	@bash setup/host/provision_vm.sh "$(VM_NAME)" shell
 
 provision:
 	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \

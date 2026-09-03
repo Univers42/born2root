@@ -635,16 +635,50 @@ else
 	echo "[SKIP] Neovim — /root/install_nvim.sh not present"
 fi
 
-echo "--- Installing hellishrc plugin framework ---"
-if [ -f /root/install_hellish_plugins.sh ]; then
-	chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
-	if HELLISH_USERS="dlesieur" bash /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-		echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
+### ─── The login shell, from upstream ────────────────────────────────────────
+# b2b-setup.sh already installed the ISO-baked binary in the installer chroot,
+# which is what guarantees a usable shell even with no network. This step runs
+# upstream's own installer now that there IS a network, so the VM gets the
+# current release plus the whole plugin framework in one go:
+#
+#   curl -fsSL .../hellish/main/install.sh | sh   -- driven with --yes here, so
+#   every question takes its default instead of needing keystrokes piped in.
+#
+# It also re-installs the SSH-compatibility wrapper, without which `ssh b2b
+# '<command>'` from the host would run inside hellish and the host-side
+# pipeline (make inception, provision, the verifiers) could not drive the VM.
+echo "--- Installing hellish from upstream (binary + plugin framework) ---"
+HELLISH_OK=0
+if [ -f /root/install_hellish_upstream.sh ]; then
+	chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
+	if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
+		bash /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+		echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
+		HELLISH_OK=1
 	else
-		echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
+		echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
 	fi
 else
-	echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+	echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
+fi
+
+# Fallback only. The upstream installer brings the plugin framework itself, so
+# this runs when that failed (no network, upstream down) and the framework is
+# therefore absent -- never on top of a good install.
+if [ "$HELLISH_OK" != "1" ] && [ ! -f /home/dlesieur/.hellishrc ]; then
+	echo "--- Installing hellishrc plugin framework (fallback) ---"
+	if [ -f /root/install_hellish_plugins.sh ]; then
+		chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+		if HELLISH_USERS="dlesieur" bash /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+			echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
+		else
+			echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
+		fi
+	else
+		echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+	fi
+else
+	echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
 fi
 
 ### ─── 4c. Herdr, Claude Code, and the optional local AI ────────────────────

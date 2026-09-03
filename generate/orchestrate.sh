@@ -519,15 +519,29 @@ _dashboard_width
 draw_dashboard true
 
 # Step 1 — VirtualBox
-if command -v VBoxManage > /dev/null 2>&1; then
-	STEP_STATUS[0]="skip"
-	STEP_DETAIL[0]="v$(VBoxManage --version 2> /dev/null)"
-	draw_dashboard
-else
+# `VBoxManage --version` prints its "vboxdrv kernel module is not loaded"
+# warning on STDOUT, so "v$(VBoxManage --version 2>/dev/null)" used to paste
+# that whole warning into this row -- a green "ready vWARNING: ..." on a
+# machine that could not start a VM, which then failed 46 seconds later at
+# startvm with no statement of the cause. Take the version only.
+vbox_version() {
+	VBoxManage --version 2> /dev/null \
+		| grep -oE '^[0-9]+\.[0-9]+\.[0-9]+r?[0-9]*' | tail -1
+}
+
+if ! command -v VBoxManage > /dev/null 2>&1; then
 	run_step 0 ${MAKE_CMD} --no-print-directory deps
-	STEP_DETAIL[0]="v$(VBoxManage --version 2> /dev/null)"
-	draw_dashboard
 fi
+
+# The kernel driver is PER-MACHINE state: a 42 home is on NFS and follows you
+# between workstations, but vboxdrv does not. So this repo can build on one
+# machine and be unable to start a VM on the next with nothing changed. Gate
+# here, before an ISO is downloaded or a VM is touched, and let the check's
+# own diagnosis be the error log.
+run_step 0 env NO_COLOR=1 VM_NAME="${VM_NAME}" \
+	bash "$(dirname "$0")/../setup/host/check_vbox_driver.sh"
+STEP_DETAIL[0]="v$(vbox_version)"
+draw_dashboard
 
 # Step 2 — Preseeded ISO
 FORCE_ISO="${FORCE_ISO:-0}"

@@ -101,11 +101,11 @@ vm_state() {
 }
 
 # Host port currently bound to a named NAT rule ("" when the rule is absent).
-get_forward_port() {
-	VBoxManage showvminfo "$VM_NAME" --machinereadable 2> /dev/null \
-		| awk -F'"' -v rule="$1" '$1 ~ /^Forwarding/ && $2 ~ "^" rule "," { print $2; exit }' \
-		| cut -d',' -f4
-}
+# Backend-aware: a VirtualBox NAT rule or a QEMU hostfwd, whichever exists.
+# shellcheck source=setup/host/vm_ports.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vm_ports.sh"
+
+get_forward_port() { vm_forward_port "$1"; }
 
 # Create a NAT rule only if that name has none yet. Never rewrites an existing
 # rule: orchestrate.sh may have moved the port to avoid a clash on this host,
@@ -333,6 +333,17 @@ configure_firefox() {
 			# The site is HTTPS on a self-signed local CA. Leaving HTTPS-only
 			# mode to auto-upgrade the plain-HTTP bonus site would break it.
 			printf 'user_pref("dom.security.https_only_mode", false);\n'
+			printf 'user_pref("dom.security.https_only_mode_pbm", false);\n'
+			# https_first is a SEPARATE pref and defaults to TRUE from Firefox
+			# 129 on. It silently rewrites http:// navigations to https://, so
+			# the bonus static site -- plain HTTP on 8090 -- answered with an
+			# HTTP response that the browser then parsed as TLS:
+			#   "SSL received a record that exceeded the maximum permissible
+			#    length"
+			# which reads as a broken server and is really an upgraded request.
+			# Turning https_only_mode off does NOT cover this one.
+			printf 'user_pref("dom.security.https_first", false);\n'
+			printf 'user_pref("dom.security.https_first_pbm", false);\n'
 			# The PAC lives inside the profile because snap confinement blocks
 			# a snap Firefox from reading hidden paths elsewhere in $HOME.
 			pac_body > "$profile/$PAC_NAME"
@@ -675,9 +686,18 @@ if have_vm; then
 	P_HTTP=$(ensure_forward http "$PREF_HTTP_PORT" "$GUEST_HTTP")
 	P_ADMINER=$(ensure_forward inception-adminer "$PREF_ADMINER_PORT" 8080)
 	ok "NAT forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}  adminer→${P_ADMINER}"
+elif [ "$(vm_backend)" = "qemu" ]; then
+	# A QEMU VM forwards with -netdev hostfwd=, decided when it was launched.
+	# There is nothing to create here and nothing that could be changed now, so
+	# just read the map qemu_vm.sh published and use it.
+	P_HTTPS=$(vm_forward_port https)   || P_HTTPS="$PREF_HTTPS_PORT"
+	P_STATIC=$(vm_forward_port inception-static) || P_STATIC="$PREF_STATIC_PORT"
+	P_HTTP=$(vm_forward_port http)     || P_HTTP="$PREF_HTTP_PORT"
+	P_ADMINER=$(vm_forward_port inception-adminer) || P_ADMINER="$PREF_ADMINER_PORT"
+	ok "QEMU forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}  adminer→${P_ADMINER}"
 else
 	P_HTTPS="$PREF_HTTPS_PORT"; P_STATIC="$PREF_STATIC_PORT"; P_HTTP="$PREF_HTTP_PORT"
-	warn "VM '$VM_NAME' not registered yet — assuming default ports"
+	warn "no VM found for '$VM_NAME' (neither VirtualBox nor QEMU) — assuming default ports"
 fi
 
 PROXY_PORT=$(pick_proxy_port)

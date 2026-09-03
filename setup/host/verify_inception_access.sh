@@ -34,11 +34,11 @@ fail() { printf "  ${C_RED}✗${C_RESET} %s\n" "$*"; FAILED=$((FAILED + 1)); }
 warn() { printf "  ${C_YELLOW}⚠${C_RESET}  %s\n" "$*"; }
 head_() { printf "\n${C_BOLD}%s${C_RESET}\n" "$*"; }
 
-get_forward_port() {
-	VBoxManage showvminfo "$VM_NAME" --machinereadable 2> /dev/null \
-		| awk -F'"' -v rule="$1" '$1 ~ /^Forwarding/ && $2 ~ "^" rule "," { print $2; exit }' \
-		| cut -d',' -f4
-}
+# Backend-aware: a VirtualBox NAT rule or a QEMU hostfwd, whichever exists.
+# shellcheck source=setup/host/vm_ports.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vm_ports.sh"
+
+get_forward_port() { vm_forward_port "$1"; }
 
 # ── 1. NAT forwards ─────────────────────────────────────────────────────────
 head_ "NAT port forwarding"
@@ -169,6 +169,7 @@ for root in "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox
 		found=$((found + 1))
 		if grep -q "network.dns.localDomains.*${DOMAIN}" "${d}user.js" 2> /dev/null \
 			&& grep -q 'network.proxy.autoconfig_url' "${d}user.js" 2> /dev/null \
+			&& grep -q 'dom.security.https_first", false' "${d}user.js" 2> /dev/null \
 			&& [ -f "${d}inception.pac" ]; then
 			configured=$((configured + 1))
 		fi
@@ -293,6 +294,29 @@ PYEOF
 	fi
 	kill "$probe_pid" 2> /dev/null
 	wait "$probe_pid" 2> /dev/null
+	rm -rf "$tmpdir"
+fi
+
+# The bonus site is plain HTTP. Firefox's https_first would upgrade it to
+# HTTPS and fail with "SSL received a record that exceeded the maximum
+# permissible length" -- a TLS error about a server that speaks no TLS. Prove
+# a real browser loads it, rather than trusting the pref to mean what it says.
+if command -v firefox > /dev/null 2>&1 && [ "$found" -gt 0 ]; then
+	tmpdir=$(mktemp -d "$HOME/b2b-ffstatic.XXXXXX")
+	mkdir -p "$tmpdir/profile"
+	{
+		printf 'user_pref("network.dns.localDomains", "%s");\n' "$DOMAIN"
+		printf 'user_pref("network.proxy.type", 0);\n'
+		printf 'user_pref("dom.security.https_only_mode", false);\n'
+		printf 'user_pref("dom.security.https_first", false);\n'
+	} > "$tmpdir/profile/user.js"
+	timeout 90 firefox --headless --profile "$tmpdir/profile" \
+		--screenshot "$tmpdir/shot.png" "http://${DOMAIN}:${P_STATIC}/" > /dev/null 2>&1
+	if [ -s "$tmpdir/shot.png" ]; then
+		pass "headless Firefox loaded the plain-HTTP bonus site (no https upgrade)"
+	else
+		fail "Firefox could not load http://${DOMAIN}:${P_STATIC}/ — https_first may be upgrading it"
+	fi
 	rm -rf "$tmpdir"
 fi
 
