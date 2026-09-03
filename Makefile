@@ -152,7 +152,22 @@ backend:
 QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)"
 
+# Boots the ISO and runs the unattended install, which REFORMATS the disk.
+# A qcow2 that has grown past ~1GB already holds an installed system, so
+# running this on it would destroy a working VM -- the same reasoning as
+# install_vm_debian.sh keeping an existing VDI. Refuse, and say how to mean it.
 qemu_install:
+	@disk="$(VM_PATH)/$(VM_NAME)/$(VM_NAME).qcow2"; \
+	sz=0; [ -f "$$disk" ] && sz=$$(stat -c %s "$$disk" 2>/dev/null || echo 0); \
+	if [ "$$sz" -gt 1073741824 ] && [ "$(FORCE_INSTALL)" != "1" ]; then \
+		printf "$(C_RED)✗$(C_RESET) Refusing to reinstall over an existing system.\n\n"; \
+		printf "    disk : %s (%s MB)\n" "$$disk" "$$((sz / 1048576))"; \
+		printf "\n  The installer reformats the disk, so this would destroy the VM\n"; \
+		printf "  that is already installed there.\n\n"; \
+		printf "    $(C_BOLD)make qemu_start$(C_RESET)                    boot what is already there\n"; \
+		printf "    $(C_BOLD)make qemu_install FORCE_INSTALL=1$(C_RESET)  wipe it and install again\n\n"; \
+		exit 1; \
+	fi
 	@$(QEMU_ENV) bash setup/host/qemu_vm.sh create
 	@$(QEMU_ENV) bash setup/host/qemu_vm.sh install
 
