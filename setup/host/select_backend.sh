@@ -37,7 +37,7 @@ say() { printf "%b\n" "$*" >&2; }
 vbox_ok=0
 vbox_why="VBoxManage not installed"
 if command -v VBoxManage > /dev/null 2>&1; then
-	if [ -c /dev/vboxdrv ] && lsmod 2> /dev/null | grep -q '^vboxdrv'; then
+	if [ -c /dev/vboxdrv ]; then
 		vbox_ok=1; vbox_why="ready"
 	else
 		vbox_why="installed, but the vboxdrv kernel module is not loaded (needs root)"

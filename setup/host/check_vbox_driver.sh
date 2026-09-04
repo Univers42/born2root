@@ -89,7 +89,7 @@ VER=$(vbox_version)
 # /dev/vboxdrv is what VBoxManage opens. A loaded module without the device
 # node, or a node with no module, are both unusable — so check both.
 DRIVER_OK=0
-if [ -c /dev/vboxdrv ] && lsmod 2> /dev/null | grep -q '^vboxdrv'; then
+if [ -c /dev/vboxdrv ]; then
 	DRIVER_OK=1
 fi
 
@@ -134,7 +134,7 @@ fi
 
 # Can the person reading this actually fix it? Only if they can run sudo.
 CAN_SUDO=0
-if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qx sudo; then
+if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qEx 'sudo|wheel'; then
 	CAN_SUDO=1
 fi
 
