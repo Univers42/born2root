@@ -37,8 +37,20 @@ say() { printf "%b\n" "$*" >&2; }
 vbox_ok=0
 vbox_why="VBoxManage not installed"
 if command -v VBoxManage > /dev/null 2>&1; then
-	if [ -c /dev/vboxdrv ] && lsmod 2> /dev/null | grep -q '^vboxdrv'; then
+	# /sys/module/<name> exists exactly when the module is loaded. Do NOT use
+	# `lsmod | grep -q` here: with pipefail, grep -q exits on the first match,
+	# lsmod gets SIGPIPE on its next write (its output is >4 KB), and the whole
+	# pipeline reports failure -- a loaded driver shows up as "not loaded".
+	if [ -c /dev/vboxdrv ] && [ -d /sys/module/vboxdrv ]; then
 		vbox_ok=1; vbox_why="ready"
+		# A loaded driver is not the whole story. VT-x belongs to one
+		# hypervisor at a time, and a running KVM guest holds it: VirtualBox
+		# would fail with VERR_VMX_IN_VMX_ROOT_MODE -- the mirror image of
+		# the EBUSY that kvm_probe.sh catches in the other direction.
+		if kvm_users=$(bash "$(dirname "${BASH_SOURCE[0]}")/kvm_probe.sh" users); then
+			vbox_ok=0
+			vbox_why="blocked: a KVM guest is running ($(printf '%s' "$kvm_users" | paste -sd, -)) and holds VT-x; one hypervisor at a time"
+		fi
 	else
 		vbox_why="installed, but the vboxdrv kernel module is not loaded (needs root)"
 	fi
@@ -47,12 +59,16 @@ fi
 qemu_ok=0
 qemu_why="qemu-system-x86_64 not installed"
 if command -v qemu-system-x86_64 > /dev/null 2>&1; then
-	if [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-		qemu_ok=1; qemu_why="ready (KVM accelerated)"
+	# Ask KVM for a VM the way QEMU will, instead of trusting the permission
+	# bits on /dev/kvm. The difference matters: while a VirtualBox VM runs it
+	# owns VT-x, and KVM_CREATE_VM fails with EBUSY even though /dev/kvm is
+	# perfectly readable. See kvm_probe.sh for the mechanism.
+	# Without KVM QEMU still runs, but a Debian install under pure emulation
+	# takes hours. Offering it silently would be a trap.
+	if qemu_why=$(bash "$(dirname "${BASH_SOURCE[0]}")/kvm_probe.sh"); then
+		qemu_ok=1
 	else
-		# Without KVM QEMU still runs, but a Debian install under pure
-		# emulation takes hours. Offering it silently would be a trap.
-		qemu_why="installed, but /dev/kvm is not readable/writable by you"
+		qemu_why="installed, but ${qemu_why}"
 	fi
 fi
 
