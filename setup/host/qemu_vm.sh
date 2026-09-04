@@ -239,6 +239,7 @@ launch() {
 		-monitor "unix:${MONITOR},server=on,wait=off" \
 		-display none \
 		-daemonize \
+		-no-reboot \
 		-pidfile "$PIDFILE" \
 		|| die "QEMU failed to start"
 
