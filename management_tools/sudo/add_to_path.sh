@@ -100,7 +100,8 @@ add_program_to_path() {
     read -r create_symlink
 
     if [[ "$create_symlink" =~ ^[Yy]$ ]]; then
-        local program_basename=$(basename "$selected_path")
+        local program_basename
+        program_basename=$(basename "$selected_path")
         echo -e "📝 Enter a name for the command (default: $program_basename): "
         read -r symlink_name
 

@@ -14,7 +14,8 @@ mkdir -p "$BACKUP_DIR"
 
 # Function to create a complete backup of LVM configuration
 backup_lvm_config() {
-    local backup_id=$(date +%Y%m%d_%H%M%S)
+    local backup_id
+    backup_id=$(date +%Y%m%d_%H%M%S)
     local backup_path="$BACKUP_DIR/lvm_backup_$backup_id"
     mkdir -p "$backup_path"
 
@@ -109,7 +110,8 @@ restore_lvm_config() {
     echo -e "${YELLOW}Available backups:${NC}"
     local i=1
     for backup in "${backups[@]}"; do
-        local backup_date=$(echo "$backup" | sed 's/lvm_backup_\([0-9]\{8\}_[0-9]\{6\}\).*/\1/')
+        local backup_date
+        backup_date=$(echo "$backup" | sed 's/lvm_backup_\([0-9]\{8\}_[0-9]\{6\}\).*/\1/')
         backup_date=$(date -d "${backup_date:0:8} ${backup_date:9:2}:${backup_date:11:2}:${backup_date:13:2}" "+%Y-%m-%d %H:%M:%S")
         echo -e "  ${YELLOW}$i)${NC} $backup_date"
         i=$((i + 1))
@@ -181,12 +183,14 @@ extend_logical_volume() {
 
     # Create backup before proceeding
     echo -e "${YELLOW}Creating LVM configuration backup before making changes...${NC}"
-    local backup_id=$(backup_lvm_config)
+    local backup_id
+    backup_id=$(backup_lvm_config)
     echo -e "${GREEN}You can restore to this point using Backup ID: $backup_id${NC}"
 
     # Check if the VG has enough free space
-    local free_space=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $7}')
-    local free_unit=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $8}')
+    local free_space free_unit
+    free_space=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $7}')
+    free_unit=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $8}')
 
     echo -e "Available space: ${free_space}${free_unit}"
 
@@ -213,7 +217,8 @@ extend_logical_volume() {
         echo -e "${GREEN}Logical volume extended successfully!${NC}"
 
         # Get filesystem type
-        local fs_type=$(sudo blkid -o value -s TYPE /dev/${vg_name}/${lv_name})
+        local fs_type
+        fs_type=$(sudo blkid -o value -s TYPE /dev/${vg_name}/${lv_name})
         echo -e "Detected filesystem: ${fs_type}"
 
         echo -e "${YELLOW}Resizing filesystem to use new space...${NC}"
@@ -254,7 +259,8 @@ rename_volume_group() {
 
     # Create backup before proceeding
     echo -e "${YELLOW}Creating LVM configuration backup before making changes...${NC}"
-    local backup_id=$(backup_lvm_config)
+    local backup_id
+    backup_id=$(backup_lvm_config)
     echo -e "${GREEN}You can restore to this point using Backup ID: $backup_id${NC}"
 
     # Check if this is likely a system VG
@@ -335,7 +341,8 @@ create_logical_volume() {
 
     # Create backup before proceeding
     echo -e "${YELLOW}Creating LVM configuration backup before making changes...${NC}"
-    local backup_id=$(backup_lvm_config)
+    local backup_id
+    backup_id=$(backup_lvm_config)
     echo -e "${GREEN}You can restore to this point using Backup ID: $backup_id${NC}"
 
     # Check if VG exists
@@ -353,8 +360,9 @@ create_logical_volume() {
     fi
 
     # Check free space
-    local free_space=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $7}')
-    local free_unit=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $8}')
+    local free_space free_unit
+    free_space=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $7}')
+    free_unit=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $8}')
     echo -e "Available space: ${free_space}${free_unit}"
 
     # Confirm action

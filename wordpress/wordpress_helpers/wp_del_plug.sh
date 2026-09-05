@@ -166,7 +166,7 @@ for plugin_dir in "$PLUGINS_DIR"/*; do
         # Set status (since we can't easily check active status without DB access)
         PLUGIN_STATUSES[$index]="Unknown"
 
-        ((index++))
+        index=$((index + 1))
     fi
 done
 
@@ -251,11 +251,11 @@ for id in "${SELECTED_PLUGINS[@]}"; do
     # Try to delete
     if rm -rf "$plugin_dir"; then
         echo -e "  ${GREEN}✓ Successfully deleted $plugin_name${NC}"
-        ((SUCCESS++))
+        SUCCESS=$((SUCCESS + 1))
     else
         echo -e "  ${RED}✗ Failed to delete $plugin_name. Permission issue?${NC}"
         echo -e "  Try running the script with sudo privileges."
-        ((FAILURE++))
+        FAILURE=$((FAILURE + 1))
     fi
 done
 

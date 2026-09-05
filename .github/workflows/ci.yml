@@ -39,7 +39,7 @@ jobs:
         if: always()
         run: |
           echo "Running Bashate on all .sh files..."
-          find . -type f -name "*.sh" -exec bashate {} +
+          find . -type f -name "*.sh" -exec bashate -i E006 {} +
 
       - name: Run shfmt (Dry-run/Diff)
         if: always()

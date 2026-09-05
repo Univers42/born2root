@@ -14,9 +14,10 @@ last_boot_module() {
     # Method 1: Using who command
     get_boot_who() {
         if command -v who &>/dev/null; then
-            local who_output=$(who -b 2>/dev/null)
+            local who_output boot_time
+            who_output=$(who -b 2>/dev/null)
             if [ -n "$who_output" ]; then
-                local boot_time=$(echo "$who_output" | awk '{print $3 " " $4}')
+                boot_time=$(echo "$who_output" | awk '{print $3 " " $4}')
                 if [ -n "$boot_time" ]; then
                     format_boot_time "$boot_time"
                 else
@@ -33,9 +34,10 @@ last_boot_module() {
     # Method 2: Using last reboot command
     get_boot_last() {
         if command -v last &>/dev/null; then
-            local boot_info=$(last reboot 2>/dev/null | head -1)
+            local boot_info boot_time
+            boot_info=$(last reboot 2>/dev/null | head -1)
             if [[ -n "$boot_info" && "$boot_info" != *"wtmp begins"* ]]; then
-                local boot_time=$(echo "$boot_info" | awk '{print $5 " " $6 " " $7 " " $8}')
+                boot_time=$(echo "$boot_info" | awk '{print $5 " " $6 " " $7 " " $8}')
                 if [ -n "$boot_time" ]; then
                     format_boot_time "$boot_time"
                 else
@@ -52,7 +54,8 @@ last_boot_module() {
     # Method 3: Using uptime -s
     get_boot_uptime() {
         if command -v uptime &>/dev/null && uptime -s &>/dev/null; then
-            local uptime_output=$(uptime -s 2>/dev/null)
+            local uptime_output
+            uptime_output=$(uptime -s 2>/dev/null)
             if [ -n "$uptime_output" ]; then
                 echo "$uptime_output"
             else
@@ -66,10 +69,11 @@ last_boot_module() {
     # Method 4: Using /proc/uptime
     get_boot_proc() {
         if [[ -f /proc/uptime ]]; then
-            local current_time=$(date +%s)
-            local uptime_seconds=$(cat /proc/uptime 2>/dev/null | awk '{print $1}' | cut -d. -f1)
+            local current_time uptime_seconds boot_time
+            current_time=$(date +%s)
+            uptime_seconds=$(cat /proc/uptime 2>/dev/null | awk '{print $1}' | cut -d. -f1)
             if [ -n "$uptime_seconds" ]; then
-                local boot_time=$((current_time - uptime_seconds))
+                boot_time=$((current_time - uptime_seconds))
                 date -d "@$boot_time" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "N/A"
             else
                 echo "N/A"

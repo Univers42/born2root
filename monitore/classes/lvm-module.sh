@@ -7,7 +7,8 @@ lvm_module() {
     # Method 1: Using lsblk
     get_lvm_lsblk() {
         if command -v lsblk &>/dev/null; then
-            local lvm_count=$(lsblk 2>/dev/null | grep "lvm" | wc -l)
+            local lvm_count
+            lvm_count=$(lsblk 2>/dev/null | grep "lvm" | wc -l)
             if [ $lvm_count -eq 0 ]; then
                 echo "no"
             else
@@ -21,7 +22,8 @@ lvm_module() {
     # Method 2: Using lvs command
     get_lvm_lvs() {
         if command -v lvs &>/dev/null; then
-            local lvs_output=$(lvs 2>/dev/null)
+            local lvs_output
+            lvs_output=$(lvs 2>/dev/null)
             if [ -z "$lvs_output" ]; then
                 echo "no"
             else
@@ -35,7 +37,8 @@ lvm_module() {
     # Method 3: Using vgs command
     get_lvm_vgs() {
         if command -v vgs &>/dev/null; then
-            local vgs_output=$(vgs 2>/dev/null)
+            local vgs_output
+            vgs_output=$(vgs 2>/dev/null)
             if [ -z "$vgs_output" ]; then
                 echo "no"
             else
@@ -49,7 +52,8 @@ lvm_module() {
     # Method 4: Checking /dev/mapper
     get_lvm_mapper() {
         if [ -d /dev/mapper ]; then
-            local mapper_entries=$(ls -la /dev/mapper/ 2>/dev/null | grep -v control | wc -l)
+            local mapper_entries
+            mapper_entries=$(ls -la /dev/mapper/ 2>/dev/null | grep -v control | wc -l)
             if [ $mapper_entries -le 1 ]; then
                 echo "no"
             else
@@ -63,7 +67,8 @@ lvm_module() {
     # Method 5: Checking /etc/fstab
     get_lvm_fstab() {
         if [ -f /etc/fstab ]; then
-            local fstab_lvm=$(grep "/dev/mapper" /etc/fstab 2>/dev/null | wc -l)
+            local fstab_lvm
+            fstab_lvm=$(grep "/dev/mapper" /etc/fstab 2>/dev/null | wc -l)
             if [ $fstab_lvm -eq 0 ]; then
                 echo "no"
             else

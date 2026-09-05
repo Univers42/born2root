@@ -86,16 +86,15 @@ _display_width() {
     printf '%s' "$text" | python3 -c "
 import sys, unicodedata, re
 s = re.sub(r'\x1b\[[0-9;]*m', '', sys.stdin.read())
-w = 0
-for c in s:
+def f(c):
     eaw = unicodedata.east_asian_width(c)
     if eaw in ('W', 'F'):
-        w += 2
+        return 2
     elif unicodedata.category(c) in ('Mn', 'Me', 'Cf') or c == '\ufe0f':
-        w += 0
+        return 0
     else:
-        w += 1
-print(w)
+        return 1
+print(sum(map(f, s)))
 " 2>/dev/null || {
         printf '%s' "$text" | sed 's/\x1b\[[0-9;]*m//g' | wc -m
     }
@@ -110,15 +109,22 @@ _auto_width() {
         stripped=$(printf '%b' "$line" | sed 's/\x1b\[[0-9;]*m//g')
         local vw
         vw=$(_display_width "$stripped")
-        if [ "$vw" -gt "$max_w" ]; then max_w="$vw"; fi
+        if [ "$vw" -gt "$max_w" ]; then
+            max_w="$vw"
+        fi
     done
     # Add 2 for right padding, clamp to [60, terminal_cols - 6]
     local term_w
     term_w=$(tput cols 2>/dev/null || echo 100)
     W=$((max_w + 2))
-    if [ "$W" -lt 60 ]; then W=60; fi
-    local max_allowed=$((term_w - 6))
-    if [ "$W" -gt "$max_allowed" ]; then W=$max_allowed; fi
+    if [ "$W" -lt 60 ]; then
+        W=60
+    fi
+    local max_allowed
+    max_allowed=$((term_w - 6))
+    if [ "$W" -gt "$max_allowed" ]; then
+        W=$max_allowed
+    fi
     return 0
 }
 
@@ -128,7 +134,8 @@ row() {
     stripped=$(printf '%b' "$content" | sed 's/\x1b\[[0-9;]*m//g')
     local vlen
     vlen=$(_display_width "$stripped")
-    local pad=$((W - vlen))
+    local pad
+    pad=$((W - vlen))
     [ "$pad" -lt 0 ] && pad=0
     printf "  ${CYN}│${RST}"
     printf '%b' "$content"
@@ -143,9 +150,10 @@ crow() {
     stripped=$(printf '%b' "$content" | sed 's/\x1b\[[0-9;]*m//g')
     local vlen
     vlen=$(_display_width "$stripped")
-    local total_pad=$((W - vlen))
-    local lpad=$((total_pad / 2))
-    local rpad=$((total_pad - lpad))
+    local total_pad lpad rpad
+    total_pad=$((W - vlen))
+    lpad=$((total_pad / 2))
+    rpad=$((total_pad - lpad))
     [ "$lpad" -lt 0 ] && lpad=0
     [ "$rpad" -lt 0 ] && rpad=0
     printf "  ${CYN}│${RST}"
@@ -242,7 +250,8 @@ draw_dashboard() {
         local det_str=""
         if [ -n "$det" ]; then
             # 2 lead + icon + 2 gap + 16 name + 1 gap + label + 1 gap
-            local avail=$((W - 5 - 16 - 1 - ${#label} - 1))
+            local avail
+            avail=$((W - 5 - 16 - 1 - ${#label} - 1))
             [ "$avail" -lt 8 ] && avail=8
             if [ "${#det}" -gt "$avail" ]; then
                 det="${det:0:$((avail - 1))}…"
@@ -306,7 +315,8 @@ run_phase() {
     # Spinner targets the row of step $idx
     # After draw_dashboard cursor is below bot border:
     #   1 up = bot, 2 up = last step, ... so step $idx = (num_steps - idx + 1) up
-    local lines_up=$((${#STEPS[@]} - idx + 1))
+    local lines_up
+    lines_up=$((${#STEPS[@]} - idx + 1))
     start_spinner "$lines_up"
 
     # Run the actual command in FOREGROUND (blocks until done)
@@ -380,7 +390,8 @@ get_host_ip() {
 UNLOCK_T0=0
 unlock_sleep() {
     sleep "$1"
-    local e=$(($(date +%s) - UNLOCK_T0))
+    local e
+    e=$(($(date +%s) - UNLOCK_T0))
     STEP_DETAIL[$S_BOOT]="unlocking LUKS, waiting for sshd... ${e}s"
     draw_dashboard
 }

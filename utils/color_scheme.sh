@@ -49,8 +49,9 @@ NC='\033[0m'
 # Simple header with text
 simple_header() {
     local text="$1"
-    local width=$(tput cols)
-    local padding=$(((width - ${#text}) / 2))
+    local width padding
+    width=$(tput cols)
+    padding=$(((width - ${#text}) / 2))
 
     echo ""
     printf "%${padding}s" ""
@@ -63,10 +64,11 @@ simple_header() {
 # Box header
 box_header() {
     local text="$1"
-    local width=$(tput cols)
-    local text_width=${#text}
-    local box_width=$((text_width + 4))
-    local padding=$(((width - box_width) / 2))
+    local width text_width box_width padding
+    width=$(tput cols)
+    text_width=${#text}
+    box_width=$((text_width + 4))
+    padding=$(((width - box_width) / 2))
 
     echo ""
     printf "%${padding}s" ""
@@ -83,8 +85,9 @@ box_header() {
 # Double-line header
 double_header() {
     local text="$1"
-    local width=$(tput cols)
-    local padding=$(((width - ${#text}) / 2))
+    local width padding
+    width=$(tput cols)
+    padding=$(((width - ${#text}) / 2))
 
     echo ""
     printf "%${width}s\n" "" | tr " " "="
@@ -97,8 +100,9 @@ double_header() {
 # Full-width banner header
 banner_header() {
     local text="$1"
-    local width=$(tput cols)
-    local padding=$(((width - ${#text}) / 2))
+    local width padding
+    width=$(tput cols)
+    padding=$(((width - ${#text}) / 2))
 
     echo ""
     echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
@@ -109,9 +113,10 @@ banner_header() {
 
 # System info header (like in your monitoring script)
 system_header() {
-    local hostname=$(hostname)
-    local username=$(whoami)
-    local date_time=$(date '+%a %b %d %H:%M:%S %Y')
+    local hostname username date_time
+    hostname=$(hostname)
+    username=$(whoami)
+    date_time=$(date '+%a %b %d %H:%M:%S %Y')
 
     echo -e "${YELLOW}Broadcast message from ${BOLD_YELLOW}root@${hostname}${NC} ${YELLOW}(tty1) (${date_time}):${NC}"
 }
@@ -137,8 +142,9 @@ info_msg() {
 progress_bar() {
     local percent=$1
     local width=50
-    local completed=$((percent * width / 100))
-    local remaining=$((width - completed))
+    local completed remaining
+    completed=$((percent * width / 100))
+    remaining=$((width - completed))
 
     printf "${BOLD_BLUE}[${BOLD_GREEN}"
     printf "%0.s█" $(seq 1 $completed)

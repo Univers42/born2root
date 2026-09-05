@@ -29,7 +29,8 @@ check_root() {
 # Function to create configuration backups
 backup_config() {
     local component=$1
-    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_path="$BACKUP_DIR/${component}_${timestamp}"
 
     echo -e "${YELLOW}Creating backup of ${component} configuration...${NC}"
@@ -98,7 +99,8 @@ restore_config() {
     echo -e "${YELLOW}Available backups:${NC}"
     local i=1
     for backup in "${backups[@]}"; do
-        local backup_date=$(echo "$backup" | sed "s/${component}_\([0-9]\{8\}_[0-9]\{6\}\).*/\1/")
+        local backup_date
+        backup_date=$(echo "$backup" | sed "s/${component}_\([0-9]\{8\}_[0-9]\{6\}\).*/\1/")
         backup_date=$(date -d "${backup_date:0:8} ${backup_date:9:2}:${backup_date:11:2}:${backup_date:13:2}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$backup_date")
         echo -e "  ${YELLOW}$i)${NC} $backup_date"
         i=$((i + 1))

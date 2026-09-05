@@ -7,10 +7,11 @@ memory_module() {
     # Method 1: Using free command
     get_memory_free() {
         if command -v free &>/dev/null; then
-            local total=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
-            local used=$(free -m 2>/dev/null | awk '/Mem:/ {print $3}')
-            if [[ -n "$total" && -n "$used" && "$total" -gt 0 ]]; then
-                local percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
+            local total used percent
+            total=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
+            used=$(free -m 2>/dev/null | awk '/Mem:/ {print $3}')
+            if [ -n "$total" ] && [ -n "$used" ] && [ "$total" -gt 0 ]; then
+                percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
                 echo "$used/$total MB ($percent%)"
             else
                 echo "N/A"
@@ -23,11 +24,12 @@ memory_module() {
     # Method 2: Using /proc/meminfo
     get_memory_proc() {
         if [ -f /proc/meminfo ]; then
-            local total=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2/1024}' | cut -d. -f1)
-            local avail=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2/1024}' | cut -d. -f1)
-            if [[ -n "$total" && -n "$avail" && "$total" -gt 0 ]]; then
-                local used=$((total - avail))
-                local percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
+            local total avail used percent
+            total=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2/1024}' | cut -d. -f1)
+            avail=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2/1024}' | cut -d. -f1)
+            if [ -n "$total" ] && [ -n "$avail" ] && [ "$total" -gt 0 ]; then
+                used=$((total - avail))
+                percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
                 echo "$used/$total MB ($percent%)"
             else
                 echo "N/A"
@@ -40,16 +42,14 @@ memory_module() {
     # Method 3: Using vmstat
     get_memory_vmstat() {
         if command -v vmstat &>/dev/null; then
-            local mem_info=$(vmstat -s 2>/dev/null)
-            if [ -n "$mem_info" ]; then
-                local total=$(echo "$mem_info" | grep "total memory" | awk '{print $1/1024}' | cut -d. -f1)
-                local used=$(echo "$mem_info" | grep "used memory" | awk '{print $1/1024}' | cut -d. -f1)
-                if [[ -n "$total" && -n "$used" && "$total" -gt 0 ]]; then
-                    local percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
-                    echo "$used/$total MB ($percent%)"
-                else
-                    echo "N/A"
-                fi
+            local total used free percent
+            total=$(vmstat -s 2>/dev/null | grep "total memory" | awk '{print $1/1024}' | cut -d. -f1)
+            # Some versions of vmstat use 'used memory' and 'free memory'
+            used=$(vmstat -s 2>/dev/null | grep "used memory" | awk '{print $1/1024}' | cut -d. -f1)
+            free=$(vmstat -s 2>/dev/null | grep "free memory" | awk '{print $1/1024}' | cut -d. -f1)
+            if [ -n "$total" ] && [ -n "$used" ] && [ "$total" -gt 0 ]; then
+                percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
+                echo "$used/$total MB ($percent%)"
             else
                 echo "N/A"
             fi
@@ -61,12 +61,13 @@ memory_module() {
     # Method 4: Using top in batch mode
     get_memory_top() {
         if command -v top &>/dev/null; then
-            local mem_line=$(top -b -n 1 2>/dev/null | grep "MiB Mem")
+            local mem_line total used percent
+            mem_line=$(top -b -n 1 2>/dev/null | grep "MiB Mem")
             if [ -n "$mem_line" ]; then
-                local total=$(echo "$mem_line" | awk '{print $4}' | cut -d. -f1)
-                local used=$(echo "$mem_line" | awk '{print $6}' | cut -d. -f1)
+                total=$(echo "$mem_line" | awk '{print $4}' | cut -d. -f1)
+                used=$(echo "$mem_line" | awk '{print $6}' | cut -d. -f1)
                 if [[ -n "$total" && -n "$used" && "$total" -gt 0 ]]; then
-                    local percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
+                    percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
                     echo "$used/$total MB ($percent%)"
                 else
                     echo "N/A"

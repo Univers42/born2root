@@ -15,7 +15,9 @@ echo "- Got architecture info"
 
 # CPU physical cores
 cpu_physical=$(grep "physical id" /proc/cpuinfo | sort | uniq | wc -l)
-if [ "$cpu_physical" -eq 0 ]; then cpu_physical=1; fi
+if [ "$cpu_physical" -eq 0 ]; then
+    cpu_physical=1
+fi
 echo "- Got CPU physical info"
 
 # CPU virtual cores

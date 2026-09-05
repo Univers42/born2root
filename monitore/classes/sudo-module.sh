@@ -7,7 +7,8 @@ sudo_command_module() {
     # Method 1: Using journalctl
     get_sudo_journalctl() {
         if command -v journalctl &>/dev/null; then
-            local sudo_count=$(journalctl _COMM=sudo 2>/dev/null | grep COMMAND | wc -l)
+            local sudo_count
+            sudo_count=$(journalctl _COMM=sudo 2>/dev/null | grep COMMAND | wc -l)
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -21,7 +22,8 @@ sudo_command_module() {
     # Method 2: Using auth.log
     get_sudo_authlog() {
         if [ -f /var/log/auth.log ]; then
-            local sudo_count=$(grep "sudo:" /var/log/auth.log 2>/dev/null | grep "COMMAND" | wc -l)
+            local sudo_count
+            sudo_count=$(grep "sudo:" /var/log/auth.log 2>/dev/null | grep "COMMAND" | wc -l)
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -35,7 +37,8 @@ sudo_command_module() {
     # Method 3: Using secure log (RHEL/CentOS)
     get_sudo_secure() {
         if [ -f /var/log/secure ]; then
-            local sudo_count=$(grep "sudo:" /var/log/secure 2>/dev/null | grep "COMMAND" | wc -l)
+            local sudo_count
+            sudo_count=$(grep "sudo:" /var/log/secure 2>/dev/null | grep "COMMAND" | wc -l)
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -49,7 +52,8 @@ sudo_command_module() {
     # Method 4: Using custom sudo log if configured
     get_sudo_custom() {
         if [ -f /var/log/sudo.log ]; then
-            local sudo_count=$(grep "COMMAND" /var/log/sudo.log 2>/dev/null | wc -l)
+            local sudo_count
+            sudo_count=$(grep "COMMAND" /var/log/sudo.log 2>/dev/null | wc -l)
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -63,7 +67,8 @@ sudo_command_module() {
     # Method 5: Using ausearch if available
     get_sudo_ausearch() {
         if command -v ausearch &>/dev/null; then
-            local sudo_count=$(ausearch -m USER_CMD -c sudo 2>/dev/null | grep -c "type=USER_CMD")
+            local sudo_count
+            sudo_count=$(ausearch -m USER_CMD -c sudo 2>/dev/null | grep -c "type=USER_CMD")
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else

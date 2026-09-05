@@ -483,7 +483,8 @@ check_disk_space() {
     local avail_kb
     avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
     [ -z "$avail_kb" ] && return 0
-    local avail_mb=$((avail_kb / 1024))
+    local avail_mb
+    avail_mb=$((avail_kb / 1024))
     if [ "$avail_mb" -lt "$min_mb" ]; then
         echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping"
         return 1

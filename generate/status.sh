@@ -43,7 +43,8 @@ row() {
     stripped=$(printf '%b' "$content" | sed 's/\x1b\[[0-9;]*m//g')
     local vlen
     vlen=$(printf '%s' "$stripped" | wc -m)
-    local pad=$((W - vlen))
+    local pad
+    pad=$((W - vlen))
     [ "$pad" -lt 0 ] && pad=0
     printf "  ${CYN}│${RST}"
     printf '%b' "$content"
@@ -58,9 +59,10 @@ crow() {
     stripped=$(printf '%b' "$content" | sed 's/\x1b\[[0-9;]*m//g')
     local vlen
     vlen=$(printf '%s' "$stripped" | wc -m)
-    local total_pad=$((W - vlen))
-    local lpad=$((total_pad / 2))
-    local rpad=$((total_pad - lpad))
+    local total_pad lpad rpad
+    total_pad=$((W - vlen))
+    lpad=$((total_pad / 2))
+    rpad=$((total_pad - lpad))
     [ "$lpad" -lt 0 ] && lpad=0
     [ "$rpad" -lt 0 ] && rpad=0
     printf "  ${CYN}│${RST}"
@@ -79,7 +81,8 @@ status_row() {
     local vis_val
     vis_val=$(printf '%b' "$value" | sed 's/\x1b\[[0-9;]*m//g')
     local vis_label="   X  ${label} "
-    local avail=$((W - ${#vis_label} - 1))
+    local avail
+    avail=$((W - ${#vis_label} - 1))
     if [ "${#vis_val}" -gt "$avail" ]; then
         # Truncate the raw value and re-wrap in color
         local trunc="${vis_val:0:$((avail - 2))}.."

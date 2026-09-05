@@ -7,7 +7,8 @@ disk_module() {
     # Method 1: Using df
     get_disk_df() {
         if command -v df &>/dev/null; then
-            local df_output=$(df -h --total 2>/dev/null | grep total)
+            local df_output
+            df_output=$(df -h --total 2>/dev/null | grep total)
             if [ -n "$df_output" ]; then
                 echo "$(echo "$df_output" | awk '{print $3"/"$2" ("$5")"}')"
             else
@@ -23,7 +24,8 @@ disk_module() {
         if command -v lsblk &>/dev/null; then
             # Filter out problematic characters and device types
             # Using more specific output format to avoid tree characters and focus on needed columns
-            local usage_data=$(lsblk -b -o NAME,SIZE,FSUSE%,MOUNTPOINT 2>/dev/null |
+            local usage_data
+            usage_data=$(lsblk -b -o NAME,SIZE,FSUSE%,MOUNTPOINT 2>/dev/null |
                 grep -v "^loop" |
                 sed '/^$/d' |
                 grep -v " $" |
@@ -37,12 +39,12 @@ disk_module() {
                 while read -r line; do
                     if [[ -n $line && $line != *"[SWAP]"* ]]; then
                         # Extract values more carefully
-                        local size=$(echo "$line" | awk '{print $2}')
-                        local use_percent=$(echo "$line" | awk '{print $3}' | tr -d '%')
+                        local size use_percent
+                        size=$(echo "$line" | awk '{print $2}')
+                        use_percent=$(echo "$line" | awk '{print $3}' | tr -d '%')
 
                         # Validate the extracted values
-                        if [[ -n "$size" && "$size" =~ ^[0-9]+$ && "$size" != "0" &&
-                            -n "$use_percent" && "$use_percent" =~ ^[0-9.]+$ ]]; then
+                        if [[ -n "$size" && "$size" =~ ^[0-9]+$ && "$size" != "0" && -n "$use_percent" && "$use_percent" =~ ^[0-9.]+$ ]]; then
                             total_size=$((total_size + size))
                             used_size=$(awk "BEGIN {print $used_size + ($size * $use_percent / 100)}")
                         fi
@@ -51,9 +53,10 @@ disk_module() {
 
                 if [[ $total_size -gt 0 ]]; then
                     # Convert to human readable
-                    local total_human=$(numfmt --to=iec --suffix=B $total_size 2>/dev/null || echo "$(($total_size / 1073741824))GB")
-                    local used_human=$(numfmt --to=iec --suffix=B ${used_size%.*} 2>/dev/null || echo "$((${used_size%.*} / 1073741824))GB")
-                    local use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total_size>0) ? $used_size*100/$total_size : 0}")
+                    local total_human used_human use_percent
+                    total_human=$(numfmt --to=iec --suffix=B $total_size 2>/dev/null || echo "$(($total_size / 1073741824))GB")
+                    used_human=$(numfmt --to=iec --suffix=B ${used_size%.*} 2>/dev/null || echo "$((${used_size%.*} / 1073741824))GB")
+                    use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total_size>0) ? $used_size*100/$total_size : 0}")
 
                     echo "$used_human/$total_human ($use_percent)"
                 else
@@ -71,7 +74,8 @@ disk_module() {
     get_disk_findmnt() {
         if command -v findmnt &>/dev/null; then
             # We'll use a more focused approach with findmnt to avoid special characters
-            local mounts=$(findmnt -t ext4,xfs,btrfs,vfat,fat,ntfs -o TARGET,SIZE,USED -b -n 2>/dev/null |
+            local mounts
+            mounts=$(findmnt -t ext4,xfs,btrfs,vfat,fat,ntfs -o TARGET,SIZE,USED -b -n 2>/dev/null |
                 grep -v "^/$" |
                 grep "[0-9]")
 
@@ -81,12 +85,12 @@ disk_module() {
 
                 while read -r mount; do
                     if [[ -n $mount ]]; then
-                        local mount_size=$(echo "$mount" | awk '{print $2}')
-                        local mount_used=$(echo "$mount" | awk '{print $3}')
+                        local mount_size mount_used
+                        mount_size=$(echo "$mount" | awk '{print $2}')
+                        mount_used=$(echo "$mount" | awk '{print $3}')
 
                         # Validate the values before using them
-                        if [[ -n "$mount_size" && "$mount_size" =~ ^[0-9]+$ &&
-                            -n "$mount_used" && "$mount_used" =~ ^[0-9]+$ ]]; then
+                        if [[ -n "$mount_size" && "$mount_size" =~ ^[0-9]+$ && -n "$mount_used" && "$mount_used" =~ ^[0-9]+$ ]]; then
                             total=$((total + mount_size))
                             used=$((used + mount_used))
                         fi
@@ -95,9 +99,10 @@ disk_module() {
 
                 if [[ $total -gt 0 ]]; then
                     # Convert to human readable
-                    local total_human=$(numfmt --to=iec --suffix=B $total 2>/dev/null || echo "$(($total / 1073741824))GB")
-                    local used_human=$(numfmt --to=iec --suffix=B $used 2>/dev/null || echo "$(($used / 1073741824))GB")
-                    local use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total>0) ? $used*100/$total : 0}")
+                    local total_human used_human use_percent
+                    total_human=$(numfmt --to=iec --suffix=B $total 2>/dev/null || echo "$(($total / 1073741824))GB")
+                    used_human=$(numfmt --to=iec --suffix=B $used 2>/dev/null || echo "$(($used / 1073741824))GB")
+                    use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total>0) ? $used*100/$total : 0}")
 
                     echo "$used_human/$total_human ($use_percent)"
                 else
@@ -128,7 +133,8 @@ disk_module() {
             echo "N/A"
             return
         fi
-        local percent=$(echo "$value" | grep -o '[0-9]*\.[0-9]*%\|[0-9]*%' | head -1 | sed 's/%//')
+        local percent
+        percent=$(echo "$value" | grep -o '[0-9]*\.[0-9]*%\|[0-9]*%' | head -1 | sed 's/%//')
         if [ -z "$percent" ]; then
             echo "N/A"
         else

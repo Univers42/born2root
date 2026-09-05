@@ -13,10 +13,11 @@ cpu_load_module() {
     # Method 1: Using top
     get_cpu_top() {
         if command -v top &>/dev/null; then
-            local top_output=$(top -bn2 2>/dev/null | grep "Cpu(s)" | tail -1)
+            local top_output cpu_usage
+            top_output=$(top -bn2 2>/dev/null | grep "Cpu(s)" | tail -1)
             if [ -n "$top_output" ]; then
                 # Extract both user and system CPU time
-                local cpu_usage=$(echo "$top_output" | awk '{print $2 + $4 + $6}')
+                cpu_usage=$(echo "$top_output" | awk '{print $2 + $4 + $6}')
                 if [ -n "$cpu_usage" ]; then
                     # Ensure we don't report exactly 0.0
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
@@ -38,9 +39,10 @@ cpu_load_module() {
     get_cpu_proc() {
         if [ -f /proc/stat ]; then
             # Take two samples with a slightly longer interval for better accuracy
-            local stat1=$(cat /proc/stat 2>/dev/null | grep '^cpu ')
+            local stat1 stat2
+            stat1=$(cat /proc/stat 2>/dev/null | grep '^cpu ')
             sleep 0.5
-            local stat2=$(cat /proc/stat 2>/dev/null | grep '^cpu ')
+            stat2=$(cat /proc/stat 2>/dev/null | grep '^cpu ')
 
             if [[ -n "$stat1" && -n "$stat2" ]]; then
                 # Parse the stats
@@ -64,12 +66,13 @@ cpu_load_module() {
                 local idle2=${cpu2[4]}
 
                 # Calculate total and idle time difference
-                local totald=$((total2 - total1))
-                local idled=$((idle2 - idle1))
+                local totald idled cpu_usage
+                totald=$((total2 - total1))
+                idled=$((idle2 - idle1))
 
                 if [ $totald -gt 0 ]; then
                     # Calculate CPU usage percentage
-                    local cpu_usage=$(awk "BEGIN {print (1 - $idled/$totald) * 100}")
+                    cpu_usage=$(awk "BEGIN {print (1 - $idled/$totald) * 100}")
                     # Ensure we don't report exactly 0.0
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
@@ -90,9 +93,10 @@ cpu_load_module() {
     get_cpu_mpstat() {
         if command -v mpstat &>/dev/null; then
             # Use a longer sampling time for better accuracy
-            local mpstat_output=$(mpstat 1 2 2>/dev/null)
+            local mpstat_output cpu_usage
+            mpstat_output=$(mpstat 1 2 2>/dev/null)
             if [ -n "$mpstat_output" ]; then
-                local cpu_usage=$(echo "$mpstat_output" | grep "Average.*all" | awk '{print 100 - $NF}')
+                cpu_usage=$(echo "$mpstat_output" | grep "Average.*all" | awk '{print 100 - $NF}')
                 if [ -n "$cpu_usage" ]; then
                     # Ensure we don't report exactly 0.0
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
@@ -114,11 +118,12 @@ cpu_load_module() {
     get_cpu_vmstat() {
         if command -v vmstat &>/dev/null; then
             # Take 3 samples over 2 seconds for better accuracy
-            local vmstat_output=$(vmstat 1 3 2>/dev/null | tail -1)
+            local vmstat_output cpu_idle cpu_usage
+            vmstat_output=$(vmstat 1 3 2>/dev/null | tail -1)
             if [ -n "$vmstat_output" ]; then
-                local cpu_idle=$(echo "$vmstat_output" | awk '{print $15}')
+                cpu_idle=$(echo "$vmstat_output" | awk '{print $15}')
                 if [ -n "$cpu_idle" ]; then
-                    local cpu_usage=$(awk "BEGIN {print 100 - $cpu_idle}")
+                    cpu_usage=$(awk "BEGIN {print 100 - $cpu_idle}")
                     # Ensure we don't report exactly 0.0
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
@@ -138,10 +143,11 @@ cpu_load_module() {
     # Method 5: Using uptime load average
     get_cpu_uptime() {
         if command -v uptime &>/dev/null; then
-            local uptime_output=$(uptime 2>/dev/null)
+            local uptime_output load cpu_usage
+            uptime_output=$(uptime 2>/dev/null)
             if [ -n "$uptime_output" ]; then
                 # Get 1-minute load average and convert to percentage
-                local load=$(echo "$uptime_output" | awk -F'[a-z]:' '{print $2}' | awk '{print $1}' | tr -d ',')
+                load=$(echo "$uptime_output" | awk -F'[a-z]:' '{print $2}' | awk '{print $1}' | tr -d ',')
                 if [ -n "$load" ]; then
                     # Get CPU core count to normalize load average
                     local cores=1
@@ -152,7 +158,7 @@ cpu_load_module() {
                     fi
 
                     # Convert load to percentage (load/cores * 100)
-                    local cpu_usage=$(awk "BEGIN {print ($load/$cores) * 100}")
+                    cpu_usage=$(awk "BEGIN {print ($load/$cores) * 100}")
                     # Ensure we don't report exactly 0.0
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"

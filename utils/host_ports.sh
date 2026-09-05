@@ -44,12 +44,12 @@ is_host_port_free() {
         # row the peer column is always *.*, 0.0.0.0:* or 0.0.0.0:0, so it can
         # never collide with a port we ask about.
         if netstat -an 2>/dev/null | awk -v p="$port" '
-			tolower($0) ~ /listen/ {
-				for (i = 1; i <= NF; i++)
-					if ($i ~ ("[:.]" p "$"))
-						found = 1
-			}
-			END { exit found ? 0 : 1 }'; then
+            tolower($0) ~ /listen/ {
+                for (i = 1; i <= NF; i++)
+                    if ($i ~ ("[:.]" p "$"))
+                        found = 1
+            }
+            END { exit found ? 0 : 1 }'; then
             return 1
         fi
     fi

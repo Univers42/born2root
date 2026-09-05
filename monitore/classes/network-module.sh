@@ -7,8 +7,9 @@ network_module() {
     # Method 1: Using hostname and ip commands
     get_network_hostname_ip() {
         if command -v hostname &>/dev/null && command -v ip &>/dev/null; then
-            local ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-            local mac=$(ip link show 2>/dev/null | grep "link/ether" | awk '{print $2}' | head -1)
+            local ip mac
+            ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            mac=$(ip link show 2>/dev/null | grep "link/ether" | awk '{print $2}' | head -1)
 
             if [[ -n "$ip" && -n "$mac" ]]; then
                 echo "IP $ip ($mac)"
@@ -23,8 +24,9 @@ network_module() {
     # Method 2: Using ifconfig command
     get_network_ifconfig() {
         if command -v ifconfig &>/dev/null; then
-            local ip=$(ifconfig 2>/dev/null | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | head -1)
-            local mac=$(ifconfig 2>/dev/null | grep "ether" | awk '{print $2}' | head -1)
+            local ip mac
+            ip=$(ifconfig 2>/dev/null | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | head -1)
+            mac=$(ifconfig 2>/dev/null | grep "ether" | awk '{print $2}' | head -1)
 
             if [[ -n "$ip" && -n "$mac" ]]; then
                 echo "IP $ip ($mac)"
@@ -40,12 +42,14 @@ network_module() {
     get_network_sysfs() {
         # Get first non-loopback interface
         if [ -d /sys/class/net ]; then
-            local interfaces=$(ls /sys/class/net/ 2>/dev/null | grep -v "lo")
-            local interface=$(echo "$interfaces" | head -1)
+            local interfaces interface
+            interfaces=$(ls /sys/class/net/ 2>/dev/null | grep -v "lo")
+            interface=$(echo "$interfaces" | head -1)
 
             if [[ -n "$interface" ]]; then
-                local ip=$(ip addr show $interface 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-                local mac=$(cat /sys/class/net/$interface/address 2>/dev/null)
+                local ip mac
+                ip=$(ip addr show $interface 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+                mac=$(cat /sys/class/net/$interface/address 2>/dev/null)
 
                 if [[ -n "$ip" && -n "$mac" ]]; then
                     echo "IP $ip ($mac)"
@@ -63,8 +67,9 @@ network_module() {
     # Method 4: Using nmcli
     get_network_nmcli() {
         if command -v nmcli &>/dev/null; then
-            local ip=$(nmcli -g IP4.ADDRESS device show 2>/dev/null | head -1 | cut -d/ -f1)
-            local mac=$(nmcli -g GENERAL.HWADDR device show 2>/dev/null | head -1)
+            local ip mac
+            ip=$(nmcli -g IP4.ADDRESS device show 2>/dev/null | head -1 | cut -d/ -f1)
+            mac=$(nmcli -g GENERAL.HWADDR device show 2>/dev/null | head -1)
 
             if [[ -n "$ip" && -n "$mac" ]]; then
                 echo "IP $ip ($mac)"

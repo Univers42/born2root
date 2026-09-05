@@ -7,7 +7,8 @@ architecture_module() {
     # Method 1: Using uname
     get_arch_uname() {
         if command -v uname &>/dev/null; then
-            local arch=$(uname -m)
+            local arch
+            arch=$(uname -m)
             if [ -n "$arch" ]; then
                 echo "$arch"
             else
@@ -21,7 +22,8 @@ architecture_module() {
     # Method 2: Using arch command
     get_arch_command() {
         if command -v arch &>/dev/null; then
-            local arch=$(arch 2>/dev/null)
+            local arch
+            arch=$(arch 2>/dev/null)
             if [ -n "$arch" ]; then
                 echo "$arch"
             else
@@ -35,7 +37,8 @@ architecture_module() {
     # Method 3: Using dpkg for Debian-based systems
     get_arch_dpkg() {
         if command -v dpkg &>/dev/null; then
-            local arch=$(dpkg --print-architecture 2>/dev/null)
+            local arch
+            arch=$(dpkg --print-architecture 2>/dev/null)
             if [ -n "$arch" ]; then
                 echo "$arch"
             else
@@ -49,7 +52,8 @@ architecture_module() {
     # Method 4: Using /proc/cpuinfo
     get_arch_cpuinfo() {
         if [ -f /proc/cpuinfo ]; then
-            local arch=$(grep -m1 "model name\|^vendor_id\|^machine" /proc/cpuinfo 2>/dev/null)
+            local arch
+            arch=$(grep -m1 "model name\|^vendor_id\|^machine" /proc/cpuinfo 2>/dev/null)
             if [ -n "$arch" ]; then
                 echo "$arch" | sed 's/.*: //'
             else

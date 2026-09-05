@@ -186,8 +186,9 @@ compare_numeric_values() {
     fi
 
     # Calculate the difference
-    local diff=$(awk "BEGIN {print sqrt(($reference-$value)^2)}")
-    local percent_diff=$(awk "BEGIN {print $reference != 0 ? ($diff/$reference)*100 : 100}")
+    local diff percent_diff
+    diff=$(awk "BEGIN {print sqrt(($reference-$value)^2)}")
+    percent_diff=$(awk "BEGIN {print $reference != 0 ? ($diff/$reference)*100 : 100}")
 
     # Check if the difference is within the threshold
     if (($(awk "BEGIN {print ($percent_diff > $threshold) ? 1 : 0}"))); then
@@ -260,8 +261,9 @@ verify_values() {
         # Check if the values are numeric (contains digits)
         if [[ "$reference" =~ [0-9] && "$val" =~ [0-9] ]]; then
             # Extract numeric part for verification if needed
-            local ref_num=$(echo "$reference" | grep -o '[0-9]*\.*[0-9]*' | head -1)
-            local val_num=$(echo "$val" | grep -o '[0-9]*\.*[0-9]*' | head -1)
+            local ref_num val_num
+            ref_num=$(echo "$reference" | grep -o '[0-9]*\.*[0-9]*' | head -1)
+            val_num=$(echo "$val" | grep -o '[0-9]*\.*[0-9]*' | head -1)
 
             # Skip if ref_num is 0 to avoid division by zero
             if [[ -z "$ref_num" || "$ref_num" == "0" || "$ref_num" == "0.0" ]]; then
@@ -272,7 +274,8 @@ verify_values() {
             result=$?
 
             # Calculate difference for reporting
-            local diff=$(awk "BEGIN {print sqrt(($ref_num-$val_num)^2)}")
+            local diff
+            diff=$(awk "BEGIN {print sqrt(($ref_num-$val_num)^2)}")
             if [[ -n "$diff" && "$diff" != "0" && "$max_diff" != "0" ]]; then
                 if (($(awk "BEGIN {print ($diff > $max_diff) ? 1 : 0}"))); then
                     max_diff=$diff
@@ -362,10 +365,10 @@ main() {
 
     # Create an ASCII art header for the final output
     local ascii_header="
-    ██████╗ ██████╗ ██████╗ ███████╗    ██╗    ██╗ █████╗ ██╗     ██╗     
-    ██╔══██╗██╔══██╗██╔══██╗██╔════╝    ██║    ██║██╔══██╗██║     ██║     
-    ██████╔╝██████╔╝██████╔╝█████╗      ██║ █╗ ██║███████║██║     ██║     
-    ██╔══██╗██╔══██╗██╔══██╗██╔══╝      ██║███╗██║██╔══██║██║     ██║     
+    ██████╗ ██████╗ ██████╗ ███████╗    ██╗    ██╗ █████╗ ██╗     ██╗
+    ██╔══██╗██╔══██╗██╔══██╗██╔════╝    ██║    ██║██╔══██╗██║     ██║
+    ██████╔╝██████╔╝██████╔╝█████╗      ██║ █╗ ██║███████║██║     ██║
+    ██╔══██╗██╔══██╗██╔══██╗██╔══╝      ██║███╗██║██╔══██║██║     ██║
     ██████╔╝██║  ██║██████╔╝███████╗    ╚███╔███╔╝██║  ██║███████╗███████╗
     ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝     ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚══════╝
     "

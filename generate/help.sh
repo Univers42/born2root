@@ -93,7 +93,8 @@ sec() {
 # leaves, and is trimmed rather than allowed to break the border.
 cmd() {
     local name="$1" desc="$2" color="${3:-${BLD}}"
-    local avail=$((W - 2 - NAMEW - 1))
+    local avail
+    avail=$((W - 2 - NAMEW - 1))
     [ "$(printf '%s' "$desc" | wc -m)" -gt "$avail" ] && desc="${desc:0:$((avail - 1))}…"
     row "  ${color}$(_pad "$name")${RST} ${desc}"
 }

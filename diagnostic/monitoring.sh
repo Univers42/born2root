@@ -40,7 +40,8 @@ sudo_count=$(grep "COMMAND" /var/log/sudo/sudo.log 2>/dev/null | wc -l)
 print_banner() {
     local text="$1"
     local length=${#text}
-    local line=$(printf "%${length}s" | tr " " "#")
+    local line
+    line=$(printf "%${length}s" | tr " " "#")
 
     echo "#$line#"
     echo "# $text #"

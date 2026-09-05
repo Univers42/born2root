@@ -76,15 +76,17 @@ show_memory_info() {
     echo
 
     # Get memory info using free command
-    local total=$(free -m | grep Mem | awk '{print $2}')
-    local used=$(free -m | grep Mem | awk '{print $3}')
-    local free=$(free -m | grep Mem | awk '{print $4}')
-    local shared=$(free -m | grep Mem | awk '{print $5}')
-    local cached=$(free -m | grep Mem | awk '{print $6}')
-    local available=$(free -m | grep Mem | awk '{print $7}')
+    local total used free shared cached available
+    total=$(free -m | grep Mem | awk '{print $2}')
+    used=$(free -m | grep Mem | awk '{print $3}')
+    free=$(free -m | grep Mem | awk '{print $4}')
+    shared=$(free -m | grep Mem | awk '{print $5}')
+    cached=$(free -m | grep Mem | awk '{print $6}')
+    available=$(free -m | grep Mem | awk '{print $7}')
 
     # Calculate usage percentage
-    local usage_percent=$(awk "BEGIN {printf \"%.2f\", ($used/$total)*100}")
+    local usage_percent
+    usage_percent=$(awk "BEGIN {printf \"%.2f\", ($used/$total)*100}")
 
     echo -e "${CYAN}Total Memory:${RESET} $total MB"
     echo -e "${CYAN}Used Memory:${RESET} $used MB"
@@ -96,13 +98,18 @@ show_memory_info() {
 
     # Make a bar showing memory usage
     local bar_size=50
-    local used_bars=$(awk "BEGIN {printf \"%.0f\", $usage_percent*$bar_size/100}")
-    local free_bars=$((bar_size - used_bars))
+    local used_bars free_bars
+    used_bars=$(awk "BEGIN {printf \"%.0f\", $usage_percent*$bar_size/100}")
+    free_bars=$((bar_size - used_bars))
 
     echo -ne "${CYAN}Memory Usage: [${RED}"
-    for ((i = 0; i < used_bars; i++)); do echo -ne "#"; done
+    for ((i = 0; i < used_bars; i++)); do
+        echo -ne "#"
+    done
     echo -ne "${GREEN}"
-    for ((i = 0; i < free_bars; i++)); do echo -ne "#"; done
+    for ((i = 0; i < free_bars; i++)); do
+        echo -ne "#"
+    done
     echo -e "${CYAN}]${RESET}"
     echo
 }
