@@ -718,9 +718,18 @@ if command -v lvremove > /dev/null 2>&1; then
 		umount /mnt/spare > /dev/null 2>&1 || true
 		rmdir /mnt/spare > /dev/null 2>&1 || true
 
+		# --noudevsync is not optional here. This runs inside the installer's
+		# chroot, where lvremove posts a udev "cookie" and then waits on a
+		# System V semaphore for udev to acknowledge the device removal. The
+		# udev that sees the event is the installer's, outside the chroot,
+		# and it has no LVM rules to answer with -- so the wait never ends.
+		# Measured on a real run: lvremove sat in __do_semtimedop for 25
+		# minutes with the install frozen at "Finishing the installation".
+		# The flag exists for exactly this ("only use this if udev is not
+		# running or has rules that ignore the devices LVM creates").
 		if mount | grep -q "LVMGroup-spare"; then
 			echo "[WARN] 'spare' is still mounted — leaving it alone"
-		elif lvremove -f LVMGroup/spare > /dev/null 2>&1; then
+		elif lvremove -f --noudevsync LVMGroup/spare > /dev/null 2>&1; then
 			FREE=$(vgs --noheadings -o vg_free --units g LVMGroup 2> /dev/null | tr -d ' ')
 			echo "[OK] 'spare' removed — ${FREE:-?} now free in LVMGroup for lvextend"
 		else

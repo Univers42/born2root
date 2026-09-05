@@ -58,6 +58,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+# Reads the installer's own progress off serial.log (shared with orchestrate.sh).
+. "$HERE/di_progress.sh"
 
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
@@ -66,6 +68,10 @@ DISK="$VM_DIR/$VM_NAME.qcow2"
 SERIAL="$VM_DIR/serial.log"
 MONITOR="$VM_DIR/monitor.sock"
 PIDFILE="$VM_DIR/qemu.pid"
+# What the disk holds is recorded, not guessed from its size: a qcow2 grows
+# past 1 GB minutes into an install, long before there is a system on it.
+PHASE="$VM_DIR/.phase"       # "installing" while d-i owns the disk
+STAMP="$VM_DIR/.installed"   # written once B2B-INSTALL-COMPLETE arrived
 
 DISK_SIZE_MB="${DISK_SIZE_MB:-122880}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
@@ -92,6 +98,13 @@ QEMU=$(command -v qemu-system-x86_64 || true)
 # as well and is what this machine has -- so test the thing that matters
 # (can we open it read-write?) rather than the thing that usually implies it.
 kvm_ok() { [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; }
+
+# Being allowed to open /dev/kvm is necessary, not sufficient. VT-x belongs to
+# one hypervisor at a time: while a VirtualBox VM runs, KVM_CREATE_VM returns
+# EBUSY and QEMU dies with "Device or resource busy". kvm_probe.sh performs
+# that exact call and says why it failed, so launch() can refuse with a real
+# reason instead of a raw ioctl error -- and never silently drop to TCG.
+kvm_why() { bash "$HERE/kvm_probe.sh"; }
 
 ACCEL="tcg"
 if kvm_ok; then
@@ -132,11 +145,40 @@ time.sleep(0.2)
 try: s.recv(65536)
 except Exception: pass
 s.sendall((cmd + "\n").encode())
-time.sleep(0.2)
-try: sys.stdout.write(s.recv(65536).decode(errors="replace"))
-except Exception: pass
+out = b""; t0 = time.time()
+while time.time() - t0 < 4:
+    try: chunk = s.recv(65536)
+    except Exception: break
+    if not chunk: break
+    out += chunk
+    if out.rstrip().endswith(b"(qemu)"): break
+sys.stdout.write(out.decode(errors="replace"))
 s.close()
 PYEOF
+}
+
+# ── Has the guest shut itself down? ─────────────────────────────────────────
+# A Linux kernel that has stopped parks every CPU with interrupts disabled and
+# halts it (stop_this_cpu: cli; hlt). Nothing can wake it again. An idle kernel
+# also sits in HLT, but with interrupts ENABLED, and the next timer tick wakes
+# it -- so HLT alone would call a busy-but-waiting installer "finished".
+# RFL bit 9 (0x200) is the interrupt flag, so the test that separates the two
+# is: every vCPU has HLT=1 and IF=0.
+#
+# This is the normal end of a d-i install: the preseed sets exit/halt, and
+# busybox's halt does not raise a real ACPI power button, so QEMU keeps running
+# a machine whose CPUs will never execute another instruction.
+guest_halted() {
+	local regs line rfl hlt n=0 halted=0
+	regs=$(mon "info registers -a") || return 1
+	while IFS= read -r line; do
+		rfl=${line#*RFL=}; rfl=${rfl%% *}
+		hlt=${line##*HLT=}; hlt=${hlt:0:1}
+		case "$rfl" in *[!0-9a-fA-F]* | "") continue ;; esac
+		n=$((n + 1))
+		[ "$hlt" = 1 ] && [ $((16#$rfl & 0x200)) -eq 0 ] && halted=$((halted + 1))
+	done <<< "$(printf '%s\n' "$regs" | grep -E 'RFL=[0-9a-f]+ .*HLT=[01]')"
+	[ "$n" -gt 0 ] && [ "$halted" -eq "$n" ]
 }
 
 # One QEMU keyname per character. Only what a passphrase needs; anything
@@ -191,6 +233,18 @@ launch() {
 
 	mkdir -p "$VM_DIR"
 	[ -f "$DISK" ] || die "no disk yet — run: $0 create"
+
+	# Check KVM before touching anything (the serial log is truncated below).
+	if [ "$ACCEL" = "kvm" ]; then
+		local why
+		if ! why=$(kvm_why); then
+			printf "  ${C_RED}✗${C_RESET} KVM %s\n" "$why" >&2
+			printf "    ${C_DIM}QEMU and VirtualBox cannot both run a VM on this host at once.${C_RESET}\n" >&2
+			printf "    ${C_DIM}Either wait for / stop the VirtualBox VM:  VBoxManage controlvm <name> acpipowerbutton${C_RESET}\n" >&2
+			printf "    ${C_DIM}or build with it instead:                  make all BACKEND=virtualbox${C_RESET}\n" >&2
+			die "cannot start QEMU with KVM"
+		fi
+	fi
 
 	if [ "$boot" = "cdrom" ]; then
 		iso=$(find_iso)
@@ -247,15 +301,160 @@ launch() {
 	ok "QEMU running (pid $(qemu_pid), accel=${ACCEL})"
 }
 
-wait_for_serial() {
-	local needle="$1" timeout="${2:-600}" deadline
-	deadline=$(( $(date +%s) + timeout ))
-	while [ "$(date +%s)" -lt "$deadline" ]; do
-		grep -qa -- "$needle" "$SERIAL" 2> /dev/null && return 0
-		is_running || return 2
-		sleep 3
+# ── Watch the unattended install ────────────────────────────────────────────
+# A headless install shows nothing, and nothing reads as "hung" long before the
+# ~20 minutes are up. So watch it, and say what is happening from evidence:
+#
+#   serial.log   the installer's own syslog. preseed.cfg's early_command
+#                streams it to ttyS0 (see di_progress.sh), so the current d-i
+#                stage, the package being unpacked, any failed step, and the
+#                B2B-INSTALL-COMPLETE marker all arrive here within a second.
+#   qcow2 size   grows while the guest writes: partitioning, debootstrap, apt.
+#   QEMU CPU     from /proc/<pid>/stat. Near 0% with nothing else moving means
+#                the installer is waiting -- on a dialog nobody can answer.
+#
+# Returns 0 once the marker arrives. Returns 1 as soon as d-i reports a failed
+# step, when QEMU exits before the marker, when nothing at all has moved for
+# INSTALL_STALL_TIMEOUT seconds, or at INSTALL_TIMEOUT. On 1 the VM is left
+# running so `screenshot` and `console` can show what it is stuck on.
+# Ctrl+C only detaches; `qemu_vm.sh watch` re-attaches to a running install.
+cpu_ticks() { awk '{print $14 + $15}' "/proc/$1/stat" 2> /dev/null || echo 0; }
+human() { numfmt --to=iec "${1:-0}" 2> /dev/null || printf '%s' "${1:-0}"; }
+
+watch_install() {
+	local timeout="${INSTALL_TIMEOUT:-3600}" tick=2
+	local stall_warn="${INSTALL_STALL_WARN:-120}" stall_fail="${INSTALL_STALL_TIMEOUT:-600}"
+	local pid started elapsed=0 quiet=0 hz failed
+	local stage="Booting the installer" prev_stage="" stage_started=0 changed=0 activity=""
+	local log_sz=0 disk_sz=0 last_log=-1 last_disk=-1 cpu=0 cpu_prev cpu_now
+	local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+	local fi=0 tty=0 drawn=0 last_beat=-60
+
+	pid=$(qemu_pid) || { warn "no QEMU running for $VM_NAME"; return 1; }
+	[ -t 1 ] && tty=1
+	hz=$(getconf CLK_TCK 2> /dev/null || echo 100)
+	# Age of the install from QEMU's own start, so a re-attach does not say 0s.
+	started=$(stat -c %Y "$PIDFILE" 2> /dev/null || date +%s)
+	cpu_prev=$(cpu_ticks "$pid")
+
+	# Three live lines redrawn in place. Without a terminal: one line per stage
+	# change plus a heartbeat every minute, so a captured log still shows life.
+	draw() {
+		local m=$((elapsed / 60)) s=$((elapsed % 60)) l1 l2 l3
+		l1=$(printf "  ${C_BLUE}%s${C_RESET} ${C_BOLD}%s${C_RESET}  ${C_DIM}%dm%02ds${C_RESET}" \
+			"${frames[$fi]}" "$stage" "$m" "$s")
+		l2=$(printf "    ${C_DIM}%.72s${C_RESET}" "$activity")
+		l3=$(printf "    ${C_DIM}disk %s · log %s · cpu %d%%${C_RESET}" \
+			"$(human "$disk_sz")" "$(human "$log_sz")" "$cpu")
+		[ "$quiet" -ge "$stall_warn" ] \
+			&& l3="$l3  ${C_YELLOW}⚠ quiet for $((quiet / 60))m$((quiet % 60))s${C_RESET}"
+		fi=$(( (fi + 1) % ${#frames[@]} ))
+		if [ "$tty" = 1 ]; then
+			[ "$drawn" = 1 ] && printf '\033[3A'
+			printf '\r\033[K%s\n\r\033[K%s\n\r\033[K%s\n' "$l1" "$l2" "$l3"
+			drawn=1
+		elif [ "$changed" = 1 ] || [ $((elapsed - last_beat)) -ge 60 ]; then
+			printf '  ▶ %dm%02ds  %s — %s\n' "$m" "$s" "$stage" "$activity"
+			last_beat=$elapsed
+		fi
+		changed=0
+	}
+	# A finished stage becomes a permanent ✓ line above the live block.
+	settle() {
+		local took=$((elapsed - stage_started))
+		if [ "$tty" = 1 ]; then
+			[ "$drawn" = 1 ] && printf '\033[3A'
+			printf '\r\033[K'
+		fi
+		printf "  ${C_GREEN}✓${C_RESET} %s  ${C_DIM}%dm%02ds${C_RESET}\n" \
+			"$prev_stage" $((took / 60)) $((took % 60))
+		if [ "$tty" = 1 ] && [ "$drawn" = 1 ]; then printf '\r\033[K\n\r\033[K\n\033[2A'; fi
+		drawn=0
+	}
+	# The final word replaces the live block.
+	finish() { # ok|fail, headline, detail
+		if [ "$tty" = 1 ] && [ "$drawn" = 1 ]; then
+			printf '\033[3A\r\033[K\n\r\033[K\n\r\033[K\n\033[3A'
+		fi
+		if [ "$1" = ok ]; then ok "$2"; else printf "  ${C_RED}✗${C_RESET} %s\n" "$2" >&2; fi
+		[ -n "${3:-}" ] && printf "    ${C_DIM}%s${C_RESET}\n" "$3"
+		drawn=0
+	}
+
+	while :; do
+		sleep "$tick"
+		elapsed=$(( $(date +%s) - started ))
+
+		# The definitive signals come from inside the installer.
+		if di_install_complete "$SERIAL"; then
+			prev_stage=$stage; settle
+			finish ok "installer reported completion after $((elapsed / 60))m$((elapsed % 60))s"
+			return 0
+		fi
+		if ! is_running; then
+			finish fail "QEMU exited before the installer finished" "last stage: $stage — see $SERIAL"
+			return 1
+		fi
+		if failed=$(di_failed_step "$SERIAL"); then
+			finish fail "the installer failed: $failed" \
+				"d-i is waiting on an error dialog nobody can answer. Look: $0 screenshot  |  $0 console"
+			return 1
+		fi
+
+		# Where is it, and is anything moving?
+		stage=$(di_current_stage "$SERIAL") || stage="Booting the installer"
+		activity=$(di_last_activity "$SERIAL") || activity="(no installer output yet)"
+		if [ "$stage" != "$prev_stage" ]; then
+			[ -n "$prev_stage" ] && settle
+			prev_stage=$stage; stage_started=$elapsed; changed=1
+		fi
+		log_sz=$(stat -c %s "$SERIAL" 2> /dev/null || echo 0)
+		disk_sz=$(stat -c %s "$DISK" 2> /dev/null || echo 0)
+		cpu_now=$(cpu_ticks "$pid")
+		cpu=$(( (cpu_now - cpu_prev) * 100 / (hz * tick) )); cpu_prev=$cpu_now
+		if [ "$log_sz" != "$last_log" ] || [ "$disk_sz" != "$last_disk" ] || [ "$cpu" -ge 5 ]; then
+			quiet=0
+		else
+			quiet=$((quiet + tick))
+		fi
+		last_log=$log_sz; last_disk=$disk_sz
+
+		# Quiet for a while: has the guest actually stopped? d-i ends on
+		# `halt`, so a halted guest AFTER its last hook is a finished install
+		# whose marker went missing -- an ISO built before the marker hook was
+		# created early enough to run. Halted BEFORE it is a kernel that died.
+		# Checked every 10s rather than every tick: it costs a monitor query.
+		if [ "$quiet" -ge "$stall_warn" ] && [ $((quiet % 10)) -eq 0 ] && guest_halted; then
+			if di_reached_final_unmount "$SERIAL"; then
+				prev_stage=$stage; settle
+				finish ok "the installer ran its last step and halted the guest after $((elapsed / 60))m$((elapsed % 60))s" \
+					"no completion marker on the serial port: this ISO predates the marker fix — rebuild it with  make gen_iso FORCE_ISO=1"
+				return 0
+			fi
+			finish fail "the guest halted before the installer's last step (a kernel panic looks like this)" \
+				"last stage: $stage. Look: $0 screenshot  |  $0 console"
+			return 1
+		fi
+		# Silence right after an error-worded line is d-i sitting on an error
+		# dialog (partman: "too small for expert recipe"). Say so now, not
+		# after the full stall timeout.
+		if [ "$quiet" -ge "$stall_warn" ] && di_looks_like_error "$activity"; then
+			finish fail "the installer stopped right after: $activity" \
+				"nothing has moved for $((quiet / 60))m$((quiet % 60))s since. Look: $0 screenshot  |  $0 console"
+			return 1
+		fi
+		if [ "$quiet" -ge "$stall_fail" ]; then
+			finish fail "nothing has moved for $((quiet / 60)) minutes: no log lines, no disk writes, no CPU" \
+				"the installer is stuck. Look: $0 screenshot  |  $0 console   (INSTALL_STALL_TIMEOUT=$stall_fail)"
+			return 1
+		fi
+		if [ "$elapsed" -ge "$timeout" ]; then
+			finish fail "still not finished after $((elapsed / 60)) minutes (INSTALL_TIMEOUT=$timeout)" \
+				"it is still moving, so this may just be slow: re-attach with  $0 watch"
+			return 1
+		fi
+		draw
 	done
-	return 1
 }
 
 # ── Actions ─────────────────────────────────────────────────────────────────
@@ -274,30 +473,61 @@ case "${1:-status}" in
 		;;
 
 	install)
-		is_running && die "already running (pid $(qemu_pid)) — stop it first"
+		is_running && die "already running (pid $(qemu_pid)) — stop it first: $0 stop"
+		printf 'installing\n' > "$PHASE"
+		rm -f "$STAMP"
 		launch cdrom
-		printf "\n  ${C_BOLD}Unattended install running.${C_RESET} Follow it with: %s console\n\n" "$0"
+		printf "\n  ${C_BOLD}Unattended install running.${C_RESET} ${C_DIM}What follows is the installer's own log,\n"
+		printf "  read off its serial port. Ctrl+C detaches; re-attach with: %s watch${C_RESET}\n\n" "$0"
 		# finish-install writes B2B-INSTALL-COMPLETE to ttyS0, then d-i halts.
-		if wait_for_serial "B2B-INSTALL-COMPLETE" "${INSTALL_TIMEOUT:-3600}"; then
-			ok "installer reported completion"
-		else
-			case $? in
-				2) ok "QEMU exited — the installer finished and powered the VM off" ;;
-				*) warn "timed out waiting for the completion marker; check: $0 console" ;;
-			esac
+		if ! watch_install; then
+			printf "    ${C_DIM}The VM is left running for a look. Stop it with: %s stop${C_RESET}\n" "$0"
+			die "the install did not finish"
 		fi
-		# d-i halts rather than powering off cleanly in some paths.
+		# The marker is written by the second-to-last hook, so d-i still has
+		# 95umount to run. Give it that, then take the machine down: it ends
+		# on `halt`, and a halted kernel does not answer the ACPI power
+		# button, so SIGTERM is the normal end of this sequence -- not a
+		# failure. Bounded at ~70s instead of the 5 minutes this used to wait.
 		if is_running; then
-			info "waiting for the VM to power itself off"
-			for _ in $(seq 1 60); do is_running || break; sleep 5; done
-			is_running && { mon "system_powerdown" > /dev/null; sleep 10; }
-			is_running && { kill "$(qemu_pid)" 2> /dev/null; sleep 2; }
+			info "letting the installer unmount and halt"
+			for _ in $(seq 1 15); do is_running || break; sleep 2; done
+			if is_running; then
+				mon "system_powerdown" > /dev/null
+				for _ in $(seq 1 10); do is_running || break; sleep 2; done
+			fi
+			if is_running; then
+				info "the guest is halted (it ignores ACPI) — stopping QEMU"
+				kill "$(qemu_pid)" 2> /dev/null; sleep 2
+				kill -9 "$(qemu_pid)" 2> /dev/null
+			fi
 		fi
+		rm -f "$MONITOR"
 		rm -f "$PIDFILE"
+		date '+%Y-%m-%d %H:%M:%S' > "$STAMP"
+		rm -f "$PHASE"
 		ok "install phase done — boot it with: $0 start"
 		;;
 
 	start)
+		# A running QEMU is not necessarily the installed system booting: it
+		# may still be d-i owning the disk, and typing a LUKS passphrase at
+		# the installer is 45 seconds of nothing followed by a wrong diagnosis.
+		if is_running && [ "$(cat "$PHASE" 2> /dev/null)" = installing ]; then
+			printf "  ${C_RED}✗${C_RESET} the installer is still running in this VM (pid %s)\n" "$(qemu_pid)" >&2
+			die "re-attach to it with: $0 watch   (or stop it: $0 stop)"
+		fi
+		# .phase still says "installing" with no QEMU behind it: the install
+		# was interrupted (Ctrl+C, a crash, a stall). Whatever is on the disk
+		# is half of a system; booting it would sit at a broken GRUB or an
+		# initramfs prompt and then be blamed on the LUKS unlock.
+		if ! is_running && [ "$(cat "$PHASE" 2> /dev/null)" = installing ]; then
+			die "the last install of this disk was interrupted — run it again: $0 install"
+		fi
+		if ! is_running && [ ! -f "$STAMP" ] \
+			&& [ "$(stat -c %s "$DISK" 2> /dev/null || echo 0)" -le 1073741824 ]; then
+			die "nothing is installed on this disk yet — run: $0 install"
+		fi
 		if is_running; then
 			ok "already running (pid $(qemu_pid))"
 		else
@@ -400,6 +630,10 @@ case "${1:-status}" in
 		ok "killed"
 		;;
 
+	watch)
+		is_running || die "nothing is running for $VM_NAME"
+		watch_install
+		;;
 	console)
 		[ -f "$SERIAL" ] || die "no serial log yet"
 		printf "  ${C_DIM}Ctrl+C stops watching, not the VM${C_RESET}\n\n"
@@ -444,7 +678,14 @@ PYEOF
 		printf "\n${C_BOLD}QEMU VM: %s${C_RESET}\n" "$VM_NAME"
 		printf "  %-12s %s\n" "accel:" "$ACCEL$( [ "$ACCEL" = tcg ] && printf ' (NO KVM — emulated, very slow)' )"
 		printf "  %-12s %s\n" "/dev/kvm:" "$( kvm_ok && echo 'usable by us' || echo 'NOT usable' )"
-		if is_running; then
+		printf "  %-12s %s\n" "KVM now:" "$(kvm_why)"
+		if [ -f "$STAMP" ]; then printf "  %-12s installed %s\n" "system:" "$(cat "$STAMP")"
+		elif [ "$(cat "$PHASE" 2> /dev/null)" = installing ]; then printf "  %-12s install in progress (or interrupted)\n" "system:"
+		else printf "  %-12s nothing installed yet\n" "system:"; fi
+		if is_running && guest_halted; then
+			printf "  %-12s ${C_YELLOW}halted${C_RESET} (pid %s — stopped itself; QEMU is still up)\n" \
+				"state:" "$(qemu_pid)"
+		elif is_running; then
 			printf "  %-12s ${C_GREEN}running${C_RESET} (pid %s)\n" "state:" "$(qemu_pid)"
 		else
 			printf "  %-12s stopped\n" "state:"

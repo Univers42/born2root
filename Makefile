@@ -110,7 +110,7 @@ C_CYAN   := \033[36m
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
         nvim hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
-        qemu_install qemu_start qemu_stop qemu_status qemu_console verify_guest
+        qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -157,11 +157,14 @@ QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 # running this on it would destroy a working VM -- the same reasoning as
 # install_vm_debian.sh keeping an existing VDI. Refuse, and say how to mean it.
 qemu_install:
-	@disk="$(VM_PATH)/$(VM_NAME)/$(VM_NAME).qcow2"; \
+	@dir="$(VM_PATH)/$(VM_NAME)"; disk="$$dir/$(VM_NAME).qcow2"; \
 	sz=0; [ -f "$$disk" ] && sz=$$(stat -c %s "$$disk" 2>/dev/null || echo 0); \
-	if [ "$$sz" -gt 1073741824 ] && [ "$(FORCE_INSTALL)" != "1" ]; then \
+	installed=0; [ -f "$$dir/.installed" ] && installed=1; \
+	[ "$$sz" -gt 1073741824 ] && [ ! -f "$$dir/.phase" ] && installed=1; \
+	if [ "$$installed" = 1 ] && [ "$(FORCE_INSTALL)" != "1" ]; then \
 		printf "$(C_RED)✗$(C_RESET) Refusing to reinstall over an existing system.\n\n"; \
-		printf "    disk : %s (%s MB)\n" "$$disk" "$$((sz / 1048576))"; \
+		printf "    disk : %s (%s MB, %s)\n" "$$disk" "$$((sz / 1048576))" \
+			"$$([ -f "$$dir/.installed" ] && echo "installed $$(cat "$$dir/.installed")" || echo "no stamp, size says installed")"; \
 		printf "\n  The installer reformats the disk, so this would destroy the VM\n"; \
 		printf "  that is already installed there.\n\n"; \
 		printf "    $(C_BOLD)make qemu_start$(C_RESET)                    boot what is already there\n"; \
@@ -183,6 +186,10 @@ qemu_status:
 
 qemu_console:
 	@$(QEMU_ENV) bash setup/host/qemu_vm.sh console
+
+# Re-attach the install progress tracker (Ctrl+C only ever detaches it).
+qemu_watch:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh watch
 
 # Prove the guest is the same whichever backend built it: partitions, LUKS,
 # LVM, UFW, the policy files and the login shell all come from the preseeded

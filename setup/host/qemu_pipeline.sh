@@ -55,17 +55,35 @@ phase "Virtual disk"
 bash "$QEMU_VM" create || die "disk creation failed"
 
 # ── 3. Install ──────────────────────────────────────────────────────────────
-# Skip when the disk already holds a system: a qcow2 that has grown well past
-# its empty size has been installed into, and re-running the installer would
-# wipe it. Same intent as install_vm_debian.sh keeping an existing VDI.
+# Whether the disk holds a system is RECORDED by qemu_vm.sh, not guessed:
+#   .installed   B2B-INSTALL-COMPLETE arrived and the VM powered off
+#   .phase       "installing" from the moment d-i is booted until then
+# Size alone lied here once: a qcow2 passes 1 GB minutes into an install, and
+# this step then called a half-installed disk "installed" and went on to type
+# a LUKS passphrase at the still-running installer. Disks from before the
+# stamp existed have only their size as evidence, and that is said out loud.
 phase "Debian install (unattended)"
-DISK="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME/$VM_NAME.qcow2"
+VM_DIR="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME"
+DISK="$VM_DIR/$VM_NAME.qcow2"
 disk_bytes=$(stat -c %s "$DISK" 2> /dev/null || echo 0)
-if [ "$disk_bytes" -gt 1073741824 ] && [ "${FORCE_INSTALL:-0}" != "1" ]; then
-	ok "disk already holds an installed system ($(du -h "$DISK" | cut -f1)) — skipping"
+phase_now=$(cat "$VM_DIR/.phase" 2> /dev/null || true)
+qemu_pid=$(head -n1 "$VM_DIR/qemu.pid" 2> /dev/null || true)
+[ -n "$qemu_pid" ] && kill -0 "$qemu_pid" 2> /dev/null || qemu_pid=""
+if [ -n "$qemu_pid" ] && [ "$phase_now" = installing ]; then
+	printf "  ${C_RED}✗${C_RESET} an install is already running in this VM (pid %s)\n" "$qemu_pid"
+	printf "    ${C_DIM}re-attach to it:  make qemu_watch        stop it:  make qemu_stop${C_RESET}\n"
+	exit 1
+elif [ -f "$VM_DIR/.installed" ] && [ "${FORCE_INSTALL:-0}" != "1" ]; then
+	ok "disk already holds an installed system (finished $(cat "$VM_DIR/.installed")) — skipping"
+	ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
+elif [ "$disk_bytes" -gt 1073741824 ] && [ -z "$phase_now" ] && [ "${FORCE_INSTALL:-0}" != "1" ]; then
+	ok "disk holds $(du -h "$DISK" | cut -f1) but no .installed stamp (built before stamps existed) — treating it as installed"
 	ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
 else
-	printf "  ${C_DIM}~20 minutes. Watch it live with: make qemu_console${C_RESET}\n"
+	[ "$phase_now" = installing ] \
+		&& printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
+	printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
+	printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
 	bash "$QEMU_VM" install || die "the install phase failed"
 fi
 

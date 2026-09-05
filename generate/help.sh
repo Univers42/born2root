@@ -126,6 +126,7 @@ cmd "make qemu_start" "Boot the QEMU VM and unlock its disk"
 cmd "make qemu_stop" "Shut the QEMU VM down"
 cmd "make qemu_status" "QEMU pid, ports, disk, last console line"
 cmd "make qemu_console" "Follow the QEMU VM's serial console"
+cmd "make qemu_watch" "Re-attach the install progress tracker"
 cmd "make verify_guest" "Prove the guest matches the spec (partitions, LUKS…)"
 
 sec "Use it"
