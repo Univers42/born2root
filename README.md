@@ -19,21 +19,20 @@ accident.
 
 - [What Is This](#what-is-this)
 - [Quick Start](#quick-start)
-- [What `make all` Does (Step by Step)](#what-make-does)
+- [What `make all` Does (Step by Step)](#what-make-all-does-step-by-step)
 - [Makefile Commands](#makefile-commands)
 - [Connecting with VS Code Remote SSH](#connecting-with-vs-code-remote-ssh)
-- [⚠️ Known Issue: VS Code SSH Drops After 15 Minutes](#known-issue-vscode-ssh-drops)
-- [⚠️ Known Issue: Docker Permission Denied](#known-issue-docker-permission-denied)
+- [⚠️ Known Issue: VS Code SSH Drops After 15 Minutes](#️-known-issue-vs-code-ssh-connection-drops-after-15-minutes)
+- [⚠️ Known Issue: Docker Permission Denied](#️-known-issue-docker-permission-denied-after-first-boot)
 - [Credentials](#credentials)
 - [What's Inside the VM](#whats-inside-the-vm)
 - [The Neovim Setup](#the-neovim-setup)
-- [Disk Layout & Growing a Partition](#disk-layout)
-- [Herdr, Claude Code & Optional AI](#tools-and-ai)
+- [Disk Layout & Growing a Partition](#disk-layout--growing-a-partition)
+- [Herdr, Claude Code & Optional AI](#herdr-claude-code--optional-ai)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
 ---
-
 
 ## What Is This
 
@@ -60,7 +59,6 @@ Everything is scripted. `make re` destroys everything and rebuilds from scratch.
 ---
 
 > ![INFO] now to implement the
-
 
 ## Quick Start
 
@@ -209,7 +207,6 @@ headless. Two details it gets right and that are easy to get wrong:
 
 ---
 
-
 ## What `make all` Does (Step by Step)
 
 ```text
@@ -250,7 +247,6 @@ make all
 ```
 
 ---
-
 
 ## Makefile Commands
 
@@ -297,7 +293,6 @@ make all
 
 ---
 
-
 ## Connecting with VS Code Remote SSH
 
 After `make all` completes, your host is already configured. Just:
@@ -324,7 +319,6 @@ ssh born2beroot    # full name
 ```
 
 ---
-
 
 ## ⚠️ Known Issue: VS Code SSH Connection Drops After ~15 Minutes
 
@@ -431,7 +425,6 @@ For the full deep dive (12 hours of debugging distilled into one doc), see
 
 ---
 
-
 ## ⚠️ Known Issue: Docker "Permission Denied" After First Boot
 
 ### The Problem
@@ -504,7 +497,6 @@ docker run --rm hello-world
 
 ---
 
-
 ## Credentials
 
 | What                 | Value            |
@@ -518,7 +510,6 @@ docker run --rm hello-world
 > evaluation.
 
 ---
-
 
 ## What's Inside the VM
 
@@ -600,7 +591,6 @@ For the full host/VM diagnosis and manual repair commands, see
 [doc/VM_APP_PORT_FORWARDING.md](doc/VM_APP_PORT_FORWARDING.md).
 
 ---
-
 
 ## The Neovim Setup
 
@@ -802,7 +792,6 @@ The warnings that remain are all expected on a headless server:
 
 ---
 
-
 ## Disk Layout & Growing a Partition
 
 The VM is a **120 GB** dynamically-allocated disk. That number is a ceiling, not
@@ -869,7 +858,6 @@ and sharing it only creates permission problems.
 
 ---
 
-
 ## Herdr, Claude Code & Optional AI
 
 ### Herdr — persistent terminal panes
@@ -933,7 +921,6 @@ Raise `VM_RAM_MB` first.
 
 ---
 
-
 ## Project Structure
 
 ```text
@@ -989,7 +976,6 @@ Raise `VM_RAM_MB` first.
 
 ---
 
-
 ## Troubleshooting
 
 ### "Connection refused" when trying `ssh b2b`
@@ -1035,7 +1021,7 @@ See [`doc/SSH_VSCODE_FIX.md`](doc/SSH_VSCODE_FIX.md) for the full explanation.
 
 Close and reopen your VS Code window. The `docker` group wasn't loaded in your
 current session. See
-[Known Issue: Docker Permission Denied](#known-issue-docker-permission-denied).
+[Known Issue: Docker Permission Denied](#️-known-issue-docker-permission-denied-after-first-boot).
 
 ### VM asks for password despite SSH key setup
 
