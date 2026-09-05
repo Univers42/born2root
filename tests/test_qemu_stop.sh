@@ -1,0 +1,113 @@
+#!/bin/bash
+# Regression test for `qemu_vm.sh stop` when the VM was started from another
+# VM_PATH.
+#
+# The bug it guards: every path in qemu_vm.sh is keyed on VM_PATH, so
+# `make qemu_stop` run WITHOUT the VM_PATH the build used looked at the wrong
+# pidfile, found nothing, and printed "✓ not running" while the VM kept
+# running -- and kept holding VT-x, so the next `make all` reported VirtualBox
+# "blocked" with the culprit invisible. other_guests() recovers the running
+# guests and the VM_PATH each belongs to from QEMU's own -name / -pidfile
+# arguments, and stop/kill refuse to claim success while any exist.
+#
+# qemu-system-x86_64 need not be installed to run this: qemu_vm.sh's own
+# BASH_SOURCE guard skips both that check and the action dispatch when sourced.
+set -e
+
+cd "$(dirname "$0")/.."
+
+fail=0
+check() {
+	if [ "$2" = "$3" ]; then
+		printf 'ok   %-40s = %s\n' "$1" "$2"
+	else
+		printf 'FAIL %-40s = %s (expected %s)\n' "$1" "$2" "$3"
+		fail=1
+	fi
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+VM_NAME=debian
+VM_PATH="$TMP/here"
+export VM_NAME VM_PATH
+
+. ./setup/host/qemu_vm.sh
+
+# Three guests, as /proc would show them: ours, one of the same VM started
+# from another VM_PATH (the reproduced case), and an unrelated VM that must be
+# left alone. Trailing space is what `tr '\0' ' '` leaves on a real cmdline.
+qemu_cmdlines() {
+	printf '%s\n' \
+		"1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
+		"1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile /mnt/storage/virtualbox/other_machine/debian/qemu.pid " \
+		"1003 /usr/bin/qemu-system-x86_64 -name debian-lab -machine pc -pidfile /srv/vms/debian-lab/qemu.pid "
+}
+
+check "our own guest is not 'other'"      "$(other_guests | grep -c '^1001 ' || true)" 0
+check "same VM from another VM_PATH found" "$(other_guests | grep '^1002 ' | cut -d' ' -f2)" /mnt/storage/virtualbox/other_machine
+check "differently named VM ignored"       "$(other_guests | grep -c '^1003 ' || true)" 0
+check "exactly one other guest"            "$(other_guests | wc -l)" 1
+
+out=$(report_other_guests 2>&1) && rc=0 || rc=$?
+check "report returns 0 when others exist" "$rc" 0
+case "$out" in
+	*"VM_PATH=/mnt/storage/virtualbox/other_machine make qemu_stop"*)
+		printf 'ok   %-40s\n' "report names the exact stop command" ;;
+	*)
+		printf 'FAIL %-40s = %s\n' "report names the exact stop command" "$out"; fail=1 ;;
+esac
+
+# Nothing running anywhere: stop/kill may say "not running" and mean it.
+qemu_cmdlines() { :; }
+check "no guests: none listed"             "$(other_guests | wc -l)" 0
+if report_other_guests > /dev/null 2>&1; then
+	printf 'FAIL %-40s\n' "report returns 1 when none"; fail=1
+else
+	printf 'ok   %-40s\n' "report returns 1 when none"
+fi
+
+# ── qemu_pid: a pidfile that exists but cannot be read is not "not running" ──
+# (root-owned, from `sudo make all`). Fixture pids are not processes, so
+# liveness is the seam.
+pid_alive() { case "$1" in 1001 | 1002) return 0 ;; esac; return 1; }
+qemu_cmdlines() {
+	printf '%s\n' \
+		"1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
+		"1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
+}
+mkdir -p "$TMP/here/debian" "$TMP/elsewhere/debian"
+printf '1002\n' > "$TMP/elsewhere/debian/qemu.pid"
+: > "$PIDFILE"; chmod 000 "$PIDFILE"
+check "unreadable pidfile: pid recovered"   "$(qemu_pid)" 1001
+check "unreadable pidfile: is_running"      "$(if is_running; then echo yes; else echo no; fi)" yes
+chmod 600 "$PIDFILE"; rm -f "$PIDFILE"
+check "no pidfile at all: not running"      "$(if is_running; then echo yes; else echo no; fi)" no
+
+# ── adopt_other_guest: one candidate is taken, two are ambiguous ────────────
+VM_PATH="$TMP/nowhere"; vm_paths
+out=$(adopt_other_guest 2>&1) && rc=0 || rc=$?
+check "two candidates: ambiguous (2)"       "$rc" 2
+case "$out" in
+	*"VM_PATH=$TMP/elsewhere make qemu_stop"*) printf 'ok   %-40s\n' "ambiguous: candidates listed" ;;
+	*) printf 'FAIL %-40s = %s\n' "ambiguous: candidates listed" "$out"; fail=1 ;;
+esac
+check "ambiguous: VM_PATH unchanged"        "$VM_PATH" "$TMP/nowhere"
+
+qemu_cmdlines() {
+	printf '%s\n' \
+		"1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
+}
+adopt_other_guest > /dev/null 2>&1 && rc=0 || rc=$?
+check "one candidate: adopted (0)"          "$rc" 0
+check "adopted: VM_PATH re-keyed"           "$VM_PATH" "$TMP/elsewhere"
+check "adopted: PIDFILE follows"            "$PIDFILE" "$TMP/elsewhere/debian/qemu.pid"
+check "adopted: now running"                "$(if is_running; then echo yes; else echo no; fi)" yes
+
+qemu_cmdlines() { :; }
+VM_PATH="$TMP/nowhere"; vm_paths
+adopt_other_guest > /dev/null 2>&1 && rc=0 || rc=$?
+check "no candidate: none (1)"              "$rc" 1
+
+exit "$fail"

@@ -370,6 +370,11 @@ get_host_ip() {
 # Sourcing defines functions only, so this starts nothing.
 . "$(dirname "${BASH_SOURCE[0]}")/../unlock_vm.sh"
 
+# The VM disk and its "this install finished" stamp (vdi_bytes / install_finished
+# / mark_install_finished). Sourced up here so Step 4 below cannot call them
+# before they exist — which is exactly what used to happen.
+. "$(dirname "${BASH_SOURCE[0]}")/../utils/vm_disk.sh"
+
 # Answer the guest's LUKS prompt without printing: draw_dashboard owns the
 # terminal here, so progress goes through STEP_DETAIL instead of stdout.
 #
@@ -604,11 +609,18 @@ fi
 ensure_vm_nat_forwarding
 
 # ── Serial console: the headless install's progress feed ────────────────────
-# The VM writes COM1 to a file (setup/install/vms/install_vm_debian.sh) and the
-# installer is booted with console=ttyS0 (generate/create_custom_iso.sh), so
-# that file carries the installer's own text — "Installing the base system
-# ... 70%" and so on. Reading it is what lets a headless run report the real
-# stage instead of "it has been running for N minutes, probably fine".
+# The VM writes COM1 to a file (setup/install/vms/install_vm_debian.sh).
+#
+# Note what is NOT in it. create_custom_iso.sh ships SERIAL_CONSOLE=0, so d-i is
+# booted WITHOUT console=ttyS0 — deliberately, because that flag makes it wrap
+# itself in GNU screen and stall. So during the install this file stays empty
+# and install_stage() below always degrades to elapsed time; it only carries the
+# installer's own text when someone sets SERIAL_CONSOLE=1 to debug interactively.
+# Run `make console` against the installed system, where the console IS mirrored
+# to COM1 (preseeds/b2b-setup.sh), and that path does work.
+#
+# What still arrives with the console off is anything written straight to the
+# device, which is how the completion marker reaches us (install_complete_signalled).
 # An older VM created before the serial port existed simply has no log; every
 # caller below degrades to elapsed time rather than failing.
 get_serial_log() {
@@ -738,15 +750,16 @@ BOOT1=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
 VM_STATE=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
 	| grep "^VMState=" | cut -d'"' -f2)
 
-if [ "$BOOT1" != "dvd" ] && install_wrote_data; then
+if [ "$BOOT1" != "dvd" ] && install_finished; then
 	set_step $S_INSTALL skip "already installed"
 elif [ "$BOOT1" != "dvd" ]; then
-	# Boot order says "installed" but the disk is empty. That combination is what
-	# a previous run leaves behind when the installer failed after the boot order
-	# had already been switched — and trusting it means skipping the install,
-	# booting an empty disk, and then blaming the LUKS unlock for timing out.
+	# Boot order says "installed" but nothing vouches for the disk: it is empty,
+	# or it carries an install that was cut short. That combination is what a
+	# previous run leaves behind when the installer died after the boot order had
+	# already been switched — and trusting it means skipping the install, booting
+	# a disk with no bootloader, and then blaming the LUKS unlock for timing out.
 	# Put the ISO back and install properly.
-	set_step $S_INSTALL working "disk is empty — reinstalling..."
+	set_step $S_INSTALL working "no verified install — reinstalling..."
 	VBoxManage storageattach "${VM_NAME}" --storagectl "IDE Controller" \
 		--port 0 --device 0 --type dvddrive --medium "$PRESEED_ISO" 2> /dev/null || true
 	VBoxManage modifyvm "${VM_NAME}" --boot1 dvd --boot2 disk --boot3 none --boot4 none 2> /dev/null || true
@@ -823,7 +836,8 @@ switch_boot_to_disk() {
 wait_for_install() {
 	local timeout=2400 # 40 minutes max (installs can be slow on shared storage)
 	local elapsed=0
-	local zero_cpu_count=0 # consecutive VM polls with ~0% CPU
+	local zero_cpu_count=0 # consecutive VM polls with ~0% CPU *and* a static disk
+	local last_vdi_bytes="" # VDI size at the previous poll; growth means "still busy"
 	local complete_at=""   # elapsed time when the install signalled completion
 	# d-i still has to unmount and halt after the finish-install hooks run, so
 	# do not yank the power the instant the marker appears. Twenty seconds is
@@ -891,11 +905,30 @@ wait_for_install() {
 			# Only attempt CPU-based halt detection if metrics are ACTUALLY working
 			# Without real metrics we CANNOT distinguish "install busy" from "halted"
 			# so we just wait for the VM to reach poweroff state on its own.
+			#
+			# An idle CPU on its own is NOT evidence that the install finished.
+			# d-i spends long stretches blocked on the mirror with the guest
+			# almost idle, and unpacking small packages barely registers either.
+			# Powering off on that alone killed dpkg midway through pkgsel: the
+			# bootloader step never ran, and the resulting disk had no GRUB, so
+			# the next boot spun at 100% CPU against an empty screen and got
+			# reported as a LUKS timeout — four steps away from the real fault.
+			# So require the disk to be quiet too. A live install grows the VDI
+			# continuously; a halted one never touches it again.
 			if [ "$state" = "running" ] && [ $((elapsed + prior)) -gt $min_elapsed ] && [ "$metrics_available" = true ]; then
-				local cpu_pct
+				local cpu_pct now_bytes disk_grew=false
+				now_bytes=$(vdi_bytes) || now_bytes=""
+				if [ -n "$now_bytes" ] && [ -n "$last_vdi_bytes" ] \
+					&& [ "$now_bytes" -gt "$last_vdi_bytes" ]; then
+					disk_grew=true
+				fi
+				[ -n "$now_bytes" ] && last_vdi_bytes=$now_bytes
+
 				cpu_pct=$(VBoxManage metrics query "${VM_NAME}" CPU/Load/User 2> /dev/null \
 					| tail -1 | awk '{print $NF}' | tr -d '%' | cut -d. -f1)
-				if [ -n "$cpu_pct" ] && [ "$cpu_pct" -eq 0 ] 2> /dev/null; then
+				if [ "$disk_grew" = true ]; then
+					zero_cpu_count=0
+				elif [ -n "$cpu_pct" ] && [ "$cpu_pct" -eq 0 ] 2> /dev/null; then
 					zero_cpu_count=$((zero_cpu_count + 1))
 				elif [ -n "$cpu_pct" ]; then
 					zero_cpu_count=0
@@ -924,16 +957,6 @@ wait_for_install() {
 # Sanity check: did the installer actually write a system to the disk? A Debian
 # base install is gigabytes; a VDI still near its empty size means the installer
 # booted and then did nothing, which is otherwise invisible from the outside.
-install_wrote_data() {
-	local vdi bytes
-	vdi=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2> /dev/null \
-		| grep '"SATA Controller-0-0"' | cut -d'"' -f4)
-	[ -n "$vdi" ] && [ -f "$vdi" ] || return 1
-	bytes=$(stat -c %s "$vdi" 2> /dev/null) || return 1
-	# 512 MB: far below any real install, far above an empty dynamic VDI.
-	[ "$bytes" -gt 536870912 ]
-}
-
 if [ "$BOOT1" = "dvd" ]; then
 	# Back-date to when the VM actually started, not to when this dashboard
 	# attached — otherwise a run that reattached after Ctrl+C reports a 20-minute
@@ -972,6 +995,8 @@ if [ "$BOOT1" = "dvd" ]; then
 		printf "    stopped on a prompt nothing answered. Check with: make console${RST}\n\n"
 		exit 1
 	fi
+	# Only now is the disk worth trusting on a later run, so stamp it only now.
+	mark_install_finished
 	set_step $S_INSTALL done "Debian installed in ~${INSTALL_MINS}m"
 fi
 

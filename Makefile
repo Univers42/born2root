@@ -110,7 +110,9 @@ C_CYAN   := \033[36m
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
         nvim hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
-        qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest
+        qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
+        qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
+        qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -127,8 +129,24 @@ C_CYAN   := \033[36m
 # -n behaves the way anyone typing it expects.
 MAKE_BIN := $(MAKE)
 
-all: prepare
+# VM_PATH is checked before either pipeline runs, so a root-owned storage
+# directory is reported -- and, with permission, fixed with sudo -- before the
+# ISO build rather than minutes after it. See utils/vm_path.sh.
+# `sudo make all` "works" and quietly builds the wrong VM: the ISO gets ROOT's
+# ~/.ssh key (so `ssh b2b` asks for a password), ~/.ssh/config is root's, and
+# the disk, pidfile and monitor socket end up root-owned. Nothing in the build
+# needs root; when VM_PATH does, make all asks for sudo for exactly that step.
+no_root:
+	@if [ "$$(id -u)" = 0 ] && [ -n "$$SUDO_USER" ] && [ "$$SUDO_USER" != root ]; then \
+		printf "  $(C_RED)✗$(C_RESET) don't build as root: the VM would get root's SSH key and root-owned files.\n"; \
+		printf "    Run it as %s:   make all VM_PATH=%s\n" "$$SUDO_USER" "$(VM_PATH)"; \
+		printf "    When VM_PATH needs root, the build asks for sudo for just that step.\n"; \
+		exit 1; \
+	fi
+
+all: no_root prepare
 	@backend=$$(BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
+	bash utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \
@@ -191,6 +209,51 @@ qemu_console:
 qemu_watch:
 	@$(QEMU_ENV) bash setup/host/qemu_vm.sh watch
 
+# Just the disk (qemu_install = create + install).
+qemu_create:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh create
+
+qemu_kill:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh kill
+
+qemu_restart:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh restart
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+
+# Hard reset, pause and resume go through the QEMU monitor.
+qemu_reset:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh reset
+
+qemu_pause:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh pause
+
+qemu_resume:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh resume
+
+# Type the LUKS passphrase at the guest (qemu_start does this itself).
+qemu_unlock:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh unlock
+
+# The VGA screen, where the LUKS prompt and boot errors live.
+qemu_screenshot:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh screenshot
+
+# A shell in the guest on the port it actually got -- or one command:
+#   make qemu_ssh CMD="uname -a"
+qemu_ssh:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh $(CMD)
+
+qemu_ssh_config:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+
+# Every QEMU guest on this host, whoever started it, from whatever VM_PATH.
+qemu_list:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh list
+
+# Any QEMU monitor command:   make qemu_monitor CMD="info block"
+qemu_monitor:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh monitor "$(or $(CMD),info status)"
+
 # Prove the guest is the same whichever backend built it: partitions, LUKS,
 # LVM, UFW, the policy files and the login shell all come from the preseeded
 # ISO. Run it on both and diff the output.
@@ -208,25 +271,35 @@ verify_guest:
 # SSH key (.gitmodules used git@github.com:); the release is plain HTTPS.
 prepare: deps pull shell
 
-# NOTE on the stash dance: `git stash pop` WITHOUT --index restores your work
-# to the working tree but throws the index away, silently un-staging everything
-# you had staged before running make. --index puts the staged/unstaged split
-# back; the bare pop is kept only as a fallback for the case where --index
-# cannot reapply cleanly.
+# NOTE on --autostash: this used to be a hand-rolled `git stash` / `git stash
+# pop` pair around the pull, and the two were NOT symmetric. `git stash` on a
+# CLEAN tree saves nothing and creates no entry, but the pop ran unconditionally
+# -- so it popped whatever unrelated entry happened to be on top of the stack.
+# A stash left over from days ago was silently applied on top of an up-to-date
+# checkout, and `make all` died in conflict markers over work that was already
+# committed. Reproduced deterministically: stash something, commit past it, run
+# the pair on the now-clean tree, and the stale WIP is back in your files.
+#
+# git's own --autostash has no such gap: it stashes only when there is something
+# to stash, and restores exactly what it stashed, or nothing at all.
 pull:
 	@bash -c '\
 	if [ -d .git ]; then \
 		printf "$(C_BLUE)▶$(C_RESET) Pulling latest from origin/main...\n"; \
-		git stash -q 2>/dev/null || true; \
-		if git pull --ff-only origin main 2>/dev/null; then \
+		if git pull --autostash --ff-only origin main 2>/dev/null; then \
 			printf "$(C_GREEN)✓$(C_RESET) Repository up to date\n"; \
 		else \
 			printf "$(C_YELLOW)⚠$(C_RESET)  Fast-forward failed — merging...\n"; \
-			git pull origin main 2>/dev/null || \
+			git pull --autostash origin main 2>/dev/null || \
 				printf "$(C_YELLOW)⚠$(C_RESET)  git pull failed (working offline?)\n"; \
 		fi; \
-		git stash pop --index -q 2>/dev/null \
-			|| git stash pop -q 2>/dev/null || true; \
+		if [ -n "$$(git diff --name-only --diff-filter=U)" ]; then \
+			printf "$(C_RED)✗$(C_RESET) your local changes conflict with what was just pulled\n"; \
+			git diff --name-only --diff-filter=U | sed "s/^/    /"; \
+			printf "    Resolve the conflict markers above, then: git add <files> && make all\n"; \
+			printf "    Your work is still in the stash too: git stash list\n"; \
+			exit 1; \
+		fi; \
 	fi'
 
 # Sync + update ALL submodules (any depth) to the latest upstream commit, and repair
@@ -504,9 +577,14 @@ clean:
 	@chmod -R u+w debian_iso_extract 2>/dev/null || true
 	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed.iso debian_iso_extract
 
+# Empty VM_PATH, but do NOT delete the directory itself. When VM_PATH points at
+# an external disk (VM_PATH=/mnt/storage/virtualbox) its parent is root-owned,
+# so removing the directory leaves a path only root can recreate -- and the next
+# `make all` dies on "mkdir: cannot create directory: Permission denied" with
+# nothing saying that a previous fclean is what caused it.
 fclean: clean rm_disk_image
-	$(RM) $(VM_PATH)
-	$(RM) "$(VM_PATH)/$(VM_NAME)"
+	@[ -n "$(VM_PATH)" ] && [ -d "$(VM_PATH)" ] \
+		&& rm -rf -- "$(VM_PATH)"/* "$(VM_PATH)"/.[!.]* 2>/dev/null; true
 
 re: fclean all
 
