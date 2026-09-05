@@ -110,4 +110,25 @@ VM_PATH="$TMP/nowhere"; vm_paths
 adopt_other_guest > /dev/null 2>&1 && rc=0 || rc=$?
 check "no candidate: none (1)"              "$rc" 1
 
+# ── await_shutdown: returns when the guest is gone, times out otherwise ─────
+# is_running is the seam; sleep is stubbed so the test is instant. No progress
+# line (STOP_PROGRESS=0) so stdout stays clean.
+export STOP_PROGRESS=0
+sleep() { :; }              # never actually wait in the test
+SERIAL=$(mktemp)            # await_shutdown tails it on a TTY; empty is fine
+
+# Goes down on the 3rd poll: await_shutdown must return 0.
+_polls=0
+is_running() { _polls=$((_polls + 1)); [ "$_polls" -lt 3 ]; }
+await_shutdown 100 && rc=0 || rc=$?
+check "await_shutdown: 0 once the guest is gone" "$rc" 0
+
+# Never goes down within the grace: must time out with 1, not spin forever.
+is_running() { return 0; }
+await_shutdown 2 && rc=0 || rc=$?
+check "await_shutdown: times out with 1"         "$rc" 1
+
+unset -f sleep is_running
+rm -f "$SERIAL"
+
 exit "$fail"

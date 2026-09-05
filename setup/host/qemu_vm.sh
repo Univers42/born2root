@@ -43,7 +43,7 @@
 #   qemu_vm.sh start       boot from disk, headless, and unlock LUKS
 #   qemu_vm.sh restart     stop, then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
-#   qemu_vm.sh stop        ACPI power button, then wait
+#   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
 #   qemu_vm.sh kill        last resort: SIGTERM the QEMU process
 #   qemu_vm.sh reset       hard reset;  pause / resume  freeze and continue
 #   qemu_vm.sh status      pid, ports, disk size, what the console last said
@@ -639,6 +639,28 @@ watch_install() {
 	done
 }
 
+# ── Waiting for a guest to power off ────────────────────────────────────────
+# QEMU exits the instant its guest powers off, so is_running going false IS
+# the shutdown finishing -- no need to poll the guest. On a terminal the
+# guest's own serial log is shown while we wait, so an orderly shutdown (which
+# CAN take 30s+) never looks like a hang. 0 if it went down, 1 on timeout.
+# The 1s tick is a seam the test overrides.
+STOP_TICK="${STOP_TICK:-1}"
+STOP_PROGRESS="${STOP_PROGRESS:-auto}"
+_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac; }
+await_shutdown() {
+	local grace="$1" waited=0 last
+	while is_running && [ "$waited" -lt "$grace" ]; do
+		sleep "$STOP_TICK"; waited=$((waited + STOP_TICK))
+		if _progress_on; then
+			last=$(tail -c 300 "$SERIAL" 2> /dev/null | tr -d '\r' | grep -a . | tail -1 | cut -c1-56)
+			printf '\r    %3ss  %-56s' "$waited" "${last:-shutting down}"
+		fi
+	done
+	_progress_on && printf '\r%*s\r' 72 ''
+	! is_running
+}
+
 # ── Actions ─────────────────────────────────────────────────────────────────
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
@@ -805,14 +827,25 @@ case "${1:-status}" in
 	stop)
 		need_running
 		need_control qemu_stop
-		info "ACPI power button (pid $(qemu_pid))"
-		mon "system_powerdown" > /dev/null
-		for _ in $(seq 1 40); do is_running || break; sleep 2; done
-		if is_running; then
-			warn "still up after 80s — sending SIGTERM"
-			kill "$(qemu_pid)" 2> /dev/null; sleep 3
+		pid=$(qemu_pid)
+		# Immediate by default -- like VirtualBox's `controlvm poweroff`, and what
+		# people mean by "stop". The monitor `quit` exits QEMU at once AND flushes
+		# the qcow2 (kill -9 would not), so the guest's journal replays cleanly on
+		# the next boot. GRACEFUL=1 asks the guest to shut its services down first,
+		# which is the slow path this used to always take.
+		if [ -n "${GRACEFUL:-}" ]; then
+			info "orderly shutdown (pid $pid) — letting the guest stop its services"
+			mon "system_powerdown" > /dev/null
+			await_shutdown "${STOP_GRACE:-90}" || warn "still up after ${STOP_GRACE:-90}s — pulling the plug"
+		else
+			info "powering off (pid $pid)"
+			mon "quit" > /dev/null 2>&1
 		fi
-		is_running && die "still running (pid $(qemu_pid)) — force it: $0 kill"
+		# Confirm it is really gone, escalating only if it is not.
+		await_shutdown 3 || true
+		is_running && { kill "$pid" 2> /dev/null; await_shutdown 3 || true; }
+		is_running && { kill -9 "$pid" 2> /dev/null; sleep 1; }
+		is_running && die "could not stop pid $pid — force it: $0 kill"
 		rm -f "$PIDFILE" "$MONITOR"
 		ok "stopped"
 		;;
