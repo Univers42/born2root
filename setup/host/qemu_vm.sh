@@ -132,6 +132,51 @@ qemu_pid() {
 
 is_running() { qemu_pid > /dev/null 2>&1; }
 
+# ── Guests of this VM started from ANOTHER VM_PATH ──────────────────────────
+# Every path above is keyed on VM_PATH, so `make qemu_stop` run without the
+# VM_PATH the build used looks at the wrong pidfile, finds nothing, and said
+# "✓ not running" while the VM kept running -- and kept holding VT-x, so the
+# next `make all` reported VirtualBox "blocked" with the culprit invisible.
+# Happened here twice in one afternoon. QEMU is always started with -name
+# VM_NAME and -pidfile <VM_PATH>/<VM_NAME>/qemu.pid, so both the guest and
+# the VM_PATH it belongs to can be recovered from its own command line.
+#
+# "<pid> <cmdline>" per running qemu-system-x86_64. The one seam tests
+# override. -x matches the 15-char comm name, so a shell whose ARGUMENTS
+# mention qemu (a grep, this script itself) can never match.
+qemu_cmdlines() {
+	local pid
+	for pid in $(pgrep -x qemu-system-x86 2> /dev/null); do
+		printf '%s %s\n' "$pid" "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null)"
+	done
+}
+
+# "<pid> <VM_PATH>" per guest named VM_NAME whose pidfile is not ours.
+other_guests() {
+	local pid args pf
+	qemu_cmdlines | while read -r pid args; do
+		case " $args" in *" -name ${VM_NAME} "*) ;; *) continue ;; esac
+		pf=${args##* -pidfile }; pf=${pf%% *}
+		[ "${pf##*/}" = qemu.pid ] || continue
+		[ "$pf" = "$PIDFILE" ] && continue
+		printf '%s %s\n' "$pid" "$(dirname "$(dirname "$pf")")"
+	done
+}
+
+# Say where the running guests are and how to reach them. Returns 0 if there
+# were any -- the caller then must NOT claim success.
+report_other_guests() {
+	local others pid path
+	others=$(other_guests)
+	[ -n "$others" ] || return 1
+	warn "nothing is running at $VM_DIR, but QEMU '$VM_NAME' IS running from another VM_PATH:"
+	printf '%s\n' "$others" | while read -r pid path; do
+		printf "     pid %-8s VM_PATH=%s\n" "$pid" "$path"
+		printf "     ${C_DIM}stop it:  VM_PATH=%s make qemu_stop${C_RESET}\n" "$path"
+	done
+	return 0
+}
+
 # ── Host port collision avoidance ───────────────────────────────────────────
 # The same problem the VirtualBox path already solves (utils/host_ports.sh):
 # on a real dev machine SOMETHING is usually already on 3306/3000/5173/etc,
@@ -273,7 +318,10 @@ build_hostfwd() {
 # ── Launch ──────────────────────────────────────────────────────────────────
 # $1 = "cdrom" to boot the installer, "disk" to boot the installed system.
 launch() {
-	local boot="$1" iso cd_args=() hd_index=1 cd_index=2
+	local boot="$1" iso cd_args=() cpu_args=() hd_index=1 cd_index=2
+	# Same array idiom as cd_args: an empty array expands to nothing, where an
+	# empty string would hand QEMU a bogus "" argument under TCG.
+	[ "$ACCEL" = kvm ] && cpu_args=(-cpu host)
 
 	mkdir -p "$VM_DIR"
 	[ -f "$DISK" ] || die "no disk yet — run: $0 create"
@@ -325,7 +373,7 @@ launch() {
 	"$QEMU" \
 		-name "$VM_NAME" \
 		-machine "pc,accel=${ACCEL}" \
-		$( [ "$ACCEL" = "kvm" ] && printf '%s' "-cpu host" ) \
+		"${cpu_args[@]}" \
 		-smp "$VM_CPUS" \
 		-m "$VM_RAM_MB" \
 		-device ich9-ahci,id=ahci \
@@ -661,7 +709,10 @@ case "${1:-status}" in
 		;;
 
 	stop)
-		is_running || { ok "not running"; exit 0; }
+		if ! is_running; then
+			report_other_guests && exit 1
+			ok "not running"; exit 0
+		fi
 		info "ACPI power button"
 		mon "system_powerdown" > /dev/null
 		for _ in $(seq 1 40); do is_running || break; sleep 2; done
@@ -674,7 +725,11 @@ case "${1:-status}" in
 		;;
 
 	kill)
-		p=$(qemu_pid) && { kill "$p" 2> /dev/null; sleep 2; kill -9 "$p" 2> /dev/null; }
+		if ! p=$(qemu_pid); then
+			report_other_guests && exit 1
+			ok "not running"; exit 0
+		fi
+		kill "$p" 2> /dev/null; sleep 2; kill -9 "$p" 2> /dev/null
 		rm -f "$PIDFILE" "$MONITOR"
 		ok "killed"
 		;;
@@ -739,6 +794,9 @@ PYEOF
 		else
 			printf "  %-12s stopped\n" "state:"
 		fi
+		others=$(other_guests)
+		[ -n "$others" ] && printf "  %-12s ${C_YELLOW}%s${C_RESET}\n" "elsewhere:" \
+			"$(printf '%s\n' "$others" | awk '{printf "pid %s (VM_PATH=%s) ", $1, $2}')"
 		[ -f "$DISK" ] && printf "  %-12s %s (%s on host)\n" "disk:" "$DISK" "$(du -h "$DISK" 2>/dev/null | cut -f1)"
 		printf "  %-12s %s\n" "iso:" "$(basename "$(find_iso)" 2>/dev/null || echo none)"
 		printf "  %-12s " "ports:"
