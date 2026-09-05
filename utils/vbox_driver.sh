@@ -30,7 +30,35 @@ vboxdrv_device_exists() { [ -c /dev/vboxdrv ]; }
 # loaded, so this check reported "not loaded" on a machine where it wasn't.
 vboxdrv_loaded() { grep -q '^vboxdrv ' "$VBOXDRV_PROC_MODULES" 2> /dev/null; }
 
-vboxdrv_accessible() { [ -r /dev/vboxdrv ] && [ -w /dev/vboxdrv ]; }
+# Where the VM binaries live. /usr/lib/virtualbox for both Debian's package and
+# Oracle's own Linux installer. Overridable for the same reason as above.
+VBOX_LIB_DIR="${VBOX_LIB_DIR:-/usr/lib/virtualbox}"
+
+# HARDENED vs DEVELOPER build -- the distinction that decides whether the
+# calling user needs access to /dev/vboxdrv at all.
+#
+# /usr/lib/virtualbox/vboxdrv.sh picks one at install time:
+#
+#   VirtualBoxVM is set-uid root  ->  hardened: GROUP=root,       MODE=0600
+#   VirtualBoxVM is not           ->  developer: GROUP=vboxusers, MODE=0660
+#
+# In a hardened install root:root 0600 is CORRECT, not broken: VirtualBoxVM and
+# VBoxHeadless are set-uid root and open the driver as root, so an ordinary user
+# never opens it and never needs to be in vboxusers. Measured here: a hardened
+# 7.1.18 with crw------- root root /dev/vboxdrv starts VMs perfectly, while
+# `VBoxManage --version` prints a clean version with no driver warning at all.
+#
+# Requiring user r/w unconditionally therefore reports a working VirtualBox as
+# unusable, silently drops the build to the other hypervisor without asking, and
+# advises joining a group that changes nothing. That was a real regression here.
+vboxdrv_hardened() {
+	[ -u "$VBOX_LIB_DIR/VirtualBoxVM" ] || [ -u "$VBOX_LIB_DIR/VBoxHeadless" ]
+}
+
+vboxdrv_accessible() {
+	vboxdrv_hardened && return 0
+	[ -r /dev/vboxdrv ] && [ -w /dev/vboxdrv ]
+}
 
 vboxdrv_ok() {
 	vboxdrv_device_exists || return 1
@@ -46,6 +74,8 @@ vboxdrv_why() {
 	elif ! vboxdrv_loaded; then
 		printf '%s' "installed, but the vboxdrv kernel module is not loaded (needs root)"
 	elif ! vboxdrv_accessible; then
+		# Only reachable on a DEVELOPER build -- a hardened one is accessible
+		# by definition -- so vboxusers really is the fix here.
 		printf '%s' "kernel driver ready, but /dev/vboxdrv is not readable/writable by $(id -un) -- join the vboxusers group"
 	else
 		printf '%s' "ready"

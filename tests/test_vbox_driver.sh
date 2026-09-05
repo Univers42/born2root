@@ -81,4 +81,37 @@ vboxdrv_accessible() { return 0; }
 check "fully usable: ok"  "$(yesno vboxdrv_ok)" yes
 check "fully usable: why" "$(vboxdrv_why)" "ready"
 
+# ── Hardened vs developer build, against the REAL vboxdrv_accessible ────────
+# The regression this pins down: a hardened install leaves /dev/vboxdrv
+# root:root 0600 on purpose, because VirtualBoxVM is set-uid root and opens the
+# driver itself. Demanding user r/w there declared a perfectly working
+# VirtualBox unusable, so `make all` stopped offering it and silently built on
+# the other hypervisor instead. Fixture dirs stand in for /usr/lib/virtualbox.
+unset -f vboxdrv_accessible vboxdrv_hardened
+eval "$(sed -n '/^vboxdrv_hardened()/,/^}/p;/^vboxdrv_accessible()/,/^}/p' ./utils/vbox_driver.sh)"
+
+hardened="$TMP/lib-hardened"; mkdir -p "$hardened"
+printf '#!/bin/sh\n' > "$hardened/VirtualBoxVM"; chmod 4711 "$hardened/VirtualBoxVM"
+
+developer="$TMP/lib-developer"; mkdir -p "$developer"
+printf '#!/bin/sh\n' > "$developer/VirtualBoxVM"; chmod 0755 "$developer/VirtualBoxVM"
+
+VBOX_LIB_DIR="$hardened"
+check "hardened: detected"                "$(yesno vboxdrv_hardened)"  yes
+check "hardened: accessible without r/w"  "$(yesno vboxdrv_accessible)" yes
+check "hardened: ok"                      "$(yesno vboxdrv_ok)"         yes
+check "hardened: why"                     "$(vboxdrv_why)"              "ready"
+
+# Developer build with an unreadable device must still report the real problem:
+# there, vboxusers membership genuinely is the fix.
+VBOX_LIB_DIR="$developer"
+check "developer: not hardened" "$(yesno vboxdrv_hardened)" no
+unreadable="$TMP/no-such-device"
+vboxdrv_accessible() { vboxdrv_hardened && return 0; [ -r "$unreadable" ] && [ -w "$unreadable" ]; }
+check "developer: unreadable device is NOT ok" "$(yesno vboxdrv_ok)" no
+case "$(vboxdrv_why)" in
+	*"vboxusers"*) printf 'ok   %-46s\n' "developer: why still says join vboxusers" ;;
+	*) printf 'FAIL %-46s = %s\n' "developer: why" "$(vboxdrv_why)"; fail=1 ;;
+esac
+
 exit "$fail"
