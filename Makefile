@@ -110,7 +110,9 @@ C_CYAN   := \033[36m
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
         nvim hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
-        qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest
+        qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
+        qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
+        qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -130,7 +132,19 @@ MAKE_BIN := $(MAKE)
 # VM_PATH is checked before either pipeline runs, so a root-owned storage
 # directory is reported -- and, with permission, fixed with sudo -- before the
 # ISO build rather than minutes after it. See utils/vm_path.sh.
-all: prepare
+# `sudo make all` "works" and quietly builds the wrong VM: the ISO gets ROOT's
+# ~/.ssh key (so `ssh b2b` asks for a password), ~/.ssh/config is root's, and
+# the disk, pidfile and monitor socket end up root-owned. Nothing in the build
+# needs root; when VM_PATH does, make all asks for sudo for exactly that step.
+no_root:
+	@if [ "$$(id -u)" = 0 ] && [ -n "$$SUDO_USER" ] && [ "$$SUDO_USER" != root ]; then \
+		printf "  $(C_RED)✗$(C_RESET) don't build as root: the VM would get root's SSH key and root-owned files.\n"; \
+		printf "    Run it as %s:   make all VM_PATH=%s\n" "$$SUDO_USER" "$(VM_PATH)"; \
+		printf "    When VM_PATH needs root, the build asks for sudo for just that step.\n"; \
+		exit 1; \
+	fi
+
+all: no_root prepare
 	@backend=$$(BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
 	bash utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
@@ -194,6 +208,51 @@ qemu_console:
 # Re-attach the install progress tracker (Ctrl+C only ever detaches it).
 qemu_watch:
 	@$(QEMU_ENV) bash setup/host/qemu_vm.sh watch
+
+# Just the disk (qemu_install = create + install).
+qemu_create:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh create
+
+qemu_kill:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh kill
+
+qemu_restart:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh restart
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+
+# Hard reset, pause and resume go through the QEMU monitor.
+qemu_reset:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh reset
+
+qemu_pause:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh pause
+
+qemu_resume:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh resume
+
+# Type the LUKS passphrase at the guest (qemu_start does this itself).
+qemu_unlock:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh unlock
+
+# The VGA screen, where the LUKS prompt and boot errors live.
+qemu_screenshot:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh screenshot
+
+# A shell in the guest on the port it actually got -- or one command:
+#   make qemu_ssh CMD="uname -a"
+qemu_ssh:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh $(CMD)
+
+qemu_ssh_config:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+
+# Every QEMU guest on this host, whoever started it, from whatever VM_PATH.
+qemu_list:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh list
+
+# Any QEMU monitor command:   make qemu_monitor CMD="info block"
+qemu_monitor:
+	@$(QEMU_ENV) bash setup/host/qemu_vm.sh monitor "$(or $(CMD),info status)"
 
 # Prove the guest is the same whichever backend built it: partitions, LUKS,
 # LVM, UFW, the policy files and the login shell all come from the preseeded

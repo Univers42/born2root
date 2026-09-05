@@ -41,12 +41,23 @@
 #   qemu_vm.sh create      create the qcow2 disk (no-op if it exists)
 #   qemu_vm.sh install     boot the preseed ISO and run the unattended install
 #   qemu_vm.sh start       boot from disk, headless, and unlock LUKS
+#   qemu_vm.sh restart     stop, then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        ACPI power button, then wait
 #   qemu_vm.sh kill        last resort: SIGTERM the QEMU process
+#   qemu_vm.sh reset       hard reset;  pause / resume  freeze and continue
 #   qemu_vm.sh status      pid, ports, disk size, what the console last said
+#   qemu_vm.sh list        every QEMU guest on this host, any VM_PATH, its owner
 #   qemu_vm.sh console     follow the serial log
+#   qemu_vm.sh screenshot  dump the VGA screen (LUKS prompt, boot errors)
+#   qemu_vm.sh monitor CMD any human-monitor command, e.g. "info block"
+#   qemu_vm.sh ssh [CMD]   a shell (or one command) in the guest
 #   qemu_vm.sh ssh-config  write the ~/.ssh/config b2b block for these ports
+#
+#   stop, kill & co. act on the guest at $VM_PATH -- or, when nothing runs
+#   there and exactly one guest of this VM runs from another VM_PATH, on that
+#   one. A guest another user started (sudo make all) is named, with the sudo
+#   command that reaches it, instead of being reported stopped.
 #
 # Env
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (122880)
@@ -65,15 +76,22 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
-VM_DIR="$VM_PATH/$VM_NAME"
-DISK="$VM_DIR/$VM_NAME.qcow2"
-SERIAL="$VM_DIR/serial.log"
-MONITOR="$VM_DIR/monitor.sock"
-PIDFILE="$VM_DIR/qemu.pid"
-# What the disk holds is recorded, not guessed from its size: a qcow2 grows
-# past 1 GB minutes into an install, long before there is a system on it.
-PHASE="$VM_DIR/.phase"       # "installing" while d-i owns the disk
-STAMP="$VM_DIR/.installed"   # written once B2B-INSTALL-COMPLETE arrived
+VM_USER="${VM_USER:-dlesieur}"
+# Everything below is keyed on VM_PATH. It is a function because stop/kill may
+# re-key onto a guest of this VM found running from ANOTHER VM_PATH (see
+# adopt_other_guest), and every derived path has to follow.
+vm_paths() {
+	VM_DIR="$VM_PATH/$VM_NAME"
+	DISK="$VM_DIR/$VM_NAME.qcow2"
+	SERIAL="$VM_DIR/serial.log"
+	MONITOR="$VM_DIR/monitor.sock"
+	PIDFILE="$VM_DIR/qemu.pid"
+	# What the disk holds is recorded, not guessed from its size: a qcow2 grows
+	# past 1 GB minutes into an install, long before there is a system on it.
+	PHASE="$VM_DIR/.phase"     # "installing" while d-i owns the disk
+	STAMP="$VM_DIR/.installed" # written once B2B-INSTALL-COMPLETE arrived
+}
+vm_paths
 
 DISK_SIZE_MB="${DISK_SIZE_MB:-122880}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
@@ -126,13 +144,27 @@ vm_pass() {
 	[ -r "$REPO_ROOT/vm_pass.txt" ] && head -n1 "$REPO_ROOT/vm_pass.txt" | tr -d '\r\n'
 }
 
+# Alive? /proc, not `kill -0`: kill -0 answers EPERM for a process owned by
+# someone else, which read as "not running" for a guest root had started.
+pid_alive() { [ -d "/proc/$1" ]; }
+
+# The pid of the guest at $VM_DIR. The pidfile is the normal source; when it
+# exists but cannot be read (root-owned, from a `sudo make all`) the guest is
+# recovered from the process list by the very -pidfile path QEMU was given,
+# instead of an unreadable file being reported as "not running".
 qemu_pid() {
-	[ -r "$PIDFILE" ] || return 1
-	local p; p=$(head -n1 "$PIDFILE" 2> /dev/null)
-	[ -n "$p" ] && kill -0 "$p" 2> /dev/null && printf '%s' "$p"
+	local p
+	p=$(head -n1 "$PIDFILE" 2> /dev/null)
+	if [ -z "$p" ] && [ -e "$PIDFILE" ]; then
+		p=$(qemu_cmdlines | awk -v pf=" -pidfile $PIDFILE " 'index($0, pf) { print $1; exit }')
+	fi
+	[ -n "$p" ] && pid_alive "$p" && printf '%s' "$p"
 }
 
 is_running() { qemu_pid > /dev/null 2>&1; }
+
+# Who started the guest -- the user who can control it without sudo.
+guest_owner() { stat -c %U "/proc/$1" 2> /dev/null; }
 
 # ── Guests of this VM started from ANOTHER VM_PATH ──────────────────────────
 # Every path above is keyed on VM_PATH, so `make qemu_stop` run without the
@@ -177,6 +209,57 @@ report_other_guests() {
 		printf "     ${C_DIM}stop it:  VM_PATH=%s make qemu_stop${C_RESET}\n" "$path"
 	done
 	return 0
+}
+
+# The user asked to stop "debian" and exactly one guest of that name is
+# running -- from another VM_PATH. Refusing and printing the command to type
+# was one round trip too many (make qemu_stop, then make qemu_stop VM_PATH=…):
+# re-key onto it and carry on. Two or more candidates ARE ambiguous: list
+# them and let the caller refuse.
+#   0 adopted (VM_PATH and every derived path now point at it)
+#   1 none      2 ambiguous (already reported)
+adopt_other_guest() {
+	local others pid path
+	others=$(other_guests)
+	[ -n "$others" ] || return 1
+	if [ "$(printf '%s\n' "$others" | wc -l)" -gt 1 ]; then
+		report_other_guests
+		return 2
+	fi
+	read -r pid path <<< "$others"
+	warn "nothing at $VM_DIR — QEMU '$VM_NAME' is running from VM_PATH=$path (pid $pid), using that"
+	VM_PATH=$path
+	vm_paths
+	return 0
+}
+
+# stop/kill semantics: something to act on, or "not running" is the truth.
+need_running() {
+	is_running && return 0
+	adopt_other_guest && return 0
+	[ $? = 2 ] && exit 1
+	ok "not running"
+	exit 0
+}
+
+# For actions where "not running" is an error (unlock, screenshot, monitor…).
+need_running_or_die() {
+	is_running && return 0
+	adopt_other_guest && return 0
+	[ $? = 2 ] && exit 1
+	die "not running"
+}
+
+# A guest root started (sudo make all) has a root-owned pidfile and monitor
+# socket: the ACPI button never reaches it and kill answers EPERM -- and this
+# script used to print "✓ stopped" over both. Say what is actually needed.
+# $1 = the make target to repeat under sudo.
+need_control() {
+	local pid owner me
+	pid=$(qemu_pid) || return 0
+	owner=$(guest_owner "$pid"); me=$(id -un)
+	[ "$owner" = "$me" ] || [ "$(id -u)" = 0 ] && return 0
+	die "QEMU '$VM_NAME' (pid $pid) was started by $owner, not $me — this needs sudo:   sudo make $1 VM_PATH=$VM_PATH"
 }
 
 # ── Host port collision avoidance ───────────────────────────────────────────
@@ -691,7 +774,8 @@ case "${1:-status}" in
 	screenshot)
 		# The VGA text screen is where the LUKS prompt and any boot error live,
 		# precisely because they do not reach the serial log (see above).
-		is_running || die "not running"
+		need_running_or_die
+		need_control qemu_screenshot
 		out="${2:-$VM_DIR/screen.ppm}"
 		mon "screendump $out" > /dev/null
 		sleep 1
@@ -705,42 +789,101 @@ case "${1:-status}" in
 		;;
 
 	unlock)
-		is_running || die "not running"
+		need_running_or_die
+		need_control qemu_unlock
 		pass=$(vm_pass); [ -n "$pass" ] || die "no passphrase available"
 		sendkey_string "$pass" && ok "passphrase sent"
 		;;
 
 	stop)
-		if ! is_running; then
-			report_other_guests && exit 1
-			ok "not running"; exit 0
-		fi
-		info "ACPI power button"
+		need_running
+		need_control qemu_stop
+		info "ACPI power button (pid $(qemu_pid))"
 		mon "system_powerdown" > /dev/null
 		for _ in $(seq 1 40); do is_running || break; sleep 2; done
 		if is_running; then
 			warn "still up after 80s — sending SIGTERM"
 			kill "$(qemu_pid)" 2> /dev/null; sleep 3
 		fi
+		is_running && die "still running (pid $(qemu_pid)) — force it: $0 kill"
 		rm -f "$PIDFILE" "$MONITOR"
 		ok "stopped"
 		;;
 
 	kill)
-		if ! p=$(qemu_pid); then
-			report_other_guests && exit 1
-			ok "not running"; exit 0
-		fi
+		need_running
+		need_control qemu_kill
+		p=$(qemu_pid)
 		kill "$p" 2> /dev/null; sleep 2; kill -9 "$p" 2> /dev/null
+		is_running && die "could not kill pid $p"
 		rm -f "$PIDFILE" "$MONITOR"
 		ok "killed"
 		;;
 
+	restart)
+		# stop may adopt another VM_PATH; start must follow it.
+		is_running || adopt_other_guest
+		case $? in
+			0) VM_PATH="$VM_PATH" "$0" stop || exit 1 ;;
+			2) exit 1 ;;
+		esac
+		exec env VM_PATH="$VM_PATH" "$0" start
+		;;
+
+	reset)
+		need_running_or_die
+		need_control qemu_reset
+		mon "system_reset" > /dev/null && ok "hard reset sent (pid $(qemu_pid))"
+		;;
+
+	pause)
+		need_running_or_die
+		need_control qemu_pause
+		mon "stop" > /dev/null && ok "paused (pid $(qemu_pid)) — continue with: $0 resume"
+		;;
+
+	resume)
+		need_running_or_die
+		need_control qemu_resume
+		mon "cont" > /dev/null && ok "resumed (pid $(qemu_pid))"
+		;;
+
+	monitor)
+		# Any human-monitor command, e.g. monitor "info status". The reply
+		# comes back with the echoed command and the prompt; strip those.
+		need_running_or_die
+		need_control qemu_monitor
+		[ -n "${2:-}" ] || die "usage: $0 monitor '<command>'   (try: info status, info block, info network)"
+		mon "$2" | tr -d '\r' | sed -e '1d' -e '/^(qemu)/d' -e 's/^(qemu) //'
+		;;
+
+	list)
+		# Every QEMU guest on this host, whoever started it, from whatever
+		# VM_PATH -- the view that answers "who is holding VT-x?".
+		found=0
+		while read -r pid args; do
+			[ -n "$pid" ] || continue
+			found=1; name='?'; path='?'
+			case " $args" in *" -name "*) name=${args##* -name }; name=${name%% *} ;; esac
+			case " $args" in *" -pidfile "*) pf=${args##* -pidfile }; pf=${pf%% *}; path=$(dirname "$(dirname "$pf")") ;; esac
+			printf "  pid %-8s %-10s %-14s VM_PATH=%s\n" "$pid" "$(guest_owner "$pid")" "$name" "$path"
+		done <<< "$(qemu_cmdlines)"
+		[ "$found" = 1 ] || ok "no QEMU guest is running on this host"
+		;;
+
+	ssh)
+		# A shell (or one command) in the guest, on the port it actually got.
+		need_running_or_die
+		exec ssh -p "$(host_port_of ssh)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+			-o LogLevel=ERROR "${VM_USER}@127.0.0.1" "${@:2}"
+		;;
+
 	watch)
-		is_running || die "nothing is running for $VM_NAME"
+		need_running_or_die
 		watch_install
 		;;
 	console)
+		[ -f "$SERIAL" ] || need_running_or_die
 		[ -f "$SERIAL" ] || die "no serial log yet"
 		printf "  ${C_DIM}Ctrl+C stops watching, not the VM${C_RESET}\n\n"
 		tail -f "$SERIAL"
@@ -751,9 +894,9 @@ case "${1:-status}" in
 		mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 		touch "$HOME/.ssh/config"; chmod 600 "$HOME/.ssh/config"
 		marker="# Born2beRoot VM (auto-generated, qemu)"
-		python3 - "$HOME/.ssh/config" "$marker" "$ssh_port" << 'PYEOF'
+		python3 - "$HOME/.ssh/config" "$marker" "$ssh_port" "$VM_USER" << 'PYEOF'
 import sys
-path, marker, port = sys.argv[1], sys.argv[2], sys.argv[3]
+path, marker, port, user = sys.argv[1:5]
 lines = open(path).read().split("\n")
 out, skip = [], False
 for ln in lines:
@@ -768,7 +911,7 @@ for ln in lines:
             continue
     out.append(ln)
 block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
-         f"    Port {port}", "    User dlesieur",
+         f"    Port {port}", f"    User {user}",
          "    ServerAliveInterval 15", "    ServerAliveCountMax 6",
          "    TCPKeepAlive yes", "    ConnectionAttempts 5", "    ConnectTimeout 15",
          "    StrictHostKeyChecking no", "    UserKnownHostsFile /dev/null",
@@ -793,6 +936,8 @@ PYEOF
 				"state:" "$(qemu_pid)"
 		elif is_running; then
 			printf "  %-12s ${C_GREEN}running${C_RESET} (pid %s)\n" "state:" "$(qemu_pid)"
+			_owner=$(guest_owner "$(qemu_pid)")
+			[ "$_owner" = "$(id -un)" ] || printf "  %-12s ${C_YELLOW}%s${C_RESET} — stop/kill/unlock need sudo\n" "started by:" "$_owner"
 		else
 			printf "  %-12s stopped\n" "state:"
 		fi
@@ -813,6 +958,6 @@ PYEOF
 		printf "\n"
 		;;
 
-	*) die "unknown action '${1}' (create|install|start|unlock|stop|kill|status|console|screenshot|ssh-config)" ;;
+	*) die "unknown action '${1}' (create|install|start|restart|stop|kill|reset|pause|resume|unlock|status|list|console|watch|screenshot|monitor|ssh|ssh-config)" ;;
 esac
 fi

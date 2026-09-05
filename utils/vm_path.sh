@@ -32,9 +32,9 @@
 VM_PATH_SUDO="${VM_PATH_SUDO:-sudo}"
 
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
-	_VP_RED=$'\033[31m' _VP_YEL=$'\033[33m' _VP_GRN=$'\033[32m' _VP_OFF=$'\033[0m'
+	_VP_RED=$'\033[31m' _VP_GRN=$'\033[32m' _VP_OFF=$'\033[0m'
 else
-	_VP_RED='' _VP_YEL='' _VP_GRN='' _VP_OFF=''
+	_VP_RED='' _VP_GRN='' _VP_OFF=''
 fi
 
 # Can we ask the user anything? /dev/tty always exists as a file, but OPENING
@@ -158,13 +158,5 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 		printf 'usage: %s VM_PATH VM_NAME\n' "$0" >&2
 		exit 2
 	}
-	# `sudo make all` "works", and is exactly how the root-owned leftovers
-	# above come to exist. Say so while it is still cheap to undo.
-	if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ]; then
-		printf '  %s⚠%s  running as root: everything under %s will belong to root, and\n' \
-			"$_VP_YEL" "$_VP_OFF" "$1/$2" >&2
-		printf '     make qemu_stop / make fclean as %s will fail on it. Afterwards, run:\n' "$SUDO_USER" >&2
-		printf '        sudo chown -R "%s" "%s"\n' "$SUDO_USER" "$1/$2" >&2
-	fi
 	ensure_vm_dir "$1" "$2"
 fi
