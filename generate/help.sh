@@ -4,14 +4,12 @@
 set -e
 
 # ── Colours ──────────────────────────────────────────────────────────────────
-RST='\033[0m'
-BLD='\033[1m'
-DIM='\033[2m'
-GRN='\033[32m'
-YLW='\033[33m'
-RED='\033[31m'
-CYN='\033[36m'
-WHT='\033[97m'
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+	RST='\033[0m'; BLD='\033[1m'; DIM='\033[2m'
+	GRN='\033[32m'; YLW='\033[33m'; RED='\033[31m'; CYN='\033[36m'; WHT='\033[97m'
+else
+	RST=''; BLD=''; DIM=''; GRN=''; YLW=''; RED=''; CYN=''; WHT=''
+fi
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
 # Adaptive width: the descriptions here are full sentences, and at a hard 60
@@ -70,7 +68,7 @@ blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
 # Pad to a visible width. bash's printf '%-18s' pads by BYTES, so a name
 # holding a multibyte character (VM_NAME=…) came out three columns short and
 # the description column went ragged.
-NAMEW=18
+NAMEW=22
 _pad() {
 	local s="$1" n
 	n=$(printf '%s' "$s" | wc -m)
@@ -78,6 +76,17 @@ _pad() {
 	[ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
 	return 0
 }
+
+# Width left for the description, and a word-wrapper that fills it. fold -s
+# breaks on spaces; each line is then <= DESCW, so row() pads it to the
+# border and nothing overflows.
+DESCW=$((W - 2 - NAMEW - 1))
+[ "$DESCW" -lt 20 ] && DESCW=20
+_wrap() { printf '%s' "$1" | fold -s -w "$2"; }
+
+# A continuation line in the description column (aligned under the text,
+# not the name). $2 optional colour, default dim.
+contline() { row "  $(_pad '') ${2:-$DIM}$1${RST}"; }
 
 # Section heading. Closes the previous section with a blank line first, so the
 # last command of a group never sits flush against the divider.
@@ -92,16 +101,29 @@ sec() {
 # One command + what it does. The description gets whatever the name column
 # leaves, and is trimmed rather than allowed to break the border.
 cmd() {
-	local name="$1" desc="$2" color="${3:-${BLD}}"
-	local avail=$((W - 2 - NAMEW - 1))
-	[ "$(printf '%s' "$desc" | wc -m)" -gt "$avail" ] && desc="${desc:0:$((avail - 1))}…"
-	row "  ${color}$(_pad "$name")${RST} ${desc}"
+	local name="$1" desc="$2" color="${3:-${BLD}}" first=1 line
+	if [ "$(printf '%s' "$name" | wc -m)" -gt "$NAMEW" ]; then
+		row "  ${color}${name}${RST}"
+		while IFS= read -r line; do contline "$line" ""; done <<< "$(_wrap "$desc" "$DESCW")"
+		return 0
+	fi
+	while IFS= read -r line; do
+		if [ "$first" = 1 ]; then
+			row "  ${color}$(_pad "$name")${RST} ${line}"; first=0
+		else
+			contline "$line" ""
+		fi
+	done <<< "$(_wrap "$desc" "$DESCW")"
 }
 
-# An indented continuation line under a command.
-note() { row "  $(_pad '')  ${DIM}$1${RST}"; }
+# An indented, wrapped continuation line under a command.
+note() {
+	local line
+	while IFS= read -r line; do contline "$line"; done <<< "$(_wrap "$1" "$DESCW")"
+}
 
 # ═════════════════════════════════════════════════════════════════════════════
+main() {
 printf "\n"
 top
 crow "${BLD}${WHT}Born2beRoot  ─  Makefile Help${RST}"
@@ -209,5 +231,25 @@ cmd "AI_MODE=…" "off (default) | client | local" "${DIM}"
 blank
 row "    ${DIM}e.g.${RST}  ${BLD}make all VM_NAME=test VM_PASS=hunter2${RST}"
 blank
+mid
+blank
+row "  ${DIM}Search:${RST} ${BLD}/text${RST} finds, ${BLD}n${RST}/${BLD}N${RST} next/prev, ${BLD}q${RST} quits (when scrollable)"
+row "  ${DIM}Jump:${RST}   ${BLD}make help FIND=qemu${RST} opens on the first match"
+blank
 bot
 printf "\n"
+}
+
+# ── Output: a searchable pager on a terminal, plain text otherwise ───────────
+# less -R keeps the colours, -X leaves the help on screen after quit, -F skips
+# paging when it already fits. FIND=<text> opens less on the first match and
+# highlights every one (n / N step through them).
+if [ -t 1 ] && command -v less > /dev/null 2>&1; then
+	if [ -n "${FIND:-}" ]; then
+		main | less -RX -p "$FIND"
+	else
+		main | less -FRX
+	fi
+else
+	main
+fi
