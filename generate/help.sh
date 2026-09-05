@@ -123,7 +123,6 @@ note() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-main() {
 printf "\n"
 top
 crow "${BLD}${WHT}Born2beRoot  ─  Makefile Help${RST}"
@@ -231,25 +230,5 @@ cmd "AI_MODE=…" "off (default) | client | local" "${DIM}"
 blank
 row "    ${DIM}e.g.${RST}  ${BLD}make all VM_NAME=test VM_PASS=hunter2${RST}"
 blank
-mid
-blank
-row "  ${DIM}Search:${RST} ${BLD}/text${RST} finds, ${BLD}n${RST}/${BLD}N${RST} next/prev, ${BLD}q${RST} quits (when scrollable)"
-row "  ${DIM}Jump:${RST}   ${BLD}make help FIND=qemu${RST} opens on the first match"
-blank
 bot
 printf "\n"
-}
-
-# ── Output: a searchable pager on a terminal, plain text otherwise ───────────
-# less -R keeps the colours, -X leaves the help on screen after quit, -F skips
-# paging when it already fits. FIND=<text> opens less on the first match and
-# highlights every one (n / N step through them).
-if [ -t 1 ] && command -v less > /dev/null 2>&1; then
-	if [ -n "${FIND:-}" ]; then
-		main | less -RX -p "$FIND"
-	else
-		main | less -FRX
-	fi
-else
-	main
-fi
