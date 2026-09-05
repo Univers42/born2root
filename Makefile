@@ -23,7 +23,13 @@ VM_NAME      ?= debian
 #   qemu        KVM; needs no module, only access to /dev/kvm, so it works as
 #               an ordinary user on machines where VirtualBox cannot
 BACKEND      ?= auto
-VM_PATH	     ?= $(CURDIR)/disk_images
+# Where the VM lives. VirtualBox remembers a VM's disk itself; for QEMU the
+# last create/boot recorded it (utils/vm_path.sh remember_vm_dir), so after a
+# `make all VM_PATH=/mnt/storage/qemu` no later `make qemu_*` needs VM_PATH.
+# An explicit VM_PATH (command line or environment) always wins.
+ifeq ($(origin VM_PATH),undefined)
+VM_PATH      := $(shell cat $(CURDIR)/disk_images/.vm_path.$(VM_NAME) 2>/dev/null || echo $(CURDIR)/disk_images)
+endif
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
 PRESEED_FILE := preseeds/preseed.cfg
@@ -136,13 +142,9 @@ MAKE_BIN := $(MAKE)
 # ~/.ssh key (so `ssh b2b` asks for a password), ~/.ssh/config is root's, and
 # the disk, pidfile and monitor socket end up root-owned. Nothing in the build
 # needs root; when VM_PATH does, make all asks for sudo for exactly that step.
+# Same check as qemu_vm.sh create/install/start (utils/vm_path.sh refuse_sudo_build).
 no_root:
-	@if [ "$$(id -u)" = 0 ] && [ -n "$$SUDO_USER" ] && [ "$$SUDO_USER" != root ]; then \
-		printf "  $(C_RED)✗$(C_RESET) don't build as root: the VM would get root's SSH key and root-owned files.\n"; \
-		printf "    Run it as %s:   make all VM_PATH=%s\n" "$$SUDO_USER" "$(VM_PATH)"; \
-		printf "    When VM_PATH needs root, the build asks for sudo for just that step.\n"; \
-		exit 1; \
-	fi
+	@bash utils/vm_path.sh --no-root "make all VM_PATH=$(VM_PATH)"
 
 all: no_root prepare
 	@backend=$$(BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)") || exit 1; \

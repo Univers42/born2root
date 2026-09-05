@@ -408,7 +408,10 @@ launch() {
 	# empty string would hand QEMU a bogus "" argument under TCG.
 	[ "$ACCEL" = kvm ] && cpu_args=(-cpu host)
 
-	mkdir -p "$VM_DIR"
+	# Checked before the first write: a root-owned VM_DIR (sudo make all) used
+	# to surface here as a dozen "Permission denied" lines from serial.log,
+	# ports.env and the pidfile. Now it is explained, and fixable in place.
+	ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 	[ -f "$DISK" ] || die "no disk yet — run: $0 create"
 
 	# Check KVM before touching anything (the serial log is truncated below).
@@ -642,6 +645,7 @@ watch_install() {
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 case "${1:-status}" in
 	create)
+		refuse_sudo_build "make qemu_create VM_PATH=$VM_PATH" || exit 1
 		ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 		if [ -f "$DISK" ]; then
 			ok "disk already exists: $DISK ($(du -h "$DISK" | cut -f1) on host)"
@@ -655,7 +659,9 @@ case "${1:-status}" in
 		;;
 
 	install)
+		refuse_sudo_build "make qemu_install VM_PATH=$VM_PATH" || exit 1
 		is_running && die "already running (pid $(qemu_pid)) — stop it first: $0 stop"
+		ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 		printf 'installing\n' > "$PHASE"
 		rm -f "$STAMP"
 		launch cdrom
@@ -692,6 +698,7 @@ case "${1:-status}" in
 		;;
 
 	start)
+		refuse_sudo_build "make qemu_start VM_PATH=$VM_PATH" || exit 1
 		# A running QEMU is not necessarily the installed system booting: it
 		# may still be d-i owning the disk, and typing a LUKS passphrase at
 		# the installer is 45 seconds of nothing followed by a wrong diagnosis.
@@ -708,7 +715,7 @@ case "${1:-status}" in
 		fi
 		if ! is_running && [ ! -f "$STAMP" ] \
 			&& [ "$(stat -c %s "$DISK" 2> /dev/null || echo 0)" -le 1073741824 ]; then
-			die "nothing is installed on this disk yet — run: $0 install"
+			die "nothing is installed at $VM_DIR — run: $0 install   (built somewhere else? pass its VM_PATH)"
 		fi
 		if is_running; then
 			ok "already running (pid $(qemu_pid))"
@@ -821,6 +828,7 @@ case "${1:-status}" in
 		;;
 
 	restart)
+		refuse_sudo_build "make qemu_restart VM_PATH=$VM_PATH" || exit 1
 		# stop may adopt another VM_PATH; start must follow it.
 		is_running || adopt_other_guest
 		case $? in

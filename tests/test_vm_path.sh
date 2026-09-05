@@ -30,6 +30,8 @@ has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2> /dev/null; rm -rf "$TMP"' EXIT
 
+# Where VM locations get remembered: never the real repo's disk_images/.
+export VM_PATH_REGISTRY="$TMP/registry"
 . ./utils/vm_path.sh
 who="$(id -un):$(id -gn)"
 
@@ -42,6 +44,7 @@ out=$(ensure_vm_dir "$TMP/own" debian 2>&1) && rc=0 || rc=$?
 check "writable VM_PATH: ok"                      "$rc" 0
 check "writable VM_PATH: VM dir created"          "$(yesno test -d "$TMP/own/debian")" yes
 check "writable VM_PATH: silent"                  "$out" ""
+check "writable VM_PATH: location remembered"     "$(cat "$TMP/registry/.vm_path.debian")" "$TMP/own"
 
 out=$(ensure_vm_dir "$TMP/new/deeper" debian 2>&1) && rc=0 || rc=$?
 check "absent but creatable: ok"                  "$rc" 0
@@ -96,6 +99,7 @@ check "accepted: sudo ran mkdir"                  "$(has "$(cat "$FAKESUDO_LOG")
 check "accepted: sudo ran chown -R"               "$(has "$(cat "$FAKESUDO_LOG")" "chown -R \"$who\"")" yes
 check "accepted: exactly the 3 printed commands"  "$(wc -l < "$FAKESUDO_LOG")" 3
 check "accepted: reports success"                 "$(has "$out" "now belongs to")" yes
+check "accepted: location remembered"             "$(cat "$TMP/registry/.vm_path.debian")" "$TMP/locked/qemu"
 
 # ── The `sudo make all` leftover: VM dir exists but belongs to someone else
 mkdir -p "$TMP/own/foreign"; chmod 555 "$TMP/own/foreign"
@@ -105,5 +109,17 @@ check "foreign VM dir: fails"                     "$rc" 1
 check "foreign VM dir: says exists but belongs to" "$(has "$out" "exists but belongs to")" yes
 check "foreign VM dir: chown -R offered"          "$(has "$out" "sudo chown -R \"$who\" \"$TMP/own/foreign\"")" yes
 check "foreign VM dir: existing VM_PATH untouched" "$(has "$out" "chown \"$who\" \"$TMP/own\"")" no
+
+# ── refuse_sudo_build: only root reached through sudo is refused ───────────
+unset SUDO_USER
+check "not root: allowed"                         "$(yesno refuse_sudo_build 'make all')" yes
+id() { case "$1" in -u) echo 0 ;; *) command id "$@" ;; esac; }
+export SUDO_USER=alice
+out=$(refuse_sudo_build "make all VM_PATH=/x" 2>&1) && rc=0 || rc=$?
+check "root via sudo: refused"                    "$rc" 1
+check "root via sudo: names user and command"     "$(has "$out" "Run it as alice:   make all VM_PATH=/x")" yes
+SUDO_USER=root
+check "real root (SUDO_USER=root): allowed"       "$(yesno refuse_sudo_build 'make all')" yes
+unset -f id; unset SUDO_USER
 
 exit "$fail"

@@ -26,6 +26,7 @@
 #
 #   . utils/vm_path.sh; ensure_vm_dir "$VM_PATH" "$VM_NAME"
 #   bash utils/vm_path.sh "$VM_PATH" "$VM_NAME"
+#   bash utils/vm_path.sh --no-root "make all VM_PATH=..."   (refuse_sudo_build)
 
 # Overridable so tests/test_vm_path.sh can stand in a fake sudo; production
 # callers never set it.
@@ -84,7 +85,13 @@ _vm_path_alternative() {
 # 0 when $VM_PATH/$VM_NAME exists and the calling user can write in it,
 # creating it when the filesystem allows. Otherwise the situation is explained
 # on stderr and the return is 1: "not usable, and here is what to do".
+# On success the location is remembered (remember_vm_dir, below).
 ensure_vm_dir() {
+	_ensure_vm_dir "$1" "$2" || return 1
+	remember_vm_dir "$(cd "$1" && pwd)" "$2"
+}
+
+_ensure_vm_dir() {
 	local vm_path=$1 vm_dir=$1/$2 blocker me line lines
 
 	if _vm_path_writable "$vm_dir"; then
@@ -152,8 +159,47 @@ ensure_vm_dir() {
 	printf '  %s✓%s %s now belongs to %s\n' "$_VP_GRN" "$_VP_OFF" "$vm_dir" "$me" >&2
 }
 
+# ── Where does this VM live? ────────────────────────────────────────────────
+# VirtualBox remembers a VM's disk itself; QEMU has nothing, so after a
+# `make all VM_PATH=/mnt/storage/qemu` every later `make qemu_*` had to be
+# told VM_PATH again -- and forgetting it read as "nothing installed" or "not
+# running". The location is recorded per VM_NAME, and the Makefile reads it
+# back as the default VM_PATH. Repo-local (disk_images/ is gitignored); the
+# tests point it elsewhere.
+VM_PATH_REGISTRY="${VM_PATH_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/disk_images}"
+
+remember_vm_dir() {
+	mkdir -p "$VM_PATH_REGISTRY" 2> /dev/null || return 0
+	printf '%s\n' "$1" > "$VM_PATH_REGISTRY/.vm_path.$2" 2> /dev/null || true
+}
+
+# ── Running as root through sudo ────────────────────────────────────────────
+# `sudo make all` (or sudo make qemu_start) "works" and builds the wrong VM:
+# the ISO gets ROOT's ~/.ssh key, so `ssh b2b` asks for a password; the b2b
+# block lands in /root/.ssh/config; and the disk, pidfile, monitor socket and
+# serial log come out root-owned, so every later command without sudo fails
+# on them -- which invites more sudo. Nothing here needs root: when VM_PATH
+# does, ensure_vm_dir asks for sudo for exactly that step. Only root reached
+# through sudo is refused; a real root login (SUDO_USER unset or root) is not.
+# $1 = the command to run instead.
+refuse_sudo_build() {
+	[ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] || return 0
+	{
+		printf '  %s✗%s not as root: the VM would get root'"'"'s SSH key and root-owned files.\n' "$_VP_RED" "$_VP_OFF"
+		printf '    Run it as %s:   %s\n' "$SUDO_USER" "$1"
+		printf '    If the VM files already belong to root, that command offers to hand them over with sudo.\n'
+	} >&2
+	return 1
+}
+
 # Run as a command (the Makefile does, before either pipeline starts).
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+	case "${1:-}" in
+		--no-root)
+			refuse_sudo_build "${2:-make all}"
+			exit
+			;;
+	esac
 	[ $# -eq 2 ] || {
 		printf 'usage: %s VM_PATH VM_NAME\n' "$0" >&2
 		exit 2
