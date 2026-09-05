@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node.js (for markdownlint)
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install dependencies
         run: |
@@ -36,16 +36,19 @@ jobs:
           find . -type f -name "*.sh" -print0 | xargs -0 shellcheck --color=always
 
       - name: Run Bashate
+        if: always()
         run: |
           echo "Running Bashate on all .sh files..."
           find . -type f -name "*.sh" -exec bashate {} +
 
       - name: Run shfmt (Dry-run/Diff)
+        if: always()
         run: |
           echo "Running shfmt to check formatting..."
           find . -type f -name "*.sh" -exec shfmt -d {} +
 
       - name: Run Markdownlint
+        if: always()
         run: |
           echo "Running Markdownlint..."
           markdownlint "**/*.md"
