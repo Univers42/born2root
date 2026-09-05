@@ -15,8 +15,8 @@ tar -czf "$BACKUP_FILE" -C /var/www/html/wp-content/plugins/ notion_wordpress_sy
 
 # Check if backup was successful
 if [ $? -eq 0 ]; then
-	echo "Backup created successfully: $BACKUP_FILE"
-	echo "Backup size: $(du -h "$BACKUP_FILE" | cut -f1)"
+    echo "Backup created successfully: $BACKUP_FILE"
+    echo "Backup size: $(du -h "$BACKUP_FILE" | cut -f1)"
 else
-	echo "Backup failed!"
+    echo "Backup failed!"
 fi

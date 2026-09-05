@@ -10,12 +10,12 @@ cd "$(dirname "$0")/.."
 
 fail=0
 check() {
-	if [ "$2" = "$3" ]; then
-		printf 'ok   %-34s = %s\n' "$1" "$3"
-	else
-		printf 'FAIL %-34s = %s (expected %s)\n' "$1" "$2" "$3"
-		fail=1
-	fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-34s = %s\n' "$1" "$3"
+    else
+        printf 'FAIL %-34s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
 }
 
 TMP=$(mktemp -d)
@@ -25,29 +25,29 @@ trap 'rm -rf "$TMP"' EXIT
 VM_PASS="" VM_PASS_FILE="$TMP/none" . ./unlock_vm.sh
 
 # Explicit override wins over the file.
-printf 'from-file\n' > "$TMP/pass"
+printf 'from-file\n' >"$TMP/pass"
 check "VM_PASS overrides file" \
-	"$(VM_PASS=from-env VM_PASS_FILE=$TMP/pass resolve_passphrase)" "from-env"
+    "$(VM_PASS=from-env VM_PASS_FILE=$TMP/pass resolve_passphrase)" "from-env"
 
 # Falls back to the file, and the trailing newline must not be typed into the prompt.
 check "falls back to file" \
-	"$(VM_PASS='' VM_PASS_FILE=$TMP/pass resolve_passphrase)" "from-file"
+    "$(VM_PASS='' VM_PASS_FILE=$TMP/pass resolve_passphrase)" "from-file"
 
-printf 'crlf-pass\r\n' > "$TMP/crlf"
+printf 'crlf-pass\r\n' >"$TMP/crlf"
 check "strips CR and LF" \
-	"$(VM_PASS='' VM_PASS_FILE=$TMP/crlf resolve_passphrase)" "crlf-pass"
+    "$(VM_PASS='' VM_PASS_FILE=$TMP/crlf resolve_passphrase)" "crlf-pass"
 
 # Only the first line: a stray second line must not leak into the passphrase.
-printf 'first\nsecond\n' > "$TMP/multi"
+printf 'first\nsecond\n' >"$TMP/multi"
 check "uses first line only" \
-	"$(VM_PASS='' VM_PASS_FILE=$TMP/multi resolve_passphrase)" "first"
+    "$(VM_PASS='' VM_PASS_FILE=$TMP/multi resolve_passphrase)" "first"
 
 # No passphrase anywhere is an error, not an empty string typed at the prompt.
-if VM_PASS='' VM_PASS_FILE="$TMP/missing" resolve_passphrase > /dev/null 2>&1; then
-	printf 'FAIL %-34s = succeeded (expected failure)\n' "errors when no passphrase"
-	fail=1
+if VM_PASS='' VM_PASS_FILE="$TMP/missing" resolve_passphrase >/dev/null 2>&1; then
+    printf 'FAIL %-34s = succeeded (expected failure)\n' "errors when no passphrase"
+    fail=1
 else
-	printf 'ok   %-34s\n' "errors when no passphrase"
+    printf 'ok   %-34s\n' "errors when no passphrase"
 fi
 
 # Enter must be press *and* release, or the guest sees a stuck key.
@@ -61,15 +61,20 @@ SENT_AT=""
 NOW=0
 send_passphrase() { SENT_AT="$SENT_AT $NOW"; }
 # ssh answers only at/after $SSH_UP_AT; NOW advances with the loop.
-ssh_port_answers() { NOW=$((NOW + 0)); [ "$NOW" -ge "$SSH_UP_AT" ]; }
+ssh_port_answers() {
+    NOW=$((NOW + 0))
+    [ "$NOW" -ge "$SSH_UP_AT" ]
+}
 
 run_loop() {
-	SENT_AT=""; NOW=0; UNLOCK_SENDS=0
-	SSH_UP_AT="$1"
-	VM_UNLOCK_DELAY="$2" VM_UNLOCK_RESEND="$3" VM_UNLOCK_TIMEOUT="$4"
-	# Drive the clock: wrap sleep so each tick advances NOW like the real loop.
-	unlock_sleep() { NOW=$((NOW + 2)); }
-	unlock_loop 4242 "pw"
+    SENT_AT=""
+    NOW=0
+    UNLOCK_SENDS=0
+    SSH_UP_AT="$1"
+    VM_UNLOCK_DELAY="$2" VM_UNLOCK_RESEND="$3" VM_UNLOCK_TIMEOUT="$4"
+    # Drive the clock: wrap sleep so each tick advances NOW like the real loop.
+    unlock_sleep() { NOW=$((NOW + 2)); }
+    unlock_loop 4242 "pw"
 }
 
 # Nothing is typed before VM_UNLOCK_DELAY -- typing early lands in GRUB and
@@ -90,10 +95,10 @@ check "returns success when ssh up" "$ok" "yes"
 
 # Gives up rather than looping forever.
 if run_loop 999 30 15 40; then
-	printf 'FAIL %-34s = succeeded (expected timeout)\n' "times out cleanly"
-	fail=1
+    printf 'FAIL %-34s = succeeded (expected timeout)\n' "times out cleanly"
+    fail=1
 else
-	printf 'ok   %-34s\n' "times out cleanly"
+    printf 'ok   %-34s\n' "times out cleanly"
 fi
 
 exit "$fail"

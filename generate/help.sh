@@ -16,53 +16,53 @@ WHT='\033[97m'
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
 # Adaptive width: the descriptions here are full sentences, and at a hard 60
 # columns several of them used to run straight through the right border.
-W=$(( $(tput cols 2> /dev/null || echo 100) - 6 ))
+W=$(($(tput cols 2>/dev/null || echo 100) - 6))
 [ "$W" -lt 64 ] && W=64
 [ "$W" -gt 78 ] && W=78
 
 top() {
-	printf "  ${CYN}╭"
-	printf '─%.0s' $(seq 1 $W)
-	printf "╮${RST}\n"
+    printf "  ${CYN}╭"
+    printf '─%.0s' $(seq 1 $W)
+    printf "╮${RST}\n"
 }
 mid() {
-	printf "  ${CYN}├"
-	printf '─%.0s' $(seq 1 $W)
-	printf "┤${RST}\n"
+    printf "  ${CYN}├"
+    printf '─%.0s' $(seq 1 $W)
+    printf "┤${RST}\n"
 }
 bot() {
-	printf "  ${CYN}╰"
-	printf '─%.0s' $(seq 1 $W)
-	printf "╯${RST}\n"
+    printf "  ${CYN}╰"
+    printf '─%.0s' $(seq 1 $W)
+    printf "╯${RST}\n"
 }
 
 # Visible length, ignoring colour escapes. Everything drawn here is width-1,
 # so counting characters is the right measure.
 _vlen() {
-	printf '%b' "$1" | sed 's/\x1b\[[0-9;]*m//g' | wc -m
+    printf '%b' "$1" | sed 's/\x1b\[[0-9;]*m//g' | wc -m
 }
 
 row() {
-	local content="$1" pad
-	pad=$((W - $(_vlen "$content")))
-	[ "$pad" -lt 0 ] && pad=0
-	printf "  ${CYN}│${RST}"
-	printf '%b' "$content"
-	printf '%*s' "$pad" ""
-	printf "${CYN}│${RST}\n"
+    local content="$1" pad
+    pad=$((W - $(_vlen "$content")))
+    [ "$pad" -lt 0 ] && pad=0
+    printf "  ${CYN}│${RST}"
+    printf '%b' "$content"
+    printf '%*s' "$pad" ""
+    printf "${CYN}│${RST}\n"
 }
 
 crow() {
-	local content="$1" total lpad rpad
-	total=$((W - $(_vlen "$content")))
-	[ "$total" -lt 0 ] && total=0
-	lpad=$((total / 2))
-	rpad=$((total - lpad))
-	printf "  ${CYN}│${RST}"
-	printf '%*s' "$lpad" ""
-	printf '%b' "$content"
-	printf '%*s' "$rpad" ""
-	printf "${CYN}│${RST}\n"
+    local content="$1" total lpad rpad
+    total=$((W - $(_vlen "$content")))
+    [ "$total" -lt 0 ] && total=0
+    lpad=$((total / 2))
+    rpad=$((total - lpad))
+    printf "  ${CYN}│${RST}"
+    printf '%*s' "$lpad" ""
+    printf '%b' "$content"
+    printf '%*s' "$rpad" ""
+    printf "${CYN}│${RST}\n"
 }
 
 blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
@@ -72,30 +72,30 @@ blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
 # the description column went ragged.
 NAMEW=18
 _pad() {
-	local s="$1" n
-	n=$(printf '%s' "$s" | wc -m)
-	printf '%s' "$s"
-	[ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
-	return 0
+    local s="$1" n
+    n=$(printf '%s' "$s" | wc -m)
+    printf '%s' "$s"
+    [ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
+    return 0
 }
 
 # Section heading. Closes the previous section with a blank line first, so the
 # last command of a group never sits flush against the divider.
 sec() {
-	blank
-	mid
-	blank
-	row "  ${BLD}${WHT}▸ $1${RST}"
-	blank
+    blank
+    mid
+    blank
+    row "  ${BLD}${WHT}▸ $1${RST}"
+    blank
 }
 
 # One command + what it does. The description gets whatever the name column
 # leaves, and is trimmed rather than allowed to break the border.
 cmd() {
-	local name="$1" desc="$2" color="${3:-${BLD}}"
-	local avail=$((W - 2 - NAMEW - 1))
-	[ "$(printf '%s' "$desc" | wc -m)" -gt "$avail" ] && desc="${desc:0:$((avail - 1))}…"
-	row "  ${color}$(_pad "$name")${RST} ${desc}"
+    local name="$1" desc="$2" color="${3:-${BLD}}"
+    local avail=$((W - 2 - NAMEW - 1))
+    [ "$(printf '%s' "$desc" | wc -m)" -gt "$avail" ] && desc="${desc:0:$((avail - 1))}…"
+    row "  ${color}$(_pad "$name")${RST} ${desc}"
 }
 
 # An indented continuation line under a command.

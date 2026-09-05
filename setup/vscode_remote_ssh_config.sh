@@ -19,7 +19,7 @@ echo -e "${BLUE}${BOLD}================================================${NC}\n"
 
 # 1. Check if VS Code is installed
 echo -e "${YELLOW}[1/5] Checking VS Code installation...${NC}"
-if ! command -v code &> /dev/null; then
+if ! command -v code &>/dev/null; then
     echo -e "${RED}✗ VS Code not found in PATH${NC}"
     echo "  Please install VS Code first"
     exit 1
@@ -51,7 +51,7 @@ if [ ! -d "$VSCODE_EXTENSIONS" ]; then
 fi
 
 # Check if Remote SSH extension is installed
-if ls "$VSCODE_EXTENSIONS"/ms-vscode-remote.remote-ssh* 1> /dev/null 2>&1; then
+if ls "$VSCODE_EXTENSIONS"/ms-vscode-remote.remote-ssh* 1>/dev/null 2>&1; then
     REMOTE_SSH_VERSION=$(ls -d "$VSCODE_EXTENSIONS"/ms-vscode-remote.remote-ssh* | head -1 | xargs basename)
     echo -e "${GREEN}✓ Remote SSH extension found: $REMOTE_SSH_VERSION${NC}\n"
 else
@@ -76,7 +76,7 @@ else
 fi
 
 # Use Python to safely merge JSON settings (handles existing settings gracefully)
-python3 << PYTHON_EOF
+python3 <<PYTHON_EOF
 import json
 import sys
 

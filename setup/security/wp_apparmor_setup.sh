@@ -6,8 +6,8 @@ echo "===================================================="
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo "This script must be run as root. Please use sudo."
-	exit 1
+    echo "This script must be run as root. Please use sudo."
+    exit 1
 fi
 
 # Step 1: Install AppArmor if needed
@@ -41,7 +41,7 @@ chmod 644 /var/log/php8.2-fpm.log /var/log/lighttpd/*.log
 
 # Step 4: Create temporary WordPress config test file
 echo "Step 4: Creating WordPress AppArmor test file..."
-cat > /var/www/html/apparmor-test.php << 'EOF'
+cat >/var/www/html/apparmor-test.php <<'EOF'
 <?php
 echo "<h1>WordPress AppArmor Test Page</h1>";
 echo "<p>This page tests WordPress functionality under AppArmor protection.</p>";
@@ -63,7 +63,7 @@ chmod 644 /var/www/html/apparmor-test.php
 
 # Step 5: Create PHP-FPM AppArmor profile
 echo "Step 5: Creating PHP-FPM AppArmor profile..."
-cat > /etc/apparmor.d/usr.sbin.php-fpm8.2 << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.php-fpm8.2 <<'EOF'
 #include <tunables/global>
 
 profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected) {
@@ -125,7 +125,7 @@ EOF
 
 # Step 6: Create Lighttpd AppArmor profile
 echo "Step 6: Creating Lighttpd AppArmor profile..."
-cat > /etc/apparmor.d/usr.sbin.lighttpd << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.lighttpd <<'EOF'
 #include <tunables/global>
 
 profile lighttpd /usr/sbin/lighttpd flags=(attach_disconnected) {
@@ -179,7 +179,7 @@ EOF
 
 # Step 7: Create MariaDB AppArmor profile
 echo "Step 7: Creating MariaDB AppArmor profile..."
-cat > /etc/apparmor.d/usr.sbin.mysqld << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.mysqld <<'EOF'
 #include <tunables/global>
 
 profile mysqld /usr/sbin/mysqld flags=(attach_disconnected) {
@@ -247,18 +247,18 @@ lighttpd_status=$(systemctl is-active lighttpd)
 mysql_status=$(systemctl is-active mariadb)
 
 if [ "$php_status" = "active" ] && [ "$lighttpd_status" = "active" ] && [ "$mysql_status" = "active" ]; then
-	echo -e "\n✅ Initial setup successful! All services are running in complain mode."
-	echo -e "Please visit http://YOUR_SERVER_IP/apparmor-test.php to verify functionality."
-	echo -e "Then run the effectiveness test script to verify security and switch to enforce mode."
+    echo -e "\n✅ Initial setup successful! All services are running in complain mode."
+    echo -e "Please visit http://YOUR_SERVER_IP/apparmor-test.php to verify functionality."
+    echo -e "Then run the effectiveness test script to verify security and switch to enforce mode."
 else
-	echo -e "\n❌ Setup incomplete. One or more services failed to start."
-	echo "PHP-FPM: $php_status"
-	echo "Lighttpd: $lighttpd_status"
-	echo "MariaDB: $mysql_status"
-	echo -e "\nCheck service logs for details:"
-	echo "  - sudo journalctl -xeu php8.2-fpm.service"
-	echo "  - sudo journalctl -xeu lighttpd.service"
-	echo "  - sudo journalctl -xeu mariadb.service"
+    echo -e "\n❌ Setup incomplete. One or more services failed to start."
+    echo "PHP-FPM: $php_status"
+    echo "Lighttpd: $lighttpd_status"
+    echo "MariaDB: $mysql_status"
+    echo -e "\nCheck service logs for details:"
+    echo "  - sudo journalctl -xeu php8.2-fpm.service"
+    echo "  - sudo journalctl -xeu lighttpd.service"
+    echo "  - sudo journalctl -xeu mariadb.service"
 fi
 
 echo "===================================================="

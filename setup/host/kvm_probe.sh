@@ -35,35 +35,37 @@ set -uo pipefail
 # this user's processes are visible in /proc; another user's guest would
 # block VirtualBox just the same but could only be seen through that error.
 if [ "${1:-}" = users ]; then
-	found=""
-	for fd in /proc/[0-9]*/fd/*; do
-		[ "$(readlink "$fd" 2> /dev/null)" = /dev/kvm ] || continue
-		pid=${fd#/proc/}; pid=${pid%%/*}
-		case " $found " in *" $pid "*) continue ;; esac
-		found="$found $pid"
-		tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null \
-			| awk -v pid="$pid" '{ for (i = 1; i <= NF; i++) if ($i == "-name") n = $(i + 1);
+    found=""
+    for fd in /proc/[0-9]*/fd/*; do
+        [ "$(readlink "$fd" 2>/dev/null)" = /dev/kvm ] || continue
+        pid=${fd#/proc/}
+        pid=${pid%%/*}
+        case " $found " in *" $pid "*) continue ;; esac
+        found="$found $pid"
+        tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null |
+            awk -v pid="$pid" '{ for (i = 1; i <= NF; i++) if ($i == "-name") n = $(i + 1);
 				sub(".*/", "", $1); printf "%s%s (pid %s)\n", $1, (n ? " " n : ""), pid }'
-	done
-	[ -n "$found" ]
-	exit $?
+    done
+    [ -n "$found" ]
+    exit $?
 fi
 
 if [ ! -c /dev/kvm ]; then
-	echo "/dev/kvm does not exist (kvm_intel/kvm_amd not loaded, or no VT-x/AMD-V)"
-	exit 2
+    echo "/dev/kvm does not exist (kvm_intel/kvm_amd not loaded, or no VT-x/AMD-V)"
+    exit 2
 fi
 if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-	echo "/dev/kvm is not readable/writable by you"
-	exit 2
+    echo "/dev/kvm is not readable/writable by you"
+    exit 2
 fi
-if ! command -v python3 > /dev/null 2>&1; then
-	echo "python3 is missing, so KVM cannot be probed (make deps)"
-	exit 4
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is missing, so KVM cannot be probed (make deps)"
+    exit 4
 fi
 
 # Output is "<stage> <errno>" on failure, nothing on success.
-result=$(python3 - <<'PYEOF'
+result=$(
+    python3 - <<'PYEOF'
 import os, fcntl, sys
 KVM_CREATE_VM = 0xAE01          # _IO(KVMIO=0xAE, 0x01), <linux/kvm.h>
 try:
@@ -81,25 +83,25 @@ PYEOF
 rc=$?
 
 if [ "$rc" = 0 ]; then
-	echo "ready (KVM accelerated)"
-	exit 0
+    echo "ready (KVM accelerated)"
+    exit 0
 fi
 
 stage=${result%% *}
 err=${result##* }
 
 if [ "$stage" = create ] && [ "$err" = 16 ]; then
-	# EBUSY: VT-x is taken. Name the VirtualBox VM if that is who has it.
-	vms=""
-	if command -v VBoxManage > /dev/null 2>&1; then
-		vms=$(VBoxManage list runningvms 2> /dev/null | sed 's/ {.*//' | paste -sd, -)
-	fi
-	if [ -n "$vms" ]; then
-		echo "blocked: VirtualBox VM ${vms} is running and holds VT-x; one hypervisor at a time"
-	else
-		echo "blocked: another hypervisor holds VT-x (KVM_CREATE_VM: EBUSY)"
-	fi
-	exit 3
+    # EBUSY: VT-x is taken. Name the VirtualBox VM if that is who has it.
+    vms=""
+    if command -v VBoxManage >/dev/null 2>&1; then
+        vms=$(VBoxManage list runningvms 2>/dev/null | sed 's/ {.*//' | paste -sd, -)
+    fi
+    if [ -n "$vms" ]; then
+        echo "blocked: VirtualBox VM ${vms} is running and holds VT-x; one hypervisor at a time"
+    else
+        echo "blocked: another hypervisor holds VT-x (KVM_CREATE_VM: EBUSY)"
+    fi
+    exit 3
 fi
 
 echo "KVM_CREATE_VM failed (${stage}: errno ${err})"

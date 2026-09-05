@@ -26,10 +26,10 @@ sed -i '/^label install$/,/^label/{s/\(append .*\)/\1 auto=true priority=critica
 
 # Create the new ISO
 xorriso -as mkisofs -o "$MODIFIED_ISO" \
-	-isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-	-c isolinux/boot.cat -b isolinux/isolinux.bin -no-emul-boot \
-	-boot-load-size 4 -boot-info-table \
-	new_iso/
+    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -c isolinux/boot.cat -b isolinux/isolinux.bin -no-emul-boot \
+    -boot-load-size 4 -boot-info-table \
+    new_iso/
 
 echo "Modified ISO created at: $MODIFIED_ISO"
 

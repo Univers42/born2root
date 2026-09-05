@@ -1,7 +1,7 @@
 #!/bin/bash
 # First-boot setup: Docker + WordPress (requires running systemd + network)
 # This script runs once via @reboot crontab, then self-deletes.
-exec > /var/log/first-boot.log 2>&1
+exec >/var/log/first-boot.log 2>&1
 set -x
 export DEBIAN_FRONTEND=noninteractive
 
@@ -9,33 +9,33 @@ echo "=== First-boot setup starting ($(date)) ==="
 
 # Ensure custom shell is the default (if configured during install)
 if [ -f /etc/b2b_custom_shell.conf ]; then
-	# shellcheck disable=SC1091
-	. /etc/b2b_custom_shell.conf 2>/dev/null || true
-	if [ -n "${B2B_CUSTOM_USER:-}" ] && [ -n "${B2B_CUSTOM_SHELL:-}" ] && [ -x "${B2B_CUSTOM_SHELL:-}" ]; then
-		# Register in /etc/shells (needed for some tools, harmless otherwise)
-		if [ -f /etc/shells ]; then
-			grep -qxF "$B2B_CUSTOM_SHELL" /etc/shells || echo "$B2B_CUSTOM_SHELL" >> /etc/shells
-		else
-			echo "$B2B_CUSTOM_SHELL" > /etc/shells
-		fi
-		if id "$B2B_CUSTOM_USER" > /dev/null 2>&1; then
-			usermod -s "$B2B_CUSTOM_SHELL" "$B2B_CUSTOM_USER" 2>/dev/null || true
-			echo "[OK] Default shell enforced on first boot: $B2B_CUSTOM_USER -> $B2B_CUSTOM_SHELL"
-		else
-			echo "[WARN] Custom shell configured but user missing: $B2B_CUSTOM_USER"
-		fi
-	else
-		echo "[WARN] /etc/b2b_custom_shell.conf present but invalid (USER/SHELL missing or SHELL not executable)"
-	fi
+    # shellcheck disable=SC1091
+    . /etc/b2b_custom_shell.conf 2>/dev/null || true
+    if [ -n "${B2B_CUSTOM_USER:-}" ] && [ -n "${B2B_CUSTOM_SHELL:-}" ] && [ -x "${B2B_CUSTOM_SHELL:-}" ]; then
+        # Register in /etc/shells (needed for some tools, harmless otherwise)
+        if [ -f /etc/shells ]; then
+            grep -qxF "$B2B_CUSTOM_SHELL" /etc/shells || echo "$B2B_CUSTOM_SHELL" >>/etc/shells
+        else
+            echo "$B2B_CUSTOM_SHELL" >/etc/shells
+        fi
+        if id "$B2B_CUSTOM_USER" >/dev/null 2>&1; then
+            usermod -s "$B2B_CUSTOM_SHELL" "$B2B_CUSTOM_USER" 2>/dev/null || true
+            echo "[OK] Default shell enforced on first boot: $B2B_CUSTOM_USER -> $B2B_CUSTOM_SHELL"
+        else
+            echo "[WARN] Custom shell configured but user missing: $B2B_CUSTOM_USER"
+        fi
+    else
+        echo "[WARN] /etc/b2b_custom_shell.conf present but invalid (USER/SHELL missing or SHELL not executable)"
+    fi
 fi
 
 # Wait for network to be fully up
 for i in $(seq 1 30); do
-	if ping -c1 -W2 deb.debian.org > /dev/null 2>&1; then
-		echo "Network is up after ${i}s"
-		break
-	fi
-	sleep 2
+    if ping -c1 -W2 deb.debian.org >/dev/null 2>&1; then
+        echo "Network is up after ${i}s"
+        break
+    fi
+    sleep 2
 done
 
 ### ─── 1. Docker installation (official method) ─────────────────────────────
@@ -49,31 +49,31 @@ chmod a+r /etc/apt/keyrings/docker.asc
 # Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
 CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
 if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
-	# Docker may not have trixie packages yet — try trixie first, fall back to bookworm
-	echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian trixie stable" > /etc/apt/sources.list.d/docker.list
-	apt-get update -qq 2> /dev/null
-	if ! apt-cache show docker-ce > /dev/null 2>&1; then
-		echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list
-		apt-get update -qq
-	fi
+    # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
+    apt-get update -qq 2>/dev/null
+    if ! apt-cache show docker-ce >/dev/null 2>&1; then
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+    fi
 else
-	echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian $CODENAME stable" > /etc/apt/sources.list.d/docker.list
-	apt-get update -qq
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
+    apt-get update -qq
 fi
 
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
 
 # Add dlesieur to docker group
-usermod -aG docker dlesieur 2> /dev/null || true
+usermod -aG docker dlesieur 2>/dev/null || true
 
 # Kill any running VS Code server so it restarts with the docker group loaded.
 # Without this, the VS Code server inherits the old group list (no docker GID)
 # and every Docker command from the VS Code terminal fails with "permission denied".
 # The user's next VS Code reconnect will spawn a fresh server with correct groups.
-pkill -u dlesieur -f "vscode-server" 2> /dev/null || true
+pkill -u dlesieur -f "vscode-server" 2>/dev/null || true
 
 # Enable and start Docker
 systemctl enable docker
@@ -95,11 +95,11 @@ echo "[OK] MariaDB configured"
 # WordPress download — always pull the latest release via curl
 cd /var/www/html
 if [ -d wordpress ]; then
-	echo "WordPress directory already exists — backing up and re-downloading"
-	mv wordpress wordpress.bak.$(date +%s)
+    echo "WordPress directory already exists — backing up and re-downloading"
+    mv wordpress wordpress.bak.$(date +%s)
 fi
 curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \
-	https://wordpress.org/latest.tar.gz -o latest.tar.gz
+    https://wordpress.org/latest.tar.gz -o latest.tar.gz
 tar -xzf latest.tar.gz
 rm -f latest.tar.gz
 chown -R www-data:www-data wordpress
@@ -107,10 +107,10 @@ WP_VER=$(grep 'wp_version =' wordpress/wp-includes/version.php | cut -d"'" -f2)
 echo "[OK] WordPress ${WP_VER:-latest} downloaded via curl"
 
 # Fetch unique salts from WordPress API
-SALTS=$(curl -fsSL --retry 2 --max-time 15 https://api.wordpress.org/secret-key/1.1/salt/ 2> /dev/null || true)
+SALTS=$(curl -fsSL --retry 2 --max-time 15 https://api.wordpress.org/secret-key/1.1/salt/ 2>/dev/null || true)
 
 # WordPress config
-cat > /var/www/html/wordpress/wp-config.php << WPEOF
+cat >/var/www/html/wordpress/wp-config.php <<WPEOF
 <?php
 define('DB_NAME', 'wordpress');
 define('DB_USER', 'wpuser');
@@ -138,7 +138,7 @@ chown www-data:www-data /var/www/html/wordpress/wp-config.php
 chmod 640 /var/www/html/wordpress/wp-config.php
 
 # Detect PHP-FPM version
-PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2> /dev/null || echo "8.2")
+PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
 
 # Belt-and-suspenders: ensure no conflicting lighttpd PHP handler is active
 # (b2b-setup.sh should have done this, but guard against older ISOs)
@@ -146,7 +146,7 @@ rm -f /etc/lighttpd/conf-enabled/15-fastcgi-php.conf
 rm -f /etc/lighttpd/conf-enabled/99-unconfigured.conf
 
 # Ensure PHP-FPM listens on the correct socket and is running
-systemctl restart "php${PHP_VER}-fpm" 2> /dev/null || true
+systemctl restart "php${PHP_VER}-fpm" 2>/dev/null || true
 systemctl restart lighttpd
 sleep 2
 
@@ -156,7 +156,7 @@ sleep 2
 echo "--- Running headless WordPress install ---"
 
 WP_INSTALL_PHP="/tmp/wp-headless-install.php"
-cat > "$WP_INSTALL_PHP" << 'INSTALLEOF'
+cat >"$WP_INSTALL_PHP" <<'INSTALLEOF'
 <?php
 // Headless WordPress installation — creates tables + admin user
 define('ABSPATH', '/var/www/html/wordpress/');
@@ -223,25 +223,25 @@ chown www-data:www-data "$WP_INSTALL_PHP"
 # because Born2beRoot requires `Defaults requiretty`.  Use `runuser` instead,
 # which switches user without going through PAM/sudo.
 if runuser -u www-data -- php "$WP_INSTALL_PHP" 2>&1; then
-	echo "[OK] WordPress headless install completed"
+    echo "[OK] WordPress headless install completed"
 else
-	echo "[WARN] WordPress headless install had issues — trying WP-CLI fallback"
-	# WP-CLI fallback
-	if ! command -v wp > /dev/null 2>&1; then
-		curl -fsSL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar 2> /dev/null || true
-		chmod +x /usr/local/bin/wp 2> /dev/null || true
-	fi
-	if command -v wp > /dev/null 2>&1; then
-		runuser -u www-data -- wp core install \
-			--path=/var/www/html/wordpress \
-			--url="http://localhost/wordpress" \
-			--title="Born2beRoot Blog" \
-			--admin_user=admin \
-			--admin_password='admin123wp!' \
-			--admin_email=admin@dlesieur42.local \
-			--skip-email 2>&1 || true
-		echo "[OK] WordPress installed via WP-CLI"
-	fi
+    echo "[WARN] WordPress headless install had issues — trying WP-CLI fallback"
+    # WP-CLI fallback
+    if ! command -v wp >/dev/null 2>&1; then
+        curl -fsSL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar 2>/dev/null || true
+        chmod +x /usr/local/bin/wp 2>/dev/null || true
+    fi
+    if command -v wp >/dev/null 2>&1; then
+        runuser -u www-data -- wp core install \
+            --path=/var/www/html/wordpress \
+            --url="http://localhost/wordpress" \
+            --title="Born2beRoot Blog" \
+            --admin_user=admin \
+            --admin_password='admin123wp!' \
+            --admin_email=admin@dlesieur42.local \
+            --skip-email 2>&1 || true
+        echo "[OK] WordPress installed via WP-CLI"
+    fi
 fi
 rm -f "$WP_INSTALL_PHP"
 
@@ -253,9 +253,9 @@ chmod -R 775 /var/www/html/wordpress/wp-content/uploads
 ### ─── 2c. Install Tech Blog Toolkit plugin ──────────────────────────────────
 PLUGIN_DIR="/var/www/html/wordpress/wp-content/plugins/tech-blog-toolkit"
 if [ ! -d "$PLUGIN_DIR" ]; then
-	mkdir -p "$PLUGIN_DIR/includes"
+    mkdir -p "$PLUGIN_DIR/includes"
 
-	cat > "$PLUGIN_DIR/tech-blog-toolkit.php" << 'PLUGINEOF'
+    cat >"$PLUGIN_DIR/tech-blog-toolkit.php" <<'PLUGINEOF'
 <?php
 /**
  * Plugin Name: Tech Blog Toolkit
@@ -299,7 +299,7 @@ function tbt_admin_page() {
 }
 PLUGINEOF
 
-	cat > "$PLUGIN_DIR/includes/post-types.php" << 'PTEOF'
+    cat >"$PLUGIN_DIR/includes/post-types.php" <<'PTEOF'
 <?php
 if (!defined('WPINC')) { die; }
 add_action('init', function(){
@@ -317,7 +317,7 @@ add_action('init', function(){
 });
 PTEOF
 
-	cat > "$PLUGIN_DIR/includes/meta-boxes.php" << 'MBEOF'
+    cat >"$PLUGIN_DIR/includes/meta-boxes.php" <<'MBEOF'
 <?php
 if (!defined('WPINC')) { die; }
 add_action('add_meta_boxes', function(){
@@ -343,7 +343,7 @@ add_action('save_post_tutorial', function($id){
 });
 MBEOF
 
-	cat > "$PLUGIN_DIR/includes/syntax-highlighter.php" << 'SHEOF'
+    cat >"$PLUGIN_DIR/includes/syntax-highlighter.php" <<'SHEOF'
 <?php
 if (!defined('WPINC')) { die; }
 add_action('wp_enqueue_scripts', function(){
@@ -357,7 +357,7 @@ add_shortcode('code', function($atts,$content=null){
 });
 SHEOF
 
-	cat > "$PLUGIN_DIR/includes/admin-dashboard.php" << 'ADEOF'
+    cat >"$PLUGIN_DIR/includes/admin-dashboard.php" <<'ADEOF'
 <?php
 if (!defined('WPINC')) { die; }
 add_action('wp_dashboard_setup', function(){
@@ -374,47 +374,47 @@ function tbt_dashboard_widget_cb() {
 }
 ADEOF
 
-	chown -R www-data:www-data "$PLUGIN_DIR"
-	echo "[OK] Tech Blog Toolkit plugin installed"
+    chown -R www-data:www-data "$PLUGIN_DIR"
+    echo "[OK] Tech Blog Toolkit plugin installed"
 fi
 
 # Activate plugin + create sample tutorial post via WP-CLI
-if command -v wp > /dev/null 2>&1; then
-	runuser -u www-data -- wp plugin activate tech-blog-toolkit \
-		--path=/var/www/html/wordpress 2> /dev/null || true
-	# Create a sample tutorial if none exist
-	TCOUNT=$(runuser -u www-data -- wp post list --post_type=tutorial --format=count \
-		--path=/var/www/html/wordpress 2> /dev/null || echo "0")
-	if [ "$TCOUNT" = "0" ]; then
-		runuser -u www-data -- wp post create \
-			--path=/var/www/html/wordpress \
-			--post_type=tutorial \
-			--post_title="Getting Started with Born2beRoot" \
-			--post_content='<h2>Introduction</h2><p>This tutorial covers the basics of setting up a Born2beRoot virtual machine with WordPress, lighttpd, and MariaDB.</p><pre><code class="language-bash">sudo apt install lighttpd mariadb-server php-fpm</code></pre><h2>Key Concepts</h2><p>Learn about system administration, security hardening, and web server configuration.</p>' \
-			--post_status=publish 2> /dev/null || true
-		echo "[OK] Sample tutorial post created"
-	fi
+if command -v wp >/dev/null 2>&1; then
+    runuser -u www-data -- wp plugin activate tech-blog-toolkit \
+        --path=/var/www/html/wordpress 2>/dev/null || true
+    # Create a sample tutorial if none exist
+    TCOUNT=$(runuser -u www-data -- wp post list --post_type=tutorial --format=count \
+        --path=/var/www/html/wordpress 2>/dev/null || echo "0")
+    if [ "$TCOUNT" = "0" ]; then
+        runuser -u www-data -- wp post create \
+            --path=/var/www/html/wordpress \
+            --post_type=tutorial \
+            --post_title="Getting Started with Born2beRoot" \
+            --post_content='<h2>Introduction</h2><p>This tutorial covers the basics of setting up a Born2beRoot virtual machine with WordPress, lighttpd, and MariaDB.</p><pre><code class="language-bash">sudo apt install lighttpd mariadb-server php-fpm</code></pre><h2>Key Concepts</h2><p>Learn about system administration, security hardening, and web server configuration.</p>' \
+            --post_status=publish 2>/dev/null || true
+        echo "[OK] Sample tutorial post created"
+    fi
 else
-	# Activate via DB if WP-CLI unavailable
-	mysql -u wpuser -pwppass123 wordpress -e \
-		"UPDATE wp_options SET option_value='a:1:{i:0;s:39:\"tech-blog-toolkit/tech-blog-toolkit.php\";}' WHERE option_name='active_plugins';" 2> /dev/null || true
-	echo "[OK] Tech Blog Toolkit activated via DB"
+    # Activate via DB if WP-CLI unavailable
+    mysql -u wpuser -pwppass123 wordpress -e \
+        "UPDATE wp_options SET option_value='a:1:{i:0;s:39:\"tech-blog-toolkit/tech-blog-toolkit.php\";}' WHERE option_name='active_plugins';" 2>/dev/null || true
+    echo "[OK] Tech Blog Toolkit activated via DB"
 fi
 
 # ── Fix lighttpd config if stock php-cgi handler is still active ─────────────
 # b2b-setup.sh should have removed 15-fastcgi-php.conf, but if the install
 # path ran before our fix, clean it up now so lighttpd can start.
 if [ -f /etc/lighttpd/conf-enabled/15-fastcgi-php.conf ]; then
-	rm -f /etc/lighttpd/conf-enabled/15-fastcgi-php.conf
-	echo "[FIX] Removed conflicting 15-fastcgi-php.conf (php-cgi)"
+    rm -f /etc/lighttpd/conf-enabled/15-fastcgi-php.conf
+    echo "[FIX] Removed conflicting 15-fastcgi-php.conf (php-cgi)"
 fi
-rm -f /etc/lighttpd/conf-enabled/99-unconfigured.conf 2> /dev/null || true
+rm -f /etc/lighttpd/conf-enabled/99-unconfigured.conf 2>/dev/null || true
 
 # Belt-and-suspenders: ensure 99-wordpress.conf has root redirect + safe rewrite rules
-PHP_SOCK_PATH=$(find /run/php -name 'php*-fpm.sock' 2> /dev/null | head -1)
+PHP_SOCK_PATH=$(find /run/php -name 'php*-fpm.sock' 2>/dev/null | head -1)
 PHP_SOCK_PATH="${PHP_SOCK_PATH:-/run/php/php8.4-fpm.sock}"
-if ! grep -q 'url.redirect' /etc/lighttpd/conf-enabled/99-wordpress.conf 2> /dev/null; then
-	cat > /etc/lighttpd/conf-available/99-wordpress.conf << WPFIX
+if ! grep -q 'url.redirect' /etc/lighttpd/conf-enabled/99-wordpress.conf 2>/dev/null; then
+    cat >/etc/lighttpd/conf-available/99-wordpress.conf <<WPFIX
 server.modules += ( "mod_rewrite" )
 fastcgi.server += ( ".php" =>
     (( "socket" => "${PHP_SOCK_PATH}",
@@ -432,40 +432,40 @@ url.rewrite-if-not-file = (
 index-file.names += ( "index.php" )
 server.max-request-size = 32768
 WPFIX
-	ln -sf /etc/lighttpd/conf-available/99-wordpress.conf \
-		/etc/lighttpd/conf-enabled/99-wordpress.conf 2> /dev/null || true
-	echo "[FIX] Updated 99-wordpress.conf with root redirect + safe rewrite rules"
+    ln -sf /etc/lighttpd/conf-available/99-wordpress.conf \
+        /etc/lighttpd/conf-enabled/99-wordpress.conf 2>/dev/null || true
+    echo "[FIX] Updated 99-wordpress.conf with root redirect + safe rewrite rules"
 fi
 
 # Restart PHP-FPM + lighttpd to pick up new config
-systemctl restart "php${PHP_VER}-fpm" 2> /dev/null || true
-systemctl restart lighttpd 2> /dev/null || true
+systemctl restart "php${PHP_VER}-fpm" 2>/dev/null || true
+systemctl restart lighttpd 2>/dev/null || true
 
 # Verify lighttpd is running; if not, run config test for diagnostics
-if ! systemctl is-active --quiet lighttpd 2> /dev/null; then
-	echo "[WARN] lighttpd failed to start — running config test:"
-	lighttpd -tt -f /etc/lighttpd/lighttpd.conf 2>&1 || true
-	# Try one more time after a short delay
-	sleep 2
-	systemctl restart lighttpd 2> /dev/null || true
+if ! systemctl is-active --quiet lighttpd 2>/dev/null; then
+    echo "[WARN] lighttpd failed to start — running config test:"
+    lighttpd -tt -f /etc/lighttpd/lighttpd.conf 2>&1 || true
+    # Try one more time after a short delay
+    sleep 2
+    systemctl restart lighttpd 2>/dev/null || true
 fi
 echo "[OK] WordPress fully installed — dashboard ready at /wordpress/wp-admin/"
 
 ### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
-ufw allow 2375/tcp comment 'Docker' 2> /dev/null || true
+ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
 
 ### ─── 3b. Ensure NAT keepalive + SSH stability services are running ─────────
 # b2b-setup.sh creates these in chroot but systemctl enable may not stick.
 # Belt-and-suspenders: re-enable and start them now with real systemd.
 systemctl daemon-reload
-systemctl enable nat-keepalive 2> /dev/null || true
-systemctl start nat-keepalive 2> /dev/null || true
-systemctl enable sshd-watchdog 2> /dev/null || true
-systemctl start sshd-watchdog 2> /dev/null || true
-systemctl enable ssh 2> /dev/null || true
-systemctl restart ssh 2> /dev/null || true
+systemctl enable nat-keepalive 2>/dev/null || true
+systemctl start nat-keepalive 2>/dev/null || true
+systemctl enable sshd-watchdog 2>/dev/null || true
+systemctl start sshd-watchdog 2>/dev/null || true
+systemctl enable ssh 2>/dev/null || true
+systemctl restart ssh 2>/dev/null || true
 # Apply kernel TCP keepalive values (may not have been applied from chroot)
-sysctl --system > /dev/null 2>&1 || true
+sysctl --system >/dev/null 2>&1 || true
 echo "[OK] NAT keepalive + sshd-watchdog + SSH stability ensured"
 
 ### ─── 4. Third-party tools (with disk space guards) ─────────────────────────
@@ -479,41 +479,41 @@ echo "--- Ensuring third-party dev tools are installed ---"
 
 # Disk space check helper (same as b2b-setup.sh)
 check_disk_space() {
-	local mount="$1" min_mb="${2:-200}"
-	local avail_kb
-	avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
-	[ -z "$avail_kb" ] && return 0
-	local avail_mb=$((avail_kb / 1024))
-	if [ "$avail_mb" -lt "$min_mb" ]; then
-		echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping"
-		return 1
-	fi
-	return 0
+    local mount="$1" min_mb="${2:-200}"
+    local avail_kb
+    avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
+    [ -z "$avail_kb" ] && return 0
+    local avail_mb=$((avail_kb / 1024))
+    if [ "$avail_mb" -lt "$min_mb" ]; then
+        echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping"
+        return 1
+    fi
+    return 0
 }
 
 # Node.js + npm (not installed in chroot — triggers hang)
-if ! command -v node > /dev/null 2>&1 && check_disk_space / 300; then
-	apt-get install -y -qq nodejs npm 2>/dev/null || true
-	echo "[OK] nodejs + npm installed"
+if ! command -v node >/dev/null 2>&1 && check_disk_space / 300; then
+    apt-get install -y -qq nodejs npm 2>/dev/null || true
+    echo "[OK] nodejs + npm installed"
 else
-	echo "[SKIP] nodejs already present or insufficient disk space"
+    echo "[SKIP] nodejs already present or insufficient disk space"
 fi
 
 # NPM globals (skip if already installed)
-if command -v npm > /dev/null 2>&1 && ! command -v eslint > /dev/null 2>&1 && check_disk_space / 200; then
-	npm install -g eslint prettier 2>/dev/null || true
-	echo "[OK] NPM globals installed"
+if command -v npm >/dev/null 2>&1 && ! command -v eslint >/dev/null 2>&1 && check_disk_space / 200; then
+    npm install -g eslint prettier 2>/dev/null || true
+    echo "[OK] NPM globals installed"
 else
-	echo "[SKIP] NPM globals already present or npm not available"
+    echo "[SKIP] NPM globals already present or npm not available"
 fi
 
 # Python tools via pipx — only if 500+ MB free (checkov alone is ~400 MB)
-if ! command -v ruff > /dev/null 2>&1 && check_disk_space / 500; then
-	apt-get install -y -qq pipx 2>/dev/null || true
-	PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install ruff 2>/dev/null || true
-	echo "[OK] Python tools installed"
+if ! command -v ruff >/dev/null 2>&1 && check_disk_space / 500; then
+    apt-get install -y -qq pipx 2>/dev/null || true
+    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install ruff 2>/dev/null || true
+    echo "[OK] Python tools installed"
 else
-	echo "[SKIP] Python tools already present or insufficient disk space"
+    echo "[SKIP] Python tools already present or insufficient disk space"
 fi
 
 # Clean apt cache to reclaim space
@@ -543,30 +543,30 @@ echo "[OK] Third-party tools check complete"
 # persist. Born2beRoot requires the firewall to be on with only 4242 open, so
 # this is mandatory-part correctness, not a nicety.
 echo "--- Configuring UFW ---"
-if command -v ufw > /dev/null 2>&1; then
-	ufw --force reset > /dev/null 2>&1 || true
-	ufw default deny incoming > /dev/null 2>&1 || true
-	ufw default allow outgoing > /dev/null 2>&1 || true
+if command -v ufw >/dev/null 2>&1; then
+    ufw --force reset >/dev/null 2>&1 || true
+    ufw default deny incoming >/dev/null 2>&1 || true
+    ufw default allow outgoing >/dev/null 2>&1 || true
 
-	# 4242 is the subject's requirement; the rest are the bonus web stack and
-	# the app ports the NAT forwards already expose.
-	ufw allow 4242/tcp comment 'SSH' > /dev/null 2>&1 || true
-	for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
-		ufw allow "${p}/tcp" > /dev/null 2>&1 || true
-	done
+    # 4242 is the subject's requirement; the rest are the bonus web stack and
+    # the app ports the NAT forwards already expose.
+    ufw allow 4242/tcp comment 'SSH' >/dev/null 2>&1 || true
+    for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
+        ufw allow "${p}/tcp" >/dev/null 2>&1 || true
+    done
 
-	ufw --force enable > /dev/null 2>&1 || true
-	systemctl enable ufw > /dev/null 2>&1 || true
+    ufw --force enable >/dev/null 2>&1 || true
+    systemctl enable ufw >/dev/null 2>&1 || true
 
-	# Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
-	# what actually decides whether packets are filtered, unlike systemd's view.
-	if ufw status 2> /dev/null | grep -q "Status: active"; then
-		echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
-	else
-		echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
-	fi
+    # Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
+    # what actually decides whether packets are filtered, unlike systemd's view.
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+        echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
+    else
+        echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
+    fi
 else
-	echo "[SKIP] ufw not installed"
+    echo "[SKIP] ufw not installed"
 fi
 
 # Fallback for the 'spare' volume. b2b-setup.sh normally removes it during the
@@ -574,19 +574,19 @@ fi
 # Here the real system is up, so if it is still around, release it now --
 # otherwise the free extents the partition layout is designed around never
 # materialise and `lvextend` has nothing to take.
-if command -v lvremove > /dev/null 2>&1 \
-	&& lvs --noheadings -o lv_name LVMGroup 2>/dev/null | tr -d ' ' | grep -qx spare; then
-	echo "--- Releasing the leftover 'spare' volume ---"
-	sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab 2>/dev/null || true
-	umount /mnt/spare >/dev/null 2>&1 || true
-	rmdir /mnt/spare >/dev/null 2>&1 || true
-	if ! mount | grep -q LVMGroup-spare; then
-		if lvremove -f LVMGroup/spare >/dev/null 2>&1; then
-			echo "[OK] spare removed — $(vgs --noheadings -o vg_free --units g LVMGroup 2>/dev/null | tr -d ' ') free for lvextend"
-		else
-			echo "[WARN] could not remove 'spare'; run: sudo lvremove -f LVMGroup/spare"
-		fi
-	fi
+if command -v lvremove >/dev/null 2>&1 &&
+    lvs --noheadings -o lv_name LVMGroup 2>/dev/null | tr -d ' ' | grep -qx spare; then
+    echo "--- Releasing the leftover 'spare' volume ---"
+    sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab 2>/dev/null || true
+    umount /mnt/spare >/dev/null 2>&1 || true
+    rmdir /mnt/spare >/dev/null 2>&1 || true
+    if ! mount | grep -q LVMGroup-spare; then
+        if lvremove -f LVMGroup/spare >/dev/null 2>&1; then
+            echo "[OK] spare removed — $(vgs --noheadings -o vg_free --units g LVMGroup 2>/dev/null | tr -d ' ') free for lvextend"
+        else
+            echo "[WARN] could not remove 'spare'; run: sudo lvremove -f LVMGroup/spare"
+        fi
+    fi
 fi
 
 # Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
@@ -595,44 +595,44 @@ fi
 # off PATH when the prefix moves afterwards.
 echo "--- Pointing machine-wide tooling at /opt ---"
 if [ -f /root/install_global_scope.sh ]; then
-	chmod +x /root/install_global_scope.sh 2>/dev/null || true
-	bash /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log \
-		|| echo "[WARN] global scope setup reported errors"
+    chmod +x /root/install_global_scope.sh 2>/dev/null || true
+    bash /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+        echo "[WARN] global scope setup reported errors"
 else
-	echo "[SKIP] /root/install_global_scope.sh not present"
+    echo "[SKIP] /root/install_global_scope.sh not present"
 fi
 
 echo "--- Installing Neovim + kickstart.nvim ---"
 if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
-	# kickstart clones ~30 plugins, Mason pulls language servers and treesitter
-	# compiles parsers — call it 2 GB of headroom to be safe.
-	if check_disk_space / 2000; then
-		chmod +x /root/install_nvim.sh 2>/dev/null || true
-		# Bootstrap is skipped HERE and done once by the extras script below:
-		# downloading kickstart's plugins and then immediately downloading the
-		# extras on top would pay the cold-cache cost twice.
-		if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 bash /root/install_nvim.sh 2>&1 \
-			| tee -a /var/log/b2b-nvim-install.log; then
-			echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
-		else
-			echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
-		fi
+    # kickstart clones ~30 plugins, Mason pulls language servers and treesitter
+    # compiles parsers — call it 2 GB of headroom to be safe.
+    if check_disk_space / 2000; then
+        chmod +x /root/install_nvim.sh 2>/dev/null || true
+        # Bootstrap is skipped HERE and done once by the extras script below:
+        # downloading kickstart's plugins and then immediately downloading the
+        # extras on top would pay the cold-cache cost twice.
+        if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 bash /root/install_nvim.sh 2>&1 |
+            tee -a /var/log/b2b-nvim-install.log; then
+            echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
+        else
+            echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
+        fi
 
-		if [ -f /root/install_nvim_extras.sh ]; then
-			echo "--- Installing the Neovim extras layer ---"
-			chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
-			if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 bash /root/install_nvim_extras.sh 2>&1 \
-				| tee -a /var/log/b2b-nvim-install.log; then
-				echo "[OK] Neovim extras installed"
-			else
-				echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
-			fi
-		fi
-	else
-		echo "[SKIP] Neovim — insufficient disk space"
-	fi
+        if [ -f /root/install_nvim_extras.sh ]; then
+            echo "--- Installing the Neovim extras layer ---"
+            chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
+            if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 bash /root/install_nvim_extras.sh 2>&1 |
+                tee -a /var/log/b2b-nvim-install.log; then
+                echo "[OK] Neovim extras installed"
+            else
+                echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+            fi
+        fi
+    else
+        echo "[SKIP] Neovim — insufficient disk space"
+    fi
 else
-	echo "[SKIP] Neovim — /root/install_nvim.sh not present"
+    echo "[SKIP] Neovim — /root/install_nvim.sh not present"
 fi
 
 ### ─── The login shell, from upstream ────────────────────────────────────────
@@ -650,35 +650,35 @@ fi
 echo "--- Installing hellish from upstream (binary + plugin framework) ---"
 HELLISH_OK=0
 if [ -f /root/install_hellish_upstream.sh ]; then
-	chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
-	if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
-		bash /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-		echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
-		HELLISH_OK=1
-	else
-		echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
-	fi
+    chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
+    if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
+        bash /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+        echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
+        HELLISH_OK=1
+    else
+        echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
+    fi
 else
-	echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
+    echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
 fi
 
 # Fallback only. The upstream installer brings the plugin framework itself, so
 # this runs when that failed (no network, upstream down) and the framework is
 # therefore absent -- never on top of a good install.
 if [ "$HELLISH_OK" != "1" ] && [ ! -f /home/dlesieur/.hellishrc ]; then
-	echo "--- Installing hellishrc plugin framework (fallback) ---"
-	if [ -f /root/install_hellish_plugins.sh ]; then
-		chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
-		if HELLISH_USERS="dlesieur" bash /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-			echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
-		else
-			echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
-		fi
-	else
-		echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
-	fi
+    echo "--- Installing hellishrc plugin framework (fallback) ---"
+    if [ -f /root/install_hellish_plugins.sh ]; then
+        chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+        if HELLISH_USERS="dlesieur" bash /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+            echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
+        else
+            echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
+        fi
+    else
+        echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+    fi
 else
-	echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
+    echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
 fi
 
 ### ─── 4c. Herdr, Claude Code, and the optional local AI ────────────────────
@@ -687,32 +687,32 @@ fi
 # and downloads nothing here.
 echo "--- Installing Herdr + Claude Code ---"
 if [ -f /root/install_devtools.sh ]; then
-	chmod +x /root/install_devtools.sh 2>/dev/null || true
-	if check_disk_space / 500; then
-		bash /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log \
-			|| echo "[WARN] devtools install reported errors"
-	else
-		echo "[SKIP] devtools — insufficient disk space"
-	fi
+    chmod +x /root/install_devtools.sh 2>/dev/null || true
+    if check_disk_space / 500; then
+        bash /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+            echo "[WARN] devtools install reported errors"
+    else
+        echo "[SKIP] devtools — insufficient disk space"
+    fi
 else
-	echo "[SKIP] /root/install_devtools.sh not present"
+    echo "[SKIP] /root/install_devtools.sh not present"
 fi
 
 B2B_AI_MODE="${B2B_AI_MODE:-off}"
 if [ "$B2B_AI_MODE" = "off" ]; then
-	echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
+    echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
 elif [ -f /root/install_ai.sh ]; then
-	echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
-	chmod +x /root/install_ai.sh 2>/dev/null || true
-	# A model is gigabytes; refuse rather than filling the volume it lands on.
-	if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
-		AI_MODE="$B2B_AI_MODE" bash /root/install_ai.sh 2>&1 | tee -a /var/log/b2b-provision.log \
-			|| echo "[WARN] AI install reported errors"
-	else
-		echo "[SKIP] AI — not enough free space on /opt for a model"
-	fi
+    echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
+    chmod +x /root/install_ai.sh 2>/dev/null || true
+    # A model is gigabytes; refuse rather than filling the volume it lands on.
+    if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
+        AI_MODE="$B2B_AI_MODE" bash /root/install_ai.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+            echo "[WARN] AI install reported errors"
+    else
+        echo "[SKIP] AI — not enough free space on /opt for a model"
+    fi
 else
-	echo "[SKIP] AI — /root/install_ai.sh not present"
+    echo "[SKIP] AI — /root/install_ai.sh not present"
 fi
 
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────

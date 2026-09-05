@@ -21,9 +21,9 @@ echo ""
 
 # Check if plugin directory exists
 if [ ! -d "$LOCAL_PLUGIN_PATH" ]; then
-	echo -e "${RED}Error: Plugin directory '$PLUGIN_NAME' not found in the current directory.${NC}"
-	echo "Make sure your plugin folder is in the current directory."
-	exit 1
+    echo -e "${RED}Error: Plugin directory '$PLUGIN_NAME' not found in the current directory.${NC}"
+    echo "Make sure your plugin folder is in the current directory."
+    exit 1
 fi
 
 # Collect FTP credentials
@@ -36,19 +36,19 @@ FTP_PORT=${FTP_PORT:-21}
 read -p "WordPress plugins path (e.g., /public_html/wp-content/plugins): " WP_PLUGINS_PATH
 
 # Check if required utilities are installed
-if ! command -v lftp &> /dev/null; then
-	echo -e "${RED}Error: 'lftp' command not found. Please install it:${NC}"
-	echo "  • Debian/Ubuntu: sudo apt-get install lftp"
-	echo "  • CentOS/RHEL: sudo yum install lftp"
-	echo "  • macOS: brew install lftp"
-	exit 1
+if ! command -v lftp &>/dev/null; then
+    echo -e "${RED}Error: 'lftp' command not found. Please install it:${NC}"
+    echo "  • Debian/Ubuntu: sudo apt-get install lftp"
+    echo "  • CentOS/RHEL: sudo yum install lftp"
+    echo "  • macOS: brew install lftp"
+    exit 1
 fi
 
 echo -e "${YELLOW}\nPreparing to upload plugin...${NC}"
 
 # Create a temporary script for lftp to avoid password in command line
 TEMP_SCRIPT=$(mktemp)
-cat > $TEMP_SCRIPT << EOF
+cat >$TEMP_SCRIPT <<EOF
 open -u "$FTP_USER","$FTP_PASS" -p $FTP_PORT $FTP_SERVER
 set ssl:verify-certificate no
 set ftp:ssl-allow yes
@@ -78,15 +78,15 @@ lftp -f $TEMP_SCRIPT
 
 # Check if the upload was successful
 if [ $? -ne 0 ]; then
-	echo -e "${RED}\nError: Failed to upload plugin. Please check your FTP credentials and paths.${NC}"
-	rm $TEMP_SCRIPT
-	exit 1
+    echo -e "${RED}\nError: Failed to upload plugin. Please check your FTP credentials and paths.${NC}"
+    rm $TEMP_SCRIPT
+    exit 1
 else
-	echo -e "${GREEN}\nPlugin '$PLUGIN_NAME' has been successfully uploaded to your server!${NC}"
-	echo -e "${YELLOW}Next steps:${NC}"
-	echo "1. Log in to your WordPress admin panel"
-	echo "2. Navigate to Plugins → Installed Plugins"
-	echo "3. Find 'Tech Blog Toolkit' and click 'Activate'"
+    echo -e "${GREEN}\nPlugin '$PLUGIN_NAME' has been successfully uploaded to your server!${NC}"
+    echo -e "${YELLOW}Next steps:${NC}"
+    echo "1. Log in to your WordPress admin panel"
+    echo "2. Navigate to Plugins → Installed Plugins"
+    echo "3. Find 'Tech Blog Toolkit' and click 'Activate'"
 fi
 
 # Clean up

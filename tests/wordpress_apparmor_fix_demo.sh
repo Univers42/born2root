@@ -15,14 +15,14 @@ echo -e "\n${YELLOW}Step 1: Disabling current AppArmor profiles...${NC}"
 aa-disable usr.sbin.php-fpm8.2
 aa-disable usr.sbin.lighttpd
 
-apparmor_parser -R /etc/apparmor.d/usr.sbin.php-fpm8.2 2> /dev/null || true
-apparmor_parser -R /etc/apparmor.d/usr.sbin.lighttpd 2> /dev/null || true
+apparmor_parser -R /etc/apparmor.d/usr.sbin.php-fpm8.2 2>/dev/null || true
+apparmor_parser -R /etc/apparmor.d/usr.sbin.lighttpd 2>/dev/null || true
 
 # Step 2: Create simplified profiles for demonstration
 echo -e "\n${YELLOW}Step 2: Creating demonstration-ready profiles...${NC}"
 
 # Create a simplified PHP-FPM profile
-cat > /etc/apparmor.d/usr.sbin.php-fpm8.2 << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.php-fpm8.2 <<'EOF'
 #include <tunables/global>
 
 profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected,complain) {
@@ -45,7 +45,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected,complain) {
 EOF
 
 # Create a simplified Lighttpd profile
-cat > /etc/apparmor.d/usr.sbin.lighttpd << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.lighttpd <<'EOF'
 #include <tunables/global>
 
 profile lighttpd /usr/sbin/lighttpd flags=(attach_disconnected,complain) {
@@ -74,7 +74,7 @@ aa-complain /etc/apparmor.d/usr.sbin.lighttpd
 
 # Step 4: Create a special transition script
 echo -e "\n${YELLOW}Step 4: Creating special demonstration toggle script...${NC}"
-cat > /root/wordpress-security-demo/toggle-demo-protection.sh << 'EOF'
+cat >/root/wordpress-security-demo/toggle-demo-protection.sh <<'EOF'
 #!/bin/bash
 
 RED='\033[0;31m'
@@ -110,7 +110,7 @@ chmod +x /root/wordpress-security-demo/toggle-demo-protection.sh
 
 # Step 5: Create malicious test script that respects the demo flag
 echo -e "\n${YELLOW}Step 5: Creating modified webshell for demonstration...${NC}"
-cat > /tmp/malicious-webshell.php << 'EOF'
+cat >/tmp/malicious-webshell.php <<'EOF'
 <?php
 // This file simulates a malicious webshell that checks the demo flag
 
@@ -223,7 +223,7 @@ EOF
 
 # Step 6: Update the demo script to use the new toggle script
 echo -e "\n${YELLOW}Step 6: Creating updated demo script...${NC}"
-cat > /root/wordpress-security-demo/run-attack-demo.sh << 'EOF'
+cat >/root/wordpress-security-demo/run-attack-demo.sh <<'EOF'
 #!/bin/bash
 
 RED='\033[0;31m'

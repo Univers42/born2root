@@ -12,8 +12,8 @@ echo -e "Current User: ${whoami}"
 prerequisites_check
 
 check_internet() {
-	# TODO: implement internet checks
-	return 0
+    # TODO: implement internet checks
+    return 0
 }
 #Checking with ping a website
 # Check if the connection is working

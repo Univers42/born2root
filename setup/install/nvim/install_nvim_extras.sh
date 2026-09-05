@@ -64,11 +64,11 @@ PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # `command -v` that checks for it -- installed, working, and reported missing.
 # Ask npm where it actually is rather than hardcoding the location.
 if command -v npm >/dev/null 2>&1; then
-	_npm_prefix=$(npm config get prefix --global 2>/dev/null)
-	case "$_npm_prefix" in
-		/*) [ -d "${_npm_prefix}/bin" ] && PATH="${_npm_prefix}/bin:$PATH" ;;
-	esac
-	unset _npm_prefix
+    _npm_prefix=$(npm config get prefix --global 2>/dev/null)
+    case "$_npm_prefix" in
+    /*) [ -d "${_npm_prefix}/bin" ] && PATH="${_npm_prefix}/bin:$PATH" ;;
+    esac
+    unset _npm_prefix
 fi
 export PATH
 
@@ -79,14 +79,17 @@ NVIM_BOOTSTRAP="${NVIM_BOOTSTRAP:-1}"
 NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-1200}"
 NVIM_SESSION_DIR_NAME="${NVIM_SESSION_DIR_NAME:-.nvim-sessions}"
 
-log()  { printf '[nvim-extras] %s\n' "$*"; }
+log() { printf '[nvim-extras] %s\n' "$*"; }
 warn() { printf '[nvim-extras] WARN: %s\n' "$*" >&2; }
-die()  { printf '[nvim-extras] ERROR: %s\n' "$*" >&2; exit 1; }
+die() {
+    printf '[nvim-extras] ERROR: %s\n' "$*" >&2
+    exit 1
+}
 
 [ "$(id -u)" -eq 0 ] || die "must run as root (use sudo)"
 [ -x "$NVIM_BIN" ] || NVIM_BIN=$(command -v nvim 2>/dev/null || true)
-[ -n "$NVIM_BIN" ] && [ -x "$NVIM_BIN" ] \
-	|| die "nvim is not installed — run install_nvim.sh first"
+[ -n "$NVIM_BIN" ] && [ -x "$NVIM_BIN" ] ||
+    die "nvim is not installed — run install_nvim.sh first"
 
 # ── Extra system packages these plugins shell out to ────────────────────────
 #   fzf       fzf.vim drives the `fzf` binary; the plugin is only the glue
@@ -94,28 +97,28 @@ die()  { printf '[nvim-extras] ERROR: %s\n' "$*" >&2; exit 1; }
 #   git       vim-fugitive / vim-flog / gitsigns
 #   xdg-utils vim-gh-line opens URLs (harmless on a headless box; it just prints)
 install_deps() {
-	log "installing fzf, bat and friends"
-	export DEBIAN_FRONTEND=noninteractive
-	apt-get update -qq 2>/dev/null || warn "apt-get update failed — using the current index"
-	apt-get install -y -qq -o Dpkg::Options::=--force-confdef \
-		-o Dpkg::Options::=--force-confold \
-		fzf bat git ripgrep xdg-utils 2>/dev/null \
-		|| warn "some optional packages could not be installed"
+    log "installing fzf, bat and friends"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq 2>/dev/null || warn "apt-get update failed — using the current index"
+    apt-get install -y -qq -o Dpkg::Options::=--force-confdef \
+        -o Dpkg::Options::=--force-confold \
+        fzf bat git ripgrep xdg-utils 2>/dev/null ||
+        warn "some optional packages could not be installed"
 
-	# Debian installs bat as `batcat` (name clash with the `bacula` bat tool).
-	# fzf.vim's preview looks for `bat`, so give it one.
-	if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
-		ln -sf "$(command -v batcat)" /usr/local/bin/bat
-		log "linked batcat -> /usr/local/bin/bat"
-	fi
-	apt-get clean 2>/dev/null || true
+    # Debian installs bat as `batcat` (name clash with the `bacula` bat tool).
+    # fzf.vim's preview looks for `bat`, so give it one.
+    if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
+        ln -sf "$(command -v batcat)" /usr/local/bin/bat
+        log "linked batcat -> /usr/local/bin/bat"
+    fi
+    apt-get clean 2>/dev/null || true
 }
 
 # ── The plugin layer ────────────────────────────────────────────────────────
 write_plugins_lua() {
-	local cfg="$1"
-	mkdir -p "${cfg}/plugin"
-	cat > "${cfg}/plugin/10-b2b-plugins.lua" <<'LUAEOF'
+    local cfg="$1"
+    mkdir -p "${cfg}/plugin"
+    cat >"${cfg}/plugin/10-b2b-plugins.lua" <<'LUAEOF'
 -- 10-b2b-plugins.lua — everything kickstart.nvim leaves out.
 --
 -- Written by setup/install/nvim/install_nvim_extras.sh. It lives in plugin/,
@@ -463,13 +466,13 @@ if #problems > 0 then
   end)
 end
 LUAEOF
-	chmod 644 "${cfg}/plugin/10-b2b-plugins.lua"
+    chmod 644 "${cfg}/plugin/10-b2b-plugins.lua"
 }
 
 # ── VS Code muscle memory ───────────────────────────────────────────────────
 write_keymaps_lua() {
-	local cfg="$1"
-	cat > "${cfg}/plugin/20-b2b-keymaps.lua" <<'LUAEOF'
+    local cfg="$1"
+    cat >"${cfg}/plugin/20-b2b-keymaps.lua" <<'LUAEOF'
 -- 20-b2b-keymaps.lua — the VS Code bindings worth keeping.
 --
 -- The point of these is transition, not permanence: they let you work at full
@@ -608,13 +611,13 @@ if has 'TSContextToggle' then
   map('n', '<leader>tc', '<cmd>TSContextToggle<CR>', '[T]oggle treesitter [c]ontext')
 end
 LUAEOF
-	chmod 644 "${cfg}/plugin/20-b2b-keymaps.lua"
+    chmod 644 "${cfg}/plugin/20-b2b-keymaps.lua"
 }
 
 # ── Session management (the VS Code "workspace" equivalent) ─────────────────
 write_sessions_lua() {
-	local cfg="$1" sessdir="$2"
-	cat > "${cfg}/plugin/30-b2b-sessions.lua" <<LUAEOF
+    local cfg="$1" sessdir="$2"
+    cat >"${cfg}/plugin/30-b2b-sessions.lua" <<LUAEOF
 -- 30-b2b-sessions.lua — sessions that behave like VS Code workspaces.
 --
 -- Neovim's built-in :mksession writes a one-shot snapshot. tpope's vim-obsession
@@ -690,7 +693,7 @@ vim.keymap.set('n', '<leader>sF', function()
   end)
 end, { desc = '[S]ession: [F]ind and load' })
 LUAEOF
-	chmod 644 "${cfg}/plugin/30-b2b-sessions.lua"
+    chmod 644 "${cfg}/plugin/30-b2b-sessions.lua"
 }
 
 # ── The `vw` shell command ──────────────────────────────────────────────────
@@ -708,8 +711,8 @@ LUAEOF
 # same information the zsh completion showed in its descriptions. A bash
 # completion is installed as well, for anyone using bash.
 write_vw() {
-	local sessdir_rel="$1"
-	cat > /usr/local/bin/vw <<VWEOF
+    local sessdir_rel="$1"
+    cat >/usr/local/bin/vw <<VWEOF
 #!/usr/bin/env bash
 # vw — open a saved Neovim session ("workspace").
 #
@@ -765,11 +768,11 @@ fi
 echo "Launching \$session nvim session..." >&2
 exec nvim -S "\$SESSION_DIR/\$session" "\$@"
 VWEOF
-	chmod 755 /usr/local/bin/vw
+    chmod 755 /usr/local/bin/vw
 
-	# Bash completion, for bash users. Ported from the zsh #compdef original.
-	mkdir -p /etc/bash_completion.d
-	cat > /etc/bash_completion.d/vw <<VWCEOF
+    # Bash completion, for bash users. Ported from the zsh #compdef original.
+    mkdir -p /etc/bash_completion.d
+    cat >/etc/bash_completion.d/vw <<VWCEOF
 # bash completion for vw — see /usr/local/bin/vw
 _vw() {
 	local dir="\${NVIM_SESSION_DIR:-\$HOME/${sessdir_rel}}"
@@ -778,13 +781,13 @@ _vw() {
 }
 complete -F _vw vw
 VWCEOF
-	chmod 644 /etc/bash_completion.d/vw
+    chmod 644 /etc/bash_completion.d/vw
 }
 
 # ── Startup: make the IDE visible ───────────────────────────────────────────
 write_startup_lua() {
-	local cfg="$1"
-	cat > "${cfg}/plugin/40-b2b-startup.lua" <<'LUAEOF'
+    local cfg="$1"
+    cat >"${cfg}/plugin/40-b2b-startup.lua" <<'LUAEOF'
 -- 40-b2b-startup.lua — make the editor LOOK like the editor you configured.
 --
 -- Everything in 10-b2b-plugins.lua loads correctly, but almost none of it
@@ -1047,16 +1050,16 @@ vim.api.nvim_create_user_command('B2BStart', function() M.start_page() end,
 
 return M
 LUAEOF
-	chmod 644 "${cfg}/plugin/40-b2b-startup.lua"
+    chmod 644 "${cfg}/plugin/40-b2b-startup.lua"
 }
 
 # ── Terminal fixes these bindings depend on ─────────────────────────────────
 write_profile() {
-	# Ctrl+S is swallowed by the tty as XOFF (software flow control) long before
-	# Neovim sees it, which is why <C-s> "does nothing" in every terminal editor
-	# until this is turned off. Ctrl+Q (XON) unfreezes a terminal that got stuck
-	# the old way; nothing modern relies on either.
-	cat > /etc/profile.d/nvim-extras.sh <<'PROFEOF'
+    # Ctrl+S is swallowed by the tty as XOFF (software flow control) long before
+    # Neovim sees it, which is why <C-s> "does nothing" in every terminal editor
+    # until this is turned off. Ctrl+Q (XON) unfreezes a terminal that got stuck
+    # the old way; nothing modern relies on either.
+    cat >/etc/profile.d/nvim-extras.sh <<'PROFEOF'
 # Added by born2root setup/install/nvim/install_nvim_extras.sh
 #
 # Free Ctrl+S (and Ctrl+Q) from terminal flow control so Neovim can bind them.
@@ -1071,8 +1074,8 @@ esac
 # Where `vw` and Neovim keep saved sessions.
 export NVIM_SESSION_DIR="${NVIM_SESSION_DIR:-$HOME/.nvim-sessions}"
 PROFEOF
-	chmod 644 /etc/profile.d/nvim-extras.sh
-	log "wrote /etc/profile.d/nvim-extras.sh (frees Ctrl+S, sets NVIM_SESSION_DIR)"
+    chmod 644 /etc/profile.d/nvim-extras.sh
+    log "wrote /etc/profile.d/nvim-extras.sh (frees Ctrl+S, sets NVIM_SESSION_DIR)"
 }
 
 # ── tmux: the half that makes remote sessions resumable ─────────────────────
@@ -1082,18 +1085,19 @@ PROFEOF
 # b2b-setup.sh already installs tmux and writes a config; this only adds the
 # pieces Neovim specifically needs, and only if they are not already there.
 configure_tmux() {
-	local user="$1" home conf
-	home=$(getent passwd "$user" | cut -d: -f6)
-	conf="${home}/.tmux.conf"
-	local group; group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    local user="$1" home conf
+    home=$(getent passwd "$user" | cut -d: -f6)
+    conf="${home}/.tmux.conf"
+    local group
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
 
-	[ -f "$conf" ] || : > "$conf"
-	if grep -q 'born2root: neovim' "$conf" 2>/dev/null; then
-		log "${user}: .tmux.conf already carries the Neovim block — leaving it"
-		return 0
-	fi
+    [ -f "$conf" ] || : >"$conf"
+    if grep -q 'born2root: neovim' "$conf" 2>/dev/null; then
+        log "${user}: .tmux.conf already carries the Neovim block — leaving it"
+        return 0
+    fi
 
-	cat >> "$conf" <<'TMUXEOF'
+    cat >>"$conf" <<'TMUXEOF'
 
 # ── born2root: neovim ───────────────────────────────────────────────────────
 # True colour. Without this Neovim colourschemes render in 16 colours inside
@@ -1116,48 +1120,48 @@ set -g focus-events on
 set -g set-titles on
 set -g set-titles-string '#S:#I.#P #W'
 TMUXEOF
-	chown "${user}:${group}" "$conf" 2>/dev/null || true
-	log "${user}: appended the Neovim block to ~/.tmux.conf"
+    chown "${user}:${group}" "$conf" 2>/dev/null || true
+    log "${user}: appended the Neovim block to ~/.tmux.conf"
 }
 
 # ── Per-user install ────────────────────────────────────────────────────────
 setup_user() {
-	local user="$1" home cfg group sessdir
-	home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
-	if [ -z "$home" ] || [ ! -d "$home" ]; then
-		warn "user '${user}' has no home directory — skipping"
-		return 1
-	fi
-	cfg="${home}/.config/nvim"
-	if [ ! -f "${cfg}/init.lua" ]; then
-		warn "${user}: no kickstart config at ${cfg} — run install_nvim.sh first"
-		return 1
-	fi
-	group=$(id -gn "$user" 2>/dev/null || echo "$user")
-	sessdir="${home}/${NVIM_SESSION_DIR_NAME}"
+    local user="$1" home cfg group sessdir
+    home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+    if [ -z "$home" ] || [ ! -d "$home" ]; then
+        warn "user '${user}' has no home directory — skipping"
+        return 1
+    fi
+    cfg="${home}/.config/nvim"
+    if [ ! -f "${cfg}/init.lua" ]; then
+        warn "${user}: no kickstart config at ${cfg} — run install_nvim.sh first"
+        return 1
+    fi
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    sessdir="${home}/${NVIM_SESSION_DIR_NAME}"
 
-	write_plugins_lua "$cfg"
-	write_keymaps_lua "$cfg"
-	write_sessions_lua "$cfg" "$sessdir"
-	write_startup_lua "$cfg"
+    write_plugins_lua "$cfg"
+    write_keymaps_lua "$cfg"
+    write_sessions_lua "$cfg" "$sessdir"
+    write_startup_lua "$cfg"
 
-	mkdir -p "$sessdir"
+    mkdir -p "$sessdir"
 
-	# Keep the drop-ins out of `git status` in the kickstart checkout.
-	if [ -d "${cfg}/.git" ]; then
-		mkdir -p "${cfg}/.git/info"
-		local f
-		for f in plugin/10-b2b-plugins.lua plugin/20-b2b-keymaps.lua \
-			plugin/30-b2b-sessions.lua plugin/40-b2b-startup.lua; do
-			grep -qxF "$f" "${cfg}/.git/info/exclude" 2>/dev/null \
-				|| printf '%s\n' "$f" >> "${cfg}/.git/info/exclude"
-		done
-	fi
+    # Keep the drop-ins out of `git status` in the kickstart checkout.
+    if [ -d "${cfg}/.git" ]; then
+        mkdir -p "${cfg}/.git/info"
+        local f
+        for f in plugin/10-b2b-plugins.lua plugin/20-b2b-keymaps.lua \
+            plugin/30-b2b-sessions.lua plugin/40-b2b-startup.lua; do
+            grep -qxF "$f" "${cfg}/.git/info/exclude" 2>/dev/null ||
+                printf '%s\n' "$f" >>"${cfg}/.git/info/exclude"
+        done
+    fi
 
-	chown -R "${user}:${group}" "$cfg" "$sessdir" 2>/dev/null || true
-	configure_tmux "$user"
-	log "${user}: config layer written into ${cfg}/plugin/"
-	return 0
+    chown -R "${user}:${group}" "$cfg" "$sessdir" 2>/dev/null || true
+    configure_tmux "$user"
+    log "${user}: config layer written into ${cfg}/plugin/"
+    return 0
 }
 
 # Run a command as <user>, with a terminal type Neovim can work with.
@@ -1171,10 +1175,12 @@ setup_user() {
 # failures that do not exist in the terminal the user actually opens. Verified:
 # the same report run with TERM=xterm-256color has zero errors.
 run_as_user() {
-	local user="$1"; shift
-	set -- env "TERM=${NVIM_TERM:-xterm-256color}" "$@"
-	if [ "$user" = "root" ]; then timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
-	else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
+    local user="$1"
+    shift
+    set -- env "TERM=${NVIM_TERM:-xterm-256color}" "$@"
+    if [ "$user" = "root" ]; then
+        timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
+    else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
 }
 
 # blink.cmp (kickstart's completion engine) does its matching in a small Rust
@@ -1189,151 +1195,160 @@ run_as_user() {
 # with curl, into the exact paths blink's own health check looks at
 # (<plugin>/target/release/). Deterministic, and it fails loudly.
 install_blink_fuzzy() {
-	local user="$1" home plugin tag triple lib_dir base
-	home=$(getent passwd "$user" | cut -d: -f6)
-	plugin="${home}/.local/share/nvim/site/pack/core/opt/blink.cmp"
-	[ -d "$plugin" ] || { log "${user}: blink.cmp not installed — skipping its fuzzy lib"; return 0; }
+    local user="$1" home plugin tag triple lib_dir base
+    home=$(getent passwd "$user" | cut -d: -f6)
+    plugin="${home}/.local/share/nvim/site/pack/core/opt/blink.cmp"
+    [ -d "$plugin" ] || {
+        log "${user}: blink.cmp not installed — skipping its fuzzy lib"
+        return 0
+    }
 
-	lib_dir="${plugin}/target/release"
-	if [ -f "${lib_dir}/libblink_cmp_fuzzy.so" ]; then
-		log "${user}: blink.cmp fuzzy lib already present"
-		return 0
-	fi
+    lib_dir="${plugin}/target/release"
+    if [ -f "${lib_dir}/libblink_cmp_fuzzy.so" ]; then
+        log "${user}: blink.cmp fuzzy lib already present"
+        return 0
+    fi
 
-	# The binary must match the checked-out tag, so read it from the checkout
-	# rather than assuming the newest release.
-	#
-	# Read it AS THE OWNING USER. This function runs as root while the plugin
-	# tree belongs to $user, and git >= 2.35 refuses to operate on a repository
-	# owned by somebody else ("detected dubious ownership") -- it exits non-zero
-	# and prints nothing, so as root every one of these commands came back empty
-	# and the lib was silently skipped with "cannot determine the tag". Verified:
-	# the identical command run as the user returns v1.10.2.
-	local git_as="runuser -u ${user} --"
-	[ "$user" = "root" ] && git_as=""
-	tag=$($git_as git -C "$plugin" describe --tags --exact-match 2>/dev/null) \
-		|| tag=$($git_as git -C "$plugin" tag --points-at HEAD 2>/dev/null | head -n1)
-	[ -n "$tag" ] || tag=$($git_as git -C "$plugin" describe --tags 2>/dev/null \
-		| sed 's/-[0-9]*-g[0-9a-f]*$//')
-	if [ -z "$tag" ]; then
-		warn "${user}: cannot determine the blink.cmp tag — skipping its fuzzy lib"
-		return 0
-	fi
+    # The binary must match the checked-out tag, so read it from the checkout
+    # rather than assuming the newest release.
+    #
+    # Read it AS THE OWNING USER. This function runs as root while the plugin
+    # tree belongs to $user, and git >= 2.35 refuses to operate on a repository
+    # owned by somebody else ("detected dubious ownership") -- it exits non-zero
+    # and prints nothing, so as root every one of these commands came back empty
+    # and the lib was silently skipped with "cannot determine the tag". Verified:
+    # the identical command run as the user returns v1.10.2.
+    local git_as="runuser -u ${user} --"
+    [ "$user" = "root" ] && git_as=""
+    tag=$($git_as git -C "$plugin" describe --tags --exact-match 2>/dev/null) ||
+        tag=$($git_as git -C "$plugin" tag --points-at HEAD 2>/dev/null | head -n1)
+    [ -n "$tag" ] || tag=$($git_as git -C "$plugin" describe --tags 2>/dev/null |
+        sed 's/-[0-9]*-g[0-9a-f]*$//')
+    if [ -z "$tag" ]; then
+        warn "${user}: cannot determine the blink.cmp tag — skipping its fuzzy lib"
+        return 0
+    fi
 
-	case "$(uname -m)" in
-		x86_64|amd64) triple="x86_64-unknown-linux-gnu" ;;
-		aarch64|arm64) triple="aarch64-unknown-linux-gnu" ;;
-		*) log "${user}: no prebuilt blink.cmp lib for $(uname -m) — Lua fallback stays"; return 0 ;;
-	esac
+    case "$(uname -m)" in
+    x86_64 | amd64) triple="x86_64-unknown-linux-gnu" ;;
+    aarch64 | arm64) triple="aarch64-unknown-linux-gnu" ;;
+    *)
+        log "${user}: no prebuilt blink.cmp lib for $(uname -m) — Lua fallback stays"
+        return 0
+        ;;
+    esac
 
-	log "${user}: fetching the blink.cmp fuzzy library (${tag}, ${triple})"
-	base="https://github.com/saghen/blink.cmp/releases/download/${tag}"
-	mkdir -p "$lib_dir"
+    log "${user}: fetching the blink.cmp fuzzy library (${tag}, ${triple})"
+    base="https://github.com/saghen/blink.cmp/releases/download/${tag}"
+    mkdir -p "$lib_dir"
 
-	if ! curl -fsSL --retry 3 --max-time 180 \
-		-o "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${base}/${triple}.so"; then
-		warn "${user}: could not download the blink.cmp fuzzy lib — the Lua fallback still works"
-		rm -f "${lib_dir}/libblink_cmp_fuzzy.so.tmp"
-		return 0
-	fi
-	# blink writes the checksum beside the library and reads it back later, so
-	# fetch it too; verify while we have both.
-	if curl -fsSL --retry 3 --max-time 60 \
-		-o "${lib_dir}/libblink_cmp_fuzzy.so.sha256" "${base}/${triple}.so.sha256"; then
-		local want got
-		want=$(awk '{print $1; exit}' "${lib_dir}/libblink_cmp_fuzzy.so.sha256")
-		got=$(sha256sum "${lib_dir}/libblink_cmp_fuzzy.so.tmp" | awk '{print $1}')
-		if [ -n "$want" ] && [ "$want" != "$got" ]; then
-			warn "${user}: blink.cmp fuzzy lib checksum mismatch — discarding it"
-			rm -f "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${lib_dir}/libblink_cmp_fuzzy.so.sha256"
-			return 0
-		fi
-	fi
-	mv "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${lib_dir}/libblink_cmp_fuzzy.so"
-	printf '%s\n' "$tag" > "${lib_dir}/version"
+    if ! curl -fsSL --retry 3 --max-time 180 \
+        -o "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${base}/${triple}.so"; then
+        warn "${user}: could not download the blink.cmp fuzzy lib — the Lua fallback still works"
+        rm -f "${lib_dir}/libblink_cmp_fuzzy.so.tmp"
+        return 0
+    fi
+    # blink writes the checksum beside the library and reads it back later, so
+    # fetch it too; verify while we have both.
+    if curl -fsSL --retry 3 --max-time 60 \
+        -o "${lib_dir}/libblink_cmp_fuzzy.so.sha256" "${base}/${triple}.so.sha256"; then
+        local want got
+        want=$(awk '{print $1; exit}' "${lib_dir}/libblink_cmp_fuzzy.so.sha256")
+        got=$(sha256sum "${lib_dir}/libblink_cmp_fuzzy.so.tmp" | awk '{print $1}')
+        if [ -n "$want" ] && [ "$want" != "$got" ]; then
+            warn "${user}: blink.cmp fuzzy lib checksum mismatch — discarding it"
+            rm -f "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${lib_dir}/libblink_cmp_fuzzy.so.sha256"
+            return 0
+        fi
+    fi
+    mv "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${lib_dir}/libblink_cmp_fuzzy.so"
+    printf '%s\n' "$tag" >"${lib_dir}/version"
 
-	local group; group=$(id -gn "$user" 2>/dev/null || echo "$user")
-	chown -R "${user}:${group}" "${plugin}/target" 2>/dev/null || true
-	log "${user}: blink.cmp fuzzy lib installed"
+    local group
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    chown -R "${user}:${group}" "${plugin}/target" 2>/dev/null || true
+    log "${user}: blink.cmp fuzzy lib installed"
 }
 
 bootstrap_user() {
-	local user="$1" home group
-	home=$(getent passwd "$user" | cut -d: -f6)
-	group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    local user="$1" home group
+    home=$(getent passwd "$user" | cut -d: -f6)
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
 
-	log "${user}: downloading the extra plugins (a few minutes on a cold cache)"
-	local i
-	for i in 1 2; do
-		run_as_user "$user" "$NVIM_BIN" --headless +'lua vim.cmd("sleep 300m")' +qa >/dev/null 2>&1 \
-			|| warn "${user}: headless start ${i} returned non-zero"
-	done
+    log "${user}: downloading the extra plugins (a few minutes on a cold cache)"
+    local i
+    for i in 1 2; do
+        run_as_user "$user" "$NVIM_BIN" --headless +'lua vim.cmd("sleep 300m")' +qa >/dev/null 2>&1 ||
+            warn "${user}: headless start ${i} returned non-zero"
+    done
 
-	log "${user}: refreshing treesitter parsers"
-	run_as_user "$user" "$NVIM_BIN" --headless +'silent! TSUpdateSync' +qa >/dev/null 2>&1 || true
+    log "${user}: refreshing treesitter parsers"
+    run_as_user "$user" "$NVIM_BIN" --headless +'silent! TSUpdateSync' +qa >/dev/null 2>&1 || true
 
-	# Mason installs the language servers and formatters kickstart asks for
-	# (lua-language-server, stylua). Nothing else triggers this: the plain
-	# headless starts above load mason-tool-installer but its install runs
-	# asynchronously and the process exits first, so without the explicit
-	# *Sync* command you end up with a config that has LSP wired up and no
-	# language server behind it -- :checkhealth reports
-	#     'lua-language-server' is not executable
-	# and nothing works, with no obvious cause.
-	log "${user}: installing Mason language servers + formatters"
-	run_as_user "$user" "$NVIM_BIN" --headless \
-		+'silent! MasonToolsUpdateSync' +qa >/dev/null 2>&1 \
-		|| warn "${user}: MasonToolsUpdateSync returned non-zero"
+    # Mason installs the language servers and formatters kickstart asks for
+    # (lua-language-server, stylua). Nothing else triggers this: the plain
+    # headless starts above load mason-tool-installer but its install runs
+    # asynchronously and the process exits first, so without the explicit
+    # *Sync* command you end up with a config that has LSP wired up and no
+    # language server behind it -- :checkhealth reports
+    #     'lua-language-server' is not executable
+    # and nothing works, with no obvious cause.
+    log "${user}: installing Mason language servers + formatters"
+    run_as_user "$user" "$NVIM_BIN" --headless \
+        +'silent! MasonToolsUpdateSync' +qa >/dev/null 2>&1 ||
+        warn "${user}: MasonToolsUpdateSync returned non-zero"
 
-	install_blink_fuzzy "$user"
+    install_blink_fuzzy "$user"
 
-	# What actually loaded. :B2BExtras writes to the message area, so it has to
-	# be captured through :redir, and two things had to be got right:
-	#  - each piece needs its own -c, because `redir` takes the whole rest of
-	#    the line as its argument: `redir >> /dev/stdout | silent B2BExtras` is
-	#    read as a redirect to a file named "/dev/stdout | silent B2BExtras"
-	#    and fails with E488;
-	#  - it cannot redirect to /dev/stdout at all, because under runuser stdout
-	#    is a pipe, and Neovim refuses to open a pipe by name (E190).
-	# So it writes a real file. That file lives in the user's own state
-	# directory rather than /tmp: nvim runs as them and must be able to create
-	# it, and a mode-666 file in a world-writable /tmp is a symlink race
-	# waiting to be lost.
-	log "${user}: verifying the extras"
-	local report_file="${home}/.local/state/nvim/b2b-extras.log"
-	run_as_user "$user" "$NVIM_BIN" --headless \
-		-c "redir! > ${report_file}" -c 'silent B2BExtras' -c 'redir END' -c 'qa' >/dev/null 2>&1 || true
-	if [ -s "$report_file" ]; then
-		sed 's/^/[nvim-extras]   /' "$report_file"
-	else
-		warn "${user}: :B2BExtras produced no report"
-	fi
+    # What actually loaded. :B2BExtras writes to the message area, so it has to
+    # be captured through :redir, and two things had to be got right:
+    #  - each piece needs its own -c, because `redir` takes the whole rest of
+    #    the line as its argument: `redir >> /dev/stdout | silent B2BExtras` is
+    #    read as a redirect to a file named "/dev/stdout | silent B2BExtras"
+    #    and fails with E488;
+    #  - it cannot redirect to /dev/stdout at all, because under runuser stdout
+    #    is a pipe, and Neovim refuses to open a pipe by name (E190).
+    # So it writes a real file. That file lives in the user's own state
+    # directory rather than /tmp: nvim runs as them and must be able to create
+    # it, and a mode-666 file in a world-writable /tmp is a symlink race
+    # waiting to be lost.
+    log "${user}: verifying the extras"
+    local report_file="${home}/.local/state/nvim/b2b-extras.log"
+    run_as_user "$user" "$NVIM_BIN" --headless \
+        -c "redir! > ${report_file}" -c 'silent B2BExtras' -c 'redir END' -c 'qa' >/dev/null 2>&1 || true
+    if [ -s "$report_file" ]; then
+        sed 's/^/[nvim-extras]   /' "$report_file"
+    else
+        warn "${user}: :B2BExtras produced no report"
+    fi
 
-	chown -R "${user}:${group}" "${home}/.local" "${home}/.cache" 2>/dev/null || true
+    chown -R "${user}:${group}" "${home}/.local" "${home}/.cache" 2>/dev/null || true
 }
 
 health_report() {
-	local user="$1" home out group
-	home=$(getent passwd "$user" | cut -d: -f6)
-	group=$(id -gn "$user" 2>/dev/null || echo "$user")
-	out="${home}/.local/state/nvim/checkhealth.log"
-	mkdir -p "$(dirname "$out")"
+    local user="$1" home out group
+    home=$(getent passwd "$user" | cut -d: -f6)
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    out="${home}/.local/state/nvim/checkhealth.log"
+    mkdir -p "$(dirname "$out")"
 
-	run_as_user "$user" "$NVIM_BIN" --headless +'checkhealth' +"w! ${out}" +qa >/dev/null 2>&1 || true
-	if [ -s "$out" ]; then
-		chown "${user}:${group}" "$out" 2>/dev/null || true
-		# Neovim writes these as "- ❌ ERROR ..." and "- ⚠️ WARNING ...", with the
-		# emoji between the bullet and the word -- so an anchored '^- ERROR'
-		# matches nothing at all and every report looks perfectly clean.
-		local errs warns
-		errs=$(grep -cE '^- .*\bERROR\b' "$out" 2>/dev/null || true); errs=${errs:-0}
-		warns=$(grep -cE '^- .*\bWARNING\b' "$out" 2>/dev/null || true); warns=${warns:-0}
-		log "${user}: checkhealth — ${errs} error(s), ${warns} warning(s) — full report: ${out}"
-		[ "$errs" -gt 0 ] && grep -E '^- .*\bERROR\b' "$out" | sed 's/^/[nvim-extras]   /' | head -n 20
-	else
-		warn "${user}: checkhealth produced no output"
-	fi
-	return 0
+    run_as_user "$user" "$NVIM_BIN" --headless +'checkhealth' +"w! ${out}" +qa >/dev/null 2>&1 || true
+    if [ -s "$out" ]; then
+        chown "${user}:${group}" "$out" 2>/dev/null || true
+        # Neovim writes these as "- ❌ ERROR ..." and "- ⚠️ WARNING ...", with the
+        # emoji between the bullet and the word -- so an anchored '^- ERROR'
+        # matches nothing at all and every report looks perfectly clean.
+        local errs warns
+        errs=$(grep -cE '^- .*\bERROR\b' "$out" 2>/dev/null || true)
+        errs=${errs:-0}
+        warns=$(grep -cE '^- .*\bWARNING\b' "$out" 2>/dev/null || true)
+        warns=${warns:-0}
+        log "${user}: checkhealth — ${errs} error(s), ${warns} warning(s) — full report: ${out}"
+        [ "$errs" -gt 0 ] && grep -E '^- .*\bERROR\b' "$out" | sed 's/^/[nvim-extras]   /' | head -n 20
+    else
+        warn "${user}: checkhealth produced no output"
+    fi
+    return 0
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -1344,17 +1359,17 @@ write_vw "$NVIM_SESSION_DIR_NAME"
 
 configured=""
 for u in $NVIM_USERS; do
-	setup_user "$u" && configured="${configured} ${u}"
+    setup_user "$u" && configured="${configured} ${u}"
 done
 [ -n "${configured// /}" ] || die "no users configured — nothing to do"
 
 if [ "$NVIM_BOOTSTRAP" = "1" ]; then
-	for u in $configured; do
-		bootstrap_user "$u"
-		health_report "$u"
-	done
+    for u in $configured; do
+        bootstrap_user "$u"
+        health_report "$u"
+    done
 else
-	log "NVIM_BOOTSTRAP=0 — config written, plugins not downloaded"
+    log "NVIM_BOOTSTRAP=0 — config written, plugins not downloaded"
 fi
 
 log "=== done for:${configured} ==="

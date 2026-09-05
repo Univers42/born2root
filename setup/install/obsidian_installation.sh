@@ -16,7 +16,7 @@ flatpak run md.obsidian.Obsidian
 sudo rm /usr/local/bin/obsidian
 
 # Create a new script that uses flatpak run
-sudo tee /usr/local/bin/obsidian > /dev/null << 'EOF'
+sudo tee /usr/local/bin/obsidian >/dev/null <<'EOF'
 #!/bin/bash
 flatpak run md.obsidian.Obsidian "$@"
 EOF

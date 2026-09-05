@@ -11,8 +11,8 @@ echo -e "${BLUE}=== FIXING PASSWORD POLICY FOR BORN2BEROOT ===${NC}"
 
 # 1. Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo "This script must be run as root. Run with sudo."
-	exit 1
+    echo "This script must be run as root. Run with sudo."
+    exit 1
 fi
 
 # 2. Backup current configuration
@@ -29,23 +29,23 @@ sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE   7/' /etc/login.defs
 # 4. Configure password complexity
 echo -e "${YELLOW}Setting password complexity requirements...${NC}"
 if ! grep -q "pam_pwquality.so" /etc/pam.d/common-password; then
-	echo "Installing libpam-pwquality..."
-	apt-get install -y libpam-pwquality
+    echo "Installing libpam-pwquality..."
+    apt-get install -y libpam-pwquality
 fi
 
 # Update configuration if line exists
 if grep -q "pam_pwquality.so" /etc/pam.d/common-password; then
-	sed -i '/pam_pwquality.so/c\password        requisite                       pam_pwquality.so retry=3 minlen=10 ucredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7 enforce_for_root' /etc/pam.d/common-password
+    sed -i '/pam_pwquality.so/c\password        requisite                       pam_pwquality.so retry=3 minlen=10 ucredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7 enforce_for_root' /etc/pam.d/common-password
 else
-	# Add configuration if line doesn't exist
-	sed -i '/pam_unix.so/i password        requisite                       pam_pwquality.so retry=3 minlen=10 ucredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7 enforce_for_root' /etc/pam.d/common-password
+    # Add configuration if line doesn't exist
+    sed -i '/pam_unix.so/i password        requisite                       pam_pwquality.so retry=3 minlen=10 ucredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7 enforce_for_root' /etc/pam.d/common-password
 fi
 
 # 5. Apply changes to existing users
 echo -e "${YELLOW}Applying policy to user accounts...${NC}"
 for user in $(grep "/bin/bash" /etc/passwd | cut -d: -f1); do
-	chage -M 30 -m 2 -W 7 $user
-	echo "Updated policy for user: $user"
+    chage -M 30 -m 2 -W 7 $user
+    echo "Updated policy for user: $user"
 done
 
 # 6. Verify configuration

@@ -9,8 +9,8 @@ read -p "Enter host machine IP address (leave blank for auto-detect): " HOST_IP
 
 # Auto-detect host IP if not provided
 if [ -z "$HOST_IP" ]; then
-	HOST_IP=$(ip route | grep default | awk '{print $3}')
-	echo "Using detected host IP: $HOST_IP"
+    HOST_IP=$(ip route | grep default | awk '{print $3}')
+    echo "Using detected host IP: $HOST_IP"
 fi
 
 # Construct URL

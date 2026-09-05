@@ -11,13 +11,13 @@ echo "This script demonstrates how AppArmor protects against attacks"
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-    echo "This script must be run as root. Please use sudo."
-    exit 1
+	echo "This script must be run as root. Please use sudo."
+	exit 1
 fi
 
 # Step 1: Create a "malicious" test file
 echo "Step 1: Creating malicious PHP test file..."
-cat > /var/www/html/hack-simulation.php << 'EOF'
+cat >/var/www/html/hack-simulation.php <<'EOF'
 <?php
 // This file simulates malicious code that might be injected into WordPress
 
@@ -144,7 +144,7 @@ chmod 644 /var/www/html/hack-simulation.php
 
 # Step 2: Set up command-line demonstration
 echo "Step 2: Creating command-line demonstration script..."
-cat > /root/apparmor-demo.sh << 'EOF'
+cat >/root/apparmor-demo.sh <<'EOF'
 #!/bin/bash
 
 echo "===================================================="

@@ -8,14 +8,14 @@
 RESERVED_HOST_PORTS=""
 
 is_host_port_reserved() {
-	case " $RESERVED_HOST_PORTS " in
-		*" $1 "*) return 0 ;;
-		*) return 1 ;;
-	esac
+    case " $RESERVED_HOST_PORTS " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+    esac
 }
 
 reserve_host_port() {
-	RESERVED_HOST_PORTS="${RESERVED_HOST_PORTS} $1"
+    RESERVED_HOST_PORTS="${RESERVED_HOST_PORTS} $1"
 }
 
 # Is nothing listening on this TCP port on the host?
@@ -26,38 +26,38 @@ reserve_host_port() {
 # accept; its local-address column is host:port on Linux/Windows but host.port on
 # BSD, hence the [:.] separator class.
 is_host_port_free() {
-	local port="$1"
-	[ -n "$port" ] || return 1
+    local port="$1"
+    [ -n "$port" ] || return 1
 
-	if command -v ss > /dev/null 2>&1; then
-		if ss -H -ltn 2> /dev/null \
-			| awk -v p="$port" '$4 ~ ("[:.]" p "$") { found = 1 } END { exit found ? 0 : 1 }'; then
-			return 1 # something already listens there
-		fi
-	elif command -v lsof > /dev/null 2>&1; then
-		if lsof -nP -iTCP:"$port" -sTCP:LISTEN > /dev/null 2>&1; then
-			return 1
-		fi
-	elif command -v netstat > /dev/null 2>&1; then
-		# Scan every column rather than a fixed one: the local address is $4 on
-		# Linux/BSD but $2 on Windows, whose output is indented. On a listening
-		# row the peer column is always *.*, 0.0.0.0:* or 0.0.0.0:0, so it can
-		# never collide with a port we ask about.
-		if netstat -an 2> /dev/null | awk -v p="$port" '
+    if command -v ss >/dev/null 2>&1; then
+        if ss -H -ltn 2>/dev/null |
+            awk -v p="$port" '$4 ~ ("[:.]" p "$") { found = 1 } END { exit found ? 0 : 1 }'; then
+            return 1 # something already listens there
+        fi
+    elif command -v lsof >/dev/null 2>&1; then
+        if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+            return 1
+        fi
+    elif command -v netstat >/dev/null 2>&1; then
+        # Scan every column rather than a fixed one: the local address is $4 on
+        # Linux/BSD but $2 on Windows, whose output is indented. On a listening
+        # row the peer column is always *.*, 0.0.0.0:* or 0.0.0.0:0, so it can
+        # never collide with a port we ask about.
+        if netstat -an 2>/dev/null | awk -v p="$port" '
 			tolower($0) ~ /listen/ {
 				for (i = 1; i <= NF; i++)
 					if ($i ~ ("[:.]" p "$"))
 						found = 1
 			}
 			END { exit found ? 0 : 1 }'; then
-			return 1
-		fi
-	fi
+            return 1
+        fi
+    fi
 
-	if command -v nc > /dev/null 2>&1 && nc -z -w 1 127.0.0.1 "$port" > /dev/null 2>&1; then
-		return 1 # port answers on loopback
-	fi
-	return 0
+    if command -v nc >/dev/null 2>&1 && nc -z -w 1 127.0.0.1 "$port" >/dev/null 2>&1; then
+        return 1 # port answers on loopback
+    fi
+    return 0
 }
 
 # resolve_host_port <varname> <preferred_port>
@@ -72,18 +72,18 @@ is_host_port_free() {
 # VirtualBox then rejects the second rule claiming it, with
 # "A NAT rule for this host port and this host IP already exists".
 resolve_host_port() {
-	local __rhp_var="$1" port="$2" i=0
+    local __rhp_var="$1" port="$2" i=0
 
-	while [ "$i" -lt 100 ]; do
-		if ! is_host_port_reserved "$port" && is_host_port_free "$port"; then
-			reserve_host_port "$port"
-			printf -v "$__rhp_var" '%s' "$port"
-			return 0
-		fi
-		port=$((port + 1))
-		i=$((i + 1))
-	done
+    while [ "$i" -lt 100 ]; do
+        if ! is_host_port_reserved "$port" && is_host_port_free "$port"; then
+            reserve_host_port "$port"
+            printf -v "$__rhp_var" '%s' "$port"
+            return 0
+        fi
+        port=$((port + 1))
+        i=$((i + 1))
+    done
 
-	echo "Error: no free host port in ${2}-$((${2} + 99))" >&2
-	return 1
+    echo "Error: no free host port in ${2}-$((${2} + 99))" >&2
+    return 1
 }

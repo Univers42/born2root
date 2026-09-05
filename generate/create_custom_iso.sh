@@ -16,24 +16,24 @@ cd "$REPO_ROOT"
 # succeeds without the preseed. Measured on a real run. So a build holds a
 # lock for its whole life (fd 9), and a second build waits and says so.
 ISO_LOCK="${ISO_LOCK:-$REPO_ROOT/.gen_iso.lock}"
-exec 9> "$ISO_LOCK"
+exec 9>"$ISO_LOCK"
 if ! flock -n 9; then
-	echo "⏳ another ISO build is running (lock: $ISO_LOCK) — waiting for it to finish..."
-	flock 9
-	echo "✓ lock acquired, continuing"
+    echo "⏳ another ISO build is running (lock: $ISO_LOCK) — waiting for it to finish..."
+    flock 9
+    echo "✓ lock acquired, continuing"
 fi
 
 # ── Portable downloader (curl preferred, wget fallback) ──────────────────────
 download() {
-	local url="$1" dest="$2"
-	if command -v curl > /dev/null 2>&1; then
-		curl -fL --progress-bar -o "$dest" "$url"
-	elif command -v wget > /dev/null 2>&1; then
-		wget -O "$dest" "$url"
-	else
-		echo "Error: neither curl nor wget found. Install one of them." >&2
-		exit 1
-	fi
+    local url="$1" dest="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL --progress-bar -o "$dest" "$url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "$dest" "$url"
+    else
+        echo "Error: neither curl nor wget found. Install one of them." >&2
+        exit 1
+    fi
 }
 
 # ── Dynamically discover the latest Debian netinst ISO ───────────────────────
@@ -42,14 +42,14 @@ BASE_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/"
 echo "===== Creating Custom Debian ISO with Preseed ====="
 echo "Querying $BASE_URL for the latest ISO filename..."
 
-ISO_FILENAME=$(curl -fsSL "$BASE_URL" 2> /dev/null \
-	| grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' \
-	| head -n1)
+ISO_FILENAME=$(curl -fsSL "$BASE_URL" 2>/dev/null |
+    grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' |
+    head -n1)
 
 if [ -z "$ISO_FILENAME" ]; then
-	echo "Error: Could not determine the latest Debian ISO filename from $BASE_URL"
-	echo "The Debian mirrors may be temporarily unavailable."
-	exit 1
+    echo "Error: Could not determine the latest Debian ISO filename from $BASE_URL"
+    echo "The Debian mirrors may be temporarily unavailable."
+    exit 1
 fi
 
 URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
@@ -61,8 +61,8 @@ PRESEED_FILE="preseeds/preseed.cfg"
 OUTPUT_ISO="${OUTPUT_ISO:-${ISO_FILENAME%.iso}-preseed.iso}"
 # xorriso runs from inside $ISO_DIR, so it needs the output as an absolute path.
 case "$OUTPUT_ISO" in
-	/*) OUTPUT_ABS="$OUTPUT_ISO" ;;
-	*)  OUTPUT_ABS="$REPO_ROOT/$OUTPUT_ISO" ;;
+/*) OUTPUT_ABS="$OUTPUT_ISO" ;;
+*) OUTPUT_ABS="$REPO_ROOT/$OUTPUT_ISO" ;;
 esac
 FORCE_ISO="${FORCE_ISO:-0}"
 
@@ -96,9 +96,9 @@ FORCE_ISO="${FORCE_ISO:-0}"
 # reads and which works — that path was verified end to end.
 SERIAL_CONSOLE="${SERIAL_CONSOLE:-0}"
 if [ "$SERIAL_CONSOLE" = "1" ]; then
-	CONSOLE_ARGS="console=tty0 console=ttyS0,115200n8"
+    CONSOLE_ARGS="console=tty0 console=ttyS0,115200n8"
 else
-	CONSOLE_ARGS=""
+    CONSOLE_ARGS=""
 fi
 
 # Shared by the BIOS (isolinux) and EFI (grub) entries so the two can never
@@ -113,9 +113,9 @@ DI_CMDLINE="auto=true priority=critical DEBIAN_FRONTEND=noninteractive locale=en
 # so the boot can be followed; on the VGA path it matches the cmdline that has
 # actually completed an unattended install here.
 if [ "$SERIAL_CONSOLE" = "1" ]; then
-	DI_TAIL="---"
+    DI_TAIL="---"
 else
-	DI_TAIL="--- quiet"
+    DI_TAIL="--- quiet"
 fi
 
 echo "  Latest ISO: $ISO_FILENAME"
@@ -125,30 +125,30 @@ echo ""
 
 # ── Check for already-built preseed ISO ──────────────────────────────────────
 if [ -f "$OUTPUT_ISO" ]; then
-	if [ "$FORCE_ISO" = "1" ]; then
-		echo "↻ FORCE_ISO=1 — rebuilding: $OUTPUT_ISO"
-		rm -f "$OUTPUT_ISO"
-	else
-		echo "✓ Preseeded ISO already exists: $OUTPUT_ISO"
-		exit 0
-	fi
+    if [ "$FORCE_ISO" = "1" ]; then
+        echo "↻ FORCE_ISO=1 — rebuilding: $OUTPUT_ISO"
+        rm -f "$OUTPUT_ISO"
+    else
+        echo "✓ Preseeded ISO already exists: $OUTPUT_ISO"
+        exit 0
+    fi
 fi
 
 # ── Download the base ISO if needed ──────────────────────────────────────────
 if [ -f "$ISO_FILENAME" ]; then
-	echo "✓ ISO file found locally: $ISO_FILENAME"
+    echo "✓ ISO file found locally: $ISO_FILENAME"
 else
-	echo "Downloading ISO from $URL_IMAGE_ISO ..."
-	download "$URL_IMAGE_ISO" "$ISO_FILENAME" || {
-		echo "Error: Failed to download ISO"
-		exit 1
-	}
+    echo "Downloading ISO from $URL_IMAGE_ISO ..."
+    download "$URL_IMAGE_ISO" "$ISO_FILENAME" || {
+        echo "Error: Failed to download ISO"
+        exit 1
+    }
 fi
 
 # Check if preseed file exists
 if [ ! -f "$PRESEED_FILE" ]; then
-	echo "Error: $PRESEED_FILE not found!"
-	exit 1
+    echo "Error: $PRESEED_FILE not found!"
+    exit 1
 fi
 
 # Remove a previous extraction. xorriso reproduces the ISO's read-only modes, so
@@ -157,17 +157,17 @@ fi
 # on the first pass while the server catches up. One retry clears it; without
 # this the whole build died on a wall of "rm: Permission denied" lines.
 purge_dir() {
-	local dir="$1" attempt
-	[ -e "$dir" ] || return 0
-	for attempt in 1 2 3; do
-		chmod -R u+w "$dir" 2> /dev/null || true
-		rm -rf "$dir" 2> /dev/null
-		[ -e "$dir" ] || return 0
-		sleep 2
-	done
-	echo "Error: could not remove $dir (files still held open, or a stale NFS handle)." >&2
-	echo "       Remove it by hand and re-run:  rm -rf $dir" >&2
-	return 1
+    local dir="$1" attempt
+    [ -e "$dir" ] || return 0
+    for attempt in 1 2 3; do
+        chmod -R u+w "$dir" 2>/dev/null || true
+        rm -rf "$dir" 2>/dev/null
+        [ -e "$dir" ] || return 0
+        sleep 2
+    done
+    echo "Error: could not remove $dir (files still held open, or a stale NFS handle)." >&2
+    echo "       Remove it by hand and re-run:  rm -rf $dir" >&2
+    return 1
 }
 
 # Create extraction directory
@@ -176,15 +176,15 @@ purge_dir "$ISO_DIR"
 mkdir -p "$ISO_DIR"
 
 # Use xorriso (most portable for ISO manipulation), fallback to bsdtar, then 7z
-if command -v xorriso > /dev/null 2>&1; then
-	xorriso -osirrox on -indev "$ISO_FILENAME" -extract / "$ISO_DIR" 2> /dev/null
-elif command -v bsdtar > /dev/null 2>&1; then
-	bsdtar -C "$ISO_DIR" -xf "$ISO_FILENAME"
-elif command -v 7z > /dev/null 2>&1; then
-	7z x -o"$ISO_DIR" "$ISO_FILENAME" > /dev/null
+if command -v xorriso >/dev/null 2>&1; then
+    xorriso -osirrox on -indev "$ISO_FILENAME" -extract / "$ISO_DIR" 2>/dev/null
+elif command -v bsdtar >/dev/null 2>&1; then
+    bsdtar -C "$ISO_DIR" -xf "$ISO_FILENAME"
+elif command -v 7z >/dev/null 2>&1; then
+    7z x -o"$ISO_DIR" "$ISO_FILENAME" >/dev/null
 else
-	echo "Error: No ISO extraction tool found. Install xorriso, bsdtar, or p7zip."
-	exit 1
+    echo "Error: No ISO extraction tool found. Install xorriso, bsdtar, or p7zip."
+    exit 1
 fi
 
 # Make extracted files writable
@@ -197,13 +197,13 @@ cp "$PRESEED_FILE" "$ISO_DIR/preseed.cfg"
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)
 echo "Copying setup scripts to ISO root..."
 for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do
-	if [ -f "preseeds/$SCRIPT" ]; then
-		cp "preseeds/$SCRIPT" "$ISO_DIR/$SCRIPT"
-		echo "  ✓ $SCRIPT"
-	else
-		echo "Error: preseeds/$SCRIPT not found — the install cannot configure the guest without it" >&2
-		exit 1
-	fi
+    if [ -f "preseeds/$SCRIPT" ]; then
+        cp "preseeds/$SCRIPT" "$ISO_DIR/$SCRIPT"
+        echo "  ✓ $SCRIPT"
+    else
+        echo "Error: preseeds/$SCRIPT not found — the install cannot configure the guest without it" >&2
+        exit 1
+    fi
 done
 
 # AI_MODE has to travel INSIDE the ISO: first-boot-setup.sh runs from @reboot
@@ -212,16 +212,16 @@ done
 # variable that would silently be empty at boot.
 AI_MODE="${AI_MODE:-off}"
 case "$AI_MODE" in
-	off | client | local) ;;
-	*)
-		echo "Error: AI_MODE must be off, client or local (got '$AI_MODE')" >&2
-		exit 1
-		;;
+off | client | local) ;;
+*)
+    echo "Error: AI_MODE must be off, client or local (got '$AI_MODE')" >&2
+    exit 1
+    ;;
 esac
 if [ -f "$ISO_DIR/first-boot-setup.sh" ]; then
-	sed -i "s|^B2B_AI_MODE=\"\${B2B_AI_MODE:-off}\"|B2B_AI_MODE=\"\${B2B_AI_MODE:-${AI_MODE}}\"|" \
-		"$ISO_DIR/first-boot-setup.sh"
-	echo "  ✓ AI_MODE=${AI_MODE} baked into first-boot-setup.sh"
+    sed -i "s|^B2B_AI_MODE=\"\${B2B_AI_MODE:-off}\"|B2B_AI_MODE=\"\${B2B_AI_MODE:-${AI_MODE}}\"|" \
+        "$ISO_DIR/first-boot-setup.sh"
+    echo "  ✓ AI_MODE=${AI_MODE} baked into first-boot-setup.sh"
 fi
 
 # Post-install provisioners. These are NOT run from the d-i chroot: both need a
@@ -230,21 +230,21 @@ fi
 # runs them on the first real boot.
 echo "Copying post-install provisioners to ISO root..."
 for PROVISIONER in \
-	setup/install/tools/install_global_scope.sh \
-	setup/install/tools/install_devtools.sh \
-	setup/install/ai/install_ai.sh \
-	setup/install/nvim/install_nvim.sh \
-	setup/install/nvim/install_nvim_extras.sh \
-	setup/install/hellish/install_hellish_plugins.sh \
-	setup/install/hellish/install_hellish_upstream.sh; do
-	if [ -f "$PROVISIONER" ]; then
-		cp "$PROVISIONER" "$ISO_DIR/$(basename "$PROVISIONER")"
-		chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true
-		echo "  ✓ $(basename "$PROVISIONER")"
-	else
-		echo "Error: $PROVISIONER not found — first-boot-setup.sh would run without it" >&2
-		exit 1
-	fi
+    setup/install/tools/install_global_scope.sh \
+    setup/install/tools/install_devtools.sh \
+    setup/install/ai/install_ai.sh \
+    setup/install/nvim/install_nvim.sh \
+    setup/install/nvim/install_nvim_extras.sh \
+    setup/install/hellish/install_hellish_plugins.sh \
+    setup/install/hellish/install_hellish_upstream.sh; do
+    if [ -f "$PROVISIONER" ]; then
+        cp "$PROVISIONER" "$ISO_DIR/$(basename "$PROVISIONER")"
+        chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true
+        echo "  ✓ $(basename "$PROVISIONER")"
+    else
+        echo "Error: $PROVISIONER not found — first-boot-setup.sh would run without it" >&2
+        exit 1
+    fi
 done
 
 # Optional: bake a custom login shell into the ISO.
@@ -253,37 +253,37 @@ done
 # If not provided, the VM keeps the default /bin/bash.
 CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}"
 if [ -n "$CUSTOM_SHELL_PATH" ]; then
-	echo "Copying custom shell to ISO root..."
-	# If relative, resolve against repo root
-	case "$CUSTOM_SHELL_PATH" in
-		/*) : ;;
-		*) CUSTOM_SHELL_PATH="${REPO_ROOT}/${CUSTOM_SHELL_PATH}" ;;
-	esac
-	if [ ! -f "$CUSTOM_SHELL_PATH" ]; then
-		echo "Error: CUSTOM_SHELL_PATH points to a missing file: $CUSTOM_SHELL_PATH" >&2
-		exit 1
-	fi
-	CUSTOM_SHELL_NAME="${CUSTOM_SHELL_NAME:-$(basename "$CUSTOM_SHELL_PATH")}"
-	CUSTOM_SHELL_DEST="${CUSTOM_SHELL_DEST:-/usr/bin/$CUSTOM_SHELL_NAME}"
+    echo "Copying custom shell to ISO root..."
+    # If relative, resolve against repo root
+    case "$CUSTOM_SHELL_PATH" in
+    /*) : ;;
+    *) CUSTOM_SHELL_PATH="${REPO_ROOT}/${CUSTOM_SHELL_PATH}" ;;
+    esac
+    if [ ! -f "$CUSTOM_SHELL_PATH" ]; then
+        echo "Error: CUSTOM_SHELL_PATH points to a missing file: $CUSTOM_SHELL_PATH" >&2
+        exit 1
+    fi
+    CUSTOM_SHELL_NAME="${CUSTOM_SHELL_NAME:-$(basename "$CUSTOM_SHELL_PATH")}"
+    CUSTOM_SHELL_DEST="${CUSTOM_SHELL_DEST:-/usr/bin/$CUSTOM_SHELL_NAME}"
 
-	cp "$CUSTOM_SHELL_PATH" "$ISO_DIR/custom_shell.bin"
-	chmod 755 "$ISO_DIR/custom_shell.bin" || true
-	printf '%s\n' "$CUSTOM_SHELL_DEST" > "$ISO_DIR/custom_shell.dest"
-	printf '%s\n' "$CUSTOM_SHELL_NAME" > "$ISO_DIR/custom_shell.name"
-	echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
-	echo "    dest: $CUSTOM_SHELL_DEST"
-	# Optional extra: upstream's own shell-registration helper, if a hellish
-	# source tree happens to be checked out beside us. Not required — b2b-setup.sh
-	# appends to /etc/shells and runs usermod itself — so its absence is normal
-	# now that the sh42 submodule is gone.
-	REGISTER_SCRIPT="hellish/vendor/scripts/register_shell.sh"
-	if [ -f "$REGISTER_SCRIPT" ]; then
-		cp "$REGISTER_SCRIPT" "$ISO_DIR/register_shell.sh"
-		chmod 755 "$ISO_DIR/register_shell.sh" || true
-		echo "  ✓ register_shell.sh"
-	fi
+    cp "$CUSTOM_SHELL_PATH" "$ISO_DIR/custom_shell.bin"
+    chmod 755 "$ISO_DIR/custom_shell.bin" || true
+    printf '%s\n' "$CUSTOM_SHELL_DEST" >"$ISO_DIR/custom_shell.dest"
+    printf '%s\n' "$CUSTOM_SHELL_NAME" >"$ISO_DIR/custom_shell.name"
+    echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
+    echo "    dest: $CUSTOM_SHELL_DEST"
+    # Optional extra: upstream's own shell-registration helper, if a hellish
+    # source tree happens to be checked out beside us. Not required — b2b-setup.sh
+    # appends to /etc/shells and runs usermod itself — so its absence is normal
+    # now that the sh42 submodule is gone.
+    REGISTER_SCRIPT="hellish/vendor/scripts/register_shell.sh"
+    if [ -f "$REGISTER_SCRIPT" ]; then
+        cp "$REGISTER_SCRIPT" "$ISO_DIR/register_shell.sh"
+        chmod 755 "$ISO_DIR/register_shell.sh" || true
+        echo "  ✓ register_shell.sh"
+    fi
 else
-	echo "ℹ CUSTOM_SHELL_PATH not set — keeping default shell (bash)"
+    echo "ℹ CUSTOM_SHELL_PATH not set — keeping default shell (bash)"
 fi
 
 # Copy host's SSH public key into the ISO so b2b-setup.sh can install it
@@ -291,16 +291,16 @@ fi
 echo "Injecting host SSH public key..."
 HOST_PUBKEY=""
 for kf in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
-	if [ -f "$kf" ]; then
-		HOST_PUBKEY="$kf"
-		break
-	fi
+    if [ -f "$kf" ]; then
+        HOST_PUBKEY="$kf"
+        break
+    fi
 done
 if [ -n "$HOST_PUBKEY" ]; then
-	cp "$HOST_PUBKEY" "$ISO_DIR/host_ssh_pubkey"
-	echo "  ✓ Host SSH public key baked into ISO ($(basename "$HOST_PUBKEY"))"
+    cp "$HOST_PUBKEY" "$ISO_DIR/host_ssh_pubkey"
+    echo "  ✓ Host SSH public key baked into ISO ($(basename "$HOST_PUBKEY"))"
 else
-	echo "  ℹ No host SSH key found — VM will use password auth only"
+    echo "  ℹ No host SSH key found — VM will use password auth only"
 fi
 
 # ── CRITICAL: Inject preseed.cfg into the initrd ────────────────────────────
@@ -312,28 +312,28 @@ fi
 echo "Injecting preseed.cfg into initrd..."
 INITRD="$ISO_DIR/install.amd/initrd.gz"
 if [ -f "$INITRD" ]; then
-	INITRD_ABS="$(cd "$(dirname "$INITRD")" && pwd)/$(basename "$INITRD")"
-	INJECT_DIR=$(mktemp -d)
-	cp "$PRESEED_FILE" "$INJECT_DIR/preseed.cfg"
-	(cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2> /dev/null | gzip >> "$INITRD_ABS")
-	rm -rf "$INJECT_DIR"
-	echo "  ✓ preseed.cfg injected into install.amd/initrd.gz"
+    INITRD_ABS="$(cd "$(dirname "$INITRD")" && pwd)/$(basename "$INITRD")"
+    INJECT_DIR=$(mktemp -d)
+    cp "$PRESEED_FILE" "$INJECT_DIR/preseed.cfg"
+    (cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2>/dev/null | gzip >>"$INITRD_ABS")
+    rm -rf "$INJECT_DIR"
+    echo "  ✓ preseed.cfg injected into install.amd/initrd.gz"
 else
-	# Without the preseed inside the initrd the install is interactive and
-	# waits on a question forever. Never ship that ISO.
-	echo "Error: $INITRD not found — the extraction tree is incomplete (another build purging it?)" >&2
-	exit 1
+    # Without the preseed inside the initrd the install is interactive and
+    # waits on a question forever. Never ship that ISO.
+    echo "Error: $INITRD not found — the extraction tree is incomplete (another build purging it?)" >&2
+    exit 1
 fi
 
 # Also inject into GTK initrd if it exists
 INITRD_GTK="$ISO_DIR/install.amd/gtk/initrd.gz"
 if [ -f "$INITRD_GTK" ]; then
-	INITRD_GTK_ABS="$(cd "$(dirname "$INITRD_GTK")" && pwd)/$(basename "$INITRD_GTK")"
-	INJECT_DIR=$(mktemp -d)
-	cp "$PRESEED_FILE" "$INJECT_DIR/preseed.cfg"
-	(cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2> /dev/null | gzip >> "$INITRD_GTK_ABS")
-	rm -rf "$INJECT_DIR"
-	echo "  ✓ preseed.cfg injected into install.amd/gtk/initrd.gz"
+    INITRD_GTK_ABS="$(cd "$(dirname "$INITRD_GTK")" && pwd)/$(basename "$INITRD_GTK")"
+    INJECT_DIR=$(mktemp -d)
+    cp "$PRESEED_FILE" "$INJECT_DIR/preseed.cfg"
+    (cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2>/dev/null | gzip >>"$INITRD_GTK_ABS")
+    rm -rf "$INJECT_DIR"
+    echo "  ✓ preseed.cfg injected into install.amd/gtk/initrd.gz"
 fi
 
 # Edit boot menu for BIOS (ISOLINUX)
@@ -345,13 +345,13 @@ echo "Updating BIOS boot menu (isolinux)..."
 # 1. isolinux.cfg — set a 1-second timeout so it auto-boots
 ISOLINUX_MAIN="$ISO_DIR/isolinux/isolinux.cfg"
 if [ -f "$ISOLINUX_MAIN" ]; then
-	# vesamenu.c32 draws nothing on a serial line, so the serial build bypasses
-	# it and boots the txt.cfg entry directly. The VGA build keeps the menu
-	# module, which is what the ISO that installs successfully here uses —
-	# untested variations on the boot path are expensive to debug (a failure
-	# costs a 20-minute install to notice).
-	if [ "$SERIAL_CONSOLE" = "1" ]; then
-		cat > "$ISOLINUX_MAIN" << 'EOF'
+    # vesamenu.c32 draws nothing on a serial line, so the serial build bypasses
+    # it and boots the txt.cfg entry directly. The VGA build keeps the menu
+    # module, which is what the ISO that installs successfully here uses —
+    # untested variations on the boot path are expensive to debug (a failure
+    # costs a 20-minute install to notice).
+    if [ "$SERIAL_CONSOLE" = "1" ]; then
+        cat >"$ISOLINUX_MAIN" <<'EOF'
 # D-I config version 2.0
 path 
 serial 0 115200
@@ -360,9 +360,9 @@ default install
 prompt 0
 timeout 10
 EOF
-		echo "  ✓ isolinux.cfg  → serial console, boots 'install' directly"
-	else
-		cat > "$ISOLINUX_MAIN" << 'EOF'
+        echo "  ✓ isolinux.cfg  → serial console, boots 'install' directly"
+    else
+        cat >"$ISOLINUX_MAIN" <<'EOF'
 # D-I config version 2.0
 path 
 include menu.cfg
@@ -370,8 +370,8 @@ default vesamenu.c32
 prompt 0
 timeout 10
 EOF
-		echo "  ✓ isolinux.cfg  → timeout 10 (1s)"
-	fi
+        echo "  ✓ isolinux.cfg  → timeout 10 (1s)"
+    fi
 fi
 
 # 2. txt.cfg — our automated install entry (marked as menu default)
@@ -379,7 +379,7 @@ fi
 # locale/country/keymap on cmdline as belt-and-suspenders for pre-preseed Qs.
 ISOLINUX_TXT="$ISO_DIR/isolinux/txt.cfg"
 if [ -f "$ISOLINUX_TXT" ]; then
-	cat > "$ISOLINUX_TXT" << EOF
+    cat >"$ISOLINUX_TXT" <<EOF
 default install
 label install
     menu label ^Automated Install
@@ -387,19 +387,19 @@ label install
     kernel /install.amd/vmlinuz
     append ${DI_CMDLINE} initrd=/install.amd/initrd.gz ${DI_TAIL}
 EOF
-	echo "  ✓ txt.cfg       → Automated Install (default)"
+    echo "  ✓ txt.cfg       → Automated Install (default)"
 fi
 
 # 3. gtk.cfg — remove "menu default" from Graphical Install
 ISOLINUX_GTK="$ISO_DIR/isolinux/gtk.cfg"
 if [ -f "$ISOLINUX_GTK" ]; then
-	cat > "$ISOLINUX_GTK" << 'EOF'
+    cat >"$ISOLINUX_GTK" <<'EOF'
 label installgui
     menu label ^Graphical install
     kernel /install.amd/vmlinuz
     append vga=788 initrd=/install.amd/gtk/initrd.gz --- quiet
 EOF
-	echo "  ✓ gtk.cfg       → removed menu default"
+    echo "  ✓ gtk.cfg       → removed menu default"
 fi
 
 echo "✓ BIOS boot menu updated"
@@ -408,17 +408,17 @@ echo "✓ BIOS boot menu updated"
 echo "Updating EFI boot menu (GRUB)..."
 GRUB_CFG="$ISO_DIR/boot/grub/grub.cfg"
 if [ -f "$GRUB_CFG" ]; then
-	# Backup original
-	cp "$GRUB_CFG" "$GRUB_CFG.bak"
+    # Backup original
+    cp "$GRUB_CFG" "$GRUB_CFG.bak"
 
-	# Create new GRUB config with auto-install as default
-	GRUB_SERIAL=""
-	if [ "$SERIAL_CONSOLE" = "1" ]; then
-		GRUB_SERIAL="serial --unit=0 --speed=115200
+    # Create new GRUB config with auto-install as default
+    GRUB_SERIAL=""
+    if [ "$SERIAL_CONSOLE" = "1" ]; then
+        GRUB_SERIAL="serial --unit=0 --speed=115200
 terminal_input serial console
 terminal_output serial console"
-	fi
-	cat > "$GRUB_CFG" << GRUBEOF
+    fi
+    cat >"$GRUB_CFG" <<GRUBEOF
 ${GRUB_SERIAL}
 set default=0
 set timeout=1
@@ -436,27 +436,27 @@ menuentry 'Install' {
 }
 GRUBEOF
 
-	echo "✓ EFI boot menu updated"
+    echo "✓ EFI boot menu updated"
 else
-	echo "Error: $GRUB_CFG not found — the extraction tree is incomplete (another build purging it?)" >&2
-	exit 1
+    echo "Error: $GRUB_CFG not found — the extraction tree is incomplete (another build purging it?)" >&2
+    exit 1
 fi
 
 # Update MD5 sums
 echo "Updating MD5 checksums..."
 cd "$ISO_DIR"
-find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + > md5sum.txt 2> /dev/null || true
+find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + >md5sum.txt 2>/dev/null || true
 cd "$REPO_ROOT"
 
 # Rebuild ISO
 echo "Rebuilding ISO with xorriso..."
-if ! command -v xorriso > /dev/null 2>&1; then
-	echo "Error: xorriso is required to rebuild the ISO."
-	echo "Install it with:"
-	echo "  Debian/Ubuntu: sudo apt-get install -y xorriso"
-	echo "  Fedora:        sudo dnf install -y xorriso"
-	echo "  Arch:          sudo pacman -Sy xorriso"
-	exit 1
+if ! command -v xorriso >/dev/null 2>&1; then
+    echo "Error: xorriso is required to rebuild the ISO."
+    echo "Install it with:"
+    echo "  Debian/Ubuntu: sudo apt-get install -y xorriso"
+    echo "  Fedora:        sudo dnf install -y xorriso"
+    echo "  Arch:          sudo pacman -Sy xorriso"
+    exit 1
 fi
 # Two kinds of xorriso output are expected on a Debian ISO and say nothing
 # about the build: the percentage progress, and one "Cannot add ... to Joliet
@@ -468,26 +468,26 @@ fi
 cd "$ISO_DIR"
 XORRISO_LOG=$(mktemp)
 xorriso -as mkisofs \
-	-o "$OUTPUT_ABS" \
-	-c isolinux/boot.cat \
-	-b isolinux/isolinux.bin \
-	-no-emul-boot -boot-load-size 4 -boot-info-table \
-	-eltorito-alt-boot \
-	-e boot/grub/efi.img \
-	-no-emul-boot \
-	-isohybrid-gpt-basdat \
-	-r -J \
-	. 2>&1 | tee "$XORRISO_LOG" \
-	| grep -vE '^xorriso : UPDATE :|Cannot add .* to Joliet tree\. Symlinks can only be added to a Rock Ridge tree\.'
+    -o "$OUTPUT_ABS" \
+    -c isolinux/boot.cat \
+    -b isolinux/isolinux.bin \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -eltorito-alt-boot \
+    -e boot/grub/efi.img \
+    -no-emul-boot \
+    -isohybrid-gpt-basdat \
+    -r -J \
+    . 2>&1 | tee "$XORRISO_LOG" |
+    grep -vE '^xorriso : UPDATE :|Cannot add .* to Joliet tree\. Symlinks can only be added to a Rock Ridge tree\.'
 XORRISO_RC=${PIPESTATUS[0]}
-JOLIET_SKIPS=$(grep -c 'Symlinks can only be added to a Rock Ridge tree' "$XORRISO_LOG" 2> /dev/null || true)
+JOLIET_SKIPS=$(grep -c 'Symlinks can only be added to a Rock Ridge tree' "$XORRISO_LOG" 2>/dev/null || true)
 rm -f "$XORRISO_LOG"
 if [ "$XORRISO_RC" != "0" ]; then
-	echo "Error: xorriso failed to create the ISO (exit $XORRISO_RC)" >&2
-	exit 1
+    echo "Error: xorriso failed to create the ISO (exit $XORRISO_RC)" >&2
+    exit 1
 fi
-if [ "${JOLIET_SKIPS:-0}" -gt 0 ] 2> /dev/null; then
-	echo "  · ${JOLIET_SKIPS} symlinks kept out of the Joliet tree (expected — Rock Ridge carries them)"
+if [ "${JOLIET_SKIPS:-0}" -gt 0 ] 2>/dev/null; then
+    echo "  · ${JOLIET_SKIPS} symlinks kept out of the Joliet tree (expected — Rock Ridge carries them)"
 fi
 cd "$REPO_ROOT"
 

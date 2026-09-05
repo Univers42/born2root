@@ -43,15 +43,25 @@ STAMP="$OUT_DIR/.hellish-version"
 
 # Colours (match the Makefile; honour NO_COLOR and non-TTY output).
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-	G='\033[32m'; Y='\033[33m'; B='\033[34m'; R='\033[31m'; D='\033[90m'; Z='\033[0m'
+    G='\033[32m'
+    Y='\033[33m'
+    B='\033[34m'
+    R='\033[31m'
+    D='\033[90m'
+    Z='\033[0m'
 else
-	G=''; Y=''; B=''; R=''; D=''; Z=''
+    G=''
+    Y=''
+    B=''
+    R=''
+    D=''
+    Z=''
 fi
-say()  { printf "%b\n" "$*"; }
-ok()   { say "${G}✓${Z} $*"; }
+say() { printf "%b\n" "$*"; }
+ok() { say "${G}✓${Z} $*"; }
 info() { say "${B}▶${Z} $*"; }
 warn() { say "${Y}⚠${Z}  $*"; }
-err()  { say "${R}✗${Z} $*" >&2; }
+err() { say "${R}✗${Z} $*" >&2; }
 
 # ── Which asset can this machine actually run? ──────────────────────────────
 # Mirrors update_asset_name() in hellish: the asset is keyed off `uname -m`
@@ -60,65 +70,65 @@ err()  { say "${R}✗${Z} $*" >&2; }
 # deliberately identical to upstream's own resolver.
 MACHINE="$(uname -m)"
 case "$MACHINE" in
-	x86_64|aarch64) ASSET="hellish-linux-${MACHINE}" ;;
-	*)
-		err "No hellish release is published for arch '${MACHINE}'."
-		err "Build hellish from source and pass CUSTOM_SHELL_PATH=<binary>."
-		exit 1
-		;;
+x86_64 | aarch64) ASSET="hellish-linux-${MACHINE}" ;;
+*)
+    err "No hellish release is published for arch '${MACHINE}'."
+    err "Build hellish from source and pass CUSTOM_SHELL_PATH=<binary>."
+    exit 1
+    ;;
 esac
 
-need() { command -v "$1" > /dev/null 2>&1; }
+need() { command -v "$1" >/dev/null 2>&1; }
 if ! need curl; then
-	err "curl is required to fetch the hellish release. Run: make deps"
-	exit 1
+    err "curl is required to fetch the hellish release. Run: make deps"
+    exit 1
 fi
 
 # ── Resolve the version to install ──────────────────────────────────────────
 # A pinned HELLISH_VERSION skips the API entirely, which also means `make all`
 # keeps working when the API rate limit (60/hr unauthenticated) is exhausted.
 resolve_latest() {
-	curl -fsSL --max-time 20 \
-		-H 'Accept: application/vnd.github+json' \
-		"https://api.github.com/repos/${REPO}/releases/latest" 2> /dev/null \
-		| grep -m1 '"tag_name"' \
-		| sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
+    curl -fsSL --max-time 20 \
+        -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
+        grep -m1 '"tag_name"' |
+        sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
 }
 
 VERSION="${HELLISH_VERSION:-}"
 if [ -n "$VERSION" ]; then
-	info "Using pinned hellish ${VERSION}"
+    info "Using pinned hellish ${VERSION}"
 else
-	info "Resolving latest hellish release..."
-	VERSION="$(resolve_latest)"
-	if [ -n "$VERSION" ]; then
-		ok "Latest release: ${VERSION}"
-	else
-		warn "Could not reach the GitHub release API (offline, or rate-limited)."
-	fi
+    info "Resolving latest hellish release..."
+    VERSION="$(resolve_latest)"
+    if [ -n "$VERSION" ]; then
+        ok "Latest release: ${VERSION}"
+    else
+        warn "Could not reach the GitHub release API (offline, or rate-limited)."
+    fi
 fi
 
 CACHED=""
-[ -f "$STAMP" ] && CACHED="$(head -n1 "$STAMP" 2> /dev/null | tr -d '\r\n')"
+[ -f "$STAMP" ] && CACHED="$(head -n1 "$STAMP" 2>/dev/null | tr -d '\r\n')"
 
 # ── Nothing to do? ──────────────────────────────────────────────────────────
 # The stamp is only written after a build passes verification, so trusting it
 # here cannot resurrect a binary that failed its checksum.
-if [ -z "${HELLISH_REFRESH:-}" ] && [ -n "$VERSION" ] \
-	&& [ "$CACHED" = "$VERSION" ] && [ -x "$OUT_BIN" ]; then
-	ok "hellish ${VERSION} already present: ${OUT_BIN} ${D}(cached)${Z}"
-	exit 0
+if [ -z "${HELLISH_REFRESH:-}" ] && [ -n "$VERSION" ] &&
+    [ "$CACHED" = "$VERSION" ] && [ -x "$OUT_BIN" ]; then
+    ok "hellish ${VERSION} already present: ${OUT_BIN} ${D}(cached)${Z}"
+    exit 0
 fi
 
 # ── Offline: fall back rather than fail ─────────────────────────────────────
 if [ -z "$VERSION" ]; then
-	if [ -x "$OUT_BIN" ]; then
-		warn "Reusing cached hellish ${CACHED:-(unknown version)}: ${OUT_BIN}"
-		exit 0
-	fi
-	err "Cannot resolve a hellish release and there is no cached binary."
-	err "Pin a known version to skip the API:  make shell HELLISH_VERSION=v2.7.6"
-	exit 1
+    if [ -x "$OUT_BIN" ]; then
+        warn "Reusing cached hellish ${CACHED:-(unknown version)}: ${OUT_BIN}"
+        exit 0
+    fi
+    err "Cannot resolve a hellish release and there is no cached binary."
+    err "Pin a known version to skip the API:  make shell HELLISH_VERSION=v2.7.6"
+    exit 1
 fi
 
 # ── Download ────────────────────────────────────────────────────────────────
@@ -128,30 +138,30 @@ trap 'rm -rf "$TMP"' EXIT
 
 info "Downloading ${ASSET} ${D}(${VERSION})${Z}"
 if ! curl -fsSL --max-time 180 -o "$TMP/$ASSET" "${BASE}/${ASSET}"; then
-	err "Download failed: ${BASE}/${ASSET}"
-	if [ -x "$OUT_BIN" ]; then
-		warn "Keeping the cached binary already at ${OUT_BIN} (${CACHED:-unknown})."
-		exit 0
-	fi
-	exit 1
+    err "Download failed: ${BASE}/${ASSET}"
+    if [ -x "$OUT_BIN" ]; then
+        warn "Keeping the cached binary already at ${OUT_BIN} (${CACHED:-unknown})."
+        exit 0
+    fi
+    exit 1
 fi
 
 # ── Verify the checksum ─────────────────────────────────────────────────────
 # Fatal when the .sha256 exists and does not match: a truncated or tampered
 # binary must never reach the ISO. Only a MISSING .sha256 downgrades to a
 # warning, since older releases predate the checksum asset.
-if curl -fsSL --max-time 30 -o "$TMP/$ASSET.sha256" "${BASE}/${ASSET}.sha256" 2> /dev/null; then
-	EXPECT="$(awk '{print $1; exit}' "$TMP/$ASSET.sha256")"
-	ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
-	if [ -z "$EXPECT" ] || [ "$EXPECT" != "$ACTUAL" ]; then
-		err "Checksum mismatch for ${ASSET} — refusing to install."
-		err "  expected: ${EXPECT:-(empty)}"
-		err "  actual:   ${ACTUAL}"
-		exit 1
-	fi
-	ok "SHA-256 verified ${D}${ACTUAL}${Z}"
+if curl -fsSL --max-time 30 -o "$TMP/$ASSET.sha256" "${BASE}/${ASSET}.sha256" 2>/dev/null; then
+    EXPECT="$(awk '{print $1; exit}' "$TMP/$ASSET.sha256")"
+    ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
+    if [ -z "$EXPECT" ] || [ "$EXPECT" != "$ACTUAL" ]; then
+        err "Checksum mismatch for ${ASSET} — refusing to install."
+        err "  expected: ${EXPECT:-(empty)}"
+        err "  actual:   ${ACTUAL}"
+        exit 1
+    fi
+    ok "SHA-256 verified ${D}${ACTUAL}${Z}"
 else
-	warn "No .sha256 published for ${VERSION} — skipping checksum verification."
+    warn "No .sha256 published for ${VERSION} — skipping checksum verification."
 fi
 
 chmod 755 "$TMP/$ASSET"
@@ -161,21 +171,24 @@ chmod 755 "$TMP/$ASSET"
 # host; a host whose glibc is older than the release's floor would fail here
 # while the VM stays perfectly fine. The checksum above is the real gate.
 if [ "$MACHINE" = "$(uname -m)" ]; then
-	if OUTPUT="$("$TMP/$ASSET" -c 'echo hellish-ok' 2> /dev/null)" \
-		&& [ "$OUTPUT" = "hellish-ok" ]; then
-		ok "Smoke test passed"
-	else
-		warn "Binary did not run on THIS host (glibc/readline too old?)."
-		warn "Not fatal — it only has to run inside the VM. Checksum was valid."
-	fi
+    if OUTPUT="$("$TMP/$ASSET" -c 'echo hellish-ok' 2>/dev/null)" &&
+        [ "$OUTPUT" = "hellish-ok" ]; then
+        ok "Smoke test passed"
+    else
+        warn "Binary did not run on THIS host (glibc/readline too old?)."
+        warn "Not fatal — it only has to run inside the VM. Checksum was valid."
+    fi
 fi
 
 # ── Install into place ──────────────────────────────────────────────────────
 mkdir -p "$OUT_DIR"
-install -m 755 "$TMP/$ASSET" "$OUT_BIN" 2> /dev/null || {
-	cp "$TMP/$ASSET" "$OUT_BIN" && chmod 755 "$OUT_BIN"
-} || { err "Could not write ${OUT_BIN}"; exit 1; }
-printf '%s\n' "$VERSION" > "$STAMP"
+install -m 755 "$TMP/$ASSET" "$OUT_BIN" 2>/dev/null || {
+    cp "$TMP/$ASSET" "$OUT_BIN" && chmod 755 "$OUT_BIN"
+} || {
+    err "Could not write ${OUT_BIN}"
+    exit 1
+}
+printf '%s\n' "$VERSION" >"$STAMP"
 
-SIZE="$(du -h "$OUT_BIN" 2> /dev/null | cut -f1)"
+SIZE="$(du -h "$OUT_BIN" 2>/dev/null | cut -f1)"
 ok "hellish ${VERSION} ready: ${OUT_BIN} ${D}(${SIZE})${Z}"

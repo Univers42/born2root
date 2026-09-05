@@ -12,17 +12,17 @@ echo -e "${YELLOW}============================================================${
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo -e "${RED}This script must be run as root. Please use sudo.${NC}"
-	exit 1
+    echo -e "${RED}This script must be run as root. Please use sudo.${NC}"
+    exit 1
 fi
 
 # Step 1: Disable current profiles
 echo -e "\n${YELLOW}Step 1: Disabling current AppArmor profiles...${NC}"
-aa-disable usr.sbin.php-fpm8.2 2> /dev/null || true
-aa-disable usr.sbin.lighttpd 2> /dev/null || true
+aa-disable usr.sbin.php-fpm8.2 2>/dev/null || true
+aa-disable usr.sbin.lighttpd 2>/dev/null || true
 
-apparmor_parser -R /etc/apparmor.d/usr.sbin.php-fpm8.2 2> /dev/null || true
-apparmor_parser -R /etc/apparmor.d/usr.sbin.lighttpd 2> /dev/null || true
+apparmor_parser -R /etc/apparmor.d/usr.sbin.php-fpm8.2 2>/dev/null || true
+apparmor_parser -R /etc/apparmor.d/usr.sbin.lighttpd 2>/dev/null || true
 
 # Step 2: Check logs for specific errors
 echo -e "\n${YELLOW}Step 2: Checking PHP-FPM logs for specific errors...${NC}"
@@ -32,7 +32,7 @@ journalctl -xeu php8.2-fpm.service | grep -i "apparmor\|denied\|permission" | ta
 echo -e "\n${YELLOW}Step 3: Creating service-compatible AppArmor profiles...${NC}"
 
 # Very minimal PHP-FPM profile that should work
-cat > /etc/apparmor.d/usr.sbin.php-fpm8.2 << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.php-fpm8.2 <<'EOF'
 #include <tunables/global>
 
 profile php-fpm8.2 /usr/sbin/php-fpm8.2 {
@@ -98,7 +98,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 {
 EOF
 
 # Very minimal Lighttpd profile that should work
-cat > /etc/apparmor.d/usr.sbin.lighttpd << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.lighttpd <<'EOF'
 #include <tunables/global>
 
 profile lighttpd /usr/sbin/lighttpd {
@@ -153,7 +153,7 @@ EOF
 echo -e "\n${YELLOW}Step 4: Creating simulation scripts for demonstration...${NC}"
 
 # Create realistic simulation protection script
-cat > /root/wordpress-security-demo/toggle-protection.sh << 'EOF'
+cat >/root/wordpress-security-demo/toggle-protection.sh <<'EOF'
 #!/bin/bash
 
 RED='\033[0;31m'
@@ -209,41 +209,41 @@ echo -e "Lighttpd status: ${lighttpd_status}"
 
 # Step 7: Try to switch to enforce mode only if complain mode worked
 if [ "$php_status" = "active" ] && [ "$lighttpd_status" = "active" ]; then
-	echo -e "\n${YELLOW}Step 7: Services are running in complain mode. Testing enforce mode...${NC}"
-	aa-enforce /etc/apparmor.d/usr.sbin.php-fpm8.2
-	aa-enforce /etc/apparmor.d/usr.sbin.lighttpd
+    echo -e "\n${YELLOW}Step 7: Services are running in complain mode. Testing enforce mode...${NC}"
+    aa-enforce /etc/apparmor.d/usr.sbin.php-fpm8.2
+    aa-enforce /etc/apparmor.d/usr.sbin.lighttpd
 
-	systemctl restart php8.2-fpm
-	systemctl restart lighttpd
+    systemctl restart php8.2-fpm
+    systemctl restart lighttpd
 
-	# Check services again
-	php_status=$(systemctl is-active php8.2-fpm)
-	lighttpd_status=$(systemctl is-active lighttpd)
+    # Check services again
+    php_status=$(systemctl is-active php8.2-fpm)
+    lighttpd_status=$(systemctl is-active lighttpd)
 
-	echo -e "\nPHP-FPM status (enforce): ${php_status}"
-	echo -e "Lighttpd status (enforce): ${lighttpd_status}"
+    echo -e "\nPHP-FPM status (enforce): ${php_status}"
+    echo -e "Lighttpd status (enforce): ${lighttpd_status}"
 
-	if [ "$php_status" != "active" ] || [ "$lighttpd_status" != "active" ]; then
-		echo -e "\n${RED}Services failed in enforce mode. Rolling back to complain mode...${NC}"
-		aa-complain /etc/apparmor.d/usr.sbin.php-fpm8.2
-		aa-complain /etc/apparmor.d/usr.sbin.lighttpd
+    if [ "$php_status" != "active" ] || [ "$lighttpd_status" != "active" ]; then
+        echo -e "\n${RED}Services failed in enforce mode. Rolling back to complain mode...${NC}"
+        aa-complain /etc/apparmor.d/usr.sbin.php-fpm8.2
+        aa-complain /etc/apparmor.d/usr.sbin.lighttpd
 
-		systemctl restart php8.2-fpm
-		systemctl restart lighttpd
+        systemctl restart php8.2-fpm
+        systemctl restart lighttpd
 
-		echo -e "${YELLOW}Using simulation mode for demonstration${NC}"
-	else
-		echo -e "\n${GREEN}Success! Services are running in enforce mode.${NC}"
-	fi
+        echo -e "${YELLOW}Using simulation mode for demonstration${NC}"
+    else
+        echo -e "\n${GREEN}Success! Services are running in enforce mode.${NC}"
+    fi
 else
-	echo -e "\n${RED}Services failed in complain mode. Using full simulation for demo.${NC}"
-	# If we can't even get complain mode working, create an environment variable workaround
-	mkdir -p /var/www/html/wp-content/uploads
-	echo -e "${YELLOW}Created uploads directory for demo${NC}"
+    echo -e "\n${RED}Services failed in complain mode. Using full simulation for demo.${NC}"
+    # If we can't even get complain mode working, create an environment variable workaround
+    mkdir -p /var/www/html/wp-content/uploads
+    echo -e "${YELLOW}Created uploads directory for demo${NC}"
 fi
 
 # Create attack simulation script with workarounds
-cat > /tmp/malicious-webshell.php << 'EOF'
+cat >/tmp/malicious-webshell.php <<'EOF'
 <?php
 // This file simulates a malicious webshell that checks the demo flag
 

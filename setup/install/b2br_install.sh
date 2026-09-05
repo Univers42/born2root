@@ -10,25 +10,25 @@ NC='\033[0m' # No Color
 
 # Function to print section headers
 print_header() {
-	echo -e "\n${BLUE}${BOLD}=== $1 ===${NC}"
+    echo -e "\n${BLUE}${BOLD}=== $1 ===${NC}"
 }
 
 # Function to install a package with status check
 install_package() {
-	echo -e "${YELLOW}Installing $1...${NC}"
-	apt-get install -y $1 > /dev/null 2>&1
-	if [ $? -eq 0 ]; then
-		echo -e "${GREEN}✓ $1 installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install $1${NC}"
-	fi
+    echo -e "${YELLOW}Installing $1...${NC}"
+    apt-get install -y $1 >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ $1 installed successfully${NC}"
+    else
+        echo -e "${RED}✗ Failed to install $1${NC}"
+    fi
 }
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo -e "${RED}This script must be run as root!${NC}"
-	echo -e "Please run with: sudo $0"
-	exit 1
+    echo -e "${RED}This script must be run as root!${NC}"
+    echo -e "Please run with: sudo $0"
+    exit 1
 fi
 
 print_header "UPDATING SYSTEM PACKAGES"
@@ -61,27 +61,27 @@ echo -e "${YELLOW}The bonus part requires a web server with WordPress${NC}"
 read -p "Install bonus packages? (y/n): " install_bonus
 
 if [[ "$install_bonus" =~ ^[Yy]$ ]]; then
-	print_header "INSTALLING BONUS PACKAGES"
+    print_header "INSTALLING BONUS PACKAGES"
 
-	# Web server
-	install_package "lighttpd"
+    # Web server
+    install_package "lighttpd"
 
-	# Database
-	install_package "mariadb-server"
+    # Database
+    install_package "mariadb-server"
 
-	# PHP for WordPress
-	install_package "php-cgi"
-	install_package "php-fpm"
-	install_package "php-mysql"
-	install_package "php-cli"
-	install_package "php-curl"
-	install_package "php-gd"
-	install_package "php-mbstring"
-	install_package "php-xml"
-	install_package "php-xmlrpc"
-	install_package "php-soap"
-	install_package "php-intl"
-	install_package "php-zip"
+    # PHP for WordPress
+    install_package "php-cgi"
+    install_package "php-fpm"
+    install_package "php-mysql"
+    install_package "php-cli"
+    install_package "php-curl"
+    install_package "php-gd"
+    install_package "php-mbstring"
+    install_package "php-xml"
+    install_package "php-xmlrpc"
+    install_package "php-soap"
+    install_package "php-intl"
+    install_package "php-zip"
 fi
 
 print_header "INSTALLATION COMPLETE"

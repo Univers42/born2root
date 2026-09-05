@@ -34,17 +34,17 @@ tcp_count=$(ss -ta | grep ESTAB | wc -l)
 user_count=$(who | wc -l)
 ip=$(hostname -I | awk '{print $1}')
 mac=$(ip link show | grep "link/ether" | awk '{print $2}' | head -1)
-sudo_count=$(grep "COMMAND" /var/log/sudo/sudo.log 2> /dev/null | wc -l)
+sudo_count=$(grep "COMMAND" /var/log/sudo/sudo.log 2>/dev/null | wc -l)
 
 # Create a simple banner with a box around it
 print_banner() {
-	local text="$1"
-	local length=${#text}
-	local line=$(printf "%${length}s" | tr " " "#")
+    local text="$1"
+    local length=${#text}
+    local line=$(printf "%${length}s" | tr " " "#")
 
-	echo "#$line#"
-	echo "# $text #"
-	echo "#$line#"
+    echo "#$line#"
+    echo "# $text #"
+    echo "#$line#"
 }
 
 # Build monitoring message

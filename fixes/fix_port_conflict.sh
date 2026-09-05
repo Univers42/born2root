@@ -17,8 +17,8 @@ sudo sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
 
 # Fix lighttpd configuration (if installed)
 if [ -f /etc/lighttpd/lighttpd.conf ]; then
-	echo "Setting lighttpd to listen ONLY on port 80..."
-	sudo sed -i 's/^server.port.*/server.port = 80/' /etc/lighttpd/lighttpd.conf
+    echo "Setting lighttpd to listen ONLY on port 80..."
+    sudo sed -i 's/^server.port.*/server.port = 80/' /etc/lighttpd/lighttpd.conf
 fi
 
 # Restart SSH
@@ -26,9 +26,9 @@ echo "Restarting SSH service..."
 sudo systemctl restart ssh
 
 # Start lighttpd on the correct port (if installed)
-if systemctl is-enabled lighttpd &> /dev/null; then
-	echo "Starting lighttpd on port 80..."
-	sudo systemctl start lighttpd
+if systemctl is-enabled lighttpd &>/dev/null; then
+    echo "Starting lighttpd on port 80..."
+    sudo systemctl start lighttpd
 fi
 
 # Verify port assignments

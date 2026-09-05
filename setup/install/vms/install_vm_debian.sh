@@ -6,11 +6,11 @@ set -e # Exit on any error
 SCRIPT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$SCRIPT_DIR"
 
-PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2> /dev/null | head -n1)
+PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
 if [ -z "$PRESEED_ISO" ]; then
-	echo "Error: No preseeded ISO found in $SCRIPT_DIR"
-	echo "Run 'make gen_iso' first."
-	exit 1
+    echo "Error: No preseeded ISO found in $SCRIPT_DIR"
+    echo "Run 'make gen_iso' first."
+    exit 1
 fi
 
 # Variables
@@ -21,16 +21,16 @@ fi
 # the caller asked for -- `make all VM_NAME=other` still wiped "debian".
 VM_NAME="${VM_NAME:-${1:-debian}}"
 case "$VM_NAME" in
-	'' | *[!A-Za-z0-9._-]*)
-		echo "Error: invalid VM_NAME '$VM_NAME' (allowed: letters, digits, . _ -)" >&2
-		exit 1
-		;;
+'' | *[!A-Za-z0-9._-]*)
+    echo "Error: invalid VM_NAME '$VM_NAME' (allowed: letters, digits, . _ -)" >&2
+    exit 1
+    ;;
 esac
 # default: project-local storage
 VM_PATH="${VM_PATH:-$(pwd)/disk_images}"
 if ! mkdir -p "$VM_PATH"; then
-	echo "Error: cannot create VM storage directory: $VM_PATH" >&2
-	exit 1
+    echo "Error: cannot create VM storage directory: $VM_PATH" >&2
+    exit 1
 fi
 
 ISO_PATH="$(pwd)/$PRESEED_ISO"
@@ -54,69 +54,69 @@ VM_DISK_SIZE="${DISK_SIZE_MB:-122880}" # 120GB in MB
 #   - VRAM: 128 MB (server, no GUI in guest)
 # This keeps the host responsive while giving the VM enough power.
 auto_size_vm() {
-	local host_ram_mb host_cpus
+    local host_ram_mb host_cpus
 
-	# Detect host RAM (MB)
-	if [ -f /proc/meminfo ]; then
-		host_ram_mb=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
-	elif command -v sysctl > /dev/null 2>&1; then
-		host_ram_mb=$(($(sysctl -n hw.memsize 2> /dev/null || echo 0) / 1024 / 1024))
-	fi
-	: "${host_ram_mb:=8192}"
+    # Detect host RAM (MB)
+    if [ -f /proc/meminfo ]; then
+        host_ram_mb=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+    elif command -v sysctl >/dev/null 2>&1; then
+        host_ram_mb=$(($(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024))
+    fi
+    : "${host_ram_mb:=8192}"
 
-	# Detect host CPU cores
-	if command -v nproc > /dev/null 2>&1; then
-		host_cpus=$(nproc)
-	elif [ -f /proc/cpuinfo ]; then
-		host_cpus=$(grep -c ^processor /proc/cpuinfo)
-	elif command -v sysctl > /dev/null 2>&1; then
-		host_cpus=$(sysctl -n hw.ncpu 2> /dev/null || echo 4)
-	fi
-	: "${host_cpus:=4}"
+    # Detect host CPU cores
+    if command -v nproc >/dev/null 2>&1; then
+        host_cpus=$(nproc)
+    elif [ -f /proc/cpuinfo ]; then
+        host_cpus=$(grep -c ^processor /proc/cpuinfo)
+    elif command -v sysctl >/dev/null 2>&1; then
+        host_cpus=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    fi
+    : "${host_cpus:=4}"
 
-	# Allocate 25% RAM, clamp [2048, 8192].
-	#
-	# VM_RAM_MB overrides the whole calculation. It exists because the automatic
-	# share is sized to keep the HOST responsive, which is the right default but
-	# the wrong answer for a couple of real cases: running a local model
-	# (setup/install/ai/install_ai.sh picks a model from this number, and on the
-	# 2048 floor it correctly refuses to pull one at all), or several editors
-	# with language servers at once. Raising it starves the host, so it is a
-	# deliberate opt-in rather than a bigger default.
-	VM_MEMORY=$((host_ram_mb / 4))
-	[ "$VM_MEMORY" -lt 2048 ] && VM_MEMORY=2048
-	[ "$VM_MEMORY" -gt 8192 ] && VM_MEMORY=8192
-	if [ -n "${VM_RAM_MB:-}" ]; then
-		case "$VM_RAM_MB" in
-			'' | *[!0-9]*)
-				echo "Warning: VM_RAM_MB='$VM_RAM_MB' is not a number — using ${VM_MEMORY}MB" >&2
-				;;
-			*)
-				if [ "$VM_RAM_MB" -lt 1024 ]; then
-					echo "Warning: VM_RAM_MB=${VM_RAM_MB} is below 1024 — using ${VM_MEMORY}MB" >&2
-				else
-					VM_MEMORY="$VM_RAM_MB"
-					if [ "$VM_MEMORY" -gt "$host_ram_mb" ]; then
-						echo "Warning: VM_RAM_MB=${VM_MEMORY} exceeds the host's ${host_ram_mb}MB" >&2
-					fi
-				fi
-				;;
-		esac
-	fi
+    # Allocate 25% RAM, clamp [2048, 8192].
+    #
+    # VM_RAM_MB overrides the whole calculation. It exists because the automatic
+    # share is sized to keep the HOST responsive, which is the right default but
+    # the wrong answer for a couple of real cases: running a local model
+    # (setup/install/ai/install_ai.sh picks a model from this number, and on the
+    # 2048 floor it correctly refuses to pull one at all), or several editors
+    # with language servers at once. Raising it starves the host, so it is a
+    # deliberate opt-in rather than a bigger default.
+    VM_MEMORY=$((host_ram_mb / 4))
+    [ "$VM_MEMORY" -lt 2048 ] && VM_MEMORY=2048
+    [ "$VM_MEMORY" -gt 8192 ] && VM_MEMORY=8192
+    if [ -n "${VM_RAM_MB:-}" ]; then
+        case "$VM_RAM_MB" in
+        '' | *[!0-9]*)
+            echo "Warning: VM_RAM_MB='$VM_RAM_MB' is not a number — using ${VM_MEMORY}MB" >&2
+            ;;
+        *)
+            if [ "$VM_RAM_MB" -lt 1024 ]; then
+                echo "Warning: VM_RAM_MB=${VM_RAM_MB} is below 1024 — using ${VM_MEMORY}MB" >&2
+            else
+                VM_MEMORY="$VM_RAM_MB"
+                if [ "$VM_MEMORY" -gt "$host_ram_mb" ]; then
+                    echo "Warning: VM_RAM_MB=${VM_MEMORY} exceeds the host's ${host_ram_mb}MB" >&2
+                fi
+            fi
+            ;;
+        esac
+    fi
 
-	# Allocate 50% CPUs, clamp [2, 8]
-	VM_CPUS=$((host_cpus / 2))
-	[ "$VM_CPUS" -lt 2 ] && VM_CPUS=2
-	[ "$VM_CPUS" -gt 8 ] && VM_CPUS=8
+    # Allocate 50% CPUs, clamp [2, 8]
+    VM_CPUS=$((host_cpus / 2))
+    [ "$VM_CPUS" -lt 2 ] && VM_CPUS=2
+    [ "$VM_CPUS" -gt 8 ] && VM_CPUS=8
 
-	VM_VRAM=128
+    VM_VRAM=128
 
-	echo "╔══════════════════════════════════════════════╗"
-	echo "║  Smart VM Sizing (host-adaptive)             ║"
-	echo "╠══════════════════════════════════════════════╣"
-	printf "║  Host:  %5d MB RAM  /  %2d cores            ║\n" "$host_ram_mb" "$host_cpus"
-	printf "║  VM:    %5d MB RAM  /  %2d cores  (25%%/50%%) ║\n" "$VM_MEMORY" "$VM_CPUS"
-	echo "╚══════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║  Smart VM Sizing (host-adaptive)             ║"
+    echo "╠══════════════════════════════════════════════╣"
+    printf "║  Host:  %5d MB RAM  /  %2d cores            ║\n" "$host_ram_mb" "$host_cpus"
+    printf "║  VM:    %5d MB RAM  /  %2d cores  (25%%/50%%) ║\n" "$VM_MEMORY" "$VM_CPUS"
+    echo "╚══════════════════════════════════════════════╝"
 }
 
 auto_size_vm
@@ -154,36 +154,36 @@ VAULT_PORT=18200
 # already taken on this host). resolve_host_port assigns into the named variable
 # so each pick is reserved against the following ones: two services landing on
 # the same host port is what VirtualBox refuses to forward.
-resolve_host_port HOST_SSH_PORT              "$SSH_PORT"
-resolve_host_port HOST_HTTP_PORT             8082
-resolve_host_port HOST_HTTPS_PORT            8443
-resolve_host_port HOST_DOCKER_PORT           5000
-resolve_host_port HOST_MARIADB_PORT          3306
-resolve_host_port HOST_REDIS_PORT            6379
-resolve_host_port HOST_FRONTEND_PORT         "$FRONTEND_PORT"
-resolve_host_port HOST_BACKEND_PORT          "$BACKEND_PORT"
-resolve_host_port HOST_OSIONOS_APP_PORT      "$OSIONOS_APP_PORT"
-resolve_host_port HOST_OSIONOS_MAIL_PORT     "$OSIONOS_MAIL_PORT"
+resolve_host_port HOST_SSH_PORT "$SSH_PORT"
+resolve_host_port HOST_HTTP_PORT 8082
+resolve_host_port HOST_HTTPS_PORT 8443
+resolve_host_port HOST_DOCKER_PORT 5000
+resolve_host_port HOST_MARIADB_PORT 3306
+resolve_host_port HOST_REDIS_PORT 6379
+resolve_host_port HOST_FRONTEND_PORT "$FRONTEND_PORT"
+resolve_host_port HOST_BACKEND_PORT "$BACKEND_PORT"
+resolve_host_port HOST_OSIONOS_APP_PORT "$OSIONOS_APP_PORT"
+resolve_host_port HOST_OSIONOS_MAIL_PORT "$OSIONOS_MAIL_PORT"
 resolve_host_port HOST_OSIONOS_CALENDAR_PORT "$OSIONOS_CALENDAR_PORT"
-resolve_host_port HOST_OSIONOS_BRIDGE_PORT   "$OSIONOS_BRIDGE_PORT"
-resolve_host_port HOST_MAIL_BRIDGE_PORT      "$MAIL_BRIDGE_PORT"
-resolve_host_port HOST_CALENDAR_BRIDGE_PORT  "$CALENDAR_BRIDGE_PORT"
-resolve_host_port HOST_WEBSITE_PORT          "$WEBSITE_PORT"
-resolve_host_port HOST_BAAS_GATEWAY_PORT     "$BAAS_GATEWAY_PORT"
-resolve_host_port HOST_BAAS_ADMIN_PORT       "$BAAS_ADMIN_PORT"
-resolve_host_port HOST_MAILPIT_PORT          "$MAILPIT_PORT"
-resolve_host_port HOST_AUTH_GATEWAY_PORT     "$AUTH_GATEWAY_PORT"
-resolve_host_port HOST_VAULT_PORT            "$VAULT_PORT"
+resolve_host_port HOST_OSIONOS_BRIDGE_PORT "$OSIONOS_BRIDGE_PORT"
+resolve_host_port HOST_MAIL_BRIDGE_PORT "$MAIL_BRIDGE_PORT"
+resolve_host_port HOST_CALENDAR_BRIDGE_PORT "$CALENDAR_BRIDGE_PORT"
+resolve_host_port HOST_WEBSITE_PORT "$WEBSITE_PORT"
+resolve_host_port HOST_BAAS_GATEWAY_PORT "$BAAS_GATEWAY_PORT"
+resolve_host_port HOST_BAAS_ADMIN_PORT "$BAAS_ADMIN_PORT"
+resolve_host_port HOST_MAILPIT_PORT "$MAILPIT_PORT"
+resolve_host_port HOST_AUTH_GATEWAY_PORT "$AUTH_GATEWAY_PORT"
+resolve_host_port HOST_VAULT_PORT "$VAULT_PORT"
 
 # Create VM folders if they don't exist
 mkdir -p "$VM_PATH/$VM_NAME"
 
 # Function to print headers
 print_header() {
-	echo ""
-	echo "==============================================="
-	echo "  $1"
-	echo "==============================================="
+    echo ""
+    echo "==============================================="
+    echo "  $1"
+    echo "==============================================="
 }
 
 print_header "Setting up Born2beRoot VirtualBox VM"
@@ -195,33 +195,33 @@ VBoxManage list vms
 
 # If a stale VM with the same name exists, force-remove it before creating fresh
 if VBoxManage list vms | grep -q "\"$VM_NAME\""; then
-	print_header "Removing stale VM \"$VM_NAME\" before fresh creation"
-	# Power off if running
-	local_state=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null \
-		| grep "^VMState=" | cut -d'"' -f2)
-	if [ "$local_state" = "running" ] || [ "$local_state" = "paused" ]; then
-		echo "  VM is $local_state — powering off..."
-		VBoxManage controlvm "$VM_NAME" poweroff 2>/dev/null || true
-		sleep 3
-		# Wait for session lock to release
-		for _i in $(seq 1 10); do
-			VBoxManage modifyvm "$VM_NAME" --description "" 2>/dev/null && break
-			sleep 1
-		done
-	fi
-	VBoxManage unregistervm "$VM_NAME" --delete 2>/dev/null || {
-		echo "  --delete failed, unregistering and cleaning files manually"
-		VBoxManage unregistervm "$VM_NAME" 2>/dev/null || true
-		# Delete VirtualBox's OWN files, not the directory. The QEMU backend
-		# keeps its qcow2, its serial log and its .installed stamp in this
-		# same disk_images/<vm>/ folder (setup/host/qemu_vm.sh), so a blanket
-		# rm -rf here destroys a working QEMU VM that has nothing to do with
-		# the stale VirtualBox registration being cleaned up.
-		rm -rf "$VM_PATH/$VM_NAME"/*.vbox "$VM_PATH/$VM_NAME"/*.vbox-prev \
-			"$VM_PATH/$VM_NAME"/*.vdi "$VM_PATH/$VM_NAME"/Logs \
-			"$VM_PATH/$VM_NAME"/Snapshots 2> /dev/null || true
-	}
-	echo "  ✓ Stale VM removed"
+    print_header "Removing stale VM \"$VM_NAME\" before fresh creation"
+    # Power off if running
+    local_state=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null |
+        grep "^VMState=" | cut -d'"' -f2)
+    if [ "$local_state" = "running" ] || [ "$local_state" = "paused" ]; then
+        echo "  VM is $local_state — powering off..."
+        VBoxManage controlvm "$VM_NAME" poweroff 2>/dev/null || true
+        sleep 3
+        # Wait for session lock to release
+        for _i in $(seq 1 10); do
+            VBoxManage modifyvm "$VM_NAME" --description "" 2>/dev/null && break
+            sleep 1
+        done
+    fi
+    VBoxManage unregistervm "$VM_NAME" --delete 2>/dev/null || {
+        echo "  --delete failed, unregistering and cleaning files manually"
+        VBoxManage unregistervm "$VM_NAME" 2>/dev/null || true
+        # Delete VirtualBox's OWN files, not the directory. The QEMU backend
+        # keeps its qcow2, its serial log and its .installed stamp in this
+        # same disk_images/<vm>/ folder (setup/host/qemu_vm.sh), so a blanket
+        # rm -rf here destroys a working QEMU VM that has nothing to do with
+        # the stale VirtualBox registration being cleaned up.
+        rm -rf "$VM_PATH/$VM_NAME"/*.vbox "$VM_PATH/$VM_NAME"/*.vbox-prev \
+            "$VM_PATH/$VM_NAME"/*.vdi "$VM_PATH/$VM_NAME"/Logs \
+            "$VM_PATH/$VM_NAME"/Snapshots 2>/dev/null || true
+    }
+    echo "  ✓ Stale VM removed"
 fi
 
 print_header "Creating new VM"
@@ -232,23 +232,23 @@ echo "ISO path: $ISO_PATH"
 # Create the VM
 print_header "Creating VirtualBox VM"
 VBoxManage createvm --name "$VM_NAME" --ostype "Debian_64" --basefolder "$VM_PATH" --register || {
-	echo "Failed to create VM"
-	exit 1
+    echo "Failed to create VM"
+    exit 1
 }
 
 # Set memory, CPU, and display
 print_header "Configuring VM hardware settings"
 VBoxManage modifyvm "$VM_NAME" \
-	--memory "$VM_MEMORY" \
-	--vram "$VM_VRAM" \
-	--cpus "$VM_CPUS" \
-	--acpi on \
-	--ioapic on \
-	--rtcuseutc on \
-	--clipboard bidirectional \
-	--draganddrop bidirectional || {
-	echo "Failed to set VM hardware"
-	exit 1
+    --memory "$VM_MEMORY" \
+    --vram "$VM_VRAM" \
+    --cpus "$VM_CPUS" \
+    --acpi on \
+    --ioapic on \
+    --rtcuseutc on \
+    --clipboard bidirectional \
+    --draganddrop bidirectional || {
+    echo "Failed to set VM hardware"
+    exit 1
 }
 
 # ── Serial console: the headless install's only window ──────────────────────
@@ -259,9 +259,9 @@ VBoxManage modifyvm "$VM_NAME" \
 # report the real install stage instead of guessing from elapsed time.
 print_header "Wiring serial console to a log file"
 SERIAL_LOG="$VM_PATH/$VM_NAME/serial.log"
-: > "$SERIAL_LOG"
+: >"$SERIAL_LOG"
 VBoxManage modifyvm "$VM_NAME" --uart1 0x3F8 4 --uartmode1 file "$SERIAL_LOG" || {
-	echo "Warning: could not attach serial console (install progress will be time-only)"
+    echo "Warning: could not attach serial console (install progress will be time-only)"
 }
 echo "  Serial console: $SERIAL_LOG"
 
@@ -281,8 +281,8 @@ VBoxManage modifyvm "$VM_NAME" --nat-dns-host-resolver1 on || true
 # Set network - NAT with port forwarding
 print_header "Configuring network and port forwarding"
 VBoxManage modifyvm "$VM_NAME" --nic1 nat || {
-	echo "Failed to set VM network"
-	exit 1
+    echo "Failed to set VM network"
+    exit 1
 }
 
 # Set up NAT port forwarding (using dynamically resolved free host ports)
@@ -313,112 +313,112 @@ echo "  Vault:            host:${HOST_VAULT_PORT} -> guest:${VAULT_PORT}"
 # exists". Args: <name> <host_port> <guest_port> (all rules are tcp).
 NATPF_HOST_PORTS=""
 add_natpf() {
-	local name="$1" host_port="$2" guest_port="$3"
+    local name="$1" host_port="$2" guest_port="$3"
 
-	# Self-check: two rules on one host port is exactly what VirtualBox rejects
-	# with "A NAT rule for this host port and this host IP already exists". Name
-	# the offending rule here instead of leaving a bare VBoxManage error.
-	case " $NATPF_HOST_PORTS " in
-		*" $host_port "*)
-			echo "Internal error: rule '${name}' reuses host port ${host_port}" >&2
-			exit 1
-			;;
-	esac
-	NATPF_HOST_PORTS="${NATPF_HOST_PORTS} ${host_port}"
+    # Self-check: two rules on one host port is exactly what VirtualBox rejects
+    # with "A NAT rule for this host port and this host IP already exists". Name
+    # the offending rule here instead of leaving a bare VBoxManage error.
+    case " $NATPF_HOST_PORTS " in
+    *" $host_port "*)
+        echo "Internal error: rule '${name}' reuses host port ${host_port}" >&2
+        exit 1
+        ;;
+    esac
+    NATPF_HOST_PORTS="${NATPF_HOST_PORTS} ${host_port}"
 
-	VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
+    VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
 
-	# Twenty of these run back to back, and VBoxSVC does not always release the
-	# machine's write lock before the next one asks for it — the result is
-	# "The machine 'debian' already has a lock request pending", which used to
-	# abort the whole build a few seconds before the install would have started.
-	# It is purely a timing problem, so retry it.
-	local attempt out
-	for attempt in 1 2 3 4 5 6; do
-		if out=$(VBoxManage modifyvm "$VM_NAME" \
-				--natpf1 "${name},tcp,,${host_port},,${guest_port}" 2>&1); then
-			return 0
-		fi
-		case "$out" in
-			*"lock request pending"*|*VBOX_E_INVALID_OBJECT_STATE*)
-				sleep 2
-				;;
-			*)
-				echo "Failed to set up NAT port forwarding for ${name}"
-				printf '%s\n' "$out" >&2
-				exit 1
-				;;
-		esac
-	done
-	echo "Failed to set up NAT port forwarding for ${name} after ${attempt} attempts"
-	printf '%s\n' "$out" >&2
-	exit 1
+    # Twenty of these run back to back, and VBoxSVC does not always release the
+    # machine's write lock before the next one asks for it — the result is
+    # "The machine 'debian' already has a lock request pending", which used to
+    # abort the whole build a few seconds before the install would have started.
+    # It is purely a timing problem, so retry it.
+    local attempt out
+    for attempt in 1 2 3 4 5 6; do
+        if out=$(VBoxManage modifyvm "$VM_NAME" \
+            --natpf1 "${name},tcp,,${host_port},,${guest_port}" 2>&1); then
+            return 0
+        fi
+        case "$out" in
+        *"lock request pending"* | *VBOX_E_INVALID_OBJECT_STATE*)
+            sleep 2
+            ;;
+        *)
+            echo "Failed to set up NAT port forwarding for ${name}"
+            printf '%s\n' "$out" >&2
+            exit 1
+            ;;
+        esac
+    done
+    echo "Failed to set up NAT port forwarding for ${name} after ${attempt} attempts"
+    printf '%s\n' "$out" >&2
+    exit 1
 }
 
-add_natpf ssh              "${HOST_SSH_PORT}"              "${SSH_PORT}"
-add_natpf http             "${HOST_HTTP_PORT}"             "${HTTP_PORT}"
-add_natpf https            "${HOST_HTTPS_PORT}"            "${HTTPS_PORT}"
-add_natpf docker           "${HOST_DOCKER_PORT}"           "${DOCKER_REGISTRY_PORT}"
-add_natpf mariadb          "${HOST_MARIADB_PORT}"          "${MARIADB_PORT}"
-add_natpf redis            "${HOST_REDIS_PORT}"            "${REDIS_PORT}"
-add_natpf frontend         "${HOST_FRONTEND_PORT}"         "${FRONTEND_PORT}"
-add_natpf backend          "${HOST_BACKEND_PORT}"          "${BACKEND_PORT}"
-add_natpf website          "${HOST_WEBSITE_PORT}"          "${WEBSITE_PORT}"
-add_natpf osionos-app      "${HOST_OSIONOS_APP_PORT}"      "${OSIONOS_APP_PORT}"
-add_natpf osionos-mail     "${HOST_OSIONOS_MAIL_PORT}"     "${OSIONOS_MAIL_PORT}"
+add_natpf ssh "${HOST_SSH_PORT}" "${SSH_PORT}"
+add_natpf http "${HOST_HTTP_PORT}" "${HTTP_PORT}"
+add_natpf https "${HOST_HTTPS_PORT}" "${HTTPS_PORT}"
+add_natpf docker "${HOST_DOCKER_PORT}" "${DOCKER_REGISTRY_PORT}"
+add_natpf mariadb "${HOST_MARIADB_PORT}" "${MARIADB_PORT}"
+add_natpf redis "${HOST_REDIS_PORT}" "${REDIS_PORT}"
+add_natpf frontend "${HOST_FRONTEND_PORT}" "${FRONTEND_PORT}"
+add_natpf backend "${HOST_BACKEND_PORT}" "${BACKEND_PORT}"
+add_natpf website "${HOST_WEBSITE_PORT}" "${WEBSITE_PORT}"
+add_natpf osionos-app "${HOST_OSIONOS_APP_PORT}" "${OSIONOS_APP_PORT}"
+add_natpf osionos-mail "${HOST_OSIONOS_MAIL_PORT}" "${OSIONOS_MAIL_PORT}"
 add_natpf osionos-calendar "${HOST_OSIONOS_CALENDAR_PORT}" "${OSIONOS_CALENDAR_PORT}"
-add_natpf osionos-bridge   "${HOST_OSIONOS_BRIDGE_PORT}"   "${OSIONOS_BRIDGE_PORT}"
-add_natpf mail-bridge      "${HOST_MAIL_BRIDGE_PORT}"      "${MAIL_BRIDGE_PORT}"
-add_natpf calendar-bridge  "${HOST_CALENDAR_BRIDGE_PORT}"  "${CALENDAR_BRIDGE_PORT}"
-add_natpf baas-gateway     "${HOST_BAAS_GATEWAY_PORT}"     "${BAAS_GATEWAY_PORT}"
-add_natpf baas-admin       "${HOST_BAAS_ADMIN_PORT}"       "${BAAS_ADMIN_PORT}"
-add_natpf mailpit          "${HOST_MAILPIT_PORT}"          "${MAILPIT_PORT}"
-add_natpf auth-gateway     "${HOST_AUTH_GATEWAY_PORT}"     "${AUTH_GATEWAY_PORT}"
-add_natpf vault            "${HOST_VAULT_PORT}"            "${VAULT_PORT}"
+add_natpf osionos-bridge "${HOST_OSIONOS_BRIDGE_PORT}" "${OSIONOS_BRIDGE_PORT}"
+add_natpf mail-bridge "${HOST_MAIL_BRIDGE_PORT}" "${MAIL_BRIDGE_PORT}"
+add_natpf calendar-bridge "${HOST_CALENDAR_BRIDGE_PORT}" "${CALENDAR_BRIDGE_PORT}"
+add_natpf baas-gateway "${HOST_BAAS_GATEWAY_PORT}" "${BAAS_GATEWAY_PORT}"
+add_natpf baas-admin "${HOST_BAAS_ADMIN_PORT}" "${BAAS_ADMIN_PORT}"
+add_natpf mailpit "${HOST_MAILPIT_PORT}" "${MAILPIT_PORT}"
+add_natpf auth-gateway "${HOST_AUTH_GATEWAY_PORT}" "${AUTH_GATEWAY_PORT}"
+add_natpf vault "${HOST_VAULT_PORT}" "${VAULT_PORT}"
 # Create disk if it does not exist
 if [ ! -f "$VM_DISK_PATH" ]; then
-	print_header "Creating virtual disk"
-	VBoxManage createmedium disk --filename "$VM_DISK_PATH" --size "$VM_DISK_SIZE" || {
-		echo "Failed to create virtual disk"
-		exit 1
-	}
+    print_header "Creating virtual disk"
+    VBoxManage createmedium disk --filename "$VM_DISK_PATH" --size "$VM_DISK_SIZE" || {
+        echo "Failed to create virtual disk"
+        exit 1
+    }
 else
-	print_header "Virtual disk already exists - Keeping existing disk"
+    print_header "Virtual disk already exists - Keeping existing disk"
 fi
 
 # Record the machine that owns this disk. The repo lives on a shared NFS home,
 # so the same disk_images/ directory is visible from every workstation -- but
 # the VM only ever runs on one of them. Destructive targets read this stamp so
 # a run here cannot silently delete a VM that belongs to another machine.
-printf '%s (kernel %s, %s)\n' "$(hostname -f 2> /dev/null || hostname)" \
-	"$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" \
-	> "$VM_PATH/$VM_NAME/.built-on" 2> /dev/null || true
+printf '%s (kernel %s, %s)\n' "$(hostname -f 2>/dev/null || hostname)" \
+    "$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" \
+    >"$VM_PATH/$VM_NAME/.built-on" 2>/dev/null || true
 
 # Add controllers and attach devices
 print_header "Setting up storage controllers"
 VBoxManage storagectl "$VM_NAME" --name "SATA Controller" --add sata --controller IntelAHCI || {
-	echo "Failed to add SATA controller"
-	exit 1
+    echo "Failed to add SATA controller"
+    exit 1
 }
 VBoxManage storageattach "$VM_NAME" --storagectl "SATA Controller" --port 0 --device 0 --type hdd --medium "$VM_DISK_PATH" || {
-	echo "Failed to attach virtual disk"
-	exit 1
+    echo "Failed to attach virtual disk"
+    exit 1
 }
 
 VBoxManage storagectl "$VM_NAME" --name "IDE Controller" --add ide || {
-	echo "Failed to add IDE controller"
-	exit 1
+    echo "Failed to add IDE controller"
+    exit 1
 }
 VBoxManage storageattach "$VM_NAME" --storagectl "IDE Controller" --port 0 --device 0 --type dvddrive --medium "$ISO_PATH" || {
-	echo "Failed to attach ISO"
-	exit 1
+    echo "Failed to attach ISO"
+    exit 1
 }
 
 # Set boot order (DVD first for installation, then disk)
 print_header "Setting boot order"
 VBoxManage modifyvm "$VM_NAME" --boot1 dvd --boot2 disk --boot3 none --boot4 none || {
-	echo "Failed to set boot order"
-	exit 1
+    echo "Failed to set boot order"
+    exit 1
 }
 
 # Enable nested virtualization (optional, for advanced use)

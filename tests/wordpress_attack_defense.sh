@@ -16,8 +16,8 @@ echo -e "${YELLOW}============================================================${
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo -e "${RED}This script must be run as root. Please use sudo.${NC}"
-	exit 1
+    echo -e "${RED}This script must be run as root. Please use sudo.${NC}"
+    exit 1
 fi
 
 # Create directory for demo artifacts
@@ -25,12 +25,12 @@ mkdir -p /root/wordpress-security-demo
 
 # Step 1: Backup current AppArmor status
 echo -e "\n${YELLOW}Step 1: Backing up current AppArmor status...${NC}"
-aa-status > /root/wordpress-security-demo/apparmor-status-before.txt
+aa-status >/root/wordpress-security-demo/apparmor-status-before.txt
 echo -e "✅ AppArmor status backed up"
 
 # Step 2: Create "malicious" upload file (simulated webshell)
 echo -e "\n${YELLOW}Step 2: Creating simulated malicious files...${NC}"
-cat > /tmp/malicious-webshell.php << 'EOF'
+cat >/tmp/malicious-webshell.php <<'EOF'
 <?php
 // This file simulates a malicious webshell that might be uploaded to WordPress
 // It attempts various malicious actions that AppArmor should block
@@ -139,7 +139,7 @@ echo "</body></html>";
 EOF
 
 # Create a PHP backdoor simulation
-cat > /tmp/simple-backdoor.php << 'EOF'
+cat >/tmp/simple-backdoor.php <<'EOF'
 <?php
 // Simulated backdoor that would normally be hidden
 if(isset($_REQUEST["cmd"])){
@@ -152,7 +152,7 @@ EOF
 echo -e "✅ Malicious files created"
 
 # Step 3: Create utility to enable/disable AppArmor
-cat > /root/wordpress-security-demo/toggle-protection.sh << 'EOF'
+cat >/root/wordpress-security-demo/toggle-protection.sh <<'EOF'
 #!/bin/bash
 
 RED='\033[0;31m'
@@ -194,7 +194,7 @@ EOF
 chmod +x /root/wordpress-security-demo/toggle-protection.sh
 
 # Step 4: Create main demonstration script
-cat > /root/wordpress-security-demo/run-attack-demo.sh << 'EOF'
+cat >/root/wordpress-security-demo/run-attack-demo.sh <<'EOF'
 #!/bin/bash
 
 RED='\033[0;31m'
@@ -316,7 +316,7 @@ chown -R www-data:www-data /var/www/html
 
 # Step 6: Set up better AppArmor profiles
 echo -e "\n${YELLOW}Step 6: Creating improved AppArmor profiles...${NC}"
-cat > /etc/apparmor.d/usr.sbin.php-fpm8.2 << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.php-fpm8.2 <<'EOF'
 #include <tunables/global>
 
 profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected) {
@@ -373,7 +373,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected) {
 }
 EOF
 
-cat > /etc/apparmor.d/usr.sbin.lighttpd << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.lighttpd <<'EOF'
 #include <tunables/global>
 
 profile lighttpd /usr/sbin/lighttpd flags=(attach_disconnected) {

@@ -11,16 +11,16 @@ echo "===================================================="
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo "This script must be run as root. Please use sudo."
-	exit 1
+    echo "This script must be run as root. Please use sudo."
+    exit 1
 fi
 
 # Step 1: Verify AppArmor is running
 echo -e "\nStep 1: Verifying AppArmor status..."
-aa-status > /dev/null 2>&1
+aa-status >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-	echo "❌ AppArmor is not running. Please run the configuration script first."
-	exit 1
+    echo "❌ AppArmor is not running. Please run the configuration script first."
+    exit 1
 fi
 echo "✅ AppArmor is running"
 
@@ -39,7 +39,7 @@ aa-status | grep -A 1 mysqld || echo "   ❌ Not found"
 echo -e "\nStep 3: Creating security test files..."
 
 # Test file that attempts various security violations
-cat > /var/www/html/security-test.php << 'EOF'
+cat >/var/www/html/security-test.php <<'EOF'
 <?php
 echo "<h1>WordPress AppArmor Security Test</h1>";
 echo "<p>This test demonstrates how AppArmor protects your WordPress site.</p>";
@@ -75,7 +75,7 @@ chown www-data:www-data /var/www/html/security-test.php
 chmod 644 /var/www/html/security-test.php
 
 # Step 4: Create a command line security test
-cat > /root/apparmor-security-test.sh << 'EOF'
+cat >/root/apparmor-security-test.sh <<'EOF'
 #!/bin/bash
 
 echo "==== WordPress AppArmor Security Command-Line Test ===="
@@ -131,10 +131,10 @@ echo -e "\nStep 5: Running command line security tests..."
 echo -e "\nStep 6: Checking for AppArmor denial logs..."
 DENIALS=$(dmesg | grep -i "apparmor.*DENIED" | tail -10)
 if [ -n "$DENIALS" ]; then
-	echo -e "AppArmor security events detected (good!):\n"
-	echo "$DENIALS" | sed 's/^/   /'
+    echo -e "AppArmor security events detected (good!):\n"
+    echo "$DENIALS" | sed 's/^/   /'
 else
-	echo "No AppArmor denials found. Security may not be enforcing properly."
+    echo "No AppArmor denials found. Security may not be enforcing properly."
 fi
 
 # Step 7: Switch profiles to enforce mode
@@ -152,21 +152,21 @@ systemctl restart mariadb
 # Step 9: Verify enforcement mode
 echo -e "\nStep 9: Verifying enforcement mode..."
 if aa-status | grep -q "php-fpm8.2.*enforce"; then
-	echo "   ✅ PHP-FPM profile is in enforce mode"
+    echo "   ✅ PHP-FPM profile is in enforce mode"
 else
-	echo "   ❌ PHP-FPM profile is not in enforce mode"
+    echo "   ❌ PHP-FPM profile is not in enforce mode"
 fi
 
 if aa-status | grep -q "lighttpd.*enforce"; then
-	echo "   ✅ Lighttpd profile is in enforce mode"
+    echo "   ✅ Lighttpd profile is in enforce mode"
 else
-	echo "   ❌ Lighttpd profile is not in enforce mode"
+    echo "   ❌ Lighttpd profile is not in enforce mode"
 fi
 
 if aa-status | grep -q "mysqld.*enforce"; then
-	echo "   ✅ MariaDB profile is in enforce mode"
+    echo "   ✅ MariaDB profile is in enforce mode"
 else
-	echo "   ❌ MariaDB profile is not in enforce mode"
+    echo "   ❌ MariaDB profile is not in enforce mode"
 fi
 
 # Step 10: Final instructions

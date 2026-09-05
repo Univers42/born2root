@@ -16,89 +16,89 @@ echo ""
 
 # Function to install packages on different distributions
 install_package() {
-	local package=$1
+    local package=$1
 
-	echo -e "${YELLOW}Installing $package...${NC}"
+    echo -e "${YELLOW}Installing $package...${NC}"
 
-	if command -v apt &> /dev/null; then
-		# Debian/Ubuntu
-		sudo apt update
-		sudo apt install -y $package
-	elif command -v dnf &> /dev/null; then
-		# Fedora
-		sudo dnf install -y $package
-	elif command -v yum &> /dev/null; then
-		# CentOS/RHEL
-		sudo yum install -y $package
-	elif command -v pacman &> /dev/null; then
-		# Arch Linux
-		sudo pacman -S --noconfirm $package
-	elif command -v zypper &> /dev/null; then
-		# openSUSE
-		sudo zypper install -y $package
-	elif command -v brew &> /dev/null; then
-		# macOS with Homebrew
-		brew install $package
-	else
-		echo -e "${RED}Could not determine package manager. Please install $package manually.${NC}"
-		return 1
-	fi
+    if command -v apt &>/dev/null; then
+        # Debian/Ubuntu
+        sudo apt update
+        sudo apt install -y $package
+    elif command -v dnf &>/dev/null; then
+        # Fedora
+        sudo dnf install -y $package
+    elif command -v yum &>/dev/null; then
+        # CentOS/RHEL
+        sudo yum install -y $package
+    elif command -v pacman &>/dev/null; then
+        # Arch Linux
+        sudo pacman -S --noconfirm $package
+    elif command -v zypper &>/dev/null; then
+        # openSUSE
+        sudo zypper install -y $package
+    elif command -v brew &>/dev/null; then
+        # macOS with Homebrew
+        brew install $package
+    else
+        echo -e "${RED}Could not determine package manager. Please install $package manually.${NC}"
+        return 1
+    fi
 
-	if [ $? -eq 0 ]; then
-		echo -e "${GREEN}✓ $package installed successfully${NC}"
-		return 0
-	else
-		echo -e "${RED}✗ Failed to install $package${NC}"
-		return 1
-	fi
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ $package installed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Failed to install $package${NC}"
+        return 1
+    fi
 }
 
 # Function to check if a package is already installed
 is_installed() {
-	if command -v $1 &> /dev/null; then
-		return 0
-	else
-		return 1
-	fi
+    if command -v $1 &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 echo -e "${YELLOW}Checking for FTP clients...${NC}"
 
 # Check for lftp
 if is_installed lftp; then
-	echo -e "${GREEN}✓ lftp is already installed${NC}"
+    echo -e "${GREEN}✓ lftp is already installed${NC}"
 else
-	echo -e "${YELLOW}lftp is not installed. Attempting to install...${NC}"
-	install_package lftp
+    echo -e "${YELLOW}lftp is not installed. Attempting to install...${NC}"
+    install_package lftp
 
-	if ! is_installed lftp; then
-		echo -e "${YELLOW}Trying alternative FTP clients...${NC}"
+    if ! is_installed lftp; then
+        echo -e "${YELLOW}Trying alternative FTP clients...${NC}"
 
-		# Try installing curl with FTP support if lftp fails
-		if ! is_installed curl; then
-			install_package curl
-		fi
+        # Try installing curl with FTP support if lftp fails
+        if ! is_installed curl; then
+            install_package curl
+        fi
 
-		# Try installing basic ftp client if needed
-		if ! is_installed ftp; then
-			install_package ftp
-		fi
-	fi
+        # Try installing basic ftp client if needed
+        if ! is_installed ftp; then
+            install_package ftp
+        fi
+    fi
 fi
 
 # Check if we have any FTP client available
 if ! is_installed lftp && ! is_installed curl && ! is_installed ftp; then
-	echo -e "${RED}Failed to install any FTP client. You may need to install manually.${NC}"
-	echo -e "${YELLOW}For Debian/Ubuntu:${NC} sudo apt update && sudo apt install lftp"
-	echo -e "${YELLOW}For Fedora:${NC} sudo dnf install lftp"
-	echo -e "${YELLOW}For CentOS/RHEL:${NC} sudo yum install lftp"
-	echo -e "${YELLOW}For macOS:${NC} brew install lftp"
+    echo -e "${RED}Failed to install any FTP client. You may need to install manually.${NC}"
+    echo -e "${YELLOW}For Debian/Ubuntu:${NC} sudo apt update && sudo apt install lftp"
+    echo -e "${YELLOW}For Fedora:${NC} sudo dnf install lftp"
+    echo -e "${YELLOW}For CentOS/RHEL:${NC} sudo yum install lftp"
+    echo -e "${YELLOW}For macOS:${NC} brew install lftp"
 
-	read -p "Would you like to continue with configuration anyway? (y/n): " CONTINUE
-	if [[ "$CONTINUE" != "y" && "$CONTINUE" != "Y" ]]; then
-		echo -e "${RED}Exiting. Please install an FTP client and run this script again.${NC}"
-		exit 1
-	fi
+    read -p "Would you like to continue with configuration anyway? (y/n): " CONTINUE
+    if [[ "$CONTINUE" != "y" && "$CONTINUE" != "Y" ]]; then
+        echo -e "${RED}Exiting. Please install an FTP client and run this script again.${NC}"
+        exit 1
+    fi
 fi
 
 echo ""
@@ -124,31 +124,31 @@ echo -e "4. Local development (XAMPP, Local, etc.)"
 read -p "What type of hosting are you using? (1-4): " HOSTING_TYPE
 
 case $HOSTING_TYPE in
-	1)
-		echo -e "${YELLOW}For shared hosting, you typically need to use the FTP credentials provided by your host.${NC}"
-		echo -e "Check your hosting account control panel or welcome email for FTP details."
-		;;
-	2)
-		echo -e "${YELLOW}Many managed WordPress hosts use SFTP instead of FTP and may have git workflows.${NC}"
-		echo -e "Check your hosting provider's documentation for the recommended file upload method."
-		;;
-	3)
-		echo -e "${YELLOW}For VPS/dedicated servers, you might need to set up FTP yourself or use SFTP/SCP.${NC}"
-		echo -e "You can typically use your server's SSH credentials for SFTP access."
-		;;
-	4)
-		echo -e "${YELLOW}For local development, you typically don't need FTP.${NC}"
-		echo -e "You can directly access the plugins folder at: wp-content/plugins/"
-		echo -e "Simply copy your plugin folder there and activate it in WordPress admin."
-		read -p "Do you still want to configure FTP? (y/n): " CONFIGURE_LOCAL
-		if [[ "$CONFIGURE_LOCAL" != "y" && "$CONFIGURE_LOCAL" != "Y" ]]; then
-			echo -e "${GREEN}For local installations, just copy your 'tech-blog-toolkit' folder to your WordPress plugins directory.${NC}"
-			exit 0
-		fi
-		;;
-	*)
-		echo -e "${YELLOW}Proceeding with general FTP configuration...${NC}"
-		;;
+1)
+    echo -e "${YELLOW}For shared hosting, you typically need to use the FTP credentials provided by your host.${NC}"
+    echo -e "Check your hosting account control panel or welcome email for FTP details."
+    ;;
+2)
+    echo -e "${YELLOW}Many managed WordPress hosts use SFTP instead of FTP and may have git workflows.${NC}"
+    echo -e "Check your hosting provider's documentation for the recommended file upload method."
+    ;;
+3)
+    echo -e "${YELLOW}For VPS/dedicated servers, you might need to set up FTP yourself or use SFTP/SCP.${NC}"
+    echo -e "You can typically use your server's SSH credentials for SFTP access."
+    ;;
+4)
+    echo -e "${YELLOW}For local development, you typically don't need FTP.${NC}"
+    echo -e "You can directly access the plugins folder at: wp-content/plugins/"
+    echo -e "Simply copy your plugin folder there and activate it in WordPress admin."
+    read -p "Do you still want to configure FTP? (y/n): " CONFIGURE_LOCAL
+    if [[ "$CONFIGURE_LOCAL" != "y" && "$CONFIGURE_LOCAL" != "Y" ]]; then
+        echo -e "${GREEN}For local installations, just copy your 'tech-blog-toolkit' folder to your WordPress plugins directory.${NC}"
+        exit 0
+    fi
+    ;;
+*)
+    echo -e "${YELLOW}Proceeding with general FTP configuration...${NC}"
+    ;;
 esac
 
 # Get FTP credentials
@@ -167,28 +167,28 @@ echo -e "3. I don't know (try to auto-detect)"
 read -p "Select option (1-3): " WP_PATH_OPTION
 
 case $WP_PATH_OPTION in
-	1)
-		echo -e "${YELLOW}Using standard WordPress path structure...${NC}"
-		read -p "Enter your web root folder (default: public_html): " WEB_ROOT
-		WEB_ROOT=${WEB_ROOT:-public_html}
-		WP_PLUGINS_PATH="/$WEB_ROOT/wp-content/plugins"
-		;;
-	2)
-		echo -e "${YELLOW}Enter custom WordPress plugins path:${NC}"
-		read -p "Full path to plugins directory (e.g., /public_html/blog/wp-content/plugins): " WP_PLUGINS_PATH
-		;;
-	3)
-		echo -e "${YELLOW}Will try to auto-detect WordPress path when connecting...${NC}"
-		WP_PLUGINS_PATH="auto-detect"
-		;;
-	*)
-		echo -e "${YELLOW}Using default WordPress path...${NC}"
-		WP_PLUGINS_PATH="/public_html/wp-content/plugins"
-		;;
+1)
+    echo -e "${YELLOW}Using standard WordPress path structure...${NC}"
+    read -p "Enter your web root folder (default: public_html): " WEB_ROOT
+    WEB_ROOT=${WEB_ROOT:-public_html}
+    WP_PLUGINS_PATH="/$WEB_ROOT/wp-content/plugins"
+    ;;
+2)
+    echo -e "${YELLOW}Enter custom WordPress plugins path:${NC}"
+    read -p "Full path to plugins directory (e.g., /public_html/blog/wp-content/plugins): " WP_PLUGINS_PATH
+    ;;
+3)
+    echo -e "${YELLOW}Will try to auto-detect WordPress path when connecting...${NC}"
+    WP_PLUGINS_PATH="auto-detect"
+    ;;
+*)
+    echo -e "${YELLOW}Using default WordPress path...${NC}"
+    WP_PLUGINS_PATH="/public_html/wp-content/plugins"
+    ;;
 esac
 
 # Save to configuration file
-cat > "$CREDENTIALS_FILE" << EOF
+cat >"$CREDENTIALS_FILE" <<EOF
 # WordPress FTP Configuration
 # Created: 2025-04-04
 # DO NOT SHARE THIS FILE
@@ -207,7 +207,7 @@ echo -e "\n${GREEN}FTP configuration saved!${NC}"
 
 # Create a test script to verify connection
 TEST_SCRIPT="$CONFIG_DIR/test-connection.sh"
-cat > "$TEST_SCRIPT" << EOF
+cat >"$TEST_SCRIPT" <<EOF
 #!/bin/bash
 # Test FTP Connection
 # Created: 2025-04-04
@@ -260,7 +260,7 @@ chmod +x "$TEST_SCRIPT"
 
 # Create a simplified upload script
 UPLOAD_SCRIPT="$CONFIG_DIR/upload-plugin.sh"
-cat > "$UPLOAD_SCRIPT" << EOF
+cat >"$UPLOAD_SCRIPT" <<EOF
 #!/bin/bash
 # WordPress Plugin Uploader
 # Created: 2025-04-04

@@ -7,8 +7,8 @@ echo "=========================================================="
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo "This script must be run as root. Please use sudo."
-	exit 1
+    echo "This script must be run as root. Please use sudo."
+    exit 1
 fi
 
 # Step 1: Backup existing WordPress database if it exists
@@ -16,23 +16,23 @@ echo "Step 1: Backing up existing WordPress data..."
 BACKUP_DIR="/root/wordpress_backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-if mysqladmin ping -s > /dev/null 2>&1; then
-	echo "MySQL server is running. Attempting to backup WordPress database..."
-	if mysql -e "USE wordpress" > /dev/null 2>&1; then
-		mysqldump wordpress > "$BACKUP_DIR/wordpress_db.sql"
-		echo "Database backup created at $BACKUP_DIR/wordpress_db.sql"
-	else
-		echo "WordPress database not found, no database backup needed."
-	fi
+if mysqladmin ping -s >/dev/null 2>&1; then
+    echo "MySQL server is running. Attempting to backup WordPress database..."
+    if mysql -e "USE wordpress" >/dev/null 2>&1; then
+        mysqldump wordpress >"$BACKUP_DIR/wordpress_db.sql"
+        echo "Database backup created at $BACKUP_DIR/wordpress_db.sql"
+    else
+        echo "WordPress database not found, no database backup needed."
+    fi
 else
-	echo "MySQL server not running, skipping database backup."
+    echo "MySQL server not running, skipping database backup."
 fi
 
 # Backup WordPress files if they exist
 if [ -d "/var/www/html" ]; then
-	echo "Backing up WordPress files..."
-	cp -r /var/www/html "$BACKUP_DIR/html_backup"
-	echo "Files backed up to $BACKUP_DIR/html_backup"
+    echo "Backing up WordPress files..."
+    cp -r /var/www/html "$BACKUP_DIR/html_backup"
+    echo "Files backed up to $BACKUP_DIR/html_backup"
 fi
 
 # Step 2: Remove existing installations
@@ -88,7 +88,7 @@ mysql -e "FLUSH PRIVILEGES;"
 echo "Step 5: Configuring Lighttpd with PHP-FPM..."
 
 # Create proper Lighttpd configuration
-cat > "/etc/lighttpd/lighttpd.conf" << 'EOF'
+cat >"/etc/lighttpd/lighttpd.conf" <<'EOF'
 server.modules = (
     "mod_indexfile",
     "mod_access",
@@ -150,12 +150,12 @@ echo "Step 6: Configuring PHP-FPM..."
 # Ensure mysqli extension is loaded
 PHP_FPM_CONF_D="/etc/php/8.2/fpm/conf.d"
 mkdir -p "$PHP_FPM_CONF_D"
-echo "extension=mysqli.so" > "$PHP_FPM_CONF_D/20-mysqli.ini"
+echo "extension=mysqli.so" >"$PHP_FPM_CONF_D/20-mysqli.ini"
 
 # Make sure mysqli is also enabled for CLI
 PHP_CLI_CONF_D="/etc/php/8.2/cli/conf.d"
 mkdir -p "$PHP_CLI_CONF_D"
-echo "extension=mysqli.so" > "$PHP_CLI_CONF_D/20-mysqli.ini"
+echo "extension=mysqli.so" >"$PHP_CLI_CONF_D/20-mysqli.ini"
 
 # Start PHP-FPM
 systemctl restart php8.2-fpm
@@ -170,7 +170,7 @@ cp -a /tmp/wordpress/. /var/www/html/
 chown -R www-data:www-data /var/www/html
 
 # Create wp-config.php
-cat > "/var/www/html/wp-config.php" << 'EOF'
+cat >"/var/www/html/wp-config.php" <<'EOF'
 <?php
 define( 'DB_NAME', 'wordpress' );
 define( 'DB_USER', 'wp_user' );
@@ -201,7 +201,7 @@ EOF
 
 # Step 8: Create test PHP file to verify mysqli extension
 echo "Step 8: Creating test files..."
-cat > "/var/www/html/test-mysqli.php" << 'EOF'
+cat >"/var/www/html/test-mysqli.php" <<'EOF'
 <?php
 echo "<h1>PHP and mysqli Test</h1>";
 echo "<p>PHP Version: " . phpversion() . "</p>";

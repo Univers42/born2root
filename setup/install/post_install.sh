@@ -14,9 +14,9 @@ apt install -y sudo ufw vim libpam-pwquality
 # Set up sudo
 usermod -aG sudo dlesieur
 mkdir -p /var/log/sudo
-echo "Defaults        logfile=\"/var/log/sudo/sudo.log\"" > /etc/sudoers.d/sudo_config
-echo "Defaults        log_input,log_output" >> /etc/sudoers.d/sudo_config
-echo "Defaults        requiretty" >> /etc/sudoers.d/sudo_config
+echo "Defaults        logfile=\"/var/log/sudo/sudo.log\"" >/etc/sudoers.d/sudo_config
+echo "Defaults        log_input,log_output" >>/etc/sudoers.d/sudo_config
+echo "Defaults        requiretty" >>/etc/sudoers.d/sudo_config
 chmod 440 /etc/sudoers.d/sudo_config
 
 # Set up password policies
@@ -34,7 +34,7 @@ ufw enable
 ufw allow 4242/tcp
 
 # Create monitoring script
-cat > /root/monitoring.sh << 'EOF'
+cat >/root/monitoring.sh <<'EOF'
 #!/bin/bash
 
 # Architecture and kernel version
@@ -95,6 +95,6 @@ wall "
 EOF
 
 chmod +x /root/monitoring.sh
-echo "*/10 * * * * root bash /root/monitoring.sh" > /etc/cron.d/monitoring
+echo "*/10 * * * * root bash /root/monitoring.sh" >/etc/cron.d/monitoring
 
 echo "Born2beRoot post-installation configuration complete!"

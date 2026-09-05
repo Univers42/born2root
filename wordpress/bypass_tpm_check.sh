@@ -1,6 +1,6 @@
 #!/bin/bash
 # Create registry bypass file for Windows 11 TPM check
-cat > "$HOME/win11_bypass.reg" << 'EOL'
+cat >"$HOME/win11_bypass.reg" <<'EOL'
 Windows Registry Editor Version 5.00
 
 [HKEY_LOCAL_MACHINE\SYSTEM\Setup\LabConfig]

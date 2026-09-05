@@ -48,135 +48,135 @@ NC='\033[0m'
 
 # Simple header with text
 simple_header() {
-	local text="$1"
-	local width=$(tput cols)
-	local padding=$(((width - ${#text}) / 2))
+    local text="$1"
+    local width=$(tput cols)
+    local padding=$(((width - ${#text}) / 2))
 
-	echo ""
-	printf "%${padding}s" ""
-	echo -e "${BOLD_BLUE}${text}${NC}"
-	printf "%${padding}s" ""
-	printf "%${width}s\n" "" | tr " " "-"
-	echo ""
+    echo ""
+    printf "%${padding}s" ""
+    echo -e "${BOLD_BLUE}${text}${NC}"
+    printf "%${padding}s" ""
+    printf "%${width}s\n" "" | tr " " "-"
+    echo ""
 }
 
 # Box header
 box_header() {
-	local text="$1"
-	local width=$(tput cols)
-	local text_width=${#text}
-	local box_width=$((text_width + 4))
-	local padding=$(((width - box_width) / 2))
+    local text="$1"
+    local width=$(tput cols)
+    local text_width=${#text}
+    local box_width=$((text_width + 4))
+    local padding=$(((width - box_width) / 2))
 
-	echo ""
-	printf "%${padding}s" ""
-	printf "%${box_width}s\n" "" | tr " " "="
+    echo ""
+    printf "%${padding}s" ""
+    printf "%${box_width}s\n" "" | tr " " "="
 
-	printf "%${padding}s" ""
-	echo -e "| ${BOLD_CYAN}${text}${NC} |"
+    printf "%${padding}s" ""
+    echo -e "| ${BOLD_CYAN}${text}${NC} |"
 
-	printf "%${padding}s" ""
-	printf "%${box_width}s\n" "" | tr " " "="
-	echo ""
+    printf "%${padding}s" ""
+    printf "%${box_width}s\n" "" | tr " " "="
+    echo ""
 }
 
 # Double-line header
 double_header() {
-	local text="$1"
-	local width=$(tput cols)
-	local padding=$(((width - ${#text}) / 2))
+    local text="$1"
+    local width=$(tput cols)
+    local padding=$(((width - ${#text}) / 2))
 
-	echo ""
-	printf "%${width}s\n" "" | tr " " "="
-	printf "%${padding}s" ""
-	echo -e "${BOLD_GREEN}${text}${NC}"
-	printf "%${width}s\n" "" | tr " " "="
-	echo ""
+    echo ""
+    printf "%${width}s\n" "" | tr " " "="
+    printf "%${padding}s" ""
+    echo -e "${BOLD_GREEN}${text}${NC}"
+    printf "%${width}s\n" "" | tr " " "="
+    echo ""
 }
 
 # Full-width banner header
 banner_header() {
-	local text="$1"
-	local width=$(tput cols)
-	local padding=$(((width - ${#text}) / 2))
+    local text="$1"
+    local width=$(tput cols)
+    local padding=$(((width - ${#text}) / 2))
 
-	echo ""
-	echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
-	echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${padding}s${text}%$(($width - $padding - ${#text}))s" "")${NC}"
-	echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
-	echo ""
+    echo ""
+    echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
+    echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${padding}s${text}%$(($width - $padding - ${#text}))s" "")${NC}"
+    echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
+    echo ""
 }
 
 # System info header (like in your monitoring script)
 system_header() {
-	local hostname=$(hostname)
-	local username=$(whoami)
-	local date_time=$(date '+%a %b %d %H:%M:%S %Y')
+    local hostname=$(hostname)
+    local username=$(whoami)
+    local date_time=$(date '+%a %b %d %H:%M:%S %Y')
 
-	echo -e "${YELLOW}Broadcast message from ${BOLD_YELLOW}root@${hostname}${NC} ${YELLOW}(tty1) (${date_time}):${NC}"
+    echo -e "${YELLOW}Broadcast message from ${BOLD_YELLOW}root@${hostname}${NC} ${YELLOW}(tty1) (${date_time}):${NC}"
 }
 
 # Status message functions
 success_msg() {
-	echo -e "${GREEN}[✓] $1${NC}"
+    echo -e "${GREEN}[✓] $1${NC}"
 }
 
 error_msg() {
-	echo -e "${RED}[✗] $1${NC}"
+    echo -e "${RED}[✗] $1${NC}"
 }
 
 warning_msg() {
-	echo -e "${YELLOW}[!] $1${NC}"
+    echo -e "${YELLOW}[!] $1${NC}"
 }
 
 info_msg() {
-	echo -e "${BLUE}[i] $1${NC}"
+    echo -e "${BLUE}[i] $1${NC}"
 }
 
 # Progress bar function
 progress_bar() {
-	local percent=$1
-	local width=50
-	local completed=$((percent * width / 100))
-	local remaining=$((width - completed))
+    local percent=$1
+    local width=50
+    local completed=$((percent * width / 100))
+    local remaining=$((width - completed))
 
-	printf "${BOLD_BLUE}[${BOLD_GREEN}"
-	printf "%0.s█" $(seq 1 $completed)
-	printf "${BOLD_RED}"
-	printf "%0.s▒" $(seq 1 $remaining)
-	printf "${BOLD_BLUE}] ${percent}%%${NC}\r"
+    printf "${BOLD_BLUE}[${BOLD_GREEN}"
+    printf "%0.s█" $(seq 1 $completed)
+    printf "${BOLD_RED}"
+    printf "%0.s▒" $(seq 1 $remaining)
+    printf "${BOLD_BLUE}] ${percent}%%${NC}\r"
 }
 
 # Display the current date and time in the monitoring format
 show_datetime() {
-	local format="${1:-%Y-%m-%d %H:%M:%S}"
-	echo -e "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): $(date -u +"$format")"
-	echo -e "Current User's Login: $(whoami)"
-	echo ""
+    local format="${1:-%Y-%m-%d %H:%M:%S}"
+    echo -e "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): $(date -u +"$format")"
+    echo -e "Current User's Login: $(whoami)"
+    echo ""
 }
 
 # Check if this script is being sourced or executed
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-	# Script is being executed directly - show demo
-	clear
-	show_datetime
-	simple_header "SIMPLE HEADER EXAMPLE"
-	box_header "BOX HEADER EXAMPLE"
-	double_header "DOUBLE LINE HEADER EXAMPLE"
-	banner_header "BANNER HEADER EXAMPLE"
-	system_header
-	echo ""
-	success_msg "This is a success message!"
-	error_msg "This is an error message!"
-	warning_msg "This is a warning message!"
-	info_msg "This is an information message!"
-	echo ""
-	echo "Progress bar example:"
-	for i in {0..100..10}; do
-		progress_bar $i
-		sleep 0.1
-	done
-	echo -e "\n\n${BOLD_YELLOW}To use this library, source it in your scripts:${NC}"
-	echo -e "${CYAN}source colorlib.sh${NC} or ${CYAN}. colorlib.sh${NC}"
-	echo ""
+    # Script is being executed directly - show demo
+    clear
+    show_datetime
+    simple_header "SIMPLE HEADER EXAMPLE"
+    box_header "BOX HEADER EXAMPLE"
+    double_header "DOUBLE LINE HEADER EXAMPLE"
+    banner_header "BANNER HEADER EXAMPLE"
+    system_header
+    echo ""
+    success_msg "This is a success message!"
+    error_msg "This is an error message!"
+    warning_msg "This is a warning message!"
+    info_msg "This is an information message!"
+    echo ""
+    echo "Progress bar example:"
+    for i in {0..100..10}; do
+        progress_bar $i
+        sleep 0.1
+    done
+    echo -e "\n\n${BOLD_YELLOW}To use this library, source it in your scripts:${NC}"
+    echo -e "${CYAN}source colorlib.sh${NC} or ${CYAN}. colorlib.sh${NC}"
+    echo ""
 fi

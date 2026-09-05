@@ -28,49 +28,49 @@ echo -e "${BLUE}${BOLD}╚══════════════════
 
 # Display user-specific ASCII art
 case "$USER_NAME" in
-	"dlesieur")
-		echo -e "${CYAN}"
-		echo -e "  _____  _      ______  _____ _____ ________  _________ "
-		echo -e " |  __ \| |    |  ____|/ ____|_   _|  ____\ \/ /__   __|"
-		echo -e " | |  | | |    | |__  | (___   | | | |__   \  /   | |   "
-		echo -e " | |  | | |    |  __|  \___ \  | | |  __|  /  \   | |   "
-		echo -e " | |__| | |____| |____ ____) |_| |_| |____/ /\ \  | |   "
-		echo -e " |_____/|______|______|_____/|_____|______/_/  \_\|_|   "
-		echo -e "${RESET}"
-		;;
+"dlesieur")
+    echo -e "${CYAN}"
+    echo -e "  _____  _      ______  _____ _____ ________  _________ "
+    echo -e " |  __ \| |    |  ____|/ ____|_   _|  ____\ \/ /__   __|"
+    echo -e " | |  | | |    | |__  | (___   | | | |__   \  /   | |   "
+    echo -e " | |  | | |    |  __|  \___ \  | | |  __|  /  \   | |   "
+    echo -e " | |__| | |____| |____ ____) |_| |_| |____/ /\ \  | |   "
+    echo -e " |_____/|______|______|_____/|_____|______/_/  \_\|_|   "
+    echo -e "${RESET}"
+    ;;
 
-	"root")
-		echo -e "${RED}"
-		echo -e " ██████╗  ██████╗  ██████╗ ████████╗ █████╗  ██████╗ ██████╗███████╗███████╗███████╗"
-		echo -e " ██╔══██╗██╔═══██╗██╔═══██╗╚══██╔══╝██╔══██╗██╔════╝██╔════╝██╔════╝██╔════╝██╔════╝"
-		echo -e " ██████╔╝██║   ██║██║   ██║   ██║   ███████║██║     ██║     █████╗  ███████╗███████╗"
-		echo -e " ██╔══██╗██║   ██║██║   ██║   ██║   ██╔══██║██║     ██║     ██╔══╝  ╚════██║╚════██║"
-		echo -e " ██║  ██║╚██████╔╝╚██████╔╝   ██║   ██║  ██║╚██████╗╚██████╗███████╗███████║███████║"
-		echo -e " ╚═╝  ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝╚══════╝╚══════╝"
-		echo -e "${RESET}"
-		;;
+"root")
+    echo -e "${RED}"
+    echo -e " ██████╗  ██████╗  ██████╗ ████████╗ █████╗  ██████╗ ██████╗███████╗███████╗███████╗"
+    echo -e " ██╔══██╗██╔═══██╗██╔═══██╗╚══██╔══╝██╔══██╗██╔════╝██╔════╝██╔════╝██╔════╝██╔════╝"
+    echo -e " ██████╔╝██║   ██║██║   ██║   ██║   ███████║██║     ██║     █████╗  ███████╗███████╗"
+    echo -e " ██╔══██╗██║   ██║██║   ██║   ██║   ██╔══██║██║     ██║     ██╔══╝  ╚════██║╚════██║"
+    echo -e " ██║  ██║╚██████╔╝╚██████╔╝   ██║   ██║  ██║╚██████╗╚██████╗███████╗███████║███████║"
+    echo -e " ╚═╝  ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝╚══════╝╚══════╝"
+    echo -e "${RESET}"
+    ;;
 
-	"evaluator")
-		echo -e "${GREEN}"
-		echo -e " ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗ ██████╗ ██████╗ "
-		echo -e " ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗"
-		echo -e " █████╗  ██║   ██║███████║██║     ██║   ██║███████║   ██║   ██║   ██║██████╔╝"
-		echo -e " ██╔══╝  ╚██╗ ██╔╝██╔══██║██║     ██║   ██║██╔══██║   ██║   ██║   ██║██╔══██╗"
-		echo -e " ███████╗ ╚████╔╝ ██║  ██║███████╗╚██████╔╝██║  ██║   ██║   ╚██████╔╝██║  ██║"
-		echo -e " ╚══════╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝"
-		echo -e "${RESET}"
-		;;
+"evaluator")
+    echo -e "${GREEN}"
+    echo -e " ███████╗██╗   ██╗ █████╗ ██╗     ██╗   ██╗ █████╗ ████████╗ ██████╗ ██████╗ "
+    echo -e " ██╔════╝██║   ██║██╔══██╗██║     ██║   ██║██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗"
+    echo -e " █████╗  ██║   ██║███████║██║     ██║   ██║███████║   ██║   ██║   ██║██████╔╝"
+    echo -e " ██╔══╝  ╚██╗ ██╔╝██╔══██║██║     ██║   ██║██╔══██║   ██║   ██║   ██║██╔══██╗"
+    echo -e " ███████╗ ╚████╔╝ ██║  ██║███████╗╚██████╔╝██║  ██║   ██║   ╚██████╔╝██║  ██║"
+    echo -e " ╚══════╝  ╚═══╝  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝"
+    echo -e "${RESET}"
+    ;;
 
-	*)
-		echo -e "${MAGENTA}"
-		echo -e " ██╗    ██╗███████╗██╗      ██████╗ ██████╗ ███╗   ███╗███████╗"
-		echo -e " ██║    ██║██╔════╝██║     ██╔════╝██╔═══██╗████╗ ████║██╔════╝"
-		echo -e " ██║ █╗ ██║█████╗  ██║     ██║     ██║   ██║██╔████╔██║█████╗  "
-		echo -e " ██║███╗██║██╔══╝  ██║     ██║     ██║   ██║██║╚██╔╝██║██╔══╝  "
-		echo -e " ╚███╔███╔╝███████╗███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗"
-		echo -e "  ╚══╝╚══╝ ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝"
-		echo -e "${RESET}"
-		;;
+*)
+    echo -e "${MAGENTA}"
+    echo -e " ██╗    ██╗███████╗██╗      ██████╗ ██████╗ ███╗   ███╗███████╗"
+    echo -e " ██║    ██║██╔════╝██║     ██╔════╝██╔═══██╗████╗ ████║██╔════╝"
+    echo -e " ██║ █╗ ██║█████╗  ██║     ██║     ██║   ██║██╔████╔██║█████╗  "
+    echo -e " ██║███╗██║██╔══╝  ██║     ██║     ██║   ██║██║╚██╔╝██║██╔══╝  "
+    echo -e " ╚███╔███╔╝███████╗███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗"
+    echo -e "  ╚══╝╚══╝ ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝"
+    echo -e "${RESET}"
+    ;;
 esac
 
 # Display information box
@@ -93,16 +93,16 @@ echo -e "• Password must be changed every 30 days\n"
 
 # Get a random tip
 tips=(
-	"Use 'sudo' to execute commands with superuser privileges"
-	"Check system logs with 'journalctl' to troubleshoot issues"
-	"Monitor system resources with 'htop' or 'top'"
-	"Use 'ctrl+r' to search command history"
-	"Remember to logout when you're done for security reasons"
-	"Use 'ssh-keygen' to create SSH keys for password-less login"
-	"Check disk usage with 'df -h' and directory size with 'du -sh'"
-	"Try 'tmux' for managing multiple terminal sessions"
-	"Born2beRoot project teaches essential sysadmin skills"
-	"Use 'man' command to learn more about any command"
+    "Use 'sudo' to execute commands with superuser privileges"
+    "Check system logs with 'journalctl' to troubleshoot issues"
+    "Monitor system resources with 'htop' or 'top'"
+    "Use 'ctrl+r' to search command history"
+    "Remember to logout when you're done for security reasons"
+    "Use 'ssh-keygen' to create SSH keys for password-less login"
+    "Check disk usage with 'df -h' and directory size with 'du -sh'"
+    "Try 'tmux' for managing multiple terminal sessions"
+    "Born2beRoot project teaches essential sysadmin skills"
+    "Use 'man' command to learn more about any command"
 )
 random_index=$((RANDOM % ${#tips[@]}))
 

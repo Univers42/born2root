@@ -27,14 +27,26 @@ QEMU_VM="$HERE/qemu_vm.sh"
 VM_NAME="${VM_NAME:-debian}"
 MAKE_BIN="${MAKE_BIN:-make}"
 
-C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_GREEN=$'\033[32m'
-C_BLUE=$'\033[34m'; C_RED=$'\033[31m'; C_DIM=$'\033[2m'
+C_RESET=$'\033[0m'
+C_BOLD=$'\033[1m'
+C_GREEN=$'\033[32m'
+C_BLUE=$'\033[34m'
+C_RED=$'\033[31m'
+C_DIM=$'\033[2m'
 if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
-	C_RESET=''; C_BOLD=''; C_GREEN=''; C_BLUE=''; C_RED=''; C_DIM=''
+    C_RESET=''
+    C_BOLD=''
+    C_GREEN=''
+    C_BLUE=''
+    C_RED=''
+    C_DIM=''
 fi
 phase() { printf "\n${C_BLUE}▶${C_RESET} ${C_BOLD}%s${C_RESET}\n" "$*"; }
-ok()    { printf "  ${C_GREEN}✓${C_RESET} %s\n" "$*"; }
-die()   { printf "\n  ${C_RED}✗${C_RESET} %s\n\n" "$*" >&2; exit 1; }
+ok() { printf "  ${C_GREEN}✓${C_RESET} %s\n" "$*"; }
+die() {
+    printf "\n  ${C_RED}✗${C_RESET} %s\n\n" "$*" >&2
+    exit 1
+}
 
 cd "$REPO_ROOT" || die "cannot enter $REPO_ROOT"
 
@@ -42,12 +54,12 @@ printf "\n${C_BOLD}Born2beRoot — QEMU/KVM build${C_RESET} ${C_DIM}(guest ident
 
 # ── 1. ISO ──────────────────────────────────────────────────────────────────
 phase "Preseeded ISO"
-if ls -1t debian-*-amd64-*preseed.iso > /dev/null 2>&1 && [ "${FORCE_ISO:-0}" != "1" ]; then
-	ok "reusing $(ls -1t debian-*-amd64-*preseed.iso | head -1)"
+if ls -1t debian-*-amd64-*preseed.iso >/dev/null 2>&1 && [ "${FORCE_ISO:-0}" != "1" ]; then
+    ok "reusing $(ls -1t debian-*-amd64-*preseed.iso | head -1)"
 else
-	CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}" AI_MODE="${AI_MODE:-off}" FORCE_ISO=1 \
-		$MAKE_BIN --no-print-directory gen_iso || die "ISO build failed"
-	ok "ISO built"
+    CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}" AI_MODE="${AI_MODE:-off}" FORCE_ISO=1 \
+        $MAKE_BIN --no-print-directory gen_iso || die "ISO build failed"
+    ok "ISO built"
 fi
 
 # ── 2. Disk ─────────────────────────────────────────────────────────────────
@@ -65,26 +77,26 @@ bash "$QEMU_VM" create || die "disk creation failed"
 phase "Debian install (unattended)"
 VM_DIR="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME"
 DISK="$VM_DIR/$VM_NAME.qcow2"
-disk_bytes=$(stat -c %s "$DISK" 2> /dev/null || echo 0)
-phase_now=$(cat "$VM_DIR/.phase" 2> /dev/null || true)
-qemu_pid=$(head -n1 "$VM_DIR/qemu.pid" 2> /dev/null || true)
-[ -n "$qemu_pid" ] && kill -0 "$qemu_pid" 2> /dev/null || qemu_pid=""
+disk_bytes=$(stat -c %s "$DISK" 2>/dev/null || echo 0)
+phase_now=$(cat "$VM_DIR/.phase" 2>/dev/null || true)
+qemu_pid=$(head -n1 "$VM_DIR/qemu.pid" 2>/dev/null || true)
+[ -n "$qemu_pid" ] && kill -0 "$qemu_pid" 2>/dev/null || qemu_pid=""
 if [ -n "$qemu_pid" ] && [ "$phase_now" = installing ]; then
-	printf "  ${C_RED}✗${C_RESET} an install is already running in this VM (pid %s)\n" "$qemu_pid"
-	printf "    ${C_DIM}re-attach to it:  make qemu_watch        stop it:  make qemu_stop${C_RESET}\n"
-	exit 1
+    printf "  ${C_RED}✗${C_RESET} an install is already running in this VM (pid %s)\n" "$qemu_pid"
+    printf "    ${C_DIM}re-attach to it:  make qemu_watch        stop it:  make qemu_stop${C_RESET}\n"
+    exit 1
 elif [ -f "$VM_DIR/.installed" ] && [ "${FORCE_INSTALL:-0}" != "1" ]; then
-	ok "disk already holds an installed system (finished $(cat "$VM_DIR/.installed")) — skipping"
-	ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
+    ok "disk already holds an installed system (finished $(cat "$VM_DIR/.installed")) — skipping"
+    ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
 elif [ "$disk_bytes" -gt 1073741824 ] && [ -z "$phase_now" ] && [ "${FORCE_INSTALL:-0}" != "1" ]; then
-	ok "disk holds $(du -h "$DISK" | cut -f1) but no .installed stamp (built before stamps existed) — treating it as installed"
-	ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
+    ok "disk holds $(du -h "$DISK" | cut -f1) but no .installed stamp (built before stamps existed) — treating it as installed"
+    ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
 else
-	[ "$phase_now" = installing ] \
-		&& printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
-	printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
-	printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
-	bash "$QEMU_VM" install || die "the install phase failed"
+    [ "$phase_now" = installing ] &&
+        printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
+    printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
+    printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
+    bash "$QEMU_VM" install || die "the install phase failed"
 fi
 
 # ── 4. First boot + LUKS ────────────────────────────────────────────────────
@@ -96,13 +108,13 @@ phase "Host configuration"
 bash "$QEMU_VM" ssh-config || die "could not write ~/.ssh/config"
 
 if timeout 20 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-	-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
-	b2b 'echo ok' > /dev/null 2>&1; then
-	ok "ssh b2b works: $(ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-		-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR b2b 'hostname' 2>/dev/null)"
+    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
+    b2b 'echo ok' >/dev/null 2>&1; then
+    ok "ssh b2b works: $(ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR b2b 'hostname' 2>/dev/null)"
 else
-	printf "  ${C_DIM}ssh b2b is not answering yet — first boot installs Docker and\n"
-	printf "  WordPress, which takes a few minutes. Watch: make qemu_console${C_RESET}\n"
+    printf "  ${C_DIM}ssh b2b is not answering yet — first boot installs Docker and\n"
+    printf "  WordPress, which takes a few minutes. Watch: make qemu_console${C_RESET}\n"
 fi
 
 printf "\n${C_GREEN}${C_BOLD}  QEMU build finished.${C_RESET}\n\n"

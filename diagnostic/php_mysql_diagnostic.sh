@@ -13,17 +13,17 @@ NC='\033[0m' # No Color
 
 # Function to print section headers
 section() {
-	echo -e "\n${BLUE}========== $1 ==========${NC}\n"
+    echo -e "\n${BLUE}========== $1 ==========${NC}\n"
 }
 
 # Function to check if a command exists
 command_exists() {
-	command -v "$1" > /dev/null 2>&1
+    command -v "$1" >/dev/null 2>&1
 }
 
 # Function to check if a PHP extension is loaded
 php_ext_loaded() {
-	php -m | grep -i "$1" > /dev/null 2>&1
+    php -m | grep -i "$1" >/dev/null 2>&1
 }
 
 # Start diagnostic
@@ -33,8 +33,8 @@ echo "User: $(whoami)"
 
 # Check if root
 if [ "$(id -u)" -ne 0 ]; then
-	echo -e "${YELLOW}Warning: Not running as root. Some tests may fail due to insufficient permissions.${NC}"
-	echo "Consider re-running with sudo for complete results."
+    echo -e "${YELLOW}Warning: Not running as root. Some tests may fail due to insufficient permissions.${NC}"
+    echo "Consider re-running with sudo for complete results."
 fi
 
 # System Information
@@ -45,11 +45,11 @@ echo "Kernel: $(uname -r)"
 # PHP Version Check
 section "PHP VERSION"
 if command_exists php; then
-	php -v
-	echo -e "\nPHP CLI Version: $(php -r 'echo phpversion();')"
-	echo "PHP SAPI: $(php -r 'echo php_sapi_name();')"
+    php -v
+    echo -e "\nPHP CLI Version: $(php -r 'echo phpversion();')"
+    echo "PHP SAPI: $(php -r 'echo php_sapi_name();')"
 else
-	echo -e "${RED}PHP not found in path${NC}"
+    echo -e "${RED}PHP not found in path${NC}"
 fi
 
 # PHP Configuration Files
@@ -69,31 +69,31 @@ echo -e "${YELLOW}Checking for MySQL/MariaDB extensions:${NC}\n"
 
 echo -n "mysqli extension: "
 if php_ext_loaded mysqli; then
-	echo -e "${GREEN}INSTALLED${NC}"
-	php -r 'var_dump(extension_loaded("mysqli"));'
+    echo -e "${GREEN}INSTALLED${NC}"
+    php -r 'var_dump(extension_loaded("mysqli"));'
 else
-	echo -e "${RED}NOT INSTALLED${NC}"
+    echo -e "${RED}NOT INSTALLED${NC}"
 fi
 
 echo -n "mysql extension (legacy): "
 if php_ext_loaded mysql; then
-	echo -e "${GREEN}INSTALLED${NC}"
+    echo -e "${GREEN}INSTALLED${NC}"
 else
-	echo -e "${YELLOW}NOT INSTALLED${NC} (Normal for PHP 7+)"
+    echo -e "${YELLOW}NOT INSTALLED${NC} (Normal for PHP 7+)"
 fi
 
 echo -n "mysqlnd extension: "
 if php_ext_loaded mysqlnd; then
-	echo -e "${GREEN}INSTALLED${NC}"
+    echo -e "${GREEN}INSTALLED${NC}"
 else
-	echo -e "${YELLOW}NOT INSTALLED${NC}"
+    echo -e "${YELLOW}NOT INSTALLED${NC}"
 fi
 
 echo -n "PDO_MySQL extension: "
 if php_ext_loaded pdo_mysql; then
-	echo -e "${GREEN}INSTALLED${NC}"
+    echo -e "${GREEN}INSTALLED${NC}"
 else
-	echo -e "${YELLOW}NOT INSTALLED${NC}"
+    echo -e "${YELLOW}NOT INSTALLED${NC}"
 fi
 
 # PHP Extension Listing
@@ -115,35 +115,35 @@ dpkg -l | grep -i php | grep -i mysql
 section "LIGHTTPD CONFIGURATION"
 echo -e "${YELLOW}Checking Lighttpd PHP Configuration:${NC}"
 if [ -d /etc/lighttpd ]; then
-	echo "Lighttpd configuration directory found"
+    echo "Lighttpd configuration directory found"
 
-	if [ -f /etc/lighttpd/lighttpd.conf ]; then
-		echo -e "\n${YELLOW}Main Lighttpd config file:${NC}"
-		grep -i "mod_fastcgi\|php" /etc/lighttpd/lighttpd.conf
-	else
-		echo -e "${RED}Main Lighttpd config file not found${NC}"
-	fi
+    if [ -f /etc/lighttpd/lighttpd.conf ]; then
+        echo -e "\n${YELLOW}Main Lighttpd config file:${NC}"
+        grep -i "mod_fastcgi\|php" /etc/lighttpd/lighttpd.conf
+    else
+        echo -e "${RED}Main Lighttpd config file not found${NC}"
+    fi
 
-	echo -e "\n${YELLOW}Checking for PHP configurations in conf-enabled:${NC}"
-	if [ -d /etc/lighttpd/conf-enabled ]; then
-		grep -i "php\|fastcgi" /etc/lighttpd/conf-enabled/* 2> /dev/null
-	fi
+    echo -e "\n${YELLOW}Checking for PHP configurations in conf-enabled:${NC}"
+    if [ -d /etc/lighttpd/conf-enabled ]; then
+        grep -i "php\|fastcgi" /etc/lighttpd/conf-enabled/* 2>/dev/null
+    fi
 
-	echo -e "\n${YELLOW}Looking for PHP-specific config files:${NC}"
-	find /etc/lighttpd -name "*php*" -type f 2> /dev/null
+    echo -e "\n${YELLOW}Looking for PHP-specific config files:${NC}"
+    find /etc/lighttpd -name "*php*" -type f 2>/dev/null
 else
-	echo -e "${RED}Lighttpd configuration directory not found${NC}"
+    echo -e "${RED}Lighttpd configuration directory not found${NC}"
 fi
 
 # Check WordPress Configuration
 section "WORDPRESS CONFIGURATION"
 echo -e "${YELLOW}Looking for WordPress installations:${NC}"
 for dir in /var/www/html /var/www; do
-	if [ -f "$dir/wp-config.php" ]; then
-		echo "WordPress found at: $dir"
-		echo "WordPress database settings:"
-		grep -E "DB_HOST|DB_NAME|DB_USER" "$dir/wp-config.php" | grep -v PASSWORD
-	fi
+    if [ -f "$dir/wp-config.php" ]; then
+        echo "WordPress found at: $dir"
+        echo "WordPress database settings:"
+        grep -E "DB_HOST|DB_NAME|DB_USER" "$dir/wp-config.php" | grep -v PASSWORD
+    fi
 done
 
 # Check PHP error logs
@@ -151,10 +151,10 @@ section "PHP ERROR LOGS"
 echo -e "${YELLOW}Recent PHP errors:${NC}"
 ERROR_LOGS="/var/log/lighttpd/error.log /var/log/apache2/error.log /var/log/php*"
 for log in $ERROR_LOGS; do
-	if [ -f "$log" ]; then
-		echo -e "\nErrors from $log:"
-		tail -n 50 "$log" | grep -i "php\|mysql\|mysqli" | tail -n 10
-	fi
+    if [ -f "$log" ]; then
+        echo -e "\nErrors from $log:"
+        tail -n 50 "$log" | grep -i "php\|mysql\|mysqli" | tail -n 10
+    fi
 done
 
 # Test PHP-MySQL Connection
@@ -162,7 +162,7 @@ section "PHP-MYSQL CONNECTION TEST"
 echo -e "${YELLOW}Creating a test PHP script to verify MySQL connectivity:${NC}"
 TEST_SCRIPT="/tmp/mysql_test_$$.php"
 
-cat > "$TEST_SCRIPT" << 'EOF'
+cat >"$TEST_SCRIPT" <<'EOF'
 <?php
 echo "PHP Version: " . phpversion() . "\n";
 
