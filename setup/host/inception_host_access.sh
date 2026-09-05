@@ -476,7 +476,15 @@ find_chromium() {
 # instead. Unconfined .deb browsers keep the tidy XDG location.
 chromium_profile_dir() {
     local bin="$1" snap_name
-    if [ "$(readlink -f "$bin" 2>/dev/null)" = "/usr/bin/snap" ] || case "$bin" in /snap/*) true ;; *) false ;; esac; then
+    local is_snap=false
+    if [ "$(readlink -f "$bin" 2>/dev/null)" = "/usr/bin/snap" ]; then
+        is_snap=true
+    else
+        case "$bin" in
+        /snap/*) is_snap=true ;;
+        esac
+    fi
+    if [ "$is_snap" = true ]; then
         snap_name=$(basename "$bin")
         printf '%s' "$HOME/snap/${snap_name}/common/inception-browser"
         return 0
