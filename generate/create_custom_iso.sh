@@ -8,6 +8,21 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 cd "$REPO_ROOT"
 
+# ── One build at a time ──────────────────────────────────────────────────────
+# Two `make all` in two terminals (one per backend, say) both land here, and
+# both use the same extraction tree and write the same ISO. The second one's
+# purge_dir deletes the first one's tree mid-build, and the first then reports
+# "initrd.gz not found", "cannot find /isolinux/isolinux.bin", or worse,
+# succeeds without the preseed. Measured on a real run. So a build holds a
+# lock for its whole life (fd 9), and a second build waits and says so.
+ISO_LOCK="${ISO_LOCK:-$REPO_ROOT/.gen_iso.lock}"
+exec 9> "$ISO_LOCK"
+if ! flock -n 9; then
+	echo "⏳ another ISO build is running (lock: $ISO_LOCK) — waiting for it to finish..."
+	flock 9
+	echo "✓ lock acquired, continuing"
+fi
+
 # ── Portable downloader (curl preferred, wget fallback) ──────────────────────
 download() {
 	local url="$1" dest="$2"
@@ -38,10 +53,17 @@ if [ -z "$ISO_FILENAME" ]; then
 fi
 
 URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
-ISO_DIR="debian_iso_extract"
+# Both overridable so a test build can run beside a real one without sharing
+# the extraction tree or overwriting the ISO a running VM booted from.
+ISO_DIR="${ISO_DIR:-debian_iso_extract}"
 PRESEED_FILE="preseeds/preseed.cfg"
 # Derive the output name from the discovered filename
-OUTPUT_ISO="${ISO_FILENAME%.iso}-preseed.iso"
+OUTPUT_ISO="${OUTPUT_ISO:-${ISO_FILENAME%.iso}-preseed.iso}"
+# xorriso runs from inside $ISO_DIR, so it needs the output as an absolute path.
+case "$OUTPUT_ISO" in
+	/*) OUTPUT_ABS="$OUTPUT_ISO" ;;
+	*)  OUTPUT_ABS="$REPO_ROOT/$OUTPUT_ISO" ;;
+esac
 FORCE_ISO="${FORCE_ISO:-0}"
 
 # ── Serial console for the headless install ─────────────────────────────────
@@ -179,7 +201,8 @@ for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do
 		cp "preseeds/$SCRIPT" "$ISO_DIR/$SCRIPT"
 		echo "  ✓ $SCRIPT"
 	else
-		echo "  ✗ WARNING: preseeds/$SCRIPT not found"
+		echo "Error: preseeds/$SCRIPT not found — the install cannot configure the guest without it" >&2
+		exit 1
 	fi
 done
 
@@ -219,7 +242,8 @@ for PROVISIONER in \
 		chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true
 		echo "  ✓ $(basename "$PROVISIONER")"
 	else
-		echo "  ✗ WARNING: $PROVISIONER not found"
+		echo "Error: $PROVISIONER not found — first-boot-setup.sh would run without it" >&2
+		exit 1
 	fi
 done
 
@@ -295,7 +319,10 @@ if [ -f "$INITRD" ]; then
 	rm -rf "$INJECT_DIR"
 	echo "  ✓ preseed.cfg injected into install.amd/initrd.gz"
 else
-	echo "  ✗ WARNING: $INITRD not found — preseed injection skipped"
+	# Without the preseed inside the initrd the install is interactive and
+	# waits on a question forever. Never ship that ISO.
+	echo "Error: $INITRD not found — the extraction tree is incomplete (another build purging it?)" >&2
+	exit 1
 fi
 
 # Also inject into GTK initrd if it exists
@@ -411,14 +438,15 @@ GRUBEOF
 
 	echo "✓ EFI boot menu updated"
 else
-	echo "Warning: $GRUB_CFG not found"
+	echo "Error: $GRUB_CFG not found — the extraction tree is incomplete (another build purging it?)" >&2
+	exit 1
 fi
 
 # Update MD5 sums
 echo "Updating MD5 checksums..."
 cd "$ISO_DIR"
 find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + > md5sum.txt 2> /dev/null || true
-cd ..
+cd "$REPO_ROOT"
 
 # Rebuild ISO
 echo "Rebuilding ISO with xorriso..."
@@ -430,9 +458,17 @@ if ! command -v xorriso > /dev/null 2>&1; then
 	echo "  Arch:          sudo pacman -Sy xorriso"
 	exit 1
 fi
+# Two kinds of xorriso output are expected on a Debian ISO and say nothing
+# about the build: the percentage progress, and one "Cannot add ... to Joliet
+# tree" per symlink (/debian, /dists/stable, the FAQ pages). Joliet has no way
+# to store a symlink; Rock Ridge (-r) does, and Rock Ridge is what the
+# installer reads. Both patterns are filtered and the symlinks are counted, so
+# the build is quiet without being silent -- every other line still prints, and
+# xorriso still aborts on FAILURE, which is checked below rather than assumed.
 cd "$ISO_DIR"
+XORRISO_LOG=$(mktemp)
 xorriso -as mkisofs \
-	-o "../$OUTPUT_ISO" \
+	-o "$OUTPUT_ABS" \
 	-c isolinux/boot.cat \
 	-b isolinux/isolinux.bin \
 	-no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -441,11 +477,19 @@ xorriso -as mkisofs \
 	-no-emul-boot \
 	-isohybrid-gpt-basdat \
 	-r -J \
-	. || {
-	echo "Error: Failed to create ISO"
+	. 2>&1 | tee "$XORRISO_LOG" \
+	| grep -vE '^xorriso : UPDATE :|Cannot add .* to Joliet tree\. Symlinks can only be added to a Rock Ridge tree\.'
+XORRISO_RC=${PIPESTATUS[0]}
+JOLIET_SKIPS=$(grep -c 'Symlinks can only be added to a Rock Ridge tree' "$XORRISO_LOG" 2> /dev/null || true)
+rm -f "$XORRISO_LOG"
+if [ "$XORRISO_RC" != "0" ]; then
+	echo "Error: xorriso failed to create the ISO (exit $XORRISO_RC)" >&2
 	exit 1
-}
-cd ..
+fi
+if [ "${JOLIET_SKIPS:-0}" -gt 0 ] 2> /dev/null; then
+	echo "  · ${JOLIET_SKIPS} symlinks kept out of the Joliet tree (expected — Rock Ridge carries them)"
+fi
+cd "$REPO_ROOT"
 
 echo "===== Success ====="
 echo "✓ Custom ISO created: $OUTPUT_ISO"

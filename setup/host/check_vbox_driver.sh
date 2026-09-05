@@ -88,12 +88,25 @@ VER=$(vbox_version)
 # ── The actual test: is the driver there? ───────────────────────────────────
 # /dev/vboxdrv is what VBoxManage opens. A loaded module without the device
 # node, or a node with no module, are both unusable — so check both.
+# /sys/module/vboxdrv exists exactly when the module is loaded. Not
+# `lsmod | grep -q`: under pipefail, grep -q's early exit gives lsmod SIGPIPE
+# and the pipeline fails even though the driver is loaded.
 DRIVER_OK=0
-if [ -c /dev/vboxdrv ] && lsmod 2> /dev/null | grep -q '^vboxdrv'; then
+if [ -c /dev/vboxdrv ] && [ -d /sys/module/vboxdrv ]; then
 	DRIVER_OK=1
 fi
 
 if [ "$DRIVER_OK" = "1" ]; then
+	# The driver is there, but VT-x belongs to one hypervisor at a time. With
+	# a KVM guest running, `VBoxManage startvm` fails with
+	# VERR_VMX_IN_VMX_ROOT_MODE -- so say it here, in words, first.
+	if kvm_users=$(bash "$(dirname "${BASH_SOURCE[0]}")/kvm_probe.sh" users); then
+		bad "VirtualBox cannot start a VM right now: a KVM guest holds VT-x"
+		printf '%s\n' "$kvm_users" | sed 's/^/     running: /'
+		printf "  One hypervisor at a time. Stop it first:  ${C_BOLD}make qemu_stop${C_RESET}\n"
+		printf "  or build with it instead:                ${C_BOLD}make all BACKEND=qemu${C_RESET}\n"
+		exit 1
+	fi
 	ok "VirtualBox ${VER:-unknown} — kernel driver loaded on $(hostname -s)"
 	exit 0
 fi
@@ -108,7 +121,7 @@ printf "     %-22s %s\n" "kernel:" "$(uname -r)"
 	&& printf "     %-22s %s\n" "/dev/vboxdrv:" "present" \
 	|| printf "     %-22s %s\n" "/dev/vboxdrv:" "MISSING"
 printf "     %-22s %s\n" "vboxdrv module:" \
-	"$(lsmod 2> /dev/null | grep -q '^vboxdrv' && echo loaded || echo 'not loaded')"
+	"$([ -d /sys/module/vboxdrv ] && echo loaded || echo 'not loaded')"
 
 # Is the module even built for the running kernel? This separates "needs a
 # rebuild" from "built fine, just never loaded" — completely different fixes.
@@ -134,7 +147,7 @@ fi
 
 # Can the person reading this actually fix it? Only if they can run sudo.
 CAN_SUDO=0
-if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qx sudo; then
+if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qEx 'sudo|wheel'; then
 	CAN_SUDO=1
 fi
 

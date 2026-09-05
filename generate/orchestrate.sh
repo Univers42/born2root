@@ -363,6 +363,8 @@ get_host_ip() {
 # such as the 42 ftpkg service on 127.0.0.1:4242). Shared with the VM installer
 # so both agree on which host ports are free and never hand out one twice.
 . "$(dirname "${BASH_SOURCE[0]}")/../utils/host_ports.sh"
+# Reads the installer's own progress off serial.log (shared with qemu_vm.sh).
+. "$(dirname "${BASH_SOURCE[0]}")/../setup/host/di_progress.sh"
 
 # LUKS unlock helpers (resolve_passphrase / send_passphrase / wait_for_ssh).
 # Sourcing defines functions only, so this starts nothing.
@@ -633,6 +635,11 @@ SERIAL_LOG=$(get_serial_log)
 # the caller falls back to elapsed time, which is at least true.
 install_stage() {
 	[ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
+	# First choice: the installer's own stage, which preseed.cfg's early_command
+	# streams off d-i's syslog (setup/host/di_progress.sh). That works on the
+	# VGA path that ships; the percentage lines below only exist with
+	# SERIAL_CONSOLE=1.
+	if di_current_stage "$SERIAL_LOG"; then return 0; fi
 	local line label pct
 	line=$(tail -c 8000 "$SERIAL_LOG" 2> /dev/null \
 		| tr '\r' '\n' \
@@ -698,7 +705,9 @@ vm_running_seconds() {
 # screen and stall (generate/create_custom_iso.sh explains at length).
 install_complete_signalled() {
 	[ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
-	grep -q 'B2B-INSTALL-COMPLETE' "$SERIAL_LOG" 2> /dev/null
+	# Anchored: the syslog feed would otherwise match d-i logging the
+	# late_command's text, which contains this string, as that command STARTS.
+	grep -q '^B2B-INSTALL-COMPLETE' "$SERIAL_LOG" 2> /dev/null
 }
 
 install_halted() {

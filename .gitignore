@@ -7,3 +7,6 @@ disk_images
 
 # Downloaded hellish release binary (setup/fetch_hellish.sh)
 dist/
+
+# ISO build lock (generate/create_custom_iso.sh)
+.gen_iso.lock

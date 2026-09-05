@@ -212,7 +212,14 @@ if VBoxManage list vms | grep -q "\"$VM_NAME\""; then
 	VBoxManage unregistervm "$VM_NAME" --delete 2>/dev/null || {
 		echo "  --delete failed, unregistering and cleaning files manually"
 		VBoxManage unregistervm "$VM_NAME" 2>/dev/null || true
-		rm -rf "$VM_PATH/$VM_NAME" 2>/dev/null || true
+		# Delete VirtualBox's OWN files, not the directory. The QEMU backend
+		# keeps its qcow2, its serial log and its .installed stamp in this
+		# same disk_images/<vm>/ folder (setup/host/qemu_vm.sh), so a blanket
+		# rm -rf here destroys a working QEMU VM that has nothing to do with
+		# the stale VirtualBox registration being cleaned up.
+		rm -rf "$VM_PATH/$VM_NAME"/*.vbox "$VM_PATH/$VM_NAME"/*.vbox-prev \
+			"$VM_PATH/$VM_NAME"/*.vdi "$VM_PATH/$VM_NAME"/Logs \
+			"$VM_PATH/$VM_NAME"/Snapshots 2> /dev/null || true
 	}
 	echo "  ✓ Stale VM removed"
 fi
