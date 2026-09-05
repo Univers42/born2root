@@ -227,6 +227,13 @@ pull:
 		fi; \
 		git stash pop --index -q 2>/dev/null \
 			|| git stash pop -q 2>/dev/null || true; \
+		if [ -n "$$(git diff --name-only --diff-filter=U)" ]; then \
+			printf "$(C_RED)✗$(C_RESET) your local changes conflict with what was just pulled\n"; \
+			git diff --name-only --diff-filter=U | sed "s/^/    /"; \
+			printf "    Resolve the conflict markers above, then: git add <files> && make all\n"; \
+			printf "    Your work is still in the stash too: git stash list\n"; \
+			exit 1; \
+		fi; \
 	fi'
 
 # Sync + update ALL submodules (any depth) to the latest upstream commit, and repair
@@ -504,9 +511,14 @@ clean:
 	@chmod -R u+w debian_iso_extract 2>/dev/null || true
 	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed.iso debian_iso_extract
 
+# Empty VM_PATH, but do NOT delete the directory itself. When VM_PATH points at
+# an external disk (VM_PATH=/mnt/storage/virtualbox) its parent is root-owned,
+# so removing the directory leaves a path only root can recreate -- and the next
+# `make all` dies on "mkdir: cannot create directory: Permission denied" with
+# nothing saying that a previous fclean is what caused it.
 fclean: clean rm_disk_image
-	$(RM) $(VM_PATH)
-	$(RM) "$(VM_PATH)/$(VM_NAME)"
+	@[ -n "$(VM_PATH)" ] && [ -d "$(VM_PATH)" ] \
+		&& rm -rf -- "$(VM_PATH)"/* "$(VM_PATH)"/.[!.]* 2>/dev/null; true
 
 re: fclean all
 
