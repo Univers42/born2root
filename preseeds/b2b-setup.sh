@@ -79,11 +79,16 @@ else
 fi
 
 # Developer essentials (all in base Debian repos)
+# libreadline-dev is a build dep, not a runtime one: the custom shell ships as a
+# prebuilt binary in 2b, but rebuilding it from source inside the VM needs the
+# headers. Without it the build fails on <readline/readline.h> and the only fix
+# is a manual apt install on a freshly provisioned machine.
 # NOTE: nodejs/npm are installed by first-boot-setup.sh (full systemd + network).
 # Installing npm in d-i chroot hangs on dpkg triggers → blocks entire script
 # → SSH, sudo, UFW, password policy etc. never get configured.
 if check_disk_space / 500; then
 	$APT git build-essential gcc g++ make \
+		libreadline-dev \
 		python3 python3-venv \
 		curl wget net-tools vim nano \
 		htop tree tmux bash-completion \
@@ -144,6 +149,18 @@ fi
 exec "$REAL_SHELL" "$@"
 HELLWRAPEOF
 			chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
+
+			# Keep a pristine copy outside /usr/bin so the shell guard in
+			# sshd-watchdog can put the wrapper back. sshd refuses any account
+			# whose login shell does not exist — it reports the user as an
+			# "invalid user", which rejects key AND password auth AND the
+			# console at the same time. A single `rm /usr/bin/hellish` therefore
+			# locks every door on the machine at once, and the error it produces
+			# ("Permission denied") points at credentials rather than the shell.
+			mkdir -p /usr/local/lib/b2b
+			cp "$CUSTOM_SHELL_DEST" /usr/local/lib/b2b/shell-wrapper 2>/dev/null || true
+			chmod 755 /usr/local/lib/b2b/shell-wrapper 2>/dev/null || true
+
 			echo "[OK] Installed hellish SSH compatibility wrapper: interactive=hellish, non-interactive=bash"
 		fi
 
@@ -303,6 +320,24 @@ while true; do
         systemctl restart ssh >> "$LOG" 2>&1
         echo "$(date): sshd restart attempted, new_status=$(systemctl is-active ssh)" >> "$LOG"
     fi
+    # Login-shell guard. sshd rejects an account whose shell is missing as an
+    # "invalid user", which kills key auth, password auth and console login in
+    # one stroke -- with no hint that the shell is the cause. Rebuilding a
+    # custom shell in place is routine here, so treat a missing one as a fault
+    # to repair rather than a state to sit in.
+    USER_SHELL=$(getent passwd dlesieur 2>/dev/null | cut -d: -f7)
+    if [ -n "$USER_SHELL" ] && [ ! -x "$USER_SHELL" ]; then
+        if [ -x /usr/local/lib/b2b/shell-wrapper ] && [ -x "${USER_SHELL}.real" ]; then
+            install -m 755 /usr/local/lib/b2b/shell-wrapper "$USER_SHELL" 2>> "$LOG"
+            echo "$(date): login shell $USER_SHELL was missing -- wrapper restored" >> "$LOG"
+        else
+            # Nothing to restore from: fall back to bash so the box stays
+            # reachable. Losing the custom shell beats losing all access.
+            usermod -s /bin/bash dlesieur 2>> "$LOG"
+            echo "$(date): login shell $USER_SHELL missing and unrecoverable -- fell back to /bin/bash" >> "$LOG"
+        fi
+    fi
+
     MIN=$(date +%M); SEC=$(date +%S)
     if [ "$((MIN % 5))" = "0" ] && [ "$SEC" -lt "16" ]; then
         echo "$(date): OK sshd=$SSHD_ACTIVE procs=$SSHD_COUNT listen=$LISTEN estab=$ESTAB mem=${MEM_FREE}kB" >> "$LOG"

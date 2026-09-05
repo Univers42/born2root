@@ -77,7 +77,8 @@ DISK_SIZE_MB="${DISK_SIZE_MB:-122880}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 VM_CPUS="${VM_CPUS:-3}"
 
-# Host:guest port pairs, matching the VirtualBox NAT rule set.
+# Host:guest port pairs, matching the VirtualBox NAT rule set. These are
+# PREFERRED host ports, not guaranteed ones -- see resolve_ports() below.
 PORTS_SPEC="${PORTS_SPEC:-ssh:4242:4242 http:8082:80 https:8443:443 inception-static:8090:8090 inception-adminer:8081:8080 mariadb:3306:3306 frontend:5173:5173 backend:3000:3000}"
 
 C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_GREEN=$'\033[32m'
@@ -91,7 +92,9 @@ warn() { printf "  ${C_YELLOW}⚠${C_RESET}  %s\n" "$*"; }
 die()  { printf "  ${C_RED}✗${C_RESET} %s\n" "$*" >&2; exit 1; }
 
 QEMU=$(command -v qemu-system-x86_64 || true)
-[ -n "$QEMU" ] || die "qemu-system-x86_64 not installed"
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+	[ -n "$QEMU" ] || die "qemu-system-x86_64 not installed"
+fi
 
 # ── Is KVM usable by THIS user? ─────────────────────────────────────────────
 # Membership in the kvm group is the usual route, but an ACL grant works just
@@ -128,6 +131,47 @@ qemu_pid() {
 }
 
 is_running() { qemu_pid > /dev/null 2>&1; }
+
+# ── Host port collision avoidance ───────────────────────────────────────────
+# The same problem the VirtualBox path already solves (utils/host_ports.sh):
+# on a real dev machine SOMETHING is usually already on 3306/3000/5173/etc,
+# and QEMU's -netdev takes every hostfwd= as one argument -- ONE busy port
+# fails the whole netdev, not just that one forward, and the VM never boots.
+# Reproduced on this repo: an unrelated Docker container already held 3306,
+# and `make all` died with "Could not set up host forwarding rule" instead of
+# picking another port the way the VirtualBox NAT rules already do.
+. "$REPO_ROOT/utils/host_ports.sh"
+
+# Walk PORTS_SPEC ("name:preferred_host:guest ...") to the host ports this run
+# will actually use, bumping past anything already listening. Sets
+# RESOLVED_SPEC as "name:actual_host:guest ..."; resolve_host_port reserves
+# each pick against the rest so two services in this spec can never collide
+# with EACH OTHER either.
+RESOLVED_SPEC=""
+resolve_ports() {
+	local spec name hp gp actual out=""
+	for spec in $PORTS_SPEC; do
+		name="${spec%%:*}"; hp="${spec#*:}"; gp="${hp#*:}"; hp="${hp%%:*}"
+		resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
+		[ "$actual" != "$hp" ] && warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
+		out="${out} ${name}:${actual}:${gp}"
+	done
+	RESOLVED_SPEC="${out# }"
+}
+
+# The host port actually forwarding a given name. While ports.env exists it is
+# authoritative -- by then QEMU itself holds the port, so re-probing "is it
+# free?" would see its own listener and wrongly walk to a different one. Only
+# before any launch is there nothing to be authoritative about yet.
+host_port_of() {
+	local name="$1"
+	if [ -r "$VM_DIR/ports.env" ]; then
+		awk -F= -v n="$name" '$1==n{print $2; exit}' "$VM_DIR/ports.env"
+		return
+	fi
+	[ -n "$RESOLVED_SPEC" ] || resolve_ports
+	printf '%s\n' "$RESOLVED_SPEC" | tr ' ' '\n' | awk -F: -v n="$name" '$1==n{print $2; exit}'
+}
 
 # ── The QEMU monitor ────────────────────────────────────────────────────────
 # A unix socket speaking QEMU's human monitor protocol. Used for sendkey (the
@@ -219,7 +263,7 @@ sendkey_string() {
 
 build_hostfwd() {
 	local spec name hp gp out=""
-	for spec in $PORTS_SPEC; do
+	for spec in $RESOLVED_SPEC; do
 		name="${spec%%:*}"; hp="${spec#*:}"; gp="${hp#*:}"; hp="${hp%%:*}"
 		out="${out},hostfwd=tcp:127.0.0.1:${hp}-:${gp}"
 	done
@@ -246,6 +290,8 @@ launch() {
 		fi
 	fi
 
+	resolve_ports
+
 	if [ "$boot" = "cdrom" ]; then
 		iso=$(find_iso)
 		[ -n "$iso" ] && [ -f "$iso" ] || die "no preseed ISO found — run: make gen_iso"
@@ -268,7 +314,7 @@ launch() {
 	# for a named NAT rule -- would conclude nothing is forwarded, and report
 	# "no 'https' NAT rule" about a port that works. See vm_ports.sh.
 	: > "$VM_DIR/ports.env"
-	for _spec in $PORTS_SPEC; do
+	for _spec in $RESOLVED_SPEC; do
 		_n="${_spec%%:*}"; _rest="${_spec#*:}"
 		printf '%s=%s\n' "$_n" "${_rest%%:*}" >> "$VM_DIR/ports.env"
 	done
@@ -458,6 +504,9 @@ watch_install() {
 }
 
 # ── Actions ─────────────────────────────────────────────────────────────────
+# Guarded so tests/test_qemu_ports.sh can source this file for its port
+# resolution functions without also running whatever action $1 says.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 case "${1:-status}" in
 	create)
 		mkdir -p "$VM_DIR"
@@ -547,7 +596,7 @@ case "${1:-status}" in
 		# passphrase at a prompt that is not ready yet is harmless -- the
 		# characters are discarded, and the next attempt types it again.
 		pass=$(vm_pass)
-		ssh_port=$(printf '%s' "$PORTS_SPEC" | tr ' ' '\n' | awk -F: '$1=="ssh"{print $2}')
+		ssh_port=$(host_port_of ssh)
 
 		ssh_banner_up() {
 			local b
@@ -641,7 +690,7 @@ case "${1:-status}" in
 		;;
 
 	ssh-config)
-		ssh_port=$(printf '%s' "$PORTS_SPEC" | tr ' ' '\n' | awk -F: '$1=="ssh"{print $2}')
+		ssh_port=$(host_port_of ssh)
 		mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
 		touch "$HOME/.ssh/config"; chmod 600 "$HOME/.ssh/config"
 		marker="# Born2beRoot VM (auto-generated, qemu)"
@@ -692,7 +741,12 @@ PYEOF
 		fi
 		[ -f "$DISK" ] && printf "  %-12s %s (%s on host)\n" "disk:" "$DISK" "$(du -h "$DISK" 2>/dev/null | cut -f1)"
 		printf "  %-12s %s\n" "iso:" "$(basename "$(find_iso)" 2>/dev/null || echo none)"
-		printf "  %-12s " "ports:"; printf '%s' "$PORTS_SPEC" | tr ' ' '\n' | awk -F: '{printf "%s→%s ", $2, $3}'; printf "\n"
+		printf "  %-12s " "ports:"
+		for _spec in $PORTS_SPEC; do
+			_n="${_spec%%:*}"; _rest="${_spec#*:}"; _gp="${_rest#*:}"
+			printf '%s→%s ' "$(host_port_of "$_n")" "$_gp"
+		done
+		printf "\n"
 		if [ -f "$SERIAL" ]; then
 			printf "  %-12s %s\n" "console:" "$(tail -c 400 "$SERIAL" 2>/dev/null | tr -d '\r' | grep -a . | tail -1 | cut -c1-70)"
 		fi
@@ -701,3 +755,4 @@ PYEOF
 
 	*) die "unknown action '${1}' (create|install|start|unlock|stop|kill|status|console|screenshot|ssh-config)" ;;
 esac
+fi

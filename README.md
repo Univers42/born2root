@@ -590,14 +590,20 @@ after `init.lua`:
 ├── init.lua                      unmodified kickstart.nvim
 └── plugin/
     ├── 00-b2b-local.lua          providers, clipboard, machine-local settings
-    ├── 10-b2b-plugins.lua        the plugin layer + :B2BExtras
+    ├── 05-b2b-pack.lua           the shared install helper + :B2BExtras
+    ├── 10-b2b-plugins.lua        the editing/navigation plugin layer
     ├── 20-b2b-keymaps.lua        the VS Code bindings
     ├── 30-b2b-sessions.lua       sessions / "workspaces"
-    └── 40-b2b-startup.lua        the file tree + start page
+    ├── 40-b2b-startup.lua        the file tree + start page
+    ├── 50-b2b-markdown.lua       markdown rendering + browser preview
+    └── 60-b2b-ide.lua            lint, debug, test, terminal, outline, SQL, AI
 ```
 
-All five are listed in `.git/info/exclude`, so `git status` in the kickstart
-checkout stays clean.
+Files in `plugin/` are sourced in name order, which is why `05-` comes first:
+it publishes the `_G.B2B` helper that `10-`, `50-` and `60-` all install
+through, so there is one copy of the install-and-report logic rather than
+three. All of them are listed in `.git/info/exclude`, so `git status` in the
+kickstart checkout stays clean.
 
 ### What you see when you open it
 
@@ -649,7 +655,71 @@ what this setup is modelled on:
   neither loads at all. `rainbow-delimiters.nvim` is the maintained successor.
 - **bullets.vim** — `dkarter/bullets.vim` now redirects to `bullets-vim/bullets.vim`.
 
+### Markdown, and the rest of the VS Code feature list
+
+`50-b2b-markdown.lua` and `60-b2b-ide.lua` cover what is left:
+
+| VS Code feature | Here | Where |
+|-----------------|------|-------|
+| Markdown preview, in the buffer | [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) | `<leader>mr` |
+| Markdown preview, in a browser | [markdown-preview.nvim](https://github.com/iamcco/markdown-preview.nvim) — mermaid + KaTeX | `<leader>mp` |
+| Autocomplete | blink.cmp | *kickstart* |
+| Go to definition / references / rename | `vim.lsp` | *kickstart* |
+| Inline errors | LSP diagnostics | *kickstart* |
+| Auto formatting | conform.nvim | *kickstart*, `<leader>f` |
+| Linting | [nvim-lint](https://github.com/mfussenegger/nvim-lint) + shellcheck / markdownlint-cli2 | on write |
+| File explorer | oil.nvim / neo-tree | `-` / `Ctrl+B` |
+| Fuzzy search | telescope / fzf | `Ctrl+P` |
+| Git gutter | gitsigns | *kickstart*, `<leader>h…` |
+| Git UI | **lazygit** (Debian package) in a floating terminal | `<leader>gg` |
+| Debugger | [nvim-dap](https://github.com/mfussenegger/nvim-dap) + dap-ui | `F5` / `F9`, `<leader>d…` |
+| Test runner | [neotest](https://github.com/nvim-neotest/neotest) (+ the python adapter) | `<leader>r…` |
+| Terminal | [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) | `Ctrl+\` |
+| Symbol outline | [aerial.nvim](https://github.com/stevearc/aerial.nvim) | `<leader>o` |
+| Tabs / buffers | barbar (above) | `Alt+1`…`Alt+9` |
+| Breadcrumbs | [nvim-navic](https://github.com/SmiteshP/nvim-navic), in the winbar | automatic |
+| Project management | `vim.fs.root()` + the session manager | automatic, `:B2BRoot` |
+| AI assistant | [codecompanion.nvim](https://github.com/olimorris/codecompanion.nvim) | `<leader>a…` |
+| REST client | [kulala.nvim](https://github.com/mistweaverco/kulala.nvim) | `<leader>k…` |
+| SQL client | [vim-dadbod](https://github.com/tpope/vim-dadbod) + dadbod-ui | `<leader>D` |
+
+**Three more things deliberately not installed:**
+
+- **bufferline.nvim** — barbar is the same feature, and two tab bars fight over
+  the tabline.
+- **project.nvim** — last commit April 2023. What it is wanted for here is "cd
+  to the project root", and **`vim.fs.root()` has been in Neovim's standard
+  library since 0.10**, so that is fifteen lines instead of a dead dependency.
+  Its other half, "reopen the project I was on", is already the session manager.
+- **a Mason package for the debugger** — gdb has spoken DAP natively since
+  gdb 14 (`gdb -i dap`) and trixie ships 16.3, so C/C++ debugging uses the gdb
+  that is already installed. No codelldb download, no Rust toolchain.
+
+Three things are fetched at **build time** rather than on your first `nvim`,
+because each is a silent network download that would otherwise happen behind a
+spinner the first time you press its key: blink.cmp's fuzzy library, the
+markdown-preview server binary, and kulala's `kulala-core` + http grammar.
+
 Run **`:B2BExtras`** inside Neovim to see exactly what loaded and what did not.
+
+#### Seeing the markdown preview from your host
+
+The preview is a web server *inside the VM*, and the VM has no browser. So it
+binds to **`127.0.0.1:8420`** only, prints its URL instead of trying to launch
+anything, and you reach it over an SSH tunnel:
+
+```bash
+# on the HOST, once per session
+ssh -p 4242 -L 8420:127.0.0.1:8420 dlesieur@127.0.0.1
+```
+
+Then `<leader>mp` inside Neovim and open the URL it echoes. `:B2BMarkdown`
+prints this reminder, plus whether the server binary is actually present.
+
+Port 8420 and not 8080/8090 on purpose: this VM already serves lighttpd on
+80/443 and the Inception stack on 8080/8081/8082 with its static site on 8090.
+Override with `NVIM_MKDP_PORT` if it still clashes. Binding to loopback rather
+than `0.0.0.0` also means UFW's allow-list needs no hole punched in it.
 
 ### Keybindings
 

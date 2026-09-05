@@ -251,6 +251,42 @@ VBoxManage modifyvm "$VM_NAME" \
 	exit 1
 }
 
+# ── Do not let the VM take the host's sound card ────────────────────────────
+# Left unset, VirtualBox picks its own host audio backend, and on a Linux
+# desktop it picks ALSA and opens the raw device about ten seconds into the
+# guest's boot ("ALSA: Using output device \"default\"" in VBox.log). It then
+# holds that device for the whole life of the VM.
+#
+# PipeWire releases the card when nothing is playing, so the next time the user
+# plays anything it has to reopen it -- and gets EBUSY:
+#
+#     spa.alsa: 'front:0': playback open failed: Device or resource busy
+#     pw.node: (alsa_output.pci-...-analog-stereo) suspended -> error
+#
+# The node then stays in error and retries every 5s forever, so host sound is
+# dead until the VM exits, and applications that open audio *block* rather than
+# fail fast -- which is why browsers and calls feel broken too, not just sound.
+#
+# Measured on this host, not assumed. Host up 6h49m with clean audio; first VM
+# start 19:00:57 -> first EBUSY 19:02:37; last EBUSY 00:42:30 -> VM powered off
+# 00:42:31, one second later, and sound came back. Confirmed A/B/C with a silent
+# 2s file: VM on + audio enabled = pw-play hangs (exit 124); VM off = exit 0;
+# VM on + audio disabled = exit 0, and VBox.log never opens an ALSA device.
+#
+# Turning it off costs nothing: this is a headless server VM and VirtualBox was
+# already configured with playback and capture both disabled, so the emulated
+# AC97 never carried sound in either direction. It only held the device.
+#
+# --audio-enabled is the 7.x spelling; --audio none is the 6.x one. Try both so
+# this keeps working on an older VirtualBox instead of silently leaving audio on.
+print_header "Disabling VM audio (it holds the host sound card hostage)"
+if VBoxManage modifyvm "$VM_NAME" --audio-enabled off 2> /dev/null \
+	|| VBoxManage modifyvm "$VM_NAME" --audio none 2> /dev/null; then
+	echo "  Audio device removed from the guest; host sound stays with the host"
+else
+	echo "  Warning: could not disable VM audio -- host sound may cut out while the VM runs" >&2
+fi
+
 # ── Serial console: the headless install's only window ──────────────────────
 # The run is headless end to end, so nothing renders the VGA console. Wire
 # COM1 to a file and the Debian installer (booted with console=ttyS0, see
@@ -311,6 +347,16 @@ echo "  Vault:            host:${HOST_VAULT_PORT} -> guest:${VAULT_PORT}"
 # name first, so re-running setup — or a VM that kept old rules from a previous,
 # partially-removed instance — never aborts with "A NAT rule of this name already
 # exists". Args: <name> <host_port> <guest_port> (all rules are tcp).
+#
+# Every rule binds NATPF_BIND, not the empty host IP VirtualBox defaults to. An
+# empty host IP means 0.0.0.0: all 34 forwards were listening on every interface,
+# so the guest's ssh (4242), MariaDB (3307), Redis (6380), Vault (18200) and the
+# rest were reachable from the whole LAN the moment the VM booted -- on a host
+# whose own firewall is off by default ("Status: inactive", iptables INPUT
+# ACCEPT, checked on this machine). Loopback is what every consumer in this repo
+# already uses: ~/.ssh/config points at 127.0.0.1, and so does the markdown
+# preview tunnel. Override only if a LAN device genuinely needs to reach the VM.
+NATPF_BIND="${NATPF_BIND:-127.0.0.1}"
 NATPF_HOST_PORTS=""
 add_natpf() {
 	local name="$1" host_port="$2" guest_port="$3"
@@ -336,7 +382,7 @@ add_natpf() {
 	local attempt out
 	for attempt in 1 2 3 4 5 6; do
 		if out=$(VBoxManage modifyvm "$VM_NAME" \
-				--natpf1 "${name},tcp,,${host_port},,${guest_port}" 2>&1); then
+				--natpf1 "${name},tcp,${NATPF_BIND},${host_port},,${guest_port}" 2>&1); then
 			return 0
 		fi
 		case "$out" in

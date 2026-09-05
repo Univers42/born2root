@@ -24,6 +24,9 @@
 
 set -uo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../utils/vbox_driver.sh"
+
 WANT="${1:-${BACKEND:-auto}}"
 
 C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_GREEN=$'\033[32m'
@@ -37,22 +40,15 @@ say() { printf "%b\n" "$*" >&2; }
 vbox_ok=0
 vbox_why="VBoxManage not installed"
 if command -v VBoxManage > /dev/null 2>&1; then
-	# /sys/module/<name> exists exactly when the module is loaded. Do NOT use
-	# `lsmod | grep -q` here: with pipefail, grep -q exits on the first match,
-	# lsmod gets SIGPIPE on its next write (its output is >4 KB), and the whole
-	# pipeline reports failure -- a loaded driver shows up as "not loaded".
-	if [ -c /dev/vboxdrv ] && [ -d /sys/module/vboxdrv ]; then
-		vbox_ok=1; vbox_why="ready"
-		# A loaded driver is not the whole story. VT-x belongs to one
-		# hypervisor at a time, and a running KVM guest holds it: VirtualBox
-		# would fail with VERR_VMX_IN_VMX_ROOT_MODE -- the mirror image of
-		# the EBUSY that kvm_probe.sh catches in the other direction.
-		if kvm_users=$(bash "$(dirname "${BASH_SOURCE[0]}")/kvm_probe.sh" users); then
-			vbox_ok=0
-			vbox_why="blocked: a KVM guest is running ($(printf '%s' "$kvm_users" | paste -sd, -)) and holds VT-x; one hypervisor at a time"
-		fi
-	else
-		vbox_why="installed, but the vboxdrv kernel module is not loaded (needs root)"
+	vboxdrv_ok && vbox_ok=1
+	vbox_why=$(vboxdrv_why)
+	# A usable driver is not the whole story. VT-x belongs to one hypervisor
+	# at a time, and a running KVM guest holds it: VirtualBox would fail with
+	# VERR_VMX_IN_VMX_ROOT_MODE -- the mirror image of the EBUSY that
+	# kvm_probe.sh catches in the other direction.
+	if [ "$vbox_ok" = 1 ] && kvm_users=$(bash "$HERE/kvm_probe.sh" users); then
+		vbox_ok=0
+		vbox_why="blocked: a KVM guest is running ($(printf '%s' "$kvm_users" | paste -sd, -)) and holds VT-x; one hypervisor at a time"
 	fi
 fi
 

@@ -56,6 +56,9 @@
 
 set -uo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../utils/vbox_driver.sh"
+
 VM_NAME="${VM_NAME:-debian}"
 # VM_PATH is the Makefile's name for it; DISK_DIR is accepted for older callers.
 VM_PATH="${VM_PATH:-${DISK_DIR:-disk_images}}"
@@ -85,22 +88,17 @@ command -v VBoxManage > /dev/null 2>&1 || {
 
 VER=$(vbox_version)
 
-# ── The actual test: is the driver there? ───────────────────────────────────
+# ── The actual test: is the driver there, loaded, AND usable by us? ─────────
 # /dev/vboxdrv is what VBoxManage opens. A loaded module without the device
-# node, or a node with no module, are both unusable — so check both.
-# /sys/module/vboxdrv exists exactly when the module is loaded. Not
-# `lsmod | grep -q`: under pipefail, grep -q's early exit gives lsmod SIGPIPE
-# and the pipeline fails even though the driver is loaded.
-DRIVER_OK=0
-if [ -c /dev/vboxdrv ] && [ -d /sys/module/vboxdrv ]; then
-	DRIVER_OK=1
-fi
-
-if [ "$DRIVER_OK" = "1" ]; then
+# node, a node with no module, or a node this user cannot open are all
+# unusable — so check all three (see utils/vbox_driver.sh for the third: a
+# device that exists with the wrong permissions reports "ready" here otherwise,
+# right up until the first VM start fails).
+if vboxdrv_ok; then
 	# The driver is there, but VT-x belongs to one hypervisor at a time. With
 	# a KVM guest running, `VBoxManage startvm` fails with
 	# VERR_VMX_IN_VMX_ROOT_MODE -- so say it here, in words, first.
-	if kvm_users=$(bash "$(dirname "${BASH_SOURCE[0]}")/kvm_probe.sh" users); then
+	if kvm_users=$(bash "$HERE/kvm_probe.sh" users); then
 		bad "VirtualBox cannot start a VM right now: a KVM guest holds VT-x"
 		printf '%s\n' "$kvm_users" | sed 's/^/     running: /'
 		printf "  One hypervisor at a time. Stop it first:  ${C_BOLD}make qemu_stop${C_RESET}\n"
@@ -109,6 +107,51 @@ if [ "$DRIVER_OK" = "1" ]; then
 	fi
 	ok "VirtualBox ${VER:-unknown} — kernel driver loaded on $(hostname -s)"
 	exit 0
+fi
+
+# ── Loaded and present, but this user cannot open it ─────────────────────────
+# A distinct failure from "not loaded": rebuilding or modprobing the module
+# fixes nothing here, since the module already works — for root.
+if [ -c /dev/vboxdrv ] && vboxdrv_loaded && ! vboxdrv_accessible; then
+	printf "\n${C_RED}${C_BOLD}  This machine cannot start a VM.${C_RESET}\n"
+	printf "  ${C_DIM}Nothing in this project is broken: this is a permission on this machine's /dev/vboxdrv.${C_RESET}\n\n"
+	bad "VirtualBox ${VER:-unknown}'s kernel driver works, but not for $(id -un)"
+	printf "     %-22s %s\n" "machine:" "$(hostname -f 2> /dev/null || hostname)"
+	printf "     %-22s %s\n" "/dev/vboxdrv:" "$(stat -c '%U:%G mode %a' /dev/vboxdrv 2> /dev/null || echo present)"
+	printf "     %-22s %s\n" "your groups:" "$(id -Gn 2> /dev/null | tr ' ' ',')"
+
+	printf "\n${C_BOLD}  Why${C_RESET}\n"
+	note "The kernel driver is loaded and working, but the device node is not"
+	note "owned by a group $(id -un) belongs to. VirtualBox expects root:vboxusers"
+	note "0660; every VM operation fails with a permission error until that is fixed."
+
+	CAN_SUDO=0
+	if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qx sudo; then
+		CAN_SUDO=1
+	fi
+
+	printf "\n${C_BOLD}  What fixes it${C_RESET}\n"
+	if [ "$CAN_SUDO" = "1" ]; then
+		note "Join the group that should own it, then start a NEW session (group"
+		note "membership only applies to logins that start after this):"
+		printf "      ${C_BOLD}sudo usermod -aG vboxusers %s${C_RESET}\n" "$(id -un)"
+		note "Still root:root after that and a fresh login? The udev rule itself"
+		note "isn't being applied — reload it: sudo udevadm control --reload-rules"
+		note "&& sudo udevadm trigger --name-match=vboxdrv"
+	else
+		note "Fixing this needs root (usermod into vboxusers, or reloading udev"
+		note "rules), and this account is not in the sudo group. Ask 42 staff, or"
+		note "build on a machine where VirtualBox already works for your account."
+	fi
+	printf "\n"
+	printf "  ${C_RED}BLOCKED${C_RESET}: vboxdrv works but is not accessible to %s on %s.\n\n" \
+		"$(id -un)" "$(hostname -s)"
+
+	if [ "${SKIP_DRIVER_CHECK:-0}" = "1" ]; then
+		warn "SKIP_DRIVER_CHECK=1 — continuing anyway (the VM start will fail)"
+		exit 0
+	fi
+	exit 1
 fi
 
 # ── Not usable. Explain exactly why, in the order that matters. ─────────────
@@ -121,7 +164,7 @@ printf "     %-22s %s\n" "kernel:" "$(uname -r)"
 	&& printf "     %-22s %s\n" "/dev/vboxdrv:" "present" \
 	|| printf "     %-22s %s\n" "/dev/vboxdrv:" "MISSING"
 printf "     %-22s %s\n" "vboxdrv module:" \
-	"$([ -d /sys/module/vboxdrv ] && echo loaded || echo 'not loaded')"
+	"$(vboxdrv_loaded && echo loaded || echo 'not loaded')"
 
 # Is the module even built for the running kernel? This separates "needs a
 # rebuild" from "built fine, just never loaded" — completely different fixes.
