@@ -33,8 +33,25 @@ info() { printf "${BLU}▶${RST} %s\n" "$*"; }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-dpkg_installed() {
-	dpkg -s "$1" 2>/dev/null | grep -q "^Status:.*installed"
+detect_pkg_mgr() {
+	if command -v apt >/dev/null 2>&1; then
+		PKG_MGR="apt"
+	elif command -v dnf >/dev/null 2>&1; then
+		PKG_MGR="dnf"
+	else
+		PKG_MGR="unknown"
+	fi
+}
+detect_pkg_mgr
+
+pkg_installed() {
+	if [ "$PKG_MGR" = "apt" ]; then
+		dpkg -s "$1" 2>/dev/null | grep -q "^Status:.*installed"
+	elif [ "$PKG_MGR" = "dnf" ]; then
+		rpm -q "$1" >/dev/null 2>&1
+	else
+		return 1
+	fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,18 +268,46 @@ check_vbox() {
 #  All other required tools
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Format: "binary:apt-package[:apt-package ...]"
-# Special binary "__dpkg" checks via dpkg instead of command -v.
-declare -a CHECKS=(
-	"xorriso:xorriso"
-	"curl:curl"
-	"cc:gcc"
-	"__dpkg:libreadline-dev"
-	"python3:python3"
-	"git:git"
-	"ssh:openssh-client"
-	"make:make"
-)
+# Format: "binary:package[:package ...]"
+# Special binary "__pkg" checks via package manager instead of command -v.
+if [ "$PKG_MGR" = "apt" ]; then
+	declare -a CHECKS=(
+		"xorriso:xorriso"
+		"curl:curl"
+		"cc:gcc"
+		"__pkg:libreadline-dev"
+		"python3:python3"
+		"git:git"
+		"ssh:openssh-client"
+		"make:make"
+	)
+	VBOX_PKG="virtualbox-7.1"
+elif [ "$PKG_MGR" = "dnf" ]; then
+	declare -a CHECKS=(
+		"xorriso:xorriso"
+		"curl:curl"
+		"cc:gcc"
+		"__pkg:readline-devel"
+		"python3:python3"
+		"git:git"
+		"ssh:openssh-clients"
+		"make:make"
+	)
+	VBOX_PKG="VirtualBox"
+else
+	# Fallback for unknown
+	declare -a CHECKS=(
+		"xorriso:xorriso"
+		"curl:curl"
+		"cc:gcc"
+		"__pkg:readline-devel"
+		"python3:python3"
+		"git:git"
+		"ssh:openssh-client"
+		"make:make"
+	)
+	VBOX_PKG="VirtualBox"
+fi
 
 MISSING_PKGS=""
 ALL_OK=true
@@ -275,9 +320,9 @@ check_entry() {
 
 	IFS=':' read -r -a pkg_arr <<< "$rest"
 
-	if [ "$binary" = "__dpkg" ]; then
+	if [ "$binary" = "__pkg" ]; then
 		local p="${pkg_arr[0]}"
-		if dpkg_installed "$p"; then
+		if pkg_installed "$p"; then
 			ok "${p} (dev headers)"
 		else
 			warn "${p} not installed"
@@ -337,15 +382,25 @@ fi
 # ── Install VirtualBox if missing ─────────────────────────────────────────────
 if [ "$VBOX_OK" = false ]; then
 	printf "\n"
-	info "VirtualBox is not installed. Setting up Oracle apt repository first..."
-	setup_vbox_apt_repo
+	if [ "$PKG_MGR" = "apt" ]; then
+		info "VirtualBox is not installed. Setting up Oracle apt repository first..."
+		setup_vbox_apt_repo
+	fi
 
 	printf "\n"
 	printf "${YLW}⚠${RST}  VirtualBox is missing.\n"
-	printf "${BLU}▶${RST} Running: ${BLD}sudo apt install virtualbox-7.1${RST}\n"
-	printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
-
-	sudo apt install virtualbox-7.1
+	if [ "$PKG_MGR" = "apt" ]; then
+		printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$VBOX_PKG"
+		printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
+		sudo apt install "$VBOX_PKG"
+	elif [ "$PKG_MGR" = "dnf" ]; then
+		printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$VBOX_PKG"
+		printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
+		sudo dnf install "$VBOX_PKG"
+	else
+		fail "Package manager unknown. Please manually install VirtualBox."
+		exit 1
+	fi
 
 	if [ "$INSTALL_EXTPACK" = "1" ]; then
 		printf "\n"
@@ -357,11 +412,19 @@ fi
 # ── Install remaining missing tools ──────────────────────────────────────────
 if [ -n "$MISSING_PKGS" ]; then
 	printf "${YLW}⚠${RST}  Missing packages: ${BLD}%s${RST}\n" "$MISSING_PKGS"
-	printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$MISSING_PKGS"
-	printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
-
-	sudo apt-get update -qq 2>/dev/null || true
-	sudo apt install $MISSING_PKGS
+	if [ "$PKG_MGR" = "apt" ]; then
+		printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$MISSING_PKGS"
+		printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
+		sudo apt-get update -qq 2>/dev/null || true
+		sudo apt install $MISSING_PKGS
+	elif [ "$PKG_MGR" = "dnf" ]; then
+		printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$MISSING_PKGS"
+		printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
+		sudo dnf install $MISSING_PKGS
+	else
+		fail "Package manager unknown. Please manually install the missing packages."
+		exit 1
+	fi
 	printf "\n"
 fi
 

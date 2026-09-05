@@ -147,7 +147,7 @@ fi
 
 # Can the person reading this actually fix it? Only if they can run sudo.
 CAN_SUDO=0
-if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qx sudo; then
+if command -v sudo > /dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2> /dev/null | tr ' ' '\n' | grep -qEx 'sudo|wheel'; then
 	CAN_SUDO=1
 fi
 
