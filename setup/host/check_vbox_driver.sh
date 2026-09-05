@@ -56,7 +56,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$HERE/../../utils/vbox_driver.sh"
 
 VM_NAME="${VM_NAME:-debian}"

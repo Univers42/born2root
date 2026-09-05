@@ -362,18 +362,18 @@ get_host_ip() {
 # Host port allocation (detects local listeners, including loopback-only ones
 # such as the 42 ftpkg service on 127.0.0.1:4242). Shared with the VM installer
 # so both agree on which host ports are free and never hand out one twice.
-. "$(dirname "${BASH_SOURCE[0]}")/../utils/host_ports.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/host_ports.sh"
 # Reads the installer's own progress off serial.log (shared with qemu_vm.sh).
-. "$(dirname "${BASH_SOURCE[0]}")/../setup/host/di_progress.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../setup/host/di_progress.sh"
 
 # LUKS unlock helpers (resolve_passphrase / send_passphrase / wait_for_ssh).
 # Sourcing defines functions only, so this starts nothing.
-. "$(dirname "${BASH_SOURCE[0]}")/../unlock_vm.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../unlock_vm.sh"
 
 # The VM disk and its "this install finished" stamp (vdi_bytes / install_finished
 # / mark_install_finished). Sourced up here so Step 4 below cannot call them
 # before they exist — which is exactly what used to happen.
-. "$(dirname "${BASH_SOURCE[0]}")/../utils/vm_disk.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/vm_disk.sh"
 
 # Answer the guest's LUKS prompt without printing: draw_dashboard owns the
 # terminal here, so progress goes through STEP_DETAIL instead of stdout.
@@ -546,7 +546,7 @@ fi
 # here, before an ISO is downloaded or a VM is touched, and let the check's
 # own diagnosis be the error log.
 run_step 0 env NO_COLOR=1 VM_NAME="${VM_NAME}" \
-	bash "$(dirname "$0")/../setup/host/check_vbox_driver.sh"
+	"${SCRIPT_SH:-bash}" "$(dirname "$0")/../setup/host/check_vbox_driver.sh"
 STEP_DETAIL[0]="v$(vbox_version)"
 draw_dashboard
 

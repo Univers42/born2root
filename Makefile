@@ -30,6 +30,28 @@ BACKEND      ?= auto
 ifeq ($(origin VM_PATH),undefined)
 VM_PATH      := $(shell cat $(CURDIR)/disk_images/.vm_path.$(VM_NAME) 2>/dev/null || echo $(CURDIR)/disk_images)
 endif
+
+# ── Which shell interprets the scripts ──────────────────────────────────────
+# make parses the Makefile; the .sh files it calls are interpreted by a shell.
+# Run them with the shell you launched make FROM -- hellish when that is your
+# shell -- and fall back to bash. The launcher is make's parent process; a
+# candidate is used only if it can run the scripts' bash-isms (arrays, local,
+# BASH_SOURCE), so `make all` can never pick a shell that would choke on them.
+# Override with `make ... SCRIPT_SH=/path/to/shell`. Exported, so recursive
+# makes and the scripts themselves inherit the same choice without re-probing.
+ifeq ($(origin SCRIPT_SH),undefined)
+SCRIPT_SH := $(shell \
+	up=$$(ps -o ppid= -p $$PPID 2>/dev/null | tr -d " "); \
+	launcher=$$(ps -o comm= -p "$$up" 2>/dev/null | sed "s/^-//"); \
+	for c in "$$launcher" "$$SHELL" hellish bash; do \
+		[ -n "$$c" ] || continue; \
+		p=$$(command -v "$$c" 2>/dev/null) || continue; \
+		"$$p" -c 'a=(1 2); f(){ local x=0; }; f; : "$${BASH_SOURCE[0]:-x}"' >/dev/null 2>&1 \
+			&& { printf "%s" "$$p"; break; }; \
+	done)
+SCRIPT_SH := $(if $(strip $(SCRIPT_SH)),$(strip $(SCRIPT_SH)),bash)
+endif
+export SCRIPT_SH
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
 PRESEED_FILE := preseeds/preseed.cfg
@@ -144,27 +166,27 @@ MAKE_BIN := $(MAKE)
 # needs root; when VM_PATH does, make all asks for sudo for exactly that step.
 # Same check as qemu_vm.sh create/install/start (utils/vm_path.sh refuse_sudo_build).
 no_root:
-	@bash utils/vm_path.sh --no-root "make all VM_PATH=$(VM_PATH)"
+	@$(SCRIPT_SH) utils/vm_path.sh --no-root "make all VM_PATH=$(VM_PATH)"
 
 all: no_root prepare
-	@backend=$$(BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
-	bash utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
+	@backend=$$(BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
+	$(SCRIPT_SH) utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \
 		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" \
-			bash setup/host/qemu_pipeline.sh; \
+			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
 	else \
 		$(MAKE_BIN) --no-print-directory check_driver && \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
-			bash generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
+			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
 
 # Which backend would `make all` pick right now, and why?
 backend:
-	@BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)" >/dev/null
+	@BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/host/select_backend.sh "$(BACKEND)" >/dev/null
 
 # =========@@ QEMU/KVM backend @@=============================================
 # The same VM, run by QEMU instead of VirtualBox. Useful on its own when you
@@ -191,76 +213,76 @@ qemu_install:
 		printf "    $(C_BOLD)make qemu_install FORCE_INSTALL=1$(C_RESET)  wipe it and install again\n\n"; \
 		exit 1; \
 	fi
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh create
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh install
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh create
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh install
 
 qemu_start:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh start
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh start
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config
 
 qemu_stop:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh stop
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop
 
 qemu_status:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh status
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh status
 
 qemu_console:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh console
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh console
 
 # Re-attach the install progress tracker (Ctrl+C only ever detaches it).
 qemu_watch:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh watch
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh watch
 
 # Just the disk (qemu_install = create + install).
 qemu_create:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh create
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh create
 
 qemu_kill:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh kill
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh kill
 
 qemu_restart:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh restart
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh restart
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config
 
 # Hard reset, pause and resume go through the QEMU monitor.
 qemu_reset:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh reset
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh reset
 
 qemu_pause:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh pause
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh pause
 
 qemu_resume:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh resume
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh resume
 
 # Type the LUKS passphrase at the guest (qemu_start does this itself).
 qemu_unlock:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh unlock
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh unlock
 
 # The VGA screen, where the LUKS prompt and boot errors live.
 qemu_screenshot:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh screenshot
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh screenshot
 
 # A shell in the guest on the port it actually got -- or one command:
 #   make qemu_ssh CMD="uname -a"
 qemu_ssh:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh $(CMD)
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh $(CMD)
 
 qemu_ssh_config:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh ssh-config
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config
 
 # Every QEMU guest on this host, whoever started it, from whatever VM_PATH.
 qemu_list:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh list
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh list
 
 # Any QEMU monitor command:   make qemu_monitor CMD="info block"
 qemu_monitor:
-	@$(QEMU_ENV) bash setup/host/qemu_vm.sh monitor "$(or $(CMD),info status)"
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh monitor "$(or $(CMD),info status)"
 
 # Prove the guest is the same whichever backend built it: partitions, LUKS,
 # LVM, UFW, the policy files and the login shell all come from the preseeded
 # ISO. Run it on both and diff the output.
 verify_guest:
-	@BACKEND_LABEL="$(BACKEND)" bash setup/host/verify_guest_parity.sh
+	@BACKEND_LABEL="$(BACKEND)" $(SCRIPT_SH) setup/host/verify_guest_parity.sh
 
 # Prepare everything needed for a smooth `make all` experience:
 # - check + install host dependencies (VirtualBox, xorriso, gcc, libreadline-dev, …)
@@ -312,7 +334,7 @@ pull:
 # (sh42 was removed in favour of the downloaded hellish release). Kept as
 # generic machinery in case one is ever added back; it is a no-op today.
 update:
-	@bash setup/update_submodules.sh
+	@$(SCRIPT_SH) setup/update_submodules.sh
 
 
 # Fetch the custom shell: download the published hellish release binary.
@@ -326,7 +348,7 @@ update:
 #   make all CUSTOM_SHELL_PATH=hellish/build/bin/hellish
 shell:
 	@HELLISH_VERSION="$(HELLISH_VERSION)" HELLISH_REFRESH="$(HELLISH_REFRESH)" \
-		OUT_BIN="$(CUSTOM_SHELL_PATH)" bash setup/fetch_hellish.sh
+		OUT_BIN="$(CUSTOM_SHELL_PATH)" $(SCRIPT_SH) setup/fetch_hellish.sh
 
 
 # =========@@ Install host developer dependencies @@==========================
@@ -335,7 +357,7 @@ shell:
 # Missing packages are installed via `sudo apt install` WITHOUT -y so the
 # user reviews and confirms the apt plan themselves.
 deps:
-	@bash setup/install/check_deps.sh
+	@$(SCRIPT_SH) setup/install/check_deps.sh
 
 # =========@@ VirtualBox Extension Pack (optional) @@=========================
 # Deliberately NOT part of `make deps` / `make all`. The pack installs into
@@ -348,7 +370,7 @@ deps:
 # a SATA disk, guest-side LUKS and a serial console. Install it only if you want
 # those extras:
 extpack:
-	@INSTALL_EXTPACK=1 bash setup/install/check_deps.sh
+	@INSTALL_EXTPACK=1 $(SCRIPT_SH) setup/install/check_deps.sh
 
 # =========@@ System compatibility pre-checks @@==============================
 check_system:
@@ -422,7 +444,7 @@ check_system:
 #   make all SKIP_DRIVER_CHECK=1   proceed anyway (the VM start will still fail)
 check_driver:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
-		bash setup/host/check_vbox_driver.sh
+		$(SCRIPT_SH) setup/host/check_vbox_driver.sh
 
 # =========@@ Whose VM is this? @@============================================
 # disk_images/ is inside the shared home, so every workstation sees the same
@@ -457,22 +479,22 @@ guard_host:
 
 # =========@@ Fix incompatible HWE kernel (VirtualBox DKMS) @@=================
 fix_hwe:
-	@bash fixes/fix_hwe_kernel.sh
+	@$(SCRIPT_SH) fixes/fix_hwe_kernel.sh
 
 fix_app_ports:
-	@bash fixes/fix_app_nat_forwarding.sh "$(VM_NAME)"
+	@$(SCRIPT_SH) fixes/fix_app_nat_forwarding.sh "$(VM_NAME)"
 
 
 # =========@@ Build preseeded ISO @@============================================
 gen_iso: shell
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
-		AI_MODE="$(AI_MODE)" bash $(ISO_BUILDER)
+		AI_MODE="$(AI_MODE)" $(SCRIPT_SH) $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
-		bash $(VM_SCRIPT) "$(VM_NAME)"
+		$(SCRIPT_SH) $(VM_SCRIPT) "$(VM_NAME)"
 
 # =========@@ Start an existing VM @@===========================================
 start_vm: check_system
@@ -480,7 +502,7 @@ start_vm: check_system
 		printf "$(C_RED)✗$(C_RESET) VM \"$(VM_NAME)\" does not exist. Run: make setup_vm\n"; \
 		exit 1; \
 	fi
-	@VM_NAME="$(VM_NAME)" bash unlock_vm.sh
+	@VM_NAME="$(VM_NAME)" $(SCRIPT_SH) unlock_vm.sh
 
 # Escape hatch: opens the VirtualBox window. Use when you need the console --
 # to watch the installer, or to type the passphrase by hand.
@@ -498,7 +520,7 @@ gui_vm: check_system
 
 # =========@@ Status @@========================================================
 status:
-	@bash generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
+	@$(SCRIPT_SH) generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
 
 # =========@@ Serial console @@================================================
 # The whole pipeline is headless, so nothing ever renders the VM's screen. The
@@ -510,10 +532,10 @@ status:
 #   make console      follow it live (Ctrl+C stops watching, not the VM)
 #   make serial_log   print what is in it and exit
 console:
-	@bash generate/serial_console.sh "$(VM_NAME)" follow
+	@$(SCRIPT_SH) generate/serial_console.sh "$(VM_NAME)" follow
 
 serial_log:
-	@bash generate/serial_console.sh "$(VM_NAME)" dump
+	@$(SCRIPT_SH) generate/serial_console.sh "$(VM_NAME)" dump
 
 # =========@@ Headless boot with unlock @@======================================
 # start_vm is headless already; kept so existing habits and docs keep working.
@@ -606,22 +628,22 @@ fresh:
 # entry. host_access teaches the two installed browsers to resolve it
 # themselves — no proxy, no SSH tunnel, no root. See the script's header.
 host_access:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
 
 host_access_undo:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/inception_host_access.sh --undo
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh --undo
 
 # Clone (or upload) Inception into the VM, build it, wire up the host, verify.
 #   make inception                    clone github.com/Univers42/inception
 #   make inception SRC=/path/to/repo  push a local working tree up instead
 inception:
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
-		bash setup/host/deploy_inception.sh
+		$(SCRIPT_SH) setup/host/deploy_inception.sh
 
 # Prove it from the host: NAT rules, TLS/SNI, the WordPress redirect trap, and
 # a real headless browser load of the bare https://$(DOMAIN) URL.
 verify_access:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" bash setup/host/verify_inception_access.sh
+	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/verify_inception_access.sh
 
 # Common misspelling. `make` has no "did you mean", so a typo here fails with a
 # bare "No rule to make target" right after host_access printed all-green --
@@ -642,10 +664,10 @@ verif_access: verify_access
 #   make nvim_health               just re-print :checkhealth from the VM
 nvim:
 	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
-		bash setup/host/provision_vm.sh "$(VM_NAME)" nvim
+		$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" nvim
 
 hellish_plugins:
-	@bash setup/host/provision_vm.sh "$(VM_NAME)" hellish
+	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" hellish
 
 # Re-run upstream's hellish installer inside a VM that is already built:
 #   curl -fsSL .../hellish/main/install.sh | sh
@@ -654,29 +676,29 @@ hellish_plugins:
 # re-applies the SSH-compatibility wrapper. `make all` already does this on
 # first boot; this is for iterating without a rebuild.
 shell_vm:
-	@bash setup/host/provision_vm.sh "$(VM_NAME)" shell
+	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" shell
 
 provision:
 	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
-		bash setup/host/provision_vm.sh "$(VM_NAME)" all
+		$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" all
 
 nvim_health:
-	@bash setup/host/provision_vm.sh "$(VM_NAME)" health
+	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" health
 
 # Machine-wide tooling on /opt instead of / and /home (npm globals, AI models).
 global_scope:
-	@bash setup/host/provision_vm.sh "$(VM_NAME)" global
+	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" global
 
 # Herdr (persistent terminal panes over SSH) + Claude Code.
 devtools:
-	@bash setup/host/provision_vm.sh "$(VM_NAME)" devtools
+	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
 
 # Optional AI. Does nothing unless AI_MODE is client or local:
 #   make ai AI_MODE=local        a model sized to this VM's RAM
 #   make ai AI_MODE=client       talk to Ollama on the host (10.0.2.2)
 ai:
-	@AI_MODE="$(AI_MODE)" bash setup/host/provision_vm.sh "$(VM_NAME)" ai
+	@AI_MODE="$(AI_MODE)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" ai
 
 # =========@@ Help @@==========================================================
 help:
-	@bash generate/help.sh
+	@$(SCRIPT_SH) generate/help.sh

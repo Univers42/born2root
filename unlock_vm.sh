@@ -157,7 +157,7 @@ main() {
 }
 
 # Only run when executed, so tests can source this for the pure helpers.
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
 	set -e
 	main "$@"
 fi

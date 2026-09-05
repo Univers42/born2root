@@ -24,7 +24,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$HERE/../../utils/vbox_driver.sh"
 
 WANT="${1:-${BACKEND:-auto}}"
@@ -61,7 +61,7 @@ if command -v qemu-system-x86_64 > /dev/null 2>&1; then
 	# perfectly readable. See kvm_probe.sh for the mechanism.
 	# Without KVM QEMU still runs, but a Debian install under pure emulation
 	# takes hours. Offering it silently would be a trap.
-	if qemu_why=$(bash "$(dirname "${BASH_SOURCE[0]}")/kvm_probe.sh"); then
+	if qemu_why=$(bash "$(dirname "${BASH_SOURCE[0]:-$0}")/kvm_probe.sh"); then
 		qemu_ok=1
 	else
 		qemu_why="installed, but ${qemu_why}"

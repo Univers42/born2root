@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ALIAS="${1:-b2b}"
 PRESEED_FILE="${PRESEED_FILE:-$REPO_ROOT/preseeds/preseed.cfg}"

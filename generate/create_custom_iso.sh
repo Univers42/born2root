@@ -4,7 +4,7 @@ set -e # Exit on any error
 
 # Always run relative to repo root (so paths like preseeds/... and dist/... work
 # regardless of the caller's current directory).
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
 cd "$REPO_ROOT"
 

@@ -20,7 +20,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 VM_NAME="${VM_NAME:-debian}"
 DOMAIN="${INCEPTION_DOMAIN:-dlesieur.42.fr}"
 SSH_ALIAS="${SSH_ALIAS:-b2b}"
@@ -36,7 +36,7 @@ head_() { printf "\n${C_BOLD}%s${C_RESET}\n" "$*"; }
 
 # Backend-aware: a VirtualBox NAT rule or a QEMU hostfwd, whichever exists.
 # shellcheck source=setup/host/vm_ports.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vm_ports.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/vm_ports.sh"
 
 get_forward_port() { vm_forward_port "$1"; }
 

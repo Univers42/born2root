@@ -156,7 +156,7 @@ show_datetime() {
 }
 
 # Check if this script is being sourced or executed
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
 	# Script is being executed directly - show demo
 	clear
 	show_datetime

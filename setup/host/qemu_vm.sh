@@ -67,7 +67,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # Reads the installer's own progress off serial.log (shared with orchestrate.sh).
 . "$HERE/di_progress.sh"
@@ -112,7 +112,7 @@ warn() { printf "  ${C_YELLOW}⚠${C_RESET}  %s\n" "$*"; }
 die()  { printf "  ${C_RED}✗${C_RESET} %s\n" "$*" >&2; exit 1; }
 
 QEMU=$(command -v qemu-system-x86_64 || true)
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 	[ -n "$QEMU" ] || die "qemu-system-x86_64 not installed"
 fi
 
@@ -153,12 +153,22 @@ pid_alive() { [ -d "/proc/$1" ]; }
 # recovered from the process list by the very -pidfile path QEMU was given,
 # instead of an unreadable file being reported as "not running".
 qemu_pid() {
-	local p
-	p=$(head -n1 "$PIDFILE" 2> /dev/null)
-	if [ -z "$p" ] && [ -e "$PIDFILE" ]; then
-		p=$(qemu_cmdlines | awk -v pf=" -pidfile $PIDFILE " 'index($0, pf) { print $1; exit }')
+	local p=
+	# Every step is written so a caller running under `set -e` is never
+	# aborted here: `|| p=` swallows a failed read (the pidfile can be
+	# unreadable when another user started the guest), the two conditions are
+	# NESTED rather than `[ -z ] && [ -e ]` (a failing second half of an
+	# if-condition trips some shells' set -e), and the tail uses explicit
+	# `|| return 1` instead of a bare `&&`-chain.
+	p=$(head -n1 "$PIDFILE" 2> /dev/null) || p=
+	if [ -z "$p" ]; then
+		if [ -e "$PIDFILE" ]; then
+			p=$(qemu_cmdlines | awk -v pf=" -pidfile $PIDFILE " 'index($0, pf) { print $1; exit }') || p=
+		fi
 	fi
-	[ -n "$p" ] && pid_alive "$p" && printf '%s' "$p"
+	[ -n "$p" ] || return 1
+	pid_alive "$p" || return 1
+	printf '%s' "$p"
 }
 
 is_running() { qemu_pid > /dev/null 2>&1; }
@@ -664,7 +674,7 @@ await_shutdown() {
 # ── Actions ─────────────────────────────────────────────────────────────────
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 case "${1:-status}" in
 	create)
 		refuse_sudo_build "make qemu_create VM_PATH=$VM_PATH" || exit 1

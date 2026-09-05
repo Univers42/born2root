@@ -145,7 +145,14 @@ _ensure_vm_dir() {
 		return 1
 	fi
 
-	mapfile -t lines < <(_vm_path_recipe "$vm_path" "$vm_dir")
+	# Fill the array WITHOUT process substitution: a non-bash shell (hellish)
+	# does not make shell functions visible inside <(...), so
+	# `mapfile -t lines < <(_vm_path_recipe ...)` read an empty list there. A
+	# command substitution DOES see functions, and filling the array in the
+	# current shell keeps the sudo loop's stdin on the terminal for the
+	# password prompt. (Univers42/hellish: process substitution drops functions.)
+	lines=()
+	while IFS= read -r line; do lines+=("$line"); done <<< "$(_vm_path_recipe "$vm_path" "$vm_dir")"
 	for line in "${lines[@]}"; do
 		"$VM_PATH_SUDO" sh -c "$line" || {
 			printf '  %s✗%s failed: sudo %s\n' "$_VP_RED" "$_VP_OFF" "$line" >&2
@@ -166,7 +173,7 @@ _ensure_vm_dir() {
 # running". The location is recorded per VM_NAME, and the Makefile reads it
 # back as the default VM_PATH. Repo-local (disk_images/ is gitignored); the
 # tests point it elsewhere.
-VM_PATH_REGISTRY="${VM_PATH_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/disk_images}"
+VM_PATH_REGISTRY="${VM_PATH_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/disk_images}"
 
 remember_vm_dir() {
 	mkdir -p "$VM_PATH_REGISTRY" 2> /dev/null || return 0
@@ -193,7 +200,7 @@ refuse_sudo_build() {
 }
 
 # Run as a command (the Makefile does, before either pipeline starts).
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 	case "${1:-}" in
 		--no-root)
 			refuse_sudo_build "${2:-make all}"

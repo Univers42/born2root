@@ -103,7 +103,7 @@ vm_state() {
 # Host port currently bound to a named NAT rule ("" when the rule is absent).
 # Backend-aware: a VirtualBox NAT rule or a QEMU hostfwd, whichever exists.
 # shellcheck source=setup/host/vm_ports.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vm_ports.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/vm_ports.sh"
 
 get_forward_port() { vm_forward_port "$1"; }
 
@@ -168,7 +168,7 @@ pick_proxy_port() {
 
 install_proxy_service() {
 	local https_port="$1" static_port="$2" http_port="$3"
-	local src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/inception_proxy.py"
+	local src="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/inception_proxy.py"
 	if [ ! -f "$src" ]; then
 		warn "inception_proxy.py missing — the bare URL will not work"
 		return 1
@@ -299,7 +299,7 @@ firefox_profiles() {
 				printf '%s\n' "${d%/}"
 			fi
 		done
-	done < <(firefox_roots)
+	done <<< "$(firefox_roots)"
 }
 
 # Rewrite user.js keeping every line the user put there themselves: the managed
@@ -353,7 +353,7 @@ configure_firefox() {
 			printf '%s\n' "$END_MARK"
 		} >> "$userjs"
 		n=$((n + 1))
-	done < <(firefox_profiles)
+	done <<< "$(firefox_profiles)"
 
 	if [ "$n" -gt 0 ]; then
 		ok "Firefox: $n profile(s) now resolve ${C_BOLD}${DOMAIN}${C_RESET} locally"
@@ -377,7 +377,7 @@ undo_firefox() {
 		[ -n "$certutil_bin" ] && "$certutil_bin" -D -n "$CA_NICKNAME" \
 			-d "sql:$profile" > /dev/null 2>&1
 		n=$((n + 1))
-	done < <(firefox_profiles)
+	done <<< "$(firefox_profiles)"
 	ok "Firefox: managed block removed from $n profile(s)"
 }
 
@@ -430,7 +430,7 @@ install_ca_into_chrome() {
 			-i "$CA_FILE" > /dev/null 2>&1; then
 			n=$((n + 1))
 		fi
-	done < <(chrome_nss_dirs)
+	done <<< "$(chrome_nss_dirs)"
 	if [ "$n" -gt 0 ]; then
 		ok "Chrome: local CA trusted in $n NSS store(s) — no certificate warning"
 	else
@@ -444,7 +444,7 @@ undo_ca_from_chrome() {
 	while read -r dir; do
 		[ -d "$dir" ] || continue
 		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" > /dev/null 2>&1
-	done < <(chrome_nss_dirs)
+	done <<< "$(chrome_nss_dirs)"
 }
 
 # ── Chromium / Chrome ───────────────────────────────────────────────────────
@@ -566,7 +566,7 @@ install_ca_into_firefox() {
 			-i "$CA_FILE" > /dev/null 2>&1; then
 			n=$((n + 1))
 		fi
-	done < <(firefox_profiles)
+	done <<< "$(firefox_profiles)"
 	if [ "$n" -gt 0 ]; then
 		CA_TRUSTED=1
 		ok "Firefox: local CA trusted in $n profile(s) — no certificate warning"
@@ -730,7 +730,7 @@ fi
 # `make all` the VM has no Inception yet, so no CA could be fetched and a
 # restart then would just force a second one after `make inception`.
 if [ "$CA_TRUSTED" = "1" ]; then
-	bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/restart_browsers.sh"
+	bash "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/restart_browsers.sh"
 else
 	warn_if_firefox_running
 fi

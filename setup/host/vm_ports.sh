@@ -28,7 +28,7 @@ VM_PORTS_SH_LOADED=1
 # Resolved ONCE, here, while BASH_SOURCE still points at this file. Computing
 # it inside the function instead gave the wrong answer, because BASH_SOURCE is
 # re-evaluated in the caller's context and walked up from the wrong directory.
-_VM_PORTS_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2> /dev/null && pwd)"
+_VM_PORTS_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2> /dev/null && pwd)"
 
 _vm_ports_file() {
 	local vm="${VM_NAME:-debian}"

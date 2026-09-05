@@ -100,7 +100,7 @@ repair_orphans() {
 		else
 			say "${R}✗${Z} Registered but failed to fetch: ${path} -> ${url}"
 		fi
-	done < <(gitlinks "$repo")
+	done <<< "$(gitlinks "$repo")"
 }
 
 # Update repo $1's direct children to their remote tip, repair orphans, then recurse.
@@ -123,7 +123,7 @@ process_repo() {
 	while read -r path; do
 		[ -n "$path" ] || continue
 		[ -e "$repo/$path/.git" ] && process_repo "$repo/$path"
-	done < <(registered_paths "$repo")
+	done <<< "$(registered_paths "$repo")"
 }
 
 ROOT=$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null) \

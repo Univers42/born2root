@@ -18,7 +18,7 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 MAKEFILE="${MAKEFILE:-$REPO_ROOT/Makefile}"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
