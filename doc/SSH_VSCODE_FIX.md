@@ -3,30 +3,32 @@
 **Author:** dlesieur @ 42  
 **Date:** February 17, 2026  
 **Status:** RESOLVED ✅  
-**Time spent debugging:** ~12 hours across multiple sessions  
+**Time spent debugging:** ~12 hours across multiple sessions
 
 ---
 
 ## Table of Contents
 
-1. [The Problem](#the-problem)
-2. [What I Tried First (And Why It Didn't Work)](#what-i-tried-first)
-3. [The Breakthrough — Finding the Real Cause](#the-breakthrough)
-4. [The Actual Root Cause Explained](#the-actual-root-cause)
-5. [The Fix — 3 Layers](#the-fix)
-6. [VS Code settings.json — Exact Configuration](#vscode-settings)
-7. [SSH Config — Host Side (~/.ssh/config)](#ssh-config-host)
-8. [SSH Config — VM Side (/etc/ssh/sshd_config)](#ssh-config-vm)
-9. [Diagnostic Commands Cheat Sheet](#diagnostic-commands)
-10. [How It's All Baked Into `make re`](#make-re-automation)
-11. [Sources & References](#sources)
+1. [The Problem](#1-the-problem)
+2. [What I Tried First (And Why It Didn't Work)](#2-what-i-tried-first-and-why-it-didnt-work)
+3. [The Breakthrough — Finding the Real Cause](#3-the-breakthrough--finding-the-real-cause)
+4. [The Actual Root Cause Explained](#4-the-actual-root-cause-explained)
+5. [The Fix — 3 Layers](#5-the-fix--3-layers)
+6. [VS Code settings.json — Exact Configuration](#6-vs-code-settingsjson--exact-configuration)
+7. [SSH Config — Host Side (~/.ssh/config)](#7-ssh-config--host-side-sshconfig)
+8. [SSH Config — VM Side (/etc/ssh/sshd_config)](#8-ssh-config--vm-side-etcsshsshd_config)
+9. [Diagnostic Commands Cheat Sheet](#9-diagnostic-commands-cheat-sheet)
+10. [How It's All Baked Into `make re`](#10-how-its-all-baked-into-make-re)
+11. [Sources & References](#11-sources--references)
 
 ---
 
-<a name="the-problem"></a>
+
 ## 1. The Problem
 
-I'm running a **Born2beRoot** Debian VM inside VirtualBox with **NAT networking** and SSH on port 4242. I connect to it from VS Code using the **Remote - SSH** extension (`ms-vscode-remote.remote-ssh`).
+I'm running a **Born2beRoot** Debian VM inside VirtualBox with **NAT
+networking** and SSH on port 4242. I connect to it from VS Code using the
+**Remote - SSH** extension (`ms-vscode-remote.remote-ssh`).
 
 **The symptoms were always the same:**
 
@@ -36,13 +38,15 @@ I'm running a **Born2beRoot** Debian VM inside VirtualBox with **NAT networking*
 - VS Code shows: **"Connection timed out during banner exchange"**
 - The log says: **"Running server is stale. Ignoring"**
 - Every reconnect attempt fails with the same banner timeout
-- But `ssh -p 4242 dlesieur@127.0.0.1` from a regular terminal **still works fine**
+- But `ssh -p 4242 dlesieur@127.0.0.1` from a regular terminal **still works
+  fine**
 
-The last point was the key clue — SSH itself was fine. The problem was specific to VS Code.
+The last point was the key clue — SSH itself was fine. The problem was specific
+to VS Code.
 
 Here's what the VS Code Remote SSH log looked like every time it died:
 
-```
+```text
 [15:12:24] SSH Resolver called for "ssh-remote+...", attempt 1
 [15:12:24] Found local server running: {..., "socksPort": 49526, ...}
 [15:12:24] Found running server - short-circuiting install
@@ -52,16 +56,19 @@ Here's what the VS Code Remote SSH log looked like every time it died:
 [15:27:50] ssh: connect to host 127.0.0.1 port 4242: Connection timed out during banner exchange
 ```
 
-Notice: it found a "running server" from a previous session, tried to reuse its SOCKS port, and then everything went sideways.
+Notice: it found a "running server" from a previous session, tried to reuse its
+SOCKS port, and then everything went sideways.
 
 ---
 
-<a name="what-i-tried-first"></a>
+
 ## 2. What I Tried First (And Why It Didn't Work)
 
-I assumed it was an SSH problem and threw literally everything at it. Here's the full list of what I tried — **none of these fixed it by themselves**:
+I assumed it was an SSH problem and threw literally everything at it. Here's the
+full list of what I tried — **none of these fixed it by themselves**:
 
 ### Layer 1: SSH Keepalives (server side)
+
 ```bash
 # In /etc/ssh/sshd_config on the VM:
 ClientAliveInterval 30    # Server pings client every 30 seconds
@@ -73,7 +80,8 @@ LoginGraceTime 300        # 5 min to authenticate (VS Code is slow to handshake)
 ```
 
 ### Layer 2: SSH Keepalives (client side, ~/.ssh/config)
-```
+
+```text
 Host *
     ServerAliveInterval 15    # Client pings server every 15 seconds
     ServerAliveCountMax 4     # 4 missed = disconnect
@@ -81,6 +89,7 @@ Host *
 ```
 
 ### Layer 3: Kernel TCP Keepalives
+
 ```bash
 # /etc/sysctl.d/99-ssh-keepalive.conf
 net.ipv4.tcp_keepalive_time=60    # First probe after 60s (not default 7200!)
@@ -89,7 +98,10 @@ net.ipv4.tcp_keepalive_probes=5   # 5 failed = dead
 ```
 
 ### Layer 4: NAT Keepalive Service
-A systemd service that pings the VirtualBox NAT gateway every 30s to keep connection tracking alive:
+
+A systemd service that pings the VirtualBox NAT gateway every 30s to keep
+connection tracking alive:
+
 ```bash
 #!/bin/bash
 GW=$(ip route | awk '/default/ {print $3}' | head -1)
@@ -101,7 +113,10 @@ done
 ```
 
 ### Layer 5: SSHD Watchdog Service
-A systemd service that checks if sshd is actually listening on port 4242 every 15s and restarts it if not:
+
+A systemd service that checks if sshd is actually listening on port 4242 every
+15s and restarts it if not:
+
 ```bash
 #!/bin/bash
 while true; do
@@ -115,6 +130,7 @@ done
 ```
 
 ### Layer 6: systemd Auto-Restart Override
+
 ```ini
 # /etc/systemd/system/ssh.service.d/override.conf
 [Service]
@@ -125,43 +141,59 @@ StartLimitBurst=10
 ```
 
 ### Layer 7: tmux Auto-Attach
+
 So at least terminal sessions survive the drops.
 
-**Result: NONE OF THIS FIXED IT.** The connection STILL dropped every ~15 minutes. The SSH daemon was healthy, the keepalives were firing, the watchdog saw sshd as "active"... but VS Code's connection still died.
+**Result: NONE OF THIS FIXED IT.** The connection STILL dropped every ~15
+minutes. The SSH daemon was healthy, the keepalives were firing, the watchdog
+saw sshd as "active"... but VS Code's connection still died.
 
-I was about to give up and rebuild the entire VM without LUKS encryption, thinking maybe that was causing it. That would have been the wrong move.
+I was about to give up and rebuild the entire VM without LUKS encryption,
+thinking maybe that was causing it. That would have been the wrong move.
 
 ---
 
-<a name="the-breakthrough"></a>
+
 ## 3. The Breakthrough — Finding the Real Cause
 
-I found two critical GitHub issues on the `microsoft/vscode-remote-release` repo:
+I found two critical GitHub issues on the `microsoft/vscode-remote-release`
+repo:
 
 ### Issue #1721 — `ssh -T timeouts with Remote - SSH`
-**URL:** https://github.com/microsoft/vscode-remote-release/issues/1721
 
-> **Key comment by a Microsoft engineer:**
-> *"A general workaround for many of them is setting `"remote.SSH.useLocalServer": false`."*
+**URL:** <https://github.com/microsoft/vscode-remote-release/issues/1721>
+
+> **Key comment by a Microsoft engineer:** _"A general workaround for many of
+> them is setting `"remote.SSH.useLocalServer": false`."_
 
 Multiple people had the exact same symptoms. The fix that kept coming up:
+
 - Delete `~/.config/Code` (or just the stale server cache)
 - Set `remote.SSH.useLocalServer` to `false`
 
 ### Issue #10580 — SSH Connection Timeout after moving to a new location
-**URL:** https://github.com/microsoft/vscode-remote-release/issues/10580
 
-Same symptoms. VS Code SSH times out, but `ssh` from terminal works fine. The logs show the same pattern: "Found running server - short-circuiting install" → then it tries to reuse a stale SOCKS tunnel → dies.
+**URL:** <https://github.com/microsoft/vscode-remote-release/issues/10580>
+
+Same symptoms. VS Code SSH times out, but `ssh` from terminal works fine. The
+logs show the same pattern: "Found running server - short-circuiting install" →
+then it tries to reuse a stale SOCKS tunnel → dies.
 
 ### Issue fixing vscode when it keeps dropping ssh connections
-**URL:** https://earlruby.org/2021/06/fixing-vscode-when-it-keeps-dropping-ssh-connections/comment-page-1/
+
+**URL:**
+<https://earlruby.org/2021/06/fixing-vscode-when-it-keeps-dropping-ssh-connections/comment-page-1/>
+
 ### The Official Troubleshooting Wiki
-**URL:** https://github.com/microsoft/vscode-remote-release/wiki/Remote-SSH-Troubleshooting
+
+**URL:**
+<https://github.com/microsoft/vscode-remote-release/wiki/Remote-SSH-Troubleshooting>
 
 This page describes the two connection modes:
 
 > **`remote.SSH.useLocalServer: true`** (default — "Local Server Mode"):  
-> The Remote-SSH extension spawns an SSH process which will then be **reused by all VS Code windows** connected to that remote.
+> The Remote-SSH extension spawns an SSH process which will then be **reused by
+> all VS Code windows** connected to that remote.
 >
 > **`remote.SSH.useLocalServer: false`** ("Terminal Mode"):  
 > Each VS Code window has **its own** connection.
@@ -170,7 +202,7 @@ That was the moment I understood everything.
 
 ---
 
-<a name="the-actual-root-cause"></a>
+
 ## 4. The Actual Root Cause Explained
 
 Here's what's actually happening, step by step:
@@ -179,17 +211,23 @@ Here's what's actually happening, step by step:
 
 When `remote.SSH.useLocalServer` is `true` (the default), VS Code does this:
 
-```
+```text
 ssh -v -T -D 49963 -o ConnectTimeout=15 dlesieur@127.0.0.1 -p 4242
               ^^
               THIS IS THE PROBLEM
 ```
 
-That **`-D 49963`** flag creates a **SOCKS5 dynamic port forwarding proxy**. VS Code routes ALL its traffic (extensions, file access, terminals, debug sessions) through this single SOCKS tunnel. It's a smart optimization — one SSH connection serves everything.
+That **`-D 49963`** flag creates a **SOCKS5 dynamic port forwarding proxy**. VS
+Code routes ALL its traffic (extensions, file access, terminals, debug sessions)
+through this single SOCKS tunnel. It's a smart optimization — one SSH connection
+serves everything.
 
 ### VirtualBox NAT Kills the SOCKS Tunnel
 
-VirtualBox NAT has a **connection tracking table** that maps host ports to guest ports. This table has an **idle timeout** (somewhere around 5-15 minutes depending on the VirtualBox version). When there's no traffic on the SOCKS proxy for a while:
+VirtualBox NAT has a **connection tracking table** that maps host ports to guest
+ports. This table has an **idle timeout** (somewhere around 5-15 minutes
+depending on the VirtualBox version). When there's no traffic on the SOCKS proxy
+for a while:
 
 1. VirtualBox NAT silently drops the connection tracking entry
 2. The SSH TCP connection stays "alive" (keepalives keep it going)
@@ -197,20 +235,25 @@ VirtualBox NAT has a **connection tracking table** that maps host ports to guest
 4. VS Code tries to send data through the SOCKS proxy → no response
 5. VS Code marks the server as "stale"
 6. VS Code tries to reconnect with a new SSH connection
-7. But it still has **cached server data** from the old session (port numbers, process IDs, etc.)
+7. But it still has **cached server data** from the old session (port numbers,
+   process IDs, etc.)
 8. It tries to reuse this stale data → **banner exchange timeout**
 
 ### Why Regular SSH Works Fine
 
-Regular `ssh -p 4242 dlesieur@127.0.0.1` doesn't use `-D` (no SOCKS proxy). It's a simple TCP connection with keepalives. VirtualBox NAT handles simple TCP keepalives fine. The connection survives indefinitely.
+Regular `ssh -p 4242 dlesieur@127.0.0.1` doesn't use `-D` (no SOCKS proxy). It's
+a simple TCP connection with keepalives. VirtualBox NAT handles simple TCP
+keepalives fine. The connection survives indefinitely.
 
 ### Why Keepalives Didn't Fix It
 
-My keepalives were keeping the **SSH connection itself** alive. But the SOCKS proxy has its own data channels that go through different NAT connection tracking entries. The keepalives don't cover those.
+My keepalives were keeping the **SSH connection itself** alive. But the SOCKS
+proxy has its own data channels that go through different NAT connection
+tracking entries. The keepalives don't cover those.
 
 ### The Diagram
 
-```
+```text
 ┌─────────────┐                    ┌──────────────┐
 │  VS Code    │                    │  Debian VM   │
 │             │                    │              │
@@ -228,7 +271,7 @@ My keepalives were keeping the **SSH connection itself** alive. But the SOCKS pr
 
 **With `useLocalServer: false` (Terminal Mode):**
 
-```
+```text
 ┌─────────────┐                    ┌──────────────┐
 │  VS Code    │                    │  Debian VM   │
 │             │                    │              │
@@ -245,30 +288,30 @@ My keepalives were keeping the **SSH connection itself** alive. But the SOCKS pr
 
 ---
 
-<a name="the-fix"></a>
+
 ## 5. The Fix — 3 Layers
 
 ### Layer A: VS Code Settings (THE critical fix)
 
 ```json
 {
-    "remote.SSH.useLocalServer": false,
-    "remote.SSH.enableDynamicForwarding": false,
-    "remote.SSH.useExecServer": false,
-    "remote.SSH.connectTimeout": 60,
-    "remote.SSH.showLoginTerminal": true
+  "remote.SSH.useLocalServer": false,
+  "remote.SSH.enableDynamicForwarding": false,
+  "remote.SSH.useExecServer": false,
+  "remote.SSH.connectTimeout": 60,
+  "remote.SSH.showLoginTerminal": true
 }
 ```
 
 **What each setting does:**
 
-| Setting | Value | Why |
-|---------|-------|-----|
-| `remote.SSH.useLocalServer` | `false` | **THE FIX.** Switches from "Local Server Mode" (shared SOCKS proxy) to "Terminal Mode" (each window gets its own SSH connection). No more shared tunnel to go stale. |
-| `remote.SSH.enableDynamicForwarding` | `false` | Disables the `-D` SOCKS proxy flag entirely. VS Code uses direct TCP port forwarding instead, which VirtualBox NAT handles properly. |
-| `remote.SSH.useExecServer` | `false` | Disables the exec server bootstrap. Less cached state = less "stale server" issues. Simpler connection lifecycle. |
-| `remote.SSH.connectTimeout` | `60` | Give VS Code 60 seconds to connect (default is 15). On a busy VirtualBox host, the first connection can be slow. |
-| `remote.SSH.showLoginTerminal` | `true` | Shows the SSH terminal during connection. Useful for debugging — I can see exactly what's happening if something goes wrong. |
+| Setting                              | Value   | Why                                                                                                                                                                  |
+| ------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `remote.SSH.useLocalServer`          | `false` | **THE FIX.** Switches from "Local Server Mode" (shared SOCKS proxy) to "Terminal Mode" (each window gets its own SSH connection). No more shared tunnel to go stale. |
+| `remote.SSH.enableDynamicForwarding` | `false` | Disables the `-D` SOCKS proxy flag entirely. VS Code uses direct TCP port forwarding instead, which VirtualBox NAT handles properly.                                 |
+| `remote.SSH.useExecServer`           | `false` | Disables the exec server bootstrap. Less cached state = less "stale server" issues. Simpler connection lifecycle.                                                    |
+| `remote.SSH.connectTimeout`          | `60`    | Give VS Code 60 seconds to connect (default is 15). On a busy VirtualBox host, the first connection can be slow.                                                     |
+| `remote.SSH.showLoginTerminal`       | `true`  | Shows the SSH terminal during connection. Useful for debugging — I can see exactly what's happening if something goes wrong.                                         |
 
 ### Layer B: Clean Stale Server Cache
 
@@ -277,13 +320,17 @@ My keepalives were keeping the **SSH connection itself** alive. But the SOCKS pr
 rm -rf ~/.config/Code/User/globalStorage/ms-vscode-remote.remote-ssh/vscode-ssh-host-*
 ```
 
-This removes the stale "Found running server" data that causes VS Code to try to reuse dead SOCKS tunnels.
+This removes the stale "Found running server" data that causes VS Code to try to
+reuse dead SOCKS tunnels.
 
 ### Layer C: SSH Key Authentication (no more password prompts)
 
-Without key auth, every time VS Code reconnects it needs a password. If the connection drops and tries to auto-reconnect, it can't type the password → permanent failure.
+Without key auth, every time VS Code reconnects it needs a password. If the
+connection drops and tries to auto-reconnect, it can't type the password →
+permanent failure.
 
 With key auth:
+
 - Connection drops
 - VS Code automatically reconnects
 - No password needed → instant reconnect
@@ -299,7 +346,7 @@ ssh -o BatchMode=yes -p 4242 dlesieur@127.0.0.1 echo "KEY AUTH WORKS"
 
 ---
 
-<a name="vscode-settings"></a>
+
 ## 6. VS Code settings.json — Exact Configuration
 
 File location: `~/.config/Code/User/settings.json`
@@ -308,31 +355,31 @@ Here's my complete settings.json with the Remote SSH fixes:
 
 ```json
 {
-    "inlineChat.hideOnRequest": true,
-    "workbench.colorTheme": "GitHub Dark High Contrast",
-    "editor.dragAndDrop": false,
-    "editor.definitionLinkOpensInPeek": true,
-    "editor.insertSpaces": false,
-    "files.autoSave": "afterDelay",
-    "github.copilot.nextEditSuggestions.enabled": true,
-    "github.copilot.enable": {
-        "*": true,
-        "plaintext": false,
-        "markdown": true,
-        "scminput": false,
-        "c": false
-    },
-    "explorer.confirmDelete": false,
-    "makefile.configureOnOpen": true,
-    "explorer.confirmDragAndDrop": false,
-    "remote.SSH.useLocalServer": false,
-    "remote.SSH.enableDynamicForwarding": false,
-    "remote.SSH.useExecServer": false,
-    "remote.SSH.connectTimeout": 60,
-    "remote.SSH.showLoginTerminal": true,
-    "remote.SSH.remotePlatform": {
-        "b2b": "linux"
-    }
+  "inlineChat.hideOnRequest": true,
+  "workbench.colorTheme": "GitHub Dark High Contrast",
+  "editor.dragAndDrop": false,
+  "editor.definitionLinkOpensInPeek": true,
+  "editor.insertSpaces": false,
+  "files.autoSave": "afterDelay",
+  "github.copilot.nextEditSuggestions.enabled": true,
+  "github.copilot.enable": {
+    "*": true,
+    "plaintext": false,
+    "markdown": true,
+    "scminput": false,
+    "c": false
+  },
+  "explorer.confirmDelete": false,
+  "makefile.configureOnOpen": true,
+  "explorer.confirmDragAndDrop": false,
+  "remote.SSH.useLocalServer": false,
+  "remote.SSH.enableDynamicForwarding": false,
+  "remote.SSH.useExecServer": false,
+  "remote.SSH.connectTimeout": 60,
+  "remote.SSH.showLoginTerminal": true,
+  "remote.SSH.remotePlatform": {
+    "b2b": "linux"
+  }
 }
 ```
 
@@ -344,7 +391,7 @@ Here's my complete settings.json with the Remote SSH fixes:
 4. Save
 5. Reload VS Code (`Ctrl+Shift+P` → "Developer: Reload Window")
 
-### Or from the terminal:
+### Or from the terminal
 
 ```bash
 # Using python3 to safely merge into existing settings
@@ -366,12 +413,12 @@ print('Done')
 
 ---
 
-<a name="ssh-config-host"></a>
+
 ## 7. SSH Config — Host Side (~/.ssh/config)
 
 File location: `~/.ssh/config`
 
-```
+```text
 Host *
     ServerAliveInterval 15
     ServerAliveCountMax 4
@@ -394,22 +441,23 @@ Host b2b vm born2beroot
     LogLevel ERROR
 ```
 
-### What each line does:
+### What each line does
 
-| Line | Purpose |
-|------|---------|
-| `ServerAliveInterval 15` | Client sends a keepalive to the server every 15 seconds. This keeps VirtualBox NAT from thinking the connection is idle. |
-| `ServerAliveCountMax 6` | If 6 keepalives get no response (= 90 seconds), consider the connection dead. |
-| `TCPKeepAlive yes` | Also enable OS-level TCP keepalives (belt AND suspenders). |
-| `ConnectionAttempts 5` | Try 5 times if the initial TCP connection fails. |
-| `ConnectTimeout 15` | Wait up to 15 seconds for the TCP connection to establish. |
-| `StrictHostKeyChecking no` | Don't ask "are you sure you want to connect?" every time (the VM regenerates its host key on rebuild). |
-| `UserKnownHostsFile /dev/null` | Don't save the VM's host key (it changes on every `make re`). |
-| `LogLevel ERROR` | Don't spam warnings about the unknown host key. |
+| Line                           | Purpose                                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `ServerAliveInterval 15`       | Client sends a keepalive to the server every 15 seconds. This keeps VirtualBox NAT from thinking the connection is idle. |
+| `ServerAliveCountMax 6`        | If 6 keepalives get no response (= 90 seconds), consider the connection dead.                                            |
+| `TCPKeepAlive yes`             | Also enable OS-level TCP keepalives (belt AND suspenders).                                                               |
+| `ConnectionAttempts 5`         | Try 5 times if the initial TCP connection fails.                                                                         |
+| `ConnectTimeout 15`            | Wait up to 15 seconds for the TCP connection to establish.                                                               |
+| `StrictHostKeyChecking no`     | Don't ask "are you sure you want to connect?" every time (the VM regenerates its host key on rebuild).                   |
+| `UserKnownHostsFile /dev/null` | Don't save the VM's host key (it changes on every `make re`).                                                            |
+| `LogLevel ERROR`               | Don't spam warnings about the unknown host key.                                                                          |
 
 ### Why `Host b2b vm born2beroot` (space-separated)?
 
 This creates three aliases for the same host. I can use any of these:
+
 ```bash
 ssh b2b            # shortest
 ssh vm             # also works
@@ -420,7 +468,7 @@ And in VS Code, I connect to `b2b` as the remote host.
 
 ---
 
-<a name="ssh-config-vm"></a>
+
 ## 8. SSH Config — VM Side (/etc/ssh/sshd_config)
 
 These settings are applied by `preseeds/b2b-setup.sh` during VM installation:
@@ -440,7 +488,8 @@ LoginGraceTime 300             # 5 min to complete auth (VS Code is slow)
 
 ### Why MaxStartups 50:30:100?
 
-This was a hard-won lesson. VS Code Remote SSH opens **many** parallel SSH connections simultaneously when it connects:
+This was a hard-won lesson. VS Code Remote SSH opens **many** parallel SSH
+connections simultaneously when it connects:
 
 - 1 for the SOCKS/control channel
 - 1 for the exec server
@@ -449,7 +498,9 @@ This was a hard-won lesson. VS Code Remote SSH opens **many** parallel SSH conne
 - 1 for file operations
 - More for port forwarding
 
-The default `MaxStartups 10:30:100` starts randomly rejecting connections at 10 unauthenticated. VS Code sometimes needs 15+ simultaneous new connections on reconnect. At 50, it has plenty of room.
+The default `MaxStartups 10:30:100` starts randomly rejecting connections at 10
+unauthenticated. VS Code sometimes needs 15+ simultaneous new connections on
+reconnect. At 50, it has plenty of room.
 
 ### Kernel TCP Keepalives
 
@@ -460,11 +511,12 @@ net.ipv4.tcp_keepalive_intvl=15    # Re-probe every 15s
 net.ipv4.tcp_keepalive_probes=5    # 5 failed probes = dead
 ```
 
-The Linux default `tcp_keepalive_time` is **7200 seconds (2 hours!)** — way too long for VirtualBox NAT which drops idle connections in ~5-15 minutes.
+The Linux default `tcp_keepalive_time` is **7200 seconds (2 hours!)** — way too
+long for VirtualBox NAT which drops idle connections in ~5-15 minutes.
 
 ---
 
-<a name="diagnostic-commands"></a>
+
 ## 9. Diagnostic Commands Cheat Sheet
 
 ### On the HOST (your 42 machine)
@@ -562,7 +614,7 @@ grep -E "^(Client|Max|Login|Pubkey|Password)" /etc/ssh/sshd_config
 echo "--- Watchdog log (last 5) ---"
 tail -5 /var/log/sshd-watchdog.log 2>/dev/null
 echo "--- VS Code server ---"
-ps aux | grep -c "[v]scode" 
+ps aux | grep -c "[v]scode"
 echo "--- Auth keys ---"; wc -l ~/.ssh/authorized_keys 2>/dev/null
 echo "=== END ==="
 '
@@ -570,19 +622,23 @@ echo "=== END ==="
 
 ---
 
-<a name="make-re-automation"></a>
+
 ## 10. How It's All Baked Into `make re`
 
-All of this is automated so I never have to do it manually again. When I run `make re`:
+All of this is automated so I never have to do it manually again. When I run
+`make re`:
 
 ### 1. ISO Creation (`generate/create_custom_iso.sh`)
+
 - Copies `b2b-setup.sh`, `monitoring.sh`, `first-boot-setup.sh` into the ISO
 - Also copies my host's SSH public key as `host_ssh_pubkey` into the ISO
 
 ### 2. VM Installation (preseed + `b2b-setup.sh`)
+
 - Preseed automates the entire Debian installation
-- `preseed.cfg` `late_command` copies `host_ssh_pubkey` from `/cdrom/` to `/target/tmp/`
-  (because `b2b-setup.sh` runs inside `in-target` chroot where `/cdrom/` is NOT accessible)
+- `preseed.cfg` `late_command` copies `host_ssh_pubkey` from `/cdrom/` to
+  `/target/tmp/` (because `b2b-setup.sh` runs inside `in-target` chroot where
+  `/cdrom/` is NOT accessible)
 - `b2b-setup.sh` runs in chroot and configures:
   - SSH on port 4242 with all keepalive settings
   - MaxStartups 50:30:100 for VS Code
@@ -590,17 +646,24 @@ All of this is automated so I never have to do it manually again. When I run `ma
   - SSHD watchdog systemd service
   - Kernel TCP keepalive sysctl
   - systemd auto-restart override for sshd
-  - Installs host SSH public key from `/tmp/host_ssh_pubkey` into `~/.ssh/authorized_keys`
+  - Installs host SSH public key from `/tmp/host_ssh_pubkey` into
+    `~/.ssh/authorized_keys`
   - Enables `PubkeyAuthentication yes`
 
 ### 3. Orchestrator (`generate/orchestrate.sh`)
+
 After the ISO is built and VM is created:
-- `setup_host_ssh_config()` — writes `~/.ssh/config` with keepalive settings and `b2b` alias
-- **NEW:** `setup_vscode_remote_ssh()` — auto-configures VS Code `settings.json` with the 5 critical Remote SSH settings
+
+- `setup_host_ssh_config()` — writes `~/.ssh/config` with keepalive settings and
+  `b2b` alias
+- **NEW:** `setup_vscode_remote_ssh()` — auto-configures VS Code `settings.json`
+  with the 5 critical Remote SSH settings
 - **NEW:** `setup_ssh_key_auth()` — generates SSH key pair if none exists
 
 ### The result
+
 After `make re`, I can immediately do:
+
 1. Boot the VM
 2. Enter LUKS passphrase (tempencrypt123)
 3. Open VS Code → Remote SSH → Connect to `b2b`
@@ -609,36 +672,36 @@ After `make re`, I can immediately do:
 
 ---
 
-<a name="sources"></a>
+
 ## 11. Sources & References
 
 ### Primary Sources (these solved my problem)
 
-| Source | What I learned |
-|--------|---------------|
-| [GitHub Issue #1721 — ssh -T timeouts with Remote - SSH](https://github.com/microsoft/vscode-remote-release/issues/1721) | Microsoft engineer's comment: *"A general workaround for many of them is setting `remote.SSH.useLocalServer: false`"*. Multiple users confirmed that cleaning `~/.config/Code` + setting this fixed their identical symptoms. |
-| [GitHub Issue #10580 — SSH Connection Timeout after moving](https://github.com/microsoft/vscode-remote-release/issues/10580) | User had the exact same symptoms with a VM. SSH works from terminal, dies in VS Code. The log showed the same "Found running server / stale / banner timeout" pattern I was seeing. |
-| [VS Code Remote SSH Troubleshooting Wiki](https://github.com/microsoft/vscode-remote-release/wiki/Remote-SSH-Troubleshooting) | Official documentation explaining Local Server Mode vs Terminal Mode. Describes `useLocalServer`, `useExecServer`, `enableDynamicForwarding` and their effects. |
+| Source                                                                                                                        | What I learned                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [GitHub Issue #1721 — ssh -T timeouts with Remote - SSH](https://github.com/microsoft/vscode-remote-release/issues/1721)      | Microsoft engineer's comment: _"A general workaround for many of them is setting `remote.SSH.useLocalServer: false`"_. Multiple users confirmed that cleaning `~/.config/Code` + setting this fixed their identical symptoms. |
+| [GitHub Issue #10580 — SSH Connection Timeout after moving](https://github.com/microsoft/vscode-remote-release/issues/10580)  | User had the exact same symptoms with a VM. SSH works from terminal, dies in VS Code. The log showed the same "Found running server / stale / banner timeout" pattern I was seeing.                                           |
+| [VS Code Remote SSH Troubleshooting Wiki](https://github.com/microsoft/vscode-remote-release/wiki/Remote-SSH-Troubleshooting) | Official documentation explaining Local Server Mode vs Terminal Mode. Describes `useLocalServer`, `useExecServer`, `enableDynamicForwarding` and their effects.                                                               |
 
 ### Supporting Knowledge
 
-| Topic | Resource |
-|-------|----------|
+| Topic                              | Resource                                                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | VirtualBox NAT connection tracking | VirtualBox docs — NAT engine maintains a connection tracking table with idle timeouts. No official documentation of the exact timeout value. |
-| SSH SOCKS proxy (`-D` flag) | `man ssh` — "Specifies a local dynamic application-level port forwarding". Creates a SOCKS5 proxy through the SSH tunnel. |
-| OpenSSH keepalives | `man sshd_config` — `ClientAliveInterval`, `ClientAliveCountMax`. These operate at the SSH protocol level, not TCP. |
-| TCP keepalives | Linux kernel docs — `tcp_keepalive_time`, `tcp_keepalive_intvl`, `tcp_keepalive_probes`. These operate at the TCP level. |
-| MaxStartups | `man sshd_config` — "Specifies the maximum number of concurrent unauthenticated connections to the SSH daemon. start:rate:full format." |
+| SSH SOCKS proxy (`-D` flag)        | `man ssh` — "Specifies a local dynamic application-level port forwarding". Creates a SOCKS5 proxy through the SSH tunnel.                    |
+| OpenSSH keepalives                 | `man sshd_config` — `ClientAliveInterval`, `ClientAliveCountMax`. These operate at the SSH protocol level, not TCP.                          |
+| TCP keepalives                     | Linux kernel docs — `tcp_keepalive_time`, `tcp_keepalive_intvl`, `tcp_keepalive_probes`. These operate at the TCP level.                     |
+| MaxStartups                        | `man sshd_config` — "Specifies the maximum number of concurrent unauthenticated connections to the SSH daemon. start:rate:full format."      |
 
 ### What DIDN'T help (but is commonly suggested)
 
-| Suggestion | Why it didn't work for me |
-|------------|--------------------------|
-| "Increase keepalive intervals" | Keepalives protect the SSH connection, not the SOCKS proxy data channels inside it. |
-| "Remove LUKS encryption" | LUKS is transparent after boot — it has zero effect on networking. |
+| Suggestion                              | Why it didn't work for me                                                                                               |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| "Increase keepalive intervals"          | Keepalives protect the SSH connection, not the SOCKS proxy data channels inside it.                                     |
+| "Remove LUKS encryption"                | LUKS is transparent after boot — it has zero effect on networking.                                                      |
 | "Use bridged networking instead of NAT" | Would work but isn't necessary — the real fix is in VS Code settings. Also, 42 campus networks often block bridged VMs. |
-| "Restart sshd" | The sshd was never the problem — it was always running and healthy. |
-| "Increase VM RAM" | Memory wasn't the issue — the VM had plenty. |
+| "Restart sshd"                          | The sshd was never the problem — it was always running and healthy.                                                     |
+| "Increase VM RAM"                       | Memory wasn't the issue — the VM had plenty.                                                                            |
 
 ---
 
@@ -646,16 +709,20 @@ After `make re`, I can immediately do:
 
 **The problem was never SSH. It was VS Code.**
 
-VS Code Remote SSH defaults to `"remote.SSH.useLocalServer": true`, which creates a **shared SOCKS5 proxy** (`ssh -D port`). VirtualBox NAT silently drops the SOCKS proxy state after ~15 minutes idle. VS Code then tries to reuse stale cached server data, and everything dies.
+VS Code Remote SSH defaults to `"remote.SSH.useLocalServer": true`, which
+creates a **shared SOCKS5 proxy** (`ssh -D port`). VirtualBox NAT silently drops
+the SOCKS proxy state after ~15 minutes idle. VS Code then tries to reuse stale
+cached server data, and everything dies.
 
 **The fix is 3 settings:**
 
 ```json
 {
-    "remote.SSH.useLocalServer": false,
-    "remote.SSH.enableDynamicForwarding": false,
-    "remote.SSH.useExecServer": false
+  "remote.SSH.useLocalServer": false,
+  "remote.SSH.enableDynamicForwarding": false,
+  "remote.SSH.useExecServer": false
 }
 ```
 
-Plus SSH key auth so reconnects are instant and automatic. That's it. 12 hours of debugging for 3 lines of JSON. 🫠
+Plus SSH key auth so reconnects are instant and automatic. That's it. 12 hours
+of debugging for 3 lines of JSON. 🫠

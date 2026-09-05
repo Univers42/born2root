@@ -1,12 +1,15 @@
 # Dual Boot Blog
 
-Welcome to the Dual Boot Blog project! This blog is dedicated to providing comprehensive guides and tutorials on setting up a dual boot machine, with a focus on personalization and security. Inspired by the Born2beroot project, we aim to help users navigate the complexities of dual booting with ease.
+Welcome to the Dual Boot Blog project! This blog is dedicated to providing
+comprehensive guides and tutorials on setting up a dual boot machine, with a
+focus on personalization and security. Inspired by the Born2beroot project, we
+aim to help users navigate the complexities of dual booting with ease.
 
 ## Project Structure
 
 The project is organized as follows:
 
-```
+```text
 dual-boot-blog
 ├── public_html
 │   ├── index.html            # Main entry point of the blog
@@ -42,18 +45,25 @@ dual-boot-blog
 
 To set up the Dual Boot Blog on your local machine, follow these steps:
 
-1. **Clone the Repository**: Download or clone the project repository to your local machine.
-2. **Set Up a Web Server**: Ensure you have a web server (like Apache or Nginx) running to serve the `public_html` directory.
-3. **Install WordPress**: If you plan to use the WordPress theme, install WordPress in the `wordpress-theme` directory.
-4. **Configure the Blog**: Customize the blog by editing the HTML, CSS, and PHP files as needed.
-5. **Access the Blog**: Open your web browser and navigate to the local server address to view the blog.
+1. **Clone the Repository**: Download or clone the project repository to your
+   local machine.
+2. **Set Up a Web Server**: Ensure you have a web server (like Apache or Nginx)
+   running to serve the `public_html` directory.
+3. **Install WordPress**: If you plan to use the WordPress theme, install
+   WordPress in the `wordpress-theme` directory.
+4. **Configure the Blog**: Customize the blog by editing the HTML, CSS, and PHP
+   files as needed.
+5. **Access the Blog**: Open your web browser and navigate to the local server
+   address to view the blog.
 
 ## Contributing
 
-Contributions are welcome! If you have suggestions or improvements, feel free to submit a pull request or open an issue.
+Contributions are welcome! If you have suggestions or improvements, feel free to
+submit a pull request or open an issue.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for more details.
+This project is licensed under the MIT License. See the LICENSE file for more
+details.
 
 Thank you for checking out the Dual Boot Blog! Happy dual booting!
