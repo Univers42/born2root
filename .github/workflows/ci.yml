@@ -1,0 +1,74 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  linting:
+    name: Linting Phase (Fail-Fast)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (for markdownlint)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          # bashate
+          pip install bashate
+          # shfmt
+          sudo snap install shfmt
+          # markdownlint
+          npm install -g markdownlint-cli
+          # shellcheck (usually pre-installed, but ensuring latest)
+          sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          echo "Running ShellCheck on all .sh files..."
+          find . -type f -name "*.sh" -print0 | xargs -0 shellcheck --color=always
+
+      - name: Run Bashate
+        run: |
+          echo "Running Bashate on all .sh files..."
+          find . -type f -name "*.sh" -exec bashate {} +
+
+      - name: Run shfmt (Dry-run/Diff)
+        run: |
+          echo "Running shfmt to check formatting..."
+          find . -type f -name "*.sh" -exec shfmt -d {} +
+
+      - name: Run Markdownlint
+        run: |
+          echo "Running Markdownlint..."
+          markdownlint "**/*.md"
+
+  build-test:
+    name: Build Phase (Dry-Run & ISO)
+    runs-on: ubuntu-latest
+    needs: linting
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Makefile (Dry-Run)
+        run: |
+          echo "Running make --dry-run all..."
+          make --dry-run all
+
+      - name: Install Host Dependencies (make deps)
+        run: |
+          echo "Running make deps with CI=true..."
+          CI=true make deps
+
+      - name: Build Custom ISO
+        run: |
+          echo "Running make gen_iso..."
+          make gen_iso

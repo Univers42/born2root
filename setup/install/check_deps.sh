@@ -392,11 +392,11 @@ if [ "$VBOX_OK" = false ]; then
 	if [ "$PKG_MGR" = "apt" ]; then
 		printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$VBOX_PKG"
 		printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
-		sudo apt install "$VBOX_PKG"
+		sudo apt install ${CI:+-y} "$VBOX_PKG"
 	elif [ "$PKG_MGR" = "dnf" ]; then
 		printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$VBOX_PKG"
 		printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
-		sudo dnf install "$VBOX_PKG"
+		sudo dnf install ${CI:+-y} "$VBOX_PKG"
 	else
 		fail "Package manager unknown. Please manually install VirtualBox."
 		exit 1
@@ -416,11 +416,11 @@ if [ -n "$MISSING_PKGS" ]; then
 		printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$MISSING_PKGS"
 		printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
 		sudo apt-get update -qq 2>/dev/null || true
-		sudo apt install $MISSING_PKGS
+		sudo apt install ${CI:+-y} $MISSING_PKGS
 	elif [ "$PKG_MGR" = "dnf" ]; then
 		printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$MISSING_PKGS"
 		printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
-		sudo dnf install $MISSING_PKGS
+		sudo dnf install ${CI:+-y} $MISSING_PKGS
 	else
 		fail "Package manager unknown. Please manually install the missing packages."
 		exit 1
