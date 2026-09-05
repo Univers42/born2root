@@ -208,25 +208,28 @@ verify_guest:
 # SSH key (.gitmodules used git@github.com:); the release is plain HTTPS.
 prepare: deps pull shell
 
-# NOTE on the stash dance: `git stash pop` WITHOUT --index restores your work
-# to the working tree but throws the index away, silently un-staging everything
-# you had staged before running make. --index puts the staged/unstaged split
-# back; the bare pop is kept only as a fallback for the case where --index
-# cannot reapply cleanly.
+# NOTE on --autostash: this used to be a hand-rolled `git stash` / `git stash
+# pop` pair around the pull, and the two were NOT symmetric. `git stash` on a
+# CLEAN tree saves nothing and creates no entry, but the pop ran unconditionally
+# -- so it popped whatever unrelated entry happened to be on top of the stack.
+# A stash left over from days ago was silently applied on top of an up-to-date
+# checkout, and `make all` died in conflict markers over work that was already
+# committed. Reproduced deterministically: stash something, commit past it, run
+# the pair on the now-clean tree, and the stale WIP is back in your files.
+#
+# git's own --autostash has no such gap: it stashes only when there is something
+# to stash, and restores exactly what it stashed, or nothing at all.
 pull:
 	@bash -c '\
 	if [ -d .git ]; then \
 		printf "$(C_BLUE)▶$(C_RESET) Pulling latest from origin/main...\n"; \
-		git stash -q 2>/dev/null || true; \
-		if git pull --ff-only origin main 2>/dev/null; then \
+		if git pull --autostash --ff-only origin main 2>/dev/null; then \
 			printf "$(C_GREEN)✓$(C_RESET) Repository up to date\n"; \
 		else \
 			printf "$(C_YELLOW)⚠$(C_RESET)  Fast-forward failed — merging...\n"; \
-			git pull origin main 2>/dev/null || \
+			git pull --autostash origin main 2>/dev/null || \
 				printf "$(C_YELLOW)⚠$(C_RESET)  git pull failed (working offline?)\n"; \
 		fi; \
-		git stash pop --index -q 2>/dev/null \
-			|| git stash pop -q 2>/dev/null || true; \
 		if [ -n "$$(git diff --name-only --diff-filter=U)" ]; then \
 			printf "$(C_RED)✗$(C_RESET) your local changes conflict with what was just pulled\n"; \
 			git diff --name-only --diff-filter=U | sed "s/^/    /"; \
