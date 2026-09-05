@@ -45,7 +45,7 @@ jobs:
         if: always()
         run: |
           echo "Running shfmt to check formatting..."
-          find . -type f -name "*.sh" -exec shfmt -d {} +
+          find . -type f -name "*.sh" -exec shfmt -d -i 4 {} +
 
       - name: Run Markdownlint
         if: always()
