@@ -23,7 +23,6 @@
 
 ---
 
-
 ## 1. The Problem
 
 I'm running a **Born2beRoot** Debian VM inside VirtualBox with **NAT
@@ -60,7 +59,6 @@ Notice: it found a "running server" from a previous session, tried to reuse its
 SOCKS port, and then everything went sideways.
 
 ---
-
 
 ## 2. What I Tried First (And Why It Didn't Work)
 
@@ -153,7 +151,6 @@ thinking maybe that was causing it. That would have been the wrong move.
 
 ---
 
-
 ## 3. The Breakthrough — Finding the Real Cause
 
 I found two critical GitHub issues on the `microsoft/vscode-remote-release`
@@ -201,7 +198,6 @@ This page describes the two connection modes:
 That was the moment I understood everything.
 
 ---
-
 
 ## 4. The Actual Root Cause Explained
 
@@ -288,7 +284,6 @@ tracking entries. The keepalives don't cover those.
 
 ---
 
-
 ## 5. The Fix — 3 Layers
 
 ### Layer A: VS Code Settings (THE critical fix)
@@ -345,7 +340,6 @@ ssh -o BatchMode=yes -p 4242 dlesieur@127.0.0.1 echo "KEY AUTH WORKS"
 ```
 
 ---
-
 
 ## 6. VS Code settings.json — Exact Configuration
 
@@ -413,7 +407,6 @@ print('Done')
 
 ---
 
-
 ## 7. SSH Config — Host Side (~/.ssh/config)
 
 File location: `~/.ssh/config`
@@ -468,7 +461,6 @@ And in VS Code, I connect to `b2b` as the remote host.
 
 ---
 
-
 ## 8. SSH Config — VM Side (/etc/ssh/sshd_config)
 
 These settings are applied by `preseeds/b2b-setup.sh` during VM installation:
@@ -515,7 +507,6 @@ The Linux default `tcp_keepalive_time` is **7200 seconds (2 hours!)** — way to
 long for VirtualBox NAT which drops idle connections in ~5-15 minutes.
 
 ---
-
 
 ## 9. Diagnostic Commands Cheat Sheet
 
@@ -622,7 +613,6 @@ echo "=== END ==="
 
 ---
 
-
 ## 10. How It's All Baked Into `make re`
 
 All of this is automated so I never have to do it manually again. When I run
@@ -671,7 +661,6 @@ After `make re`, I can immediately do:
 5. **Connection never drops** (Terminal Mode, no SOCKS proxy)
 
 ---
-
 
 ## 11. Sources & References
 

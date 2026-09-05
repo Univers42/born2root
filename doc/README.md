@@ -1,6 +1,6 @@
 # ============================================================================
 
-#
+##
 
 ## FILE HEADER
 
@@ -15,8 +15,6 @@
 ## Created: 2025/11/09 19:07:56
 
 ## Updated: 2025/11/09 19:07:56
-
-#
 
 ## ============================================================================
 
@@ -302,110 +300,149 @@ wall "    #Architecture: $arch
 
 Part 1: Foundation Questions
 
-    VM Fundamentals
-        What's the difference between a Type 1 and Type 2 hypervisor? Which one are you using for Born2beroot?
-        Explain why virtualization is important in modern IT infrastructure.
+- **VM Fundamentals**
+  - What's the difference between a Type 1 and Type 2 hypervisor? Which one are
+    you using for Born2beroot?
+  - Explain why virtualization is important in modern IT infrastructure.
 
-    Debian vs CentOS
-        Why did you choose your specific OS? Give 3 technical advantages and disadvantages compared to the alternative.
-        What is the package management system used in your OS and how does it differ from the alternative OS?
+- **Debian vs CentOS**
+  - Why did you choose your specific OS? Give 3 technical advantages and
+    disadvantages compared to the alternative.
+  - What is the package management system used in your OS and how does it differ
+    from the alternative OS?
 
-    Partitioning Concepts
-        Explain in detail what LVM is and how it works at a technical level.
-        Walk me through your partition scheme and explain WHY you created each partition with its specific size.
-        What are the security advantages of separating /home, /var, and /tmp into different partitions?
+- **Partitioning Concepts**
+  - Explain in detail what LVM is and how it works at a technical level.
+  - Walk me through your partition scheme and explain WHY you created each
+    partition with its specific size.
+  - What are the security advantages of separating /home, /var, and /tmp into
+    different partitions?
 
 Part 2: Deep Configuration Analysis
 
-    AppArmor/SELinux
-        What is the difference between Discretionary Access Control and Mandatory Access Control?
-        Explain how AppArmor profiles work and how you would modify one.
-        Command to check if AppArmor is running and in what mode?
+- **AppArmor/SELinux**
+  - What is the difference between Discretionary Access Control and Mandatory
+    Access Control?
+  - Explain how AppArmor profiles work and how you would modify one.
+  - Command to check if AppArmor is running and in what mode?
 
-    Advanced UFW
-        Explain UFW's relation to iptables. Is UFW a replacement for iptables?
-        You need to allow traffic only from a specific IP (192.168.1.5) to your SSH port. Write the exact UFW command.
-        What would happen if you had two conflicting UFW rules? How does UFW determine precedence?
+- **Advanced UFW**
+  - Explain UFW's relation to iptables. Is UFW a replacement for iptables?
+  - You need to allow traffic only from a specific IP (192.168.1.5) to your SSH
+    port. Write the exact UFW command.
+  - What would happen if you had two conflicting UFW rules? How does UFW
+    determine precedence?
 
-    SSH Security
-        What encryption algorithms does SSH use and for what purposes?
-        What's the difference between password authentication and key-based authentication in SSH?
-        If I wanted to completely disable root login via SSH while maintaining the ability to gain root privileges after logging in, what configurations would I need?
+- **SSH Security**
+  - What encryption algorithms does SSH use and for what purposes?
+  - What's the difference between password authentication and key-based
+    authentication in SSH?
+  - If I wanted to completely disable root login via SSH while maintaining the
+    ability to gain root privileges after logging in, what configurations would
+    I need?
 
 Part 3: Advanced System Administration
 
-    User/Group Management
-        Explain the structure of /etc/passwd and /etc/shadow files. Why are they separated?
-        What is the purpose of the user42 group in your setup? What special permissions does it have?
-        A new user 'auditor' needs read-only access to all log files but no other permissions. Set this up with the proper commands.
+- **User/Group Management**
+  - Explain the structure of /etc/passwd and /etc/shadow files. Why are they
+    separated?
+  - What is the purpose of the user42 group in your setup? What special
+    permissions does it have?
+  - A new user 'auditor' needs read-only access to all log files but no other
+    permissions. Set this up with the proper commands.
 
-    Password Policy
-        Explain in detail how PAM (Pluggable Authentication Modules) works with libpam-pwquality.
-        What do each of these settings mean: minlen=10, ucredit=-1, dcredit=-1, maxrepeat=3, difok=7?
-        How would you configure a policy where users cannot reuse their last 5 passwords?
+- **Password Policy**
+  - Explain in detail how PAM (Pluggable Authentication Modules) works with
+    libpam-pwquality.
+  - What do each of these settings mean: minlen=10, ucredit=-1, dcredit=-1,
+    maxrepeat=3, difok=7?
+  - How would you configure a policy where users cannot reuse their last 5
+    passwords?
 
-    Sudo Configuration
-        What is the TTY ticket system in sudo and why is it important for security?
-        Explain each component of this sudo command: sudo -l and what information it provides.
-        Create a sudo rule that allows user 'webmaster' to restart only the lighttpd service without a password.
+- **Sudo Configuration**
+  - What is the TTY ticket system in sudo and why is it important for security?
+  - Explain each component of this sudo command: sudo -l and what information it
+    provides.
+  - Create a sudo rule that allows user 'webmaster' to restart only the lighttpd
+    service without a password.
 
 Part 4: Troubleshooting and Advanced Scenarios
 
-    Monitoring Script Analysis
-        Explain the architecture of your monitoring script. How does it gather each piece of system information?
-        Why was cron chosen for scheduling rather than systemd timers?
-        How would you modify your script to alert you if disk usage goes above 90%?
+- **Monitoring Script Analysis**
+  - Explain the architecture of your monitoring script. How does it gather each
+    piece of system information?
+  - Why was cron chosen for scheduling rather than systemd timers?
+  - How would you modify your script to alert you if disk usage goes above 90%?
 
-    Network Troubleshooting
-        SSH to your server isn't working. Walk through your step-by-step troubleshooting process.
-        How would you identify if someone is trying to brute force your SSH service?
-        Examine these UFW logs and tell me if there's a security concern: [MOCK LOGS]
+- **Network Troubleshooting**
+  - SSH to your server isn't working. Walk through your step-by-step
+    troubleshooting process.
+  - How would you identify if someone is trying to brute force your SSH service?
+  - Examine these UFW logs and tell me if there's a security concern: [MOCK
+    LOGS]
 
-    Advanced LVM Operations
-        Your /var partition is running out of space. Walk me through the exact commands to expand it by 1GB.
-        What is LVM snapshotting and how would you implement it to backup your system?
-        Explain the concept of LVM striping and when you would use it.
+- **Advanced LVM Operations**
+  - Your /var partition is running out of space. Walk me through the exact
+    commands to expand it by 1GB.
+  - What is LVM snapshotting and how would you implement it to backup your
+    system?
+  - Explain the concept of LVM striping and when you would use it.
 
 Part 5: Bonus Services and Security Hardening
 
-    WordPress Stack (if implemented)
-        Explain your complete WordPress stack architecture.
-        How did you secure the communication between PHP-FPM and Lighttpd?
-        What security measures would you implement to protect WordPress from common attacks?
+- **WordPress Stack (if implemented)**
+  - Explain your complete WordPress stack architecture.
+  - How did you secure the communication between PHP-FPM and Lighttpd?
+  - What security measures would you implement to protect WordPress from common
+    attacks?
 
-    Additional Service (if implemented)
-        Explain why you chose your additional service and how it works within your system.
-        What ports does your service use and what security measures did you implement?
-        How did you configure it to start automatically when the system boots?
+- **Additional Service (if implemented)**
+  - Explain why you chose your additional service and how it works within your
+    system.
+  - What ports does your service use and what security measures did you
+    implement?
+  - How did you configure it to start automatically when the system boots?
 
-    Ultimate Security Hardening
-        What is defense in depth and how does your Born2beroot implementation demonstrate it?
-        How would you implement file integrity monitoring on your system?
-        What's your approach to keeping the system updated securely while minimizing downtime?
+- **Ultimate Security Hardening**
+  - What is defense in depth and how does your Born2beroot implementation
+    demonstrate it?
+  - How would you implement file integrity monitoring on your system?
+  - What's your approach to keeping the system updated securely while minimizing
+    downtime?
 
 Sample Technical Questions You Should Be Ready For:
 
-    "Show me the exact content of your /etc/sudoers file and explain each non-comment line."
+- **"Show me the exact content of your /etc/sudoers file and explain each
+  non-comment line."**
 
-    "Your monitoring script shows the CPU is at 95% utilization. Walk me through how you would identify what process is causing this."
+- **"Your monitoring script shows the CPU is at 95% utilization. Walk me through
+  how you would identify what process is causing this."**
 
-    "I've just deleted your UFW configuration. Recreate it from scratch with all rules."
+- **"I've just deleted your UFW configuration. Recreate it from scratch with all
+  rules."**
 
-    "Explain what would happen in your system if I executed this command: sudo chattr +i /etc/passwd"
+- **"Explain what would happen in your system if I executed this command: sudo
+  chattr +i /etc/passwd"**
 
-    "A user reports they can't log in despite using the correct password. Show me the commands to troubleshoot and fix this issue."
+- **"A user reports they can't log in despite using the correct password. Show
+  me the commands to troubleshoot and fix this issue."**
 
 Preparation Tips:
 
-    Know your logs: Be familiar with where to find SSH logs, authentication logs, and sudo logs.
+- **Know your logs: Be familiar with where to find SSH logs, authentication
+  logs, and sudo logs.**
 
-    Understand the why: Don't just memorize commands - understand why each configuration choice was made.
+- **Understand the why: Don't just memorize commands - understand why each
+  configuration choice was made.**
 
-    Practice troubleshooting: Have a friend intentionally break something on your VM and practice fixing it.
+- **Practice troubleshooting: Have a friend intentionally break something on
+  your VM and practice fixing it.**
 
-    Be ready to draw: Practice drawing diagrams of your partition scheme and system architecture.
+- **Be ready to draw: Practice drawing diagrams of your partition scheme and
+  system architecture.**
 
-    Master the monitoring script: Be able to explain every line of your monitoring script.
+- **Master the monitoring script: Be able to explain every line of your
+  monitoring script.**
 
 Remember that evaluators often focus more on your understanding than your
 ability to memorize commands. They want to see that you grasp the concepts
@@ -1107,7 +1144,9 @@ modular framework for password quality enforcement:
 4. **Configuration in Born2beroot**:
    - Located in /etc/pam.d/common-password
    - Key line:
-     `password requisite pam_pwquality.so retry=3 minlen=10 ucredit=-1 lcredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7 enforce_for_root`
+     `password requisite pam_pwquality.so retry=3 minlen=10 ucredit=-1
+      lcredit=-1 dcredit=-1 maxrepeat=3 reject_username difok=7
+       enforce_for_root`
    - "requisite" means failure of this module immediately returns failure to the
      application
 
