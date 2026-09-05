@@ -28,10 +28,10 @@ case "$VM_NAME" in
 esac
 # default: project-local storage
 VM_PATH="${VM_PATH:-$(pwd)/disk_images}"
-if ! mkdir -p "$VM_PATH"; then
-	echo "Error: cannot create VM storage directory: $VM_PATH" >&2
-	exit 1
-fi
+# A root-owned VM_PATH is explained, and sudo offered only then, instead of
+# the bare "Permission denied" this used to die with. See utils/vm_path.sh.
+. "$SCRIPT_DIR/utils/vm_path.sh"
+ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 
 ISO_PATH="$(pwd)/$PRESEED_ISO"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
@@ -174,9 +174,6 @@ resolve_host_port HOST_BAAS_ADMIN_PORT       "$BAAS_ADMIN_PORT"
 resolve_host_port HOST_MAILPIT_PORT          "$MAILPIT_PORT"
 resolve_host_port HOST_AUTH_GATEWAY_PORT     "$AUTH_GATEWAY_PORT"
 resolve_host_port HOST_VAULT_PORT            "$VAULT_PORT"
-
-# Create VM folders if they don't exist
-mkdir -p "$VM_PATH/$VM_NAME"
 
 # Function to print headers
 print_header() {

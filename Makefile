@@ -127,8 +127,12 @@ C_CYAN   := \033[36m
 # -n behaves the way anyone typing it expects.
 MAKE_BIN := $(MAKE)
 
+# VM_PATH is checked before either pipeline runs, so a root-owned storage
+# directory is reported -- and, with permission, fixed with sudo -- before the
+# ISO build rather than minutes after it. See utils/vm_path.sh.
 all: prepare
 	@backend=$$(BACKEND="$(BACKEND)" bash setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
+	bash utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \

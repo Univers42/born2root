@@ -60,6 +60,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # Reads the installer's own progress off serial.log (shared with orchestrate.sh).
 . "$HERE/di_progress.sh"
+# Is $VM_PATH/$VM_NAME usable by this user -- and if not, why, and what fixes it.
+. "$REPO_ROOT/utils/vm_path.sh"
 
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
@@ -557,7 +559,7 @@ watch_install() {
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 case "${1:-status}" in
 	create)
-		mkdir -p "$VM_DIR"
+		ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 		if [ -f "$DISK" ]; then
 			ok "disk already exists: $DISK ($(du -h "$DISK" | cut -f1) on host)"
 		else
