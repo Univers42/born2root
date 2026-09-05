@@ -114,8 +114,7 @@ CACHED=""
 # ── Nothing to do? ──────────────────────────────────────────────────────────
 # The stamp is only written after a build passes verification, so trusting it
 # here cannot resurrect a binary that failed its checksum.
-if [ -z "${HELLISH_REFRESH:-}" ] && [ -n "$VERSION" ] &&
-    [ "$CACHED" = "$VERSION" ] && [ -x "$OUT_BIN" ]; then
+if [ -z "${HELLISH_REFRESH:-}" ] && [ -n "$VERSION" ] && [ "$CACHED" = "$VERSION" ] && [ -x "$OUT_BIN" ]; then
     ok "hellish ${VERSION} already present: ${OUT_BIN} ${D}(cached)${Z}"
     exit 0
 fi

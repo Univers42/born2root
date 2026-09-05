@@ -172,7 +172,8 @@ pick_proxy_port() {
 
 install_proxy_service() {
     local https_port="$1" static_port="$2" http_port="$3"
-    local src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/inception_proxy.py"
+    local src
+    src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/inception_proxy.py"
     if [ ! -f "$src" ]; then
         warn "inception_proxy.py missing — the bare URL will not work"
         return 1
@@ -246,9 +247,7 @@ configure_desktop_proxy() {
     local mode current
     mode=$(gsettings get org.gnome.system.proxy mode 2>/dev/null | tr -d "'")
     current=$(gsettings get org.gnome.system.proxy autoconfig-url 2>/dev/null | tr -d "'")
-    if [ "$mode" != "none" ] &&
-        [ "$current" != "http://127.0.0.1:${PROXY_PORT}/inception.pac" ] &&
-        [ "$current" != "file://$DESKTOP_PAC" ]; then
+    if [ "$mode" != "none" ] && [ "$current" != "http://127.0.0.1:${PROXY_PORT}/inception.pac" ] && [ "$current" != "file://$DESKTOP_PAC" ]; then
         warn "desktop proxy already set to '$mode' — left alone; use inception-browser for Chrome"
         return 0
     fi
@@ -315,10 +314,10 @@ strip_managed_block() {
     local file="$1"
     [ -f "$file" ] || return 0
     awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
-		$0 == b { skip = 1; next }
-		$0 == e { skip = 0; next }
-		!skip   { print }
-	' "$file" >"${file}.b2b-tmp" && mv "${file}.b2b-tmp" "$file"
+        $0 == b { skip = 1; next }
+        $0 == e { skip = 0; next }
+        !skip   { print }
+    ' "$file" >"${file}.b2b-tmp" && mv "${file}.b2b-tmp" "$file"
 }
 
 configure_firefox() {
@@ -327,8 +326,7 @@ configure_firefox() {
         [ -n "$profile" ] || continue
         userjs="$profile/user.js"
         # Keep one backup of whatever was there before we ever touched it.
-        if [ -f "$userjs" ] && [ ! -f "$userjs.b2b-backup" ] &&
-            ! grep -qF "$BEGIN_MARK" "$userjs" 2>/dev/null; then
+        if [ -f "$userjs" ] && [ ! -f "$userjs.b2b-backup" ] && ! grep -qF "$BEGIN_MARK" "$userjs" 2>/dev/null; then
             cp "$userjs" "$userjs.b2b-backup"
         fi
         strip_managed_block "$userjs"
@@ -478,8 +476,7 @@ find_chromium() {
 # instead. Unconfined .deb browsers keep the tidy XDG location.
 chromium_profile_dir() {
     local bin="$1" snap_name
-    if [ "$(readlink -f "$bin" 2>/dev/null)" = "/usr/bin/snap" ] ||
-        case "$bin" in /snap/*) true ;; *) false ;; esac then
+    if [ "$(readlink -f "$bin" 2>/dev/null)" = "/usr/bin/snap" ] || case "$bin" in /snap/*) true ;; *) false ;; esac; then
         snap_name=$(basename "$bin")
         printf '%s' "$HOME/snap/${snap_name}/common/inception-browser"
         return 0

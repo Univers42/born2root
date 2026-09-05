@@ -132,12 +132,12 @@ if [ -n "$SRC" ]; then
 else
     step "Cloning ${REPO_URL} (branch ${BRANCH}) into the guest"
     vm_ssh "set -e
-		if [ -d '$GUEST_DIR/.git' ]; then
-			cd '$GUEST_DIR' && git fetch --all -q && git checkout -q '$BRANCH' && git pull -q --ff-only
-		else
-			mkdir -p \"\$(dirname '$GUEST_DIR')\"
-			git clone -q --branch '$BRANCH' '$REPO_URL' '$GUEST_DIR'
-		fi" || die "clone/pull failed"
+        if [ -d '$GUEST_DIR/.git' ]; then
+            cd '$GUEST_DIR' && git fetch --all -q && git checkout -q '$BRANCH' && git pull -q --ff-only
+        else
+            mkdir -p \"\$(dirname '$GUEST_DIR')\"
+            git clone -q --branch '$BRANCH' '$REPO_URL' '$GUEST_DIR'
+        fi" || die "clone/pull failed"
     ok "repository present at ${GUEST_DIR}"
 fi
 

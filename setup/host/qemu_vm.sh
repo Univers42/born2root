@@ -374,7 +374,9 @@ watch_install() {
     # Three live lines redrawn in place. Without a terminal: one line per stage
     # change plus a heartbeat every minute, so a captured log still shows life.
     draw() {
-        local m=$((elapsed / 60)) s=$((elapsed % 60)) l1 l2 l3
+        local m s l1 l2 l3
+        m=$((elapsed / 60))
+        s=$((elapsed % 60))
         l1=$(printf "  ${C_BLUE}%s${C_RESET} ${C_BOLD}%s${C_RESET}  ${C_DIM}%dm%02ds${C_RESET}" \
             "${frames[$fi]}" "$stage" "$m" "$s")
         l2=$(printf "    ${C_DIM}%.72s${C_RESET}" "$activity")
@@ -395,14 +397,17 @@ watch_install() {
     }
     # A finished stage becomes a permanent ✓ line above the live block.
     settle() {
-        local took=$((elapsed - stage_started))
+        local took
+        took=$((elapsed - stage_started))
         if [ "$tty" = 1 ]; then
             [ "$drawn" = 1 ] && printf '\033[3A'
             printf '\r\033[K'
         fi
         printf "  ${C_GREEN}✓${C_RESET} %s  ${C_DIM}%dm%02ds${C_RESET}\n" \
             "$prev_stage" $((took / 60)) $((took % 60))
-        if [ "$tty" = 1 ] && [ "$drawn" = 1 ]; then printf '\r\033[K\n\r\033[K\n\033[2A'; fi
+        if [ "$tty" = 1 ] && [ "$drawn" = 1 ]; then
+            printf '\r\033[K\n\r\033[K\n\033[2A'
+        fi
         drawn=0
     }
     # The final word replaces the live block.
@@ -410,7 +415,11 @@ watch_install() {
         if [ "$tty" = 1 ] && [ "$drawn" = 1 ]; then
             printf '\033[3A\r\033[K\n\r\033[K\n\r\033[K\n\033[3A'
         fi
-        if [ "$1" = ok ]; then ok "$2"; else printf "  ${C_RED}✗${C_RESET} %s\n" "$2" >&2; fi
+        if [ "$1" = ok ]; then
+            ok "$2"
+        else
+            printf "  ${C_RED}✗${C_RESET} %s\n" "$2" >&2
+        fi
         [ -n "${3:-}" ] && printf "    ${C_DIM}%s${C_RESET}\n" "$3"
         drawn=0
     }

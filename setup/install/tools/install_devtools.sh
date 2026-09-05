@@ -287,8 +287,16 @@ log "=== devtools: herdr + claude code ==="
 # if/else, not `cond && fn || log`: that idiom runs the log branch whenever the
 # FUNCTION returns non-zero too, so a failed install would report itself as
 # "skipped by configuration" — the wrong message for the wrong reason.
-if [ "$INSTALL_HERDR" = "1" ]; then install_herdr; else log "INSTALL_HERDR=0 — skipping Herdr"; fi
-if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then install_claude_code; else log "INSTALL_CLAUDE_CODE=0 — skipping Claude Code"; fi
+if [ "$INSTALL_HERDR" = "1" ]; then
+    install_herdr
+else
+    log "INSTALL_HERDR=0 — skipping Herdr"
+fi
+if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
+    install_claude_code
+else
+    log "INSTALL_CLAUDE_CODE=0 — skipping Claude Code"
+fi
 setup_herdr_service
 write_motd_hint
 log "=== done ==="

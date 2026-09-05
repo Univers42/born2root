@@ -41,7 +41,8 @@ TERM_WIDTH=$(tput cols)
 print_centered() {
     local text="$1"
     local color="${2:-$WHITE}"
-    local padding=$(((TERM_WIDTH - ${#text}) / 2))
+    local padding
+    padding=$(((TERM_WIDTH - ${#text}) / 2))
     printf "%${padding}s" ""
     echo -e "${color}${text}${NC}"
 }

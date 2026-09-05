@@ -105,10 +105,10 @@ install_deps() {
     apt-get update -qq || warn "apt-get update failed — continuing with the current index"
 
     local pkgs="git curl wget tar gzip unzip xz-utils ca-certificates \
-		build-essential gcc g++ make pkg-config \
-		ripgrep fd-find xclip \
-		python3 python3-venv python3-pip \
-		nodejs npm"
+        build-essential gcc g++ make pkg-config \
+        ripgrep fd-find xclip \
+        python3 python3-venv python3-pip \
+        nodejs npm"
 
     # One package at a time would be slower but a single missing name aborts the
     # whole batch, so fall back to per-package installs only if the batch fails.

@@ -145,8 +145,8 @@ setup_sudo() {
     pass=$(resolve_sudo_pass) || true
     if [ -z "$pass" ]; then
         die "the VM asks for a sudo password and none could be found.
-     Set one explicitly:  VM_SUDO_PASS=... make provision
-     or point at a file:  VM_SUDO_PASS_FILE=/path/to/file make provision"
+        Set one explicitly:  VM_SUDO_PASS=... make provision
+        or point at a file:  VM_SUDO_PASS_FILE=/path/to/file make provision"
     fi
 
     # The password travels on stdin and lands in a mode-600 file; the askpass

@@ -43,8 +43,8 @@ if [ "${1:-}" = users ]; then
         case " $found " in *" $pid "*) continue ;; esac
         found="$found $pid"
         tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null |
-            awk -v pid="$pid" '{ for (i = 1; i <= NF; i++) if ($i == "-name") n = $(i + 1);
-				sub(".*/", "", $1); printf "%s%s (pid %s)\n", $1, (n ? " " n : ""), pid }'
+        awk -v pid="$pid" '{ for (i = 1; i <= NF; i++) if ($i == "-name") n = $(i + 1);
+                sub(".*/", "", $1); printf "%s%s (pid %s)\n", $1, (n ? " " n : ""), pid }'
     done
     [ -n "$found" ]
     exit $?
