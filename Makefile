@@ -689,11 +689,11 @@ verif_access: verify_access
 #   make provision                 both, then print the health report
 #   make nvim_health               just re-print :checkhealth from the VM
 nvim:
-	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
+	@VM_PATH="$(VM_PATH)" NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
 		$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" nvim
 
 hellish_plugins:
-	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" hellish
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" hellish
 
 # Re-run upstream's hellish installer inside a VM that is already built:
 #   curl -fsSL .../hellish/main/install.sh | sh
@@ -705,22 +705,22 @@ hellish_plugins:
 # wrapper. `make all` already does this on first boot; this is for iterating
 # without a rebuild.
 shell_vm:
-	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" shell
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" shell
 
 provision:
-	@NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
+	@VM_PATH="$(VM_PATH)" NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
 		$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" all
 
 nvim_health:
-	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" health
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" health
 
 # Machine-wide tooling on /opt instead of / and /home (npm globals, AI models).
 global_scope:
-	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" global
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" global
 
 # Herdr (persistent terminal panes over SSH) + Claude Code.
 devtools:
-	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
 
 # Optional AI. Does nothing unless AI_MODE is client or local:
 #   make ai AI_MODE=local        a model sized to this VM's RAM

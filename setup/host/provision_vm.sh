@@ -39,22 +39,21 @@ ok()   { printf "${C_GRN}✓${C_R} %s\n" "$*"; }
 warn() { printf "${C_YEL}!${C_R} %s\n" "$*"; }
 die()  { printf "${C_RED}✗${C_R} %s\n" "$*" >&2; exit 1; }
 
-command -v VBoxManage >/dev/null 2>&1 || die "VBoxManage not found"
-
-VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1 \
-	|| die "VM \"$VM_NAME\" does not exist. Existing VMs: $(VBoxManage list vms | tr '\n' ' ')"
-
-state=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null \
-	| grep '^VMState=' | cut -d'"' -f2)
-[ "$state" = "running" ] \
-	|| die "VM \"$VM_NAME\" is $state, not running. Start it with: make start_vm VM_NAME=$VM_NAME"
-
 # ── Where does this VM's SSH live on the host? ──────────────────────────────
-SSH_PORT=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null \
-	| awk -F'"' '$1 ~ /^Forwarding/ && $2 ~ /^ssh,tcp,/ { print $2; exit }' \
-	| cut -d',' -f4)
-[ -n "$SSH_PORT" ] || die "VM \"$VM_NAME\" has no NAT rule named 'ssh'"
-info "VM \"$VM_NAME\" — ssh on 127.0.0.1:${SSH_PORT} as ${VM_USER}"
+# vm_ports.sh knows both backends: a VirtualBox NAT rule, or the hostfwd map
+# QEMU's driver recorded in ports.env under VM_PATH (the Makefile exports it).
+# A VirtualBox VM is also asked whether it is running; a QEMU guest simply has
+# to answer on its port.
+. "$REPO_ROOT/setup/host/vm_ports.sh"
+if command -v VBoxManage >/dev/null 2>&1 && VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1; then
+	state=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null \
+		| grep '^VMState=' | cut -d'"' -f2)
+	[ "$state" = "running" ] \
+		|| die "VM \"$VM_NAME\" is $state, not running. Start it with: make start_vm VM_NAME=$VM_NAME"
+fi
+SSH_PORT=$(vm_forward_port ssh 2>/dev/null) || SSH_PORT=
+[ -n "$SSH_PORT" ] || die "VM \"$VM_NAME\" has no 'ssh' forward: no VirtualBox NAT rule by that name, and no QEMU ports.env under VM_PATH (${VM_PATH:-unset}) -- is the guest running?"
+info "VM \"$VM_NAME\" ($(vm_backend 2>/dev/null || echo unknown)) — ssh on 127.0.0.1:${SSH_PORT} as ${VM_USER}"
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 	-o LogLevel=ERROR -o ConnectTimeout=15 -o ServerAliveInterval=15
