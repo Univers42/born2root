@@ -628,22 +628,22 @@ fresh:
 # entry. host_access teaches the two installed browsers to resolve it
 # themselves — no proxy, no SSH tunnel, no root. See the script's header.
 host_access:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
 
 host_access_undo:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh --undo
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh --undo
 
 # Clone (or upload) Inception into the VM, build it, wire up the host, verify.
 #   make inception                    clone github.com/Univers42/inception
 #   make inception SRC=/path/to/repo  push a local working tree up instead
 inception:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
 		$(SCRIPT_SH) setup/host/deploy_inception.sh
 
 # Prove it from the host: NAT rules, TLS/SNI, the WordPress redirect trap, and
 # a real headless browser load of the bare https://$(DOMAIN) URL.
 verify_access:
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/verify_inception_access.sh
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/verify_inception_access.sh
 
 # Common misspelling. `make` has no "did you mean", so a typo here fails with a
 # bare "No rule to make target" right after host_access printed all-green --
