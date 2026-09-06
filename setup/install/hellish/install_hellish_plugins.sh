@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #
 # install_hellish_plugins.sh — install the hellishrc plugin framework.
 #

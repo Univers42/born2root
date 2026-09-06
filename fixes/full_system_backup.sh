@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Full System Backup Script
 # Current Date and Time (UTC): 2025-04-04 16:52:53
 # Current User: LESdylan

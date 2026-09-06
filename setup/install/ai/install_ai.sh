@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #
 # install_ai.sh — optional local/remote AI, sized to the hardware that exists.
 #

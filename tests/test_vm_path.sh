@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Regression test for utils/vm_path.sh.
 #
 # The bug it guards: VM_PATH=/mnt/storage/qemu, whose parent is root-owned,

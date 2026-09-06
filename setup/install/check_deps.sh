@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # check_deps.sh — verify and install host developer dependencies for born2root
 # Called by: make deps
 #

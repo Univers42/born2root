@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Fix Lighttpd PHP Configuration and mysqli Extension
 echo "==============================================="

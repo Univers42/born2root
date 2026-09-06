@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # System Monitor & Specs Display Script
 # Current Date and Time (UTC): 2025-04-04 16:35:45

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot post-installation setup script
 # Runs inside in-target (chroot to /target) during d-i late_command
 # ─────────────────────────────────────────────────────────────────
@@ -121,47 +121,39 @@ if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
 		install -m 755 "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST" 2>/dev/null || cp "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST"
 		chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
 
-		# VS Code Remote-SSH bootstrap/tunnel uses non-interactive command sessions.
-		# Keep hellish as default interactive shell, but route non-interactive SSH
-		# commands through bash for compatibility.
+		# The login shell is the binary itself. /usr/bin/hellish is a symlink to
+		# /usr/bin/hellish.real: the binary can be refreshed (first boot installs
+		# the published release over it) without the passwd entry ever naming a
+		# file that is mid-replacement, and `command -v hellish.real` keeps
+		# naming the ELF for the tools that need one (Inception's Makefile copies
+		# it into the containers). Earlier builds put a bash script here that
+		# sent every non-interactive ssh command to bash; that made
+		# `ssh b2b '<cmd>'`, scp's server side and the whole host-driven pipeline
+		# run under bash in a VM whose point is hellish. hellish takes those
+		# itself: `hellish -c 'scp -t …'`, and `hellish -c bash` for VS Code's
+		# Remote-SSH bootstrap, which names bash explicitly.
 		if [ "$(basename "$CUSTOM_SHELL_DEST")" = "hellish" ]; then
 			CUSTOM_SHELL_REAL="${CUSTOM_SHELL_DEST}.real"
-			if [ ! -x "$CUSTOM_SHELL_REAL" ]; then
-				mv "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
-				chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
+			if [ ! -L "$CUSTOM_SHELL_DEST" ]; then
+				mv -f "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
 			fi
-			cat > "$CUSTOM_SHELL_DEST" << 'HELLWRAPEOF'
-#!/bin/bash
-REAL_SHELL="${0}.real"
-
-# For VS Code/SSH non-interactive command mode, force bash.
-if [ -n "$SSH_ORIGINAL_COMMAND" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
-	if [ -n "$SSH_ORIGINAL_COMMAND" ]; then
-		exec /bin/bash -lc "$SSH_ORIGINAL_COMMAND"
-	elif [ "$#" -gt 0 ]; then
-		exec /bin/bash "$@"
-	else
-		exec /bin/bash -l
-	fi
-fi
-
-# Interactive login keeps the custom shell behavior.
-exec "$REAL_SHELL" "$@"
-HELLWRAPEOF
-			chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
+			chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
+			ln -sfn "$CUSTOM_SHELL_REAL" "$CUSTOM_SHELL_DEST"
 
 			# Keep a pristine copy outside /usr/bin so the shell guard in
-			# sshd-watchdog can put the wrapper back. sshd refuses any account
+			# sshd-watchdog can put the binary back. sshd refuses any account
 			# whose login shell does not exist — it reports the user as an
 			# "invalid user", which rejects key AND password auth AND the
-			# console at the same time. A single `rm /usr/bin/hellish` therefore
-			# locks every door on the machine at once, and the error it produces
-			# ("Permission denied") points at credentials rather than the shell.
+			# console at the same time. A single `rm /usr/bin/hellish.real`
+			# therefore locks every door on the machine at once, and the error it
+			# produces ("Permission denied") points at credentials rather than
+			# the shell.
 			mkdir -p /usr/local/lib/b2b
-			cp "$CUSTOM_SHELL_DEST" /usr/local/lib/b2b/shell-wrapper 2>/dev/null || true
-			chmod 755 /usr/local/lib/b2b/shell-wrapper 2>/dev/null || true
+			cp "$CUSTOM_SHELL_REAL" /usr/local/lib/b2b/hellish.real 2>/dev/null || true
+			chmod 755 /usr/local/lib/b2b/hellish.real 2>/dev/null || true
+			rm -f /usr/local/lib/b2b/shell-wrapper
 
-			echo "[OK] Installed hellish SSH compatibility wrapper: interactive=hellish, non-interactive=bash"
+			echo "[OK] $CUSTOM_SHELL_DEST -> $CUSTOM_SHELL_REAL: interactive logins and ssh commands alike run hellish"
 		fi
 
 		# Register the shell so chsh/usermod accepts it
@@ -192,6 +184,30 @@ HELLWRAPEOF
 else
 	echo "[OK] No custom shell payload provided — keeping default shell (bash)"
 fi
+
+# ── The interpreter of everything this guest runs on its own ────────────────
+# The monitoring cron job, the two systemd helpers, the first-boot hook and
+# the provisioners it launches all run under the baked shell when there is
+# one, and under bash otherwise -- decided here, once, and written into the
+# scripts' shebangs and the crontab below, so that a guest built with hellish
+# runs nothing under bash that it started itself. first-boot-setup.sh reads
+# B2B_GUEST_SH from /etc/b2b_custom_shell.conf for the provisioners.
+B2B_GUEST_SH=/bin/bash
+if [ -n "${CUSTOM_SHELL_REAL:-}" ] && [ -x "$CUSTOM_SHELL_REAL" ]; then
+	B2B_GUEST_SH="$CUSTOM_SHELL_REAL"
+fi
+if [ -f /etc/b2b_custom_shell.conf ]; then
+	echo "B2B_GUEST_SH=$B2B_GUEST_SH" >> /etc/b2b_custom_shell.conf
+fi
+# pin_shebang <script>: make the script's first line name the guest interpreter.
+pin_shebang() {
+	[ -f "$1" ] || return 0
+	sed -i "1s|^#!.*|#!$B2B_GUEST_SH|" "$1" 2>/dev/null || true
+}
+for f in /root/first-boot-setup.sh /root/install_*.sh; do
+	pin_shebang "$f"
+done
+echo "[OK] Guest-side scripts run under $B2B_GUEST_SH"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BORN2BEROOT MANDATORY CONFIGURATION
@@ -284,6 +300,7 @@ while true; do
 done
 NKEOF
 chmod +x /usr/local/bin/nat-keepalive.sh
+pin_shebang /usr/local/bin/nat-keepalive.sh
 
 cat > /etc/systemd/system/nat-keepalive.service << 'NKSEOF'
 [Unit]
@@ -327,9 +344,13 @@ while true; do
     # to repair rather than a state to sit in.
     USER_SHELL=$(getent passwd dlesieur 2>/dev/null | cut -d: -f7)
     if [ -n "$USER_SHELL" ] && [ ! -x "$USER_SHELL" ]; then
-        if [ -x /usr/local/lib/b2b/shell-wrapper ] && [ -x "${USER_SHELL}.real" ]; then
-            install -m 755 /usr/local/lib/b2b/shell-wrapper "$USER_SHELL" 2>> "$LOG"
-            echo "$(date): login shell $USER_SHELL was missing -- wrapper restored" >> "$LOG"
+        if [ ! -x "${USER_SHELL}.real" ] && [ -x /usr/local/lib/b2b/hellish.real ]; then
+            install -m 755 /usr/local/lib/b2b/hellish.real "${USER_SHELL}.real" 2>> "$LOG"
+            echo "$(date): ${USER_SHELL}.real was missing -- restored from /usr/local/lib/b2b" >> "$LOG"
+        fi
+        if [ -x "${USER_SHELL}.real" ]; then
+            ln -sfn "${USER_SHELL}.real" "$USER_SHELL" 2>> "$LOG"
+            echo "$(date): login shell $USER_SHELL was missing -- link to ${USER_SHELL}.real restored" >> "$LOG"
         else
             # Nothing to restore from: fall back to bash so the box stays
             # reachable. Losing the custom shell beats losing all access.
@@ -346,6 +367,7 @@ while true; do
 done
 WDEOF
 chmod +x /usr/local/bin/sshd-watchdog.sh
+pin_shebang /usr/local/bin/sshd-watchdog.sh
 
 cat > /etc/systemd/system/sshd-watchdog.service << 'SWEOF'
 [Unit]
@@ -566,6 +588,7 @@ echo "[OK] Git configured"
 ### ─── 11. Monitoring script ────────────────────────────────────────────────
 # Already copied to /usr/local/bin/monitoring.sh by late_command
 chmod +x /usr/local/bin/monitoring.sh 2> /dev/null || true
+pin_shebang /usr/local/bin/monitoring.sh
 
 # Crontab: every 10 minutes, broadcast to all terminals
 echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >> /etc/crontab
@@ -669,7 +692,7 @@ echo "[OK] Services enabled"
 ### ─── 15. First-boot script (Docker + WordPress) ───────────────────────────
 # Already copied to /root/first-boot-setup.sh by late_command
 chmod +x /root/first-boot-setup.sh 2> /dev/null || true
-echo "@reboot root /bin/bash /root/first-boot-setup.sh" >> /etc/crontab
+echo "@reboot root $B2B_GUEST_SH /root/first-boot-setup.sh" >> /etc/crontab
 echo "[OK] First-boot hook registered"
 
 ### ─── 16. MOTD ─────────────────────────────────────────────────────────────

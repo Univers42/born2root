@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # WordPress AppArmor Effectiveness Test Script
 # Created: 2025-04-10

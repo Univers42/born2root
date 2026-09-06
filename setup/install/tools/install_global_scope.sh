@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #
 # install_global_scope.sh — put machine-wide tooling on /opt, not on / or /home.
 #

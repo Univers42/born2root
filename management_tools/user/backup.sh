@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Create backup directory if it doesn't exist
 BACKUP_DIR=~/backups

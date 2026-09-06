@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # WordPress Theme Update Script
 # Created: 2025-04-04 23:40:17
 # Author: LESdylan

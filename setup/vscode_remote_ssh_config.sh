@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # VS Code Remote SSH Configuration Script
 # Automatically configures VS Code to work with Born2beRoot VM
 # Run this to fix SSH b2b connection issues in VS Code

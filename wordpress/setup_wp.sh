@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 echo "WordPress Database Setup Script"
 echo "==============================="

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # The VM's disk image, and whether it holds a *finished* install.
 #
 # Sourced by generate/orchestrate.sh. It lives in its own file for two reasons:

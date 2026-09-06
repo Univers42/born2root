@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Force install all VS Code Remote extensions
 
 echo "Installing VS Code Remote Extensions..."

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Run on your Debian guest VM
 
 # Get host port from user

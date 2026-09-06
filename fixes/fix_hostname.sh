@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Fix hostname resolution error in Born2beRoot
 
 # Colors for better output

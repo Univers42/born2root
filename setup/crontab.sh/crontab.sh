@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Colors for better readability
 RED='\033[0;31m'

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Is VirtualBox's kernel driver actually USABLE by the CALLING user, right now?
 #
 # Existence of /dev/vboxdrv and the module being loaded is not enough: the

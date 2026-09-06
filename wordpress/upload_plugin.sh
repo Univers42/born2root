@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # WordPress Plugin FTP Uploader
 # Created: 2025-04-04
 # Author: LESdylan

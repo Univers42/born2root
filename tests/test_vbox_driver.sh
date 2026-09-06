@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Regression test for utils/vbox_driver.sh.
 #
 # The bug it guards, reproduced deterministically on a real machine:

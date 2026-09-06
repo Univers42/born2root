@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #
 # install_devtools.sh — Herdr and Claude Code.
 #

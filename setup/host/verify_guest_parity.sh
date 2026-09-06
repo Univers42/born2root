@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  verify_guest_parity.sh — is the guest the SAME on QEMU as on VirtualBox?    #
 # ============================================================================ #
@@ -114,10 +114,24 @@ fi
 row "login shell"   "$(g 'getent passwd dlesieur | cut -d: -f7')"        "/usr/bin/hellish"
 row "root shell"    "$(g 'getent passwd root | cut -d: -f7')"            "/bin/bash"
 row "hellish"       "$(g '/usr/bin/hellish.real --version 2>/dev/null | head -1')" "hellish"
-row "ssh wrapper"   "$(g 'head -1 /usr/bin/hellish')"                    "#!/bin/bash"
-row "non-interactive" "$(g 'echo $0')"                                   "bash"
+row "shell link"    "$(g 'readlink /usr/bin/hellish')"                   "/usr/bin/hellish.real"
+row "ssh command"   "$(g 'readlink /proc/$$/exe')"                       "/usr/bin/hellish.real"
+row "ssh \$0"       "$(g 'echo $0')"                                     "hellish"
 row "plugins"       "$(g 'ls ~/.hellish/plugins 2>/dev/null | wc -l')"   "--"
 row "hellishrc"     "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')"         "dlesieur"
+
+# What the guest starts on its own runs under the same shell: the cron job,
+# the two systemd helpers (checked live, by the process name of their main
+# pid), the first-boot hook and the provisioners it ran.
+printf "\n${C_BOLD}Interpreters (nothing the guest starts itself is bash)${C_RESET}\n"
+row "monitoring.sh"  "$(g 'head -1 /usr/local/bin/monitoring.sh')"      "#!/usr/bin/hellish.real"
+row "nat-keepalive"  "$(g 'head -1 /usr/local/bin/nat-keepalive.sh')"   "#!/usr/bin/hellish.real"
+row "sshd-watchdog"  "$(g 'head -1 /usr/local/bin/sshd-watchdog.sh')"   "#!/usr/bin/hellish.real"
+row "keepalive pid"  "$(g 'ps -o comm= -p "$(systemctl show -p MainPID --value nat-keepalive)"')" "hellish.real"
+row "watchdog pid"   "$(g 'ps -o comm= -p "$(systemctl show -p MainPID --value sshd-watchdog)"')" "hellish.real"
+row "guest sh conf"  "$(g 'sed -n "s/^B2B_GUEST_SH=//p" /etc/b2b_custom_shell.conf')" "/usr/bin/hellish.real"
+row "provisioners"   "$(groot 'head -qn1 /root/install_*.sh 2>/dev/null | sort -u' | tr '\n' ' ')" "#!/usr/bin/hellish.real"
+row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/null; echo "(line removed after it ran)"' | head -1)" "--"
 
 printf "\n${C_BOLD}Services${C_RESET}\n"
 row "docker"        "$(g 'systemctl is-active docker')"                  "active"

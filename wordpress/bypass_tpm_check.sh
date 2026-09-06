@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Create registry bypass file for Windows 11 TPM check
 cat > "$HOME/win11_bypass.reg" << 'EOL'
 Windows Registry Editor Version 5.00

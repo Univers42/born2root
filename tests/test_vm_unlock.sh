@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Tests for the passphrase resolution in unlock_vm.sh.
 #
 # Only the pure part is covered here: picking the passphrase and the Enter

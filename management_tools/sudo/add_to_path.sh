@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Function to find programs matching a pattern and add selected one to PATH
 add_program_to_path() {

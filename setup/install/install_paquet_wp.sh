@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Script to install required PHP extensions for WordPress
 # Specifically addresses the missing mysqli extension

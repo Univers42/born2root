@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  install_hellish_upstream.sh — install hellish IN THE VM from upstream       #
 # ============================================================================ #
@@ -30,13 +30,20 @@
 #      shell, not dlesieur's. The login shell is set here, for dlesieur only.
 #   2. HOME=/home/dlesieur for the run, so the plugin framework and ~/.hellishrc
 #      land in the user's home instead of /root, then ownership is repaired.
-#   3. The SSH-compatibility wrapper. This is not optional: /usr/bin/hellish is
-#      dlesieur's login shell, so `ssh b2b '<command>'` runs it non-interactively
-#      — and the entire host-side pipeline (deploy_inception.sh, provision_vm.sh,
-#      the CA fetch in inception_host_access.sh, every verifier) is exactly that.
-#      The wrapper keeps hellish for interactive logins and routes non-interactive
-#      invocations to bash, which is what b2b-setup.sh already did for the baked
-#      binary. Losing it strands the VM: the host can no longer drive it.
+#   3. The link. /usr/bin/hellish is dlesieur's login shell and a symlink to
+#      /usr/bin/hellish.real, the ELF (what b2b-setup.sh set up for the baked
+#      binary). Upstream's installer writes a fresh binary at /usr/bin/hellish;
+#      it is moved to .real and the link restored, so `ssh b2b '<command>'`,
+#      scp and the whole host-side pipeline (deploy_inception.sh,
+#      provision_vm.sh, the CA fetch, every verifier) keep running under
+#      hellish -- there is no bash wrapper any more, and an old guest that
+#      still has one is converted. Losing the link strands the VM (sshd
+#      rejects an account whose shell is missing), so it is also what the
+#      sshd-watchdog guard restores.
+#   4. Everything the guest starts on its own -- the monitoring cron job, the
+#      two systemd helpers, the first-boot hook and the provisioners -- gets
+#      hellish.real pinned as its interpreter (normalize_guest_interpreters),
+#      the same thing b2b-setup.sh does at install time.
 #
 # FALLBACK
 #   No network, or upstream unreachable, and an ISO-baked binary is already in
@@ -67,14 +74,24 @@ warn() { printf '[hellish-upstream] WARN: %s\n' "$*" >&2; }
 USER_HOME=$(getent passwd "$HELLISH_USER" 2>/dev/null | cut -d: -f6)
 [ -n "$USER_HOME" ] || USER_HOME="/home/$HELLISH_USER"
 
-# ── Is a wrapper already sitting at $DEST from a previous run? ───────────────
-# The wrapper is a small bash script; the real shell is an ELF binary. Handing
-# the wrapper back to the installer as "the previous install" would be wrong,
-# so unwrap first and let upstream overwrite the real binary.
+# ── Is an old bash wrapper still sitting at $DEST? ───────────────────────────
+# Guests built before the link existed have a small bash script there and the
+# ELF at $REAL. Handing the wrapper to the installer as "the previous install"
+# would be wrong, so put the binary back first and let upstream overwrite it.
+# A link (the current layout) passes through: `install` unlinks it and writes
+# a plain file, which install_link() moves to $REAL and re-links.
 unwrap() {
-	if [ -f "$DEST" ] && head -c2 "$DEST" 2>/dev/null | grep -q '#!'; then
+	if [ ! -L "$DEST" ] && [ -f "$DEST" ] && head -c2 "$DEST" 2>/dev/null | grep -q '#!'; then
 		[ -x "$REAL" ] && mv -f "$REAL" "$DEST"
 	fi
+}
+
+# The shell that runs upstream's installer (a POSIX sh script): the guest's
+# hellish.real when it is already there, sh only on a guest that has none.
+# Replacing the binary from inside itself is fine: install(1) unlinks the
+# target and writes a new file, and the running process keeps its old inode.
+run_sh() {
+	if [ -x "$REAL" ]; then printf '%s' "$REAL"; else printf 'sh'; fi
 }
 
 # ── 1. Upstream installer ───────────────────────────────────────────────────
@@ -102,11 +119,11 @@ run_upstream() {
 	[ -n "$HELLISH_VERSION" ] && set -- "$@" --version "$HELLISH_VERSION"
 
 	unwrap
-	log "running: sh install.sh $* (HOME=$USER_HOME)"
+	log "running: $(run_sh) install.sh $* (HOME=$USER_HOME)"
 	# HOME is what decides where ~/.hellishrc and ~/.hellish land. Running as
 	# root with the user's HOME puts the configuration in the right place; the
 	# files come out root-owned and are chown'd back below.
-	HOME="$USER_HOME" sh "$tmp/install.sh" "$@" 2>&1 | sed 's/^/    /'
+	HOME="$USER_HOME" "$(run_sh)" "$tmp/install.sh" "$@" 2>&1 | sed 's/^/    /'
 	rc=${PIPESTATUS[0]}
 	rm -rf "$tmp"
 
@@ -133,45 +150,57 @@ fix_ownership() {
 	log "ownership of the hellish configuration set to ${HELLISH_USER}:${g}"
 }
 
-# ── 3. The SSH-compatibility wrapper ────────────────────────────────────────
-# Identical in behaviour to the one b2b-setup.sh installs for the baked binary:
-# interactive login -> hellish, everything else -> bash. Without it, every
-# `ssh b2b '<command>'` from the host runs inside hellish.
-install_wrapper() {
-	if [ ! -x "$DEST" ]; then
-		warn "no $DEST to wrap"
-		return 1
+# ── 3. The link: /usr/bin/hellish -> /usr/bin/hellish.real ──────────────────
+# Same layout b2b-setup.sh installs for the baked binary. A fresh binary that
+# upstream left at $DEST is moved to $REAL; an old bash wrapper is replaced.
+install_link() {
+	if [ ! -L "$DEST" ] && [ -f "$DEST" ]; then
+		if head -c2 "$DEST" 2>/dev/null | grep -q '#!'; then
+			[ -x "$REAL" ] || { warn "a wrapper at $DEST but no $REAL to link to"; return 1; }
+			log "replacing the bash wrapper at $DEST with a link"
+		else
+			mv -f "$DEST" "$REAL" || { warn "could not move the binary aside"; return 1; }
+		fi
 	fi
-	# Already wrapped (re-run): leave it alone.
-	if head -c2 "$DEST" 2>/dev/null | grep -q '#!' && [ -x "$REAL" ]; then
-		log "wrapper already in place"
-		return 0
-	fi
-	mv -f "$DEST" "$REAL" || { warn "could not move the binary aside"; return 1; }
+	[ -x "$REAL" ] || { warn "no $REAL to link to"; return 1; }
 	chmod 755 "$REAL"
-	cat > "$DEST" << 'WRAPEOF'
-#!/bin/bash
-# Installed by born2root (setup/install/hellish/install_hellish_upstream.sh).
-#
-# hellish is the interactive login shell. Non-interactive invocations -- which
-# is what `ssh <host> '<command>'`, scp, rsync and VS Code Remote-SSH all use --
-# are handed to bash, so host-side automation keeps working.
-REAL_SHELL="${0}.real"
+	ln -sfn "$REAL" "$DEST"
+	# The pristine copy the sshd-watchdog guard restores from.
+	mkdir -p /usr/local/lib/b2b
+	cp -f "$REAL" /usr/local/lib/b2b/hellish.real 2>/dev/null && chmod 755 /usr/local/lib/b2b/hellish.real
+	rm -f /usr/local/lib/b2b/shell-wrapper
+	log "$DEST -> $REAL (interactive logins and ssh commands alike run hellish)"
+}
 
-if [ -n "$SSH_ORIGINAL_COMMAND" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
-	if [ -n "$SSH_ORIGINAL_COMMAND" ]; then
-		exec /bin/bash -lc "$SSH_ORIGINAL_COMMAND"
-	elif [ "$#" -gt 0 ]; then
-		exec /bin/bash "$@"
-	else
-		exec /bin/bash -l
+# ── 3b. Pin hellish.real as the interpreter of what the guest runs itself ────
+# b2b-setup.sh does this at install time from the ISO; doing it here as well
+# converts a guest that was built before, and survives a refresh. The two
+# systemd helpers are restarted so their running process is hellish.real too.
+normalize_guest_interpreters() {
+	local f changed=0
+	for f in /usr/local/bin/monitoring.sh /usr/local/bin/nat-keepalive.sh \
+		/usr/local/bin/sshd-watchdog.sh /root/first-boot-setup.sh /root/install_*.sh; do
+		[ -f "$f" ] || continue
+		if [ "$(head -1 "$f")" != "#!$REAL" ]; then
+			sed -i "1s|^#!.*|#!$REAL|" "$f" && changed=$((changed + 1))
+		fi
+	done
+	if grep -q '^@reboot root /bin/bash /root/first-boot-setup.sh' /etc/crontab 2>/dev/null; then
+		sed -i "s|^@reboot root /bin/bash /root/first-boot-setup.sh|@reboot root $REAL /root/first-boot-setup.sh|" /etc/crontab
+		changed=$((changed + 1))
 	fi
-fi
-
-exec "$REAL_SHELL" "$@"
-WRAPEOF
-	chmod 755 "$DEST"
-	log "SSH-compatibility wrapper installed (interactive=hellish, non-interactive=bash)"
+	if [ -f /etc/b2b_custom_shell.conf ]; then
+		grep -q '^B2B_GUEST_SH=' /etc/b2b_custom_shell.conf \
+			&& sed -i "s|^B2B_GUEST_SH=.*|B2B_GUEST_SH=$REAL|" /etc/b2b_custom_shell.conf \
+			|| echo "B2B_GUEST_SH=$REAL" >> /etc/b2b_custom_shell.conf
+	fi
+	for f in nat-keepalive sshd-watchdog; do
+		if systemctl is-enabled "$f" > /dev/null 2>&1 \
+			&& [ "$(ps -o comm= -p "$(systemctl show -p MainPID --value "$f" 2>/dev/null)" 2>/dev/null)" != "hellish.real" ]; then
+			systemctl restart "$f" 2> /dev/null && changed=$((changed + 1))
+		fi
+	done
+	log "guest-side scripts run under $REAL ($changed change(s))"
 }
 
 # ── 4. Register it and make it the user's login shell ───────────────────────
@@ -190,8 +219,9 @@ set_login_shell() {
 		warn "user $HELLISH_USER does not exist"
 		return 1
 	fi
-	# first-boot-setup.sh re-applies this on later boots.
-	printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\n' "$HELLISH_USER" "$DEST" \
+	# first-boot-setup.sh re-applies this on later boots, and runs the
+	# provisioners under B2B_GUEST_SH.
+	printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\nB2B_GUEST_SH=%s\n' "$HELLISH_USER" "$DEST" "$REAL" \
 		> /etc/b2b_custom_shell.conf 2> /dev/null || true
 	chmod 644 /etc/b2b_custom_shell.conf 2> /dev/null || true
 }
@@ -210,13 +240,14 @@ else
 	fi
 fi
 
-install_wrapper
+install_link || exit 1
 set_login_shell
+normalize_guest_interpreters
 
 # ── Report ──────────────────────────────────────────────────────────────────
 log "--- result ---"
 log "binary : $("$REAL" --version 2>/dev/null | head -1 || echo 'MISSING')"
-log "wrapper: $([ -f "$DEST" ] && head -1 "$DEST" || echo 'MISSING')"
+log "link   : $DEST -> $(readlink "$DEST" 2>/dev/null || echo 'NOT A LINK')"
 log "shell  : $(getent passwd "$HELLISH_USER" | cut -d: -f7)"
 if [ -f "$USER_HOME/.hellishrc" ]; then
 	log "config : $USER_HOME/.hellishrc ($(stat -c '%U:%G' "$USER_HOME/.hellishrc"))"

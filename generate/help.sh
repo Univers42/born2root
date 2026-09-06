@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot — Makefile help
 # Called by: make help (the default goal — plain `make` lands here)
 set -e

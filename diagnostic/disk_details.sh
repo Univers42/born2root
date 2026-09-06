@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Disk Identification Script
 # Current Date and Time (UTC): 2025-04-04 16:45:42
 # Current User: LESdylan

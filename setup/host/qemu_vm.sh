@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  qemu_vm.sh — run the Born2beRoot VM with QEMU/KVM instead of VirtualBox     #
 # ============================================================================ #

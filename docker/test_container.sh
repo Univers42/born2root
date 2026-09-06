@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # Test script to verify the shipped hellish binary works in the container.
 # The container installs dist/hellish (downloaded by `make shell`); it does not
 # compile anything.

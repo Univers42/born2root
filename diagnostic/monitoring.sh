@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Colors for better readability (inlined instead of sourcing)
 BLUE='\033[0;34m'

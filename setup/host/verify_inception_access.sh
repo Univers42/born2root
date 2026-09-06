@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  born2root — prove the Inception domain really works FROM THE HOST           #
 # ============================================================================ #

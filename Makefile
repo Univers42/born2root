@@ -23,6 +23,54 @@ VM_NAME      ?= debian
 #   qemu        KVM; needs no module, only access to /dev/kvm, so it works as
 #               an ordinary user on machines where VirtualBox cannot
 BACKEND      ?= auto
+# ── Which shell interprets the scripts ──────────────────────────────────────
+# make parses the Makefile; the .sh files it calls are interpreted by a shell.
+# Run them with the shell you launched make FROM -- hellish when that is your
+# shell -- and fall back to bash. (The scripts' own shebang is
+# `#!/usr/bin/env hellish`, for when they are started by hand; make never
+# consults it, so a host without hellish still builds the VM under bash.)
+# The launcher is make's parent process; a
+# candidate is used only if it can run the scripts' bash-isms (arrays, local,
+# BASH_SOURCE) and says so (BASH_VERSION -- zsh passes the rest of the probe
+# and then fails on the first unmatched glob), so `make all` can never pick a
+# shell that would choke on them.
+# Override with `make ... SCRIPT_SH=/path/to/shell`. Exported, so recursive
+# makes and the scripts themselves inherit the same choice without re-probing.
+ifeq ($(origin SCRIPT_SH),undefined)
+# No shell takes part in finding the launcher. GNU make execs a $(shell ...)
+# line that has no shell metacharacters directly, so `cat /proc/self/stat` is
+# cat itself, and its 4th field is make's pid; make's own stat gives its
+# parent; that parent's comm is the launcher. Each candidate is then asked to
+# run tools/launcher_probe.sh itself: it prints B2R_SH=<its path> only when it
+# is a shell that can interpret the scripts (bash-isms, BASH_VERSION), so a
+# candidate that is no shell at all leaves nothing. The launcher and the
+# login shell are only tried when their name is a shell's (a `timeout`,
+# an editor or a sub-make in between would otherwise print its usage).
+# They are tried one at a time -- $(if) expands only the branch it takes --
+# so a hellish launch never starts bash even to ask it.
+# Until this line every $(shell) would otherwise have been /bin/sh -c: a run
+# launched from hellish now starts no other shell at all, which is what
+# tests/born2root_shell_audit.sh in the hellish tree checks from the outside.
+_b2r_ppid    := $(word 4,$(shell cat /proc/$(word 4,$(shell cat /proc/self/stat))/stat))
+_b2r_launcher := $(shell cat /proc/$(_b2r_ppid)/comm)
+_b2r_login   := $(notdir $(shell printenv SHELL))
+_b2r_shells   := hellish hellish.real bash zsh dash sh ksh mksh ash busybox
+_b2r_try = $(if $(filter $(_b2r_shells),$(notdir $(1))),$(filter B2R_SH=%,$(shell $(1) tools/launcher_probe.sh)))
+_b2r_found := $(call _b2r_try,$(_b2r_launcher))
+_b2r_found := $(if $(_b2r_found),$(_b2r_found),$(call _b2r_try,$(_b2r_login)))
+_b2r_found := $(if $(_b2r_found),$(_b2r_found),$(call _b2r_try,hellish))
+_b2r_found := $(if $(_b2r_found),$(_b2r_found),$(call _b2r_try,bash))
+SCRIPT_SH := $(patsubst B2R_SH=%,%,$(firstword $(_b2r_found)))
+SCRIPT_SH := $(if $(strip $(SCRIPT_SH)),$(strip $(SCRIPT_SH)),bash)
+endif
+export SCRIPT_SH
+# The recipes themselves, too. make would otherwise run every recipe line
+# under /bin/sh and only hand the scripts to $(SCRIPT_SH): the loops, the
+# printf banners and the `[ ... ] && ...` glue between two scripts would be
+# dash in a run that claims to be hellish. One shell for both, from here on:
+# every $(shell ...) below this line, VM_PATH's included, runs under it too.
+SHELL := $(SCRIPT_SH)
+
 # Where the VM lives. VirtualBox remembers a VM's disk itself; for QEMU the
 # last create/boot recorded it (utils/vm_path.sh remember_vm_dir), so after a
 # `make all VM_PATH=/mnt/storage/qemu` no later `make qemu_*` needs VM_PATH.
@@ -30,28 +78,6 @@ BACKEND      ?= auto
 ifeq ($(origin VM_PATH),undefined)
 VM_PATH      := $(shell cat $(CURDIR)/disk_images/.vm_path.$(VM_NAME) 2>/dev/null || echo $(CURDIR)/disk_images)
 endif
-
-# ── Which shell interprets the scripts ──────────────────────────────────────
-# make parses the Makefile; the .sh files it calls are interpreted by a shell.
-# Run them with the shell you launched make FROM -- hellish when that is your
-# shell -- and fall back to bash. The launcher is make's parent process; a
-# candidate is used only if it can run the scripts' bash-isms (arrays, local,
-# BASH_SOURCE), so `make all` can never pick a shell that would choke on them.
-# Override with `make ... SCRIPT_SH=/path/to/shell`. Exported, so recursive
-# makes and the scripts themselves inherit the same choice without re-probing.
-ifeq ($(origin SCRIPT_SH),undefined)
-SCRIPT_SH := $(shell \
-	up=$$(ps -o ppid= -p $$PPID 2>/dev/null | tr -d " "); \
-	launcher=$$(ps -o comm= -p "$$up" 2>/dev/null | sed "s/^-//"); \
-	for c in "$$launcher" "$$SHELL" hellish bash; do \
-		[ -n "$$c" ] || continue; \
-		p=$$(command -v "$$c" 2>/dev/null) || continue; \
-		"$$p" -c 'a=(1 2); f(){ local x=0; }; f; : "$${BASH_SOURCE[0]:-x}"' >/dev/null 2>&1 \
-			&& { printf "%s" "$$p"; break; }; \
-	done)
-SCRIPT_SH := $(if $(strip $(SCRIPT_SH)),$(strip $(SCRIPT_SH)),bash)
-endif
-export SCRIPT_SH
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
 PRESEED_FILE := preseeds/preseed.cfg

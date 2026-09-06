@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # UFW Configuration Script for Born2beRoot
 # Author: LESdylan

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # SSH stability fix — run with sudo inside the VM
 set -x
 
@@ -41,7 +41,7 @@ Requires=ssh.service
 
 [Service]
 Type=simple
-ExecStart=/bin/bash /usr/local/bin/sshd-watchdog.sh
+ExecStart=/usr/local/bin/sshd-watchdog.sh
 Restart=always
 RestartSec=5
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ###################### GLOBAL CONFIGURATION ########################
 # Enable/disable debug output (set to false for production)

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # WordPress Theme Deployment Script
 # Created: 2025-04-04 23:33:33
 # Author: LESdylan

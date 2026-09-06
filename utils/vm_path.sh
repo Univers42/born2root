@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Is the VM storage directory usable by the calling user -- and if not, WHY,
 # and what exactly fixes it?
 #
@@ -25,8 +25,8 @@
 # build rather than after it:
 #
 #   . utils/vm_path.sh; ensure_vm_dir "$VM_PATH" "$VM_NAME"
-#   bash utils/vm_path.sh "$VM_PATH" "$VM_NAME"
-#   bash utils/vm_path.sh --no-root "make all VM_PATH=..."   (refuse_sudo_build)
+#   utils/vm_path.sh "$VM_PATH" "$VM_NAME"
+#   utils/vm_path.sh --no-root "make all VM_PATH=..."   (refuse_sudo_build)
 
 # Overridable so tests/test_vm_path.sh can stand in a fake sudo; production
 # callers never set it.
@@ -153,8 +153,12 @@ _ensure_vm_dir() {
 	# password prompt. (Univers42/hellish: process substitution drops functions.)
 	lines=()
 	while IFS= read -r line; do lines+=("$line"); done <<< "$(_vm_path_recipe "$vm_path" "$vm_dir")"
+	# The privileged lines run under the shell running this script -- what
+	# make picked (SCRIPT_SH), else the interpreter of this very process --
+	# not a hard-coded sh.
+	local runsh="${SCRIPT_SH:-$(readlink /proc/$$/exe 2>/dev/null || echo sh)}"
 	for line in "${lines[@]}"; do
-		"$VM_PATH_SUDO" sh -c "$line" || {
+		"$VM_PATH_SUDO" "$runsh" -c "$line" || {
 			printf '  %s✗%s failed: sudo %s\n' "$_VP_RED" "$_VP_OFF" "$line" >&2
 			return 1
 		}

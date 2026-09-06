@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot — status dashboard
 # Called by: make status
 set -e

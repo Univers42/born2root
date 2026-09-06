@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  check_vbox_driver.sh — can THIS machine actually run a VM right now?        #
 # ============================================================================ #

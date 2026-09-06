@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #
 # install_nvim_extras.sh — layer a full IDE-grade setup on top of kickstart.nvim.
 #

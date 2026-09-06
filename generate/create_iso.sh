@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Paths to original ISO and output ISO
 ORIGINAL_ISO="/path/to/debian-11.x.0-amd64-netinst.iso"

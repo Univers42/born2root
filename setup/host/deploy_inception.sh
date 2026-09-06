@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  born2root — put the Inception project into the VM and bring it up           #
 # ============================================================================ #
@@ -171,7 +171,7 @@ else
 	# one, and -S then reads the passphrase from that tty.
 	printf '%s\n' "$pass" \
 		| ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" \
-			"sudo -S -p '' sh -c 'grep -q \"$DOMAIN\" /etc/hosts || echo \"127.0.0.1 ${DOMAIN}\" >> /etc/hosts'" \
+			"sudo -S -p '' \"\$(command -v hellish.real 2>/dev/null || echo sh)\" -c 'grep -q \"$DOMAIN\" /etc/hosts || echo \"127.0.0.1 ${DOMAIN}\" >> /etc/hosts'" \
 			> /dev/null 2>&1
 	if vm_ssh "grep -q '$DOMAIN' /etc/hosts" 2> /dev/null; then
 		ok "added 127.0.0.1 ${DOMAIN} to the guest's /etc/hosts"
@@ -185,12 +185,12 @@ if [ "${NO_BUILD:-0}" = "1" ]; then
 	warn "NO_BUILD=1 — skipping the build"
 else
 	step "Building the Inception stack (this takes a few minutes)"
-	# The guest's login shell is a wrapper that hands non-interactive commands
-	# to bash (see preseeds/b2b-setup.sh); the shell behind it is hellish.real.
-	# Inception's Makefile runs its recipes and its test suite with the shell
-	# make was launched from, so name the real one explicitly: with a pty and
-	# the wrapper in the way, make's parent is not the shell that should
-	# interpret the project. A guest without hellish.real is unchanged.
+	# The guest's login shell is /usr/bin/hellish, a link to hellish.real
+	# (see preseeds/b2b-setup.sh). Inception's Makefile runs its recipes and
+	# its test suite with the shell make was launched from, and also copies
+	# that shell into the containers as /bin/sh when it is static -- so name
+	# the ELF explicitly rather than trusting the probe behind a pty. A guest
+	# without hellish.real is unchanged.
 	real=$(vm_ssh 'command -v hellish.real 2>/dev/null' 2> /dev/null | tr -d '\r')
 	[ -z "$real" ] || ok "the stack builds under ${real}"
 	# -tt so docker's build output streams live rather than arriving in one lump

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # =============================================================================
 # fix_hwe_kernel.sh — Fix VirtualBox vs HWE kernel incompatibility
 #
@@ -43,7 +43,7 @@ hr() { printf '%s\n' "───────────────────�
 # ── Root check ────────────────────────────────────────────────────────────────
 if [[ "$(id -u)" -ne 0 ]]; then
 	warn "Re-running with sudo..."
-	exec sudo bash "$0" "$@"
+	exec sudo "$(readlink /proc/$$/exe 2>/dev/null || echo bash)" "$0" "$@"
 fi
 
 hr

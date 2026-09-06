@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 set -e # Exit on any error
 
@@ -272,6 +272,18 @@ if [ -n "$CUSTOM_SHELL_PATH" ]; then
 	printf '%s\n' "$CUSTOM_SHELL_NAME" > "$ISO_DIR/custom_shell.name"
 	echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
 	echo "    dest: $CUSTOM_SHELL_DEST"
+	# Every in-target step of late_command then runs under the baked shell
+	# rather than /bin/bash: the guest's own setup (b2b-setup.sh), the ssh
+	# key, dpkg, grub. /tmp/custom_shell.bin is the copy late_command itself
+	# made a line earlier, so it is there whatever b2b-setup.sh decides. The
+	# poweroff hook systemd runs at shutdown gets the installed shell as its
+	# interpreter. The repository's preseed keeps /bin/bash, for an ISO built
+	# without a shell; only the ISO's copy is rewritten, and that copy is what
+	# goes into the initrd below.
+	sed -i -e "s|in-target /bin/bash |in-target /tmp/custom_shell.bin |g" \
+		-e "s|echo '#!/bin/sh' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|echo '#!${CUSTOM_SHELL_DEST}' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|" \
+		"$ISO_DIR/preseed.cfg"
+	echo "  ✓ late_command runs in-target under the baked shell"
 	# Optional extra: upstream's own shell-registration helper, if a hellish
 	# source tree happens to be checked out beside us. Not required — b2b-setup.sh
 	# appends to /etc/shells and runs usermod itself — so its absence is normal
@@ -314,7 +326,7 @@ INITRD="$ISO_DIR/install.amd/initrd.gz"
 if [ -f "$INITRD" ]; then
 	INITRD_ABS="$(cd "$(dirname "$INITRD")" && pwd)/$(basename "$INITRD")"
 	INJECT_DIR=$(mktemp -d)
-	cp "$PRESEED_FILE" "$INJECT_DIR/preseed.cfg"
+	cp "$ISO_DIR/preseed.cfg" "$INJECT_DIR/preseed.cfg"
 	(cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2> /dev/null | gzip >> "$INITRD_ABS")
 	rm -rf "$INJECT_DIR"
 	echo "  ✓ preseed.cfg injected into install.amd/initrd.gz"
@@ -330,7 +342,7 @@ INITRD_GTK="$ISO_DIR/install.amd/gtk/initrd.gz"
 if [ -f "$INITRD_GTK" ]; then
 	INITRD_GTK_ABS="$(cd "$(dirname "$INITRD_GTK")" && pwd)/$(basename "$INITRD_GTK")"
 	INJECT_DIR=$(mktemp -d)
-	cp "$PRESEED_FILE" "$INJECT_DIR/preseed.cfg"
+	cp "$ISO_DIR/preseed.cfg" "$INJECT_DIR/preseed.cfg"
 	(cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2> /dev/null | gzip >> "$INITRD_GTK_ABS")
 	rm -rf "$INJECT_DIR"
 	echo "  ✓ preseed.cfg injected into install.amd/gtk/initrd.gz"

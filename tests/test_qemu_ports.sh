@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Regression test for the QEMU host-port collision bug in setup/host/qemu_vm.sh.
 #
 # The bug it guards: PORTS_SPEC's host ports were used as-is, and QEMU's

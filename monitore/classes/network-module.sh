@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## NETWORK INFORMATION MODULE
 network_module() {

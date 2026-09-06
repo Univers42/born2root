@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Tests for utils/vm_disk.sh — the "does this disk hold a finished install?"
 # question that Step 4 of the orchestrator asks before deciding to skip.
 #

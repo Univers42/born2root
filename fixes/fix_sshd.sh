@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot SSH Daemon Fix
 
 # Colors for output

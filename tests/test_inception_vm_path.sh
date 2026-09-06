@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Regression test for the Inception targets' VM_PATH.
 #
 # The bug it guards: `make all VM_PATH=/some/where` records the location in

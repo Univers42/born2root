@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # diagnostic_guest.sh for Debian 12 VM
 # Run with sudo for complete results

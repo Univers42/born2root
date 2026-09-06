@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #===================================================
 # shell Color and Header Library
 # Author: Lesieur Dylan

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Regression test for `qemu_vm.sh stop` when the VM was started from another
 # VM_PATH.
 #

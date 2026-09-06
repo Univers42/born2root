@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## CPU LOAD MODULE
 cpu_load_module() {

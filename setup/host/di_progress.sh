@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  di_progress.sh — read the Debian installer's progress off the serial log    #
 # ============================================================================ #

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## CPU CORE COUNT MODULE
 cpu_core_module() {

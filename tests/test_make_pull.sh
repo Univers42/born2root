@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # Regression test for the Makefile's `pull` target.
 #
 # THE BUG THIS PINS DOWN

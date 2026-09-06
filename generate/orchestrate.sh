@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot — main orchestrator (live TUI dashboard)
 # Called by: make all
 set -e

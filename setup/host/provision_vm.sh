@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 #
 # provision_vm.sh — run a provisioner script inside a running VM, over SSH.
 #
@@ -14,14 +14,14 @@
 # the second machine's ssh rule lands on 4243 or higher.
 #
 # USAGE
-#   bash setup/host/provision_vm.sh <vm-name> nvim
-#   bash setup/host/provision_vm.sh <vm-name> hellish
-#   bash setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
-#   bash setup/host/provision_vm.sh <vm-name> health          # print checkhealth
-#   bash setup/host/provision_vm.sh <vm-name> all
+#   setup/host/provision_vm.sh <vm-name> nvim
+#   setup/host/provision_vm.sh <vm-name> hellish
+#   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
+#   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
+#   setup/host/provision_vm.sh <vm-name> all
 #
 # Environment passed through to the guest script, e.g.
-#   NVIM_VERSION=latest bash setup/host/provision_vm.sh debian-nvim nvim
+#   NVIM_VERSION=latest setup/host/provision_vm.sh debian-nvim nvim
 
 set -uo pipefail
 
@@ -151,7 +151,9 @@ setup_sudo() {
 		die "could not upload the sudo password to the VM"
 	fi
 	askpass_installed=1
-	if ! vm_ssh "umask 077; printf '#!/bin/sh\\ncat %s\\n' '$PASS_REMOTE' > '$ASKPASS_REMOTE'; chmod 700 '$ASKPASS_REMOTE'"; then
+	# The askpass helper is a two-line script sudo runs in the guest; its
+	# interpreter is the guest's hellish.real when there is one.
+	if ! vm_ssh "umask 077; i=\$(command -v hellish.real 2>/dev/null || echo /bin/sh); printf '#!%s\\ncat %s\\n' \"\$i\" '$PASS_REMOTE' > '$ASKPASS_REMOTE'; chmod 700 '$ASKPASS_REMOTE'"; then
 		die "could not install the sudo askpass helper in the VM"
 	fi
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  vm_ports.sh — "which host port reaches guest service X?", either backend    #
 # ============================================================================ #

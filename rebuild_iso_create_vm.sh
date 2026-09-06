@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 VBoxManage controlvm debian poweroff 2> /dev/null
 sleep 2

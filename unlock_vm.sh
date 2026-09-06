@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Start the VM headless and answer the guest's LUKS prompt from the host.
 #
 # The guest's LVM lives inside a LUKS container (preseeds/preseed.cfg sets

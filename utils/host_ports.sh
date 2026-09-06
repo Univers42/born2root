@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Host TCP port allocation for the VirtualBox NAT port-forward rules.
 #
 # Sourced by setup/install/vms/install_vm_debian.sh (which creates the rules) and

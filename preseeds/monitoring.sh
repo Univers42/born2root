@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 ARCH=$(uname -a)
 PCPU=$(grep "physical id" /proc/cpuinfo | sort -u | wc -l)
 VCPU=$(grep processor /proc/cpuinfo | wc -l)

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # PHP MySQL Extension Comprehensive Diagnostic Script
 # For troubleshooting WordPress PHP-MySQL connectivity issues
