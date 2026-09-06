@@ -125,10 +125,14 @@ if [ -n "$SRC" ]; then
 	# desyncs. Exclude keeps them, so a redeploy re-uses what is already there;
 	# a first deploy has neither and setup makes them once. An excluded path is
 	# also left alone on the guest, which likewise keeps the repository made
-	# below across uploads.
+	# below across uploads. vendor/ is a submodule of dev tooling: a real
+	# `make inception` clones non-recursively, so it is an empty gitlink there
+	# and never scanned -- inlining its files would only feed the compliance
+	# suite's credential scan third-party Python, so it does not travel.
 	rsync -az --delete \
 		--exclude '.git/index.lock' \
 		--exclude '/secrets/' --exclude '/srcs/.env' \
+		--exclude '/vendor/' \
 		${rsync_extra[@]+"${rsync_extra[@]}"} \
 		-e "ssh ${SSH_OPTS[*]}" \
 		"${SRC%/}/" "${SSH_ALIAS}:${GUEST_DIR}/" \
