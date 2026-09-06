@@ -138,7 +138,10 @@ row "guest sh conf"  "$(g 'sed -n "s/^B2B_GUEST_SH=//p" /etc/b2b_custom_shell.co
 # The provisioners live in /root, so the glob must expand as root, under the
 # guest's own shell; first-boot's log keeps what interpreted them when it ran.
 row "provisioners"   "$(groot "/usr/bin/hellish.real -c 'head -qn1 /root/install_*.sh 2>/dev/null | sort -u'" | tr '\n' ' ')" "#!/usr/bin/hellish.real"
-row "first-boot ran"  "$(groot 'grep -m1 -o "provisioners run under .*" /var/log/first-boot.log 2>/dev/null')" "/usr/bin/hellish.real"
+# A guest converted by `make shell_vm` after its first boot has no such line:
+# then the row is informational (the rows above already say what runs now).
+fb="$(groot 'grep -m1 -o "provisioners run under .*" /var/log/first-boot.log 2>/dev/null')"
+if [ -n "$fb" ]; then row "first-boot ran" "$fb" "/usr/bin/hellish.real"; else row "first-boot ran" "(before the interpreter pin; converted since)" "--"; fi
 row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/null; echo "(line removed after it ran)"' | head -1)" "--"
 
 printf "\n${C_BOLD}Services${C_RESET}\n"

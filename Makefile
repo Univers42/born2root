@@ -726,7 +726,7 @@ devtools:
 #   make ai AI_MODE=local        a model sized to this VM's RAM
 #   make ai AI_MODE=client       talk to Ollama on the host (10.0.2.2)
 ai:
-	@AI_MODE="$(AI_MODE)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" ai
+	@VM_PATH="$(VM_PATH)" AI_MODE="$(AI_MODE)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" ai
 
 # =========@@ Help @@==========================================================
 help:
