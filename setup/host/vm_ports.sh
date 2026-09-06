@@ -54,11 +54,16 @@ _vm_forward_port_qemu() {
 # VirtualBox first (it is authoritative when the VM is registered there), then
 # QEMU. Prints nothing when neither knows the rule, which callers treat as
 # "not forwarded".
+# `|| p=` is not redundant: a resolver returns non-zero when it does not know
+# the rule (VBoxManage absent, or no ports.env), and a bare `p=$(resolver)`
+# under `set -e` aborts THIS function before the next resolver is tried -- in
+# every POSIX shell (dash, and bash --posix; plain bash is the lone exception,
+# which is why a caller run under one masked it). The || keeps the fallthrough.
 vm_forward_port() {
 	local p
-	p=$(_vm_forward_port_vbox "$1" 2> /dev/null)
+	p=$(_vm_forward_port_vbox "$1" 2> /dev/null) || p=
 	[ -n "$p" ] && { printf '%s' "$p"; return 0; }
-	p=$(_vm_forward_port_qemu "$1" 2> /dev/null)
+	p=$(_vm_forward_port_qemu "$1" 2> /dev/null) || p=
 	[ -n "$p" ] && { printf '%s' "$p"; return 0; }
 	return 1
 }
