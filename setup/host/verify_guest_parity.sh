@@ -115,11 +115,14 @@ row "login shell"   "$(g 'getent passwd dlesieur | cut -d: -f7')"        "/usr/b
 row "root shell"    "$(g 'getent passwd root | cut -d: -f7')"            "/bin/bash"
 row "hellish"       "$(g '/usr/bin/hellish.real --version 2>/dev/null | head -1')" "hellish"
 row "shell link"    "$(g 'readlink /usr/bin/hellish')"                   "/usr/bin/hellish.real"
-row "ssh command"   "$(g 'readlink /proc/$$/exe')"                       "/usr/bin/hellish.real"
+row "ssh command"   "$(g 'x=$(readlink /proc/$$/exe); echo "$x"')"       "/usr/bin/hellish.real"
 row "ssh \$0"       "$(g 'echo $0')"                                     "hellish"
 row "plugins"       "$(g 'ls ~/.hellish/plugins 2>/dev/null | wc -l')"   "--"
 row "hellishrc"     "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')"         "dlesieur"
 
+# (`ssh b2b 'readlink /proc/$$/exe'` would be answered by readlink itself: a
+# shell execs a lone command in place of itself; the substitution keeps $$
+# the shell sshd started.)
 # What the guest starts on its own runs under the same shell: the cron job,
 # the two systemd helpers (checked live, by the process name of their main
 # pid), the first-boot hook and the provisioners it ran.

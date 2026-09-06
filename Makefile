@@ -699,8 +699,11 @@ hellish_plugins:
 #   curl -fsSL .../hellish/main/install.sh | sh
 # driven with --yes, so every question takes its default instead of needing
 # answers piped in. Installs the current release + the plugin framework, then
-# re-applies the SSH-compatibility wrapper. `make all` already does this on
-# first boot; this is for iterating without a rebuild.
+# re-links /usr/bin/hellish to the fresh hellish.real and pins it as the
+# interpreter of what the guest runs itself (cron, the two units, first
+# boot's provisioners) -- which also converts a guest built with the old bash
+# wrapper. `make all` already does this on first boot; this is for iterating
+# without a rebuild.
 shell_vm:
 	@$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" shell
 
