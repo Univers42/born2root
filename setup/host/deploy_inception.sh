@@ -152,9 +152,17 @@ if [ "${NO_BUILD:-0}" = "1" ]; then
 	warn "NO_BUILD=1 — skipping the build"
 else
 	step "Building the Inception stack (this takes a few minutes)"
+	# The guest's login shell is a wrapper that hands non-interactive commands
+	# to bash (see preseeds/b2b-setup.sh); the shell behind it is hellish.real.
+	# Inception's Makefile runs its recipes and its test suite with the shell
+	# make was launched from, so name the real one explicitly: with a pty and
+	# the wrapper in the way, make's parent is not the shell that should
+	# interpret the project. A guest without hellish.real is unchanged.
+	real=$(vm_ssh 'command -v hellish.real 2>/dev/null' 2> /dev/null | tr -d '\r')
+	[ -z "$real" ] || ok "the stack builds under ${real}"
 	# -tt so docker's build output streams live rather than arriving in one lump
 	# at the end; without a tty the whole build looks like a hang.
-	ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" "cd '$GUEST_DIR' && make" 2>&1 \
+	ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" "cd '$GUEST_DIR' && make ${real:+SCRIPT_SH=$real}" 2>&1 \
 		| sed 's/^/    /'
 	# PIPESTATUS[0] is ssh's own status; the pipe through sed would otherwise
 	# always report success.
