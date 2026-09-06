@@ -177,7 +177,7 @@ install_link() {
 # converts a guest that was built before, and survives a refresh. The two
 # systemd helpers are restarted so their running process is hellish.real too.
 normalize_guest_interpreters() {
-	local f changed=0
+	local f pid changed=0
 	for f in /usr/local/bin/monitoring.sh /usr/local/bin/nat-keepalive.sh \
 		/usr/local/bin/sshd-watchdog.sh /root/first-boot-setup.sh /root/install_*.sh; do
 		[ -f "$f" ] || continue
@@ -194,9 +194,11 @@ normalize_guest_interpreters() {
 			&& sed -i "s|^B2B_GUEST_SH=.*|B2B_GUEST_SH=$REAL|" /etc/b2b_custom_shell.conf \
 			|| echo "B2B_GUEST_SH=$REAL" >> /etc/b2b_custom_shell.conf
 	fi
+	# A script's process is named after the script, so ask /proc for argv[0].
 	for f in nat-keepalive sshd-watchdog; do
+		pid=$(systemctl show -p MainPID --value "$f" 2>/dev/null)
 		if systemctl is-enabled "$f" > /dev/null 2>&1 \
-			&& [ "$(ps -o comm= -p "$(systemctl show -p MainPID --value "$f" 2>/dev/null)" 2>/dev/null)" != "hellish.real" ]; then
+			&& [ "$(tr '\0' ' ' < "/proc/${pid:-0}/cmdline" 2>/dev/null | cut -d' ' -f1)" != "$REAL" ]; then
 			systemctl restart "$f" 2> /dev/null && changed=$((changed + 1))
 		fi
 	done

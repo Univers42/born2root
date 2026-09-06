@@ -130,10 +130,15 @@ printf "\n${C_BOLD}Interpreters (nothing the guest starts itself is bash)${C_RES
 row "monitoring.sh"  "$(g 'head -1 /usr/local/bin/monitoring.sh')"      "#!/usr/bin/hellish.real"
 row "nat-keepalive"  "$(g 'head -1 /usr/local/bin/nat-keepalive.sh')"   "#!/usr/bin/hellish.real"
 row "sshd-watchdog"  "$(g 'head -1 /usr/local/bin/sshd-watchdog.sh')"   "#!/usr/bin/hellish.real"
-row "keepalive pid"  "$(g 'ps -o comm= -p "$(systemctl show -p MainPID --value nat-keepalive)"')" "hellish.real"
-row "watchdog pid"   "$(g 'ps -o comm= -p "$(systemctl show -p MainPID --value sshd-watchdog)"')" "hellish.real"
+# A script's process is named after the script (comm), so the interpreter is
+# argv[0] of the unit's main pid, readable by anyone in /proc/<pid>/cmdline.
+row "keepalive pid"  "$(g 'tr "\\0" " " < /proc/$(systemctl show -p MainPID --value nat-keepalive)/cmdline | cut -d" " -f1')" "/usr/bin/hellish.real"
+row "watchdog pid"   "$(g 'tr "\\0" " " < /proc/$(systemctl show -p MainPID --value sshd-watchdog)/cmdline | cut -d" " -f1')" "/usr/bin/hellish.real"
 row "guest sh conf"  "$(g 'sed -n "s/^B2B_GUEST_SH=//p" /etc/b2b_custom_shell.conf')" "/usr/bin/hellish.real"
-row "provisioners"   "$(groot 'head -qn1 /root/install_*.sh 2>/dev/null | sort -u' | tr '\n' ' ')" "#!/usr/bin/hellish.real"
+# The provisioners live in /root, so the glob must expand as root, under the
+# guest's own shell; first-boot's log keeps what interpreted them when it ran.
+row "provisioners"   "$(groot "/usr/bin/hellish.real -c 'head -qn1 /root/install_*.sh 2>/dev/null | sort -u'" | tr '\n' ' ')" "#!/usr/bin/hellish.real"
+row "first-boot ran"  "$(groot 'grep -m1 -o "provisioners run under .*" /var/log/first-boot.log 2>/dev/null')" "/usr/bin/hellish.real"
 row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/null; echo "(line removed after it ran)"' | head -1)" "--"
 
 printf "\n${C_BOLD}Services${C_RESET}\n"
