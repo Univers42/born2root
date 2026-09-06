@@ -70,6 +70,7 @@ PROXY_PORT="${INCEPTION_PROXY_PORT:-8118}"
 PROXY_DIR="$HOME/.local/share/born2root"
 PROXY_BIN="$PROXY_DIR/inception_proxy.py"
 PROXY_UNIT="$HOME/.config/systemd/user/inception-proxy.service"
+PROXY_PID="$PROXY_DIR/inception-proxy.pid"
 PAC_NAME="inception.pac"
 DESKTOP_PAC="$HOME/.config/born2root/$PAC_NAME"
 LAUNCHER="$HOME/.local/bin/inception-browser"
@@ -197,26 +198,52 @@ RestartSec=3
 WantedBy=default.target
 UNITEOF
 
-	systemctl --user daemon-reload > /dev/null 2>&1
-	systemctl --user reset-failed inception-proxy.service > /dev/null 2>&1 || true
-	# enable --now is a no-op on an already-running unit, so it would keep an
-	# older copy of the proxy alive after an upgrade. Always restart.
-	systemctl --user enable inception-proxy.service > /dev/null 2>&1
-	if systemctl --user restart inception-proxy.service > /dev/null 2>&1; then
-		local i
-		for i in 1 2 3 4 5 6 7 8 9 10; do
-			port_is_free "$PROXY_PORT" || break   # bound = it is up
-			sleep 0.5
-		done
-		if port_is_free "$PROXY_PORT"; then
-			warn "proxy service did not come up on ${PROXY_PORT}"
-			return 1
+	# systemd --user needs a session bus and reads its units from the real
+	# home; over ssh, in a container or under a substitute HOME there is none
+	# of that. The proxy then runs as a plain detached process with a pid file:
+	# same binary, same port, gone with the session instead of restarted at
+	# login, and --undo stops it too.
+	local i
+	if systemctl --user show-environment > /dev/null 2>&1; then
+		systemctl --user daemon-reload > /dev/null 2>&1
+		systemctl --user reset-failed inception-proxy.service > /dev/null 2>&1 || true
+		# enable --now is a no-op on an already-running unit, so it would keep
+		# an older copy of the proxy alive after an upgrade. Always restart.
+		systemctl --user enable inception-proxy.service > /dev/null 2>&1
+		if systemctl --user restart inception-proxy.service > /dev/null 2>&1; then
+			for i in 1 2 3 4 5 6 7 8 9 10; do
+				port_is_free "$PROXY_PORT" || break   # bound = it is up
+				sleep 0.5
+			done
+			if port_is_free "$PROXY_PORT"; then
+				warn "proxy service did not come up on ${PROXY_PORT}"
+				return 1
+			fi
+			ok "local proxy running on 127.0.0.1:${PROXY_PORT} (systemd --user, restarts on login)"
+			return 0
 		fi
-		ok "local proxy running on 127.0.0.1:${PROXY_PORT} (systemd --user, restarts on login)"
-		return 0
+		warn "could not start the proxy service — running it detached instead"
 	fi
-	warn "could not start the proxy service"
-	return 1
+	local pid
+	if pid=$(cat "$PROXY_PID" 2> /dev/null) && [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
+		kill "$pid" 2> /dev/null; sleep 0.5
+	fi
+	nohup /usr/bin/env python3 "$PROXY_BIN" --port "$PROXY_PORT" --domain "$DOMAIN" \
+		--map "443:${https_port}" --map "80:${http_port}" \
+		--map "${P_ADMINER:-8081}:${P_ADMINER:-8081}" \
+		--map "${static_port}:${static_port}" --map "${https_port}:${https_port}" \
+		> "$PROXY_DIR/inception-proxy.log" 2>&1 < /dev/null &
+	printf '%s\n' "$!" > "$PROXY_PID"
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		port_is_free "$PROXY_PORT" || break
+		sleep 0.5
+	done
+	if port_is_free "$PROXY_PORT"; then
+		warn "proxy did not come up on ${PROXY_PORT} (see $PROXY_DIR/inception-proxy.log)"
+		return 1
+	fi
+	ok "local proxy running on 127.0.0.1:${PROXY_PORT} (pid $(cat "$PROXY_PID"); no systemd --user here, so until --undo or logout)"
+	return 0
 }
 
 # Only this domain is proxied; everything else stays DIRECT. The trailing
@@ -270,8 +297,12 @@ undo_desktop_proxy() {
 }
 
 undo_proxy_service() {
+	local pid
 	systemctl --user disable --now inception-proxy.service > /dev/null 2>&1
-	rm -f "$PROXY_UNIT" "$PROXY_BIN"
+	if pid=$(cat "$PROXY_PID" 2> /dev/null) && [ -n "$pid" ]; then
+		kill "$pid" 2> /dev/null
+	fi
+	rm -f "$PROXY_UNIT" "$PROXY_BIN" "$PROXY_PID"
 	systemctl --user daemon-reload > /dev/null 2>&1
 	ok "local proxy service stopped and removed"
 }

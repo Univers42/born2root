@@ -107,14 +107,43 @@ if [ -n "$SRC" ]; then
 	[ -d "$SRC" ] || die "SRC='$SRC' is not a directory"
 	step "Uploading local sources from $SRC"
 	vm_ssh "mkdir -p '$GUEST_DIR'" || die "could not create $GUEST_DIR"
-	# --delete so the guest ends up an exact mirror; excluding runtime state
-	# that must not travel between machines.
+	# A submodule or a linked worktree keeps its repository elsewhere and
+	# leaves a one-line .git FILE pointing at it: a dangling pointer once
+	# copied, after which every `git` in the compliance suite fails. Such a
+	# tree travels without it and the guest gets a repository of its own
+	# below -- the host's origin, one commit holding what was uploaded.
+	synth_repo=0; origin_url=""; rsync_extra=()
+	if [ ! -d "$SRC/.git" ]; then
+		synth_repo=1; rsync_extra=(--exclude=/.git)
+		origin_url=$(git -C "$SRC" remote get-url origin 2> /dev/null || true)
+	fi
+	# --delete so the guest ends up an exact mirror of the sources; but
+	# secrets/ and srcs/.env are RUNTIME state the guest generated (random
+	# passwords, the TLS material), not sources -- deleting and letting
+	# `make setup` mint new ones on every upload rotates the credentials out
+	# from under a MariaDB that is still running on the old ones, and the stack
+	# desyncs. Exclude keeps them, so a redeploy re-uses what is already there;
+	# a first deploy has neither and setup makes them once. An excluded path is
+	# also left alone on the guest, which likewise keeps the repository made
+	# below across uploads.
 	rsync -az --delete \
 		--exclude '.git/index.lock' \
+		--exclude '/secrets/' --exclude '/srcs/.env' \
+		${rsync_extra[@]+"${rsync_extra[@]}"} \
 		-e "ssh ${SSH_OPTS[*]}" \
 		"${SRC%/}/" "${SSH_ALIAS}:${GUEST_DIR}/" \
 		|| die "rsync of sources failed"
 	ok "sources uploaded to ${GUEST_DIR}"
+	if [ "$synth_repo" = 1 ]; then
+		if vm_ssh "cd '$GUEST_DIR' && { [ -d .git ] || { rm -f .git && git init -q -b main; }; } \
+			&& { [ -z '$origin_url' ] || git remote get-url origin > /dev/null 2>&1 || git remote add origin '$origin_url'; } \
+			&& git add -A && { git diff --cached --quiet \
+				|| git -c user.name=born2root -c user.email=born2root@localhost commit -q -m 'working tree uploaded from $(hostname)'; }" 2> /dev/null; then
+			ok "the uploaded tree is a repository of its own (origin: ${origin_url:-none})"
+		else
+			warn "could not make a repository of the uploaded tree"
+		fi
+	fi
 else
 	step "Cloning ${REPO_URL} (branch ${BRANCH}) into the guest"
 	vm_ssh "set -e
