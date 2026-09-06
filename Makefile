@@ -307,7 +307,7 @@ prepare: deps pull shell
 # git's own --autostash has no such gap: it stashes only when there is something
 # to stash, and restores exactly what it stashed, or nothing at all.
 pull:
-	@bash -c '\
+	@$(SCRIPT_SH) -c '\
 	if [ -d .git ]; then \
 		printf "$(C_BLUE)▶$(C_RESET) Pulling latest from origin/main...\n"; \
 		if git pull --autostash --ff-only origin main 2>/dev/null; then \
@@ -374,7 +374,7 @@ extpack:
 
 # =========@@ System compatibility pre-checks @@==============================
 check_system:
-	@bash -c '\
+	@$(SCRIPT_SH) -c '\
 	ERRORS=0; \
 	KERN=$$(uname -r); \
 	printf "$(C_BLUE)▶$(C_RESET) Pre-flight checks (running kernel: $$KERN)\n"; \

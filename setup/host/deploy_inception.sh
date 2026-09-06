@@ -182,7 +182,7 @@ guest_static=$(vm_ssh "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http
 
 # ── 7. Wire up the host and verify from there too ───────────────────────────
 step "Configuring host access"
-VM_NAME="$VM_NAME" INCEPTION_DOMAIN="$DOMAIN" bash "$HERE/inception_host_access.sh"
+VM_NAME="$VM_NAME" INCEPTION_DOMAIN="$DOMAIN" "${SCRIPT_SH:-bash}" "$HERE/inception_host_access.sh"
 
 step "Verifying from the host"
-bash "$HERE/verify_inception_access.sh"
+"${SCRIPT_SH:-bash}" "$HERE/verify_inception_access.sh"

@@ -730,7 +730,7 @@ fi
 # `make all` the VM has no Inception yet, so no CA could be fetched and a
 # restart then would just force a second one after `make inception`.
 if [ "$CA_TRUSTED" = "1" ]; then
-	bash "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/restart_browsers.sh"
+	"${SCRIPT_SH:-bash}" "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/restart_browsers.sh"
 else
 	warn_if_firefox_running
 fi

@@ -127,7 +127,7 @@ kvm_ok() { [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; }
 # EBUSY and QEMU dies with "Device or resource busy". kvm_probe.sh performs
 # that exact call and says why it failed, so launch() can refuse with a real
 # reason instead of a raw ioctl error -- and never silently drop to TCG.
-kvm_why() { bash "$HERE/kvm_probe.sh"; }
+kvm_why() { "${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh"; }
 
 ACCEL="tcg"
 if kvm_ok; then
@@ -772,7 +772,7 @@ case "${1:-status}" in
 
 		ssh_banner_up() {
 			local b
-			b=$(timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${ssh_port} && head -c 40 <&3" 2> /dev/null)
+			b=$(timeout 3 "${SCRIPT_SH:-bash}" -c "exec 3<>/dev/tcp/127.0.0.1/${ssh_port} && head -c 40 <&3" 2> /dev/null)
 			case "$b" in *SSH-2.0*) printf '%s' "${b%%$'\r'*}"; return 0 ;; esac
 			return 1
 		}

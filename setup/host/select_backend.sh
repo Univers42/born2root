@@ -46,7 +46,7 @@ if command -v VBoxManage > /dev/null 2>&1; then
 	# at a time, and a running KVM guest holds it: VirtualBox would fail with
 	# VERR_VMX_IN_VMX_ROOT_MODE -- the mirror image of the EBUSY that
 	# kvm_probe.sh catches in the other direction.
-	if [ "$vbox_ok" = 1 ] && kvm_users=$(bash "$HERE/kvm_probe.sh" users); then
+	if [ "$vbox_ok" = 1 ] && kvm_users=$("${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh" users); then
 		vbox_ok=0
 		vbox_why="blocked: a KVM guest is running ($(printf '%s' "$kvm_users" | paste -sd, -)) and holds VT-x; one hypervisor at a time"
 	fi
@@ -61,7 +61,7 @@ if command -v qemu-system-x86_64 > /dev/null 2>&1; then
 	# perfectly readable. See kvm_probe.sh for the mechanism.
 	# Without KVM QEMU still runs, but a Debian install under pure emulation
 	# takes hours. Offering it silently would be a trap.
-	if qemu_why=$(bash "$(dirname "${BASH_SOURCE[0]:-$0}")/kvm_probe.sh"); then
+	if qemu_why=$("${SCRIPT_SH:-bash}" "$(dirname "${BASH_SOURCE[0]:-$0}")/kvm_probe.sh"); then
 		qemu_ok=1
 	else
 		qemu_why="installed, but ${qemu_why}"

@@ -98,7 +98,7 @@ if vboxdrv_ok; then
 	# The driver is there, but VT-x belongs to one hypervisor at a time. With
 	# a KVM guest running, `VBoxManage startvm` fails with
 	# VERR_VMX_IN_VMX_ROOT_MODE -- so say it here, in words, first.
-	if kvm_users=$(bash "$HERE/kvm_probe.sh" users); then
+	if kvm_users=$("${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh" users); then
 		bad "VirtualBox cannot start a VM right now: a KVM guest holds VT-x"
 		printf '%s\n' "$kvm_users" | sed 's/^/     running: /'
 		printf "  One hypervisor at a time. Stop it first:  ${C_BOLD}make qemu_stop${C_RESET}\n"
