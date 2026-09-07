@@ -689,7 +689,9 @@ for svc in lighttpd mariadb haveged cron ssh nat-keepalive sshd-watchdog; do
     systemctl enable "$svc" 2>/dev/null || true
 done
 for f in /lib/systemd/system/php*-fpm.service; do
-    if [ -f "$f" ]; then systemctl enable "$(basename "$f")" 2>/dev/null || true; fi
+    if [ -f "$f" ]; then
+        systemctl enable "$(basename "$f")" 2>/dev/null || true
+    fi
 done
 # Disable conflict docker services
 systemctl disable postgresql 2>/dev/null || true

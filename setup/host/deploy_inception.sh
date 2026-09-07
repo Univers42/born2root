@@ -228,10 +228,16 @@ step "Verifying from inside the guest"
 vm_ssh "docker ps --format '{{.Names}}\t{{.Status}}'" 2>/dev/null | sed 's/^/    /'
 guest_https=$(vm_ssh "curl -ks -o /dev/null -w '%{http_code}' --max-time 10 https://${DOMAIN}/" 2>/dev/null)
 guest_static=$(vm_ssh "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://${DOMAIN}:8090/" 2>/dev/null)
-if [ "$guest_https" = "200" ]; then ok "guest https://${DOMAIN}/ → 200"; else
-    warn "guest https://${DOMAIN}/ → ${guest_https:-no response}"; fi
-if [ "$guest_static" = "200" ]; then ok "guest http://${DOMAIN}:8090/ → 200"; else
-    warn "guest http://${DOMAIN}:8090/ → ${guest_static:-no response}"; fi
+if [ "$guest_https" = "200" ]; then
+    ok "guest https://${DOMAIN}/ → 200"
+else
+    warn "guest https://${DOMAIN}/ → ${guest_https:-no response}"
+fi
+if [ "$guest_static" = "200" ]; then
+    ok "guest http://${DOMAIN}:8090/ → 200"
+else
+    warn "guest http://${DOMAIN}:8090/ → ${guest_static:-no response}"
+fi
 
 # ── 7. Wire up the host and verify from there too ───────────────────────────
 step "Configuring host access"
