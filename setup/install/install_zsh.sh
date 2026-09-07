@@ -11,7 +11,7 @@ change_default_shell() {
             echo "zsh is already your default shell."
         else
             echo "Changing default shell to zsh..."
-            chsh -s $(which zsh)
+            chsh -s "$(which zsh)"
             echo "Shell changed. Please log out and log back in for changes to take effect."
             grep dlesieur /etc/passwd
         fi

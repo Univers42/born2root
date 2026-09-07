@@ -104,7 +104,7 @@ echo "[OK] MariaDB configured"
 cd /var/www/html || exit 1
 if [ -d wordpress ]; then
     echo "WordPress directory already exists — backing up and re-downloading"
-    mv wordpress wordpress.bak.$(date +%s)
+    mv wordpress "wordpress.bak.$(date +%s)"
 fi
 curl -fsSL --retry 3 --retry-delay 5 --max-time 120 \
     https://wordpress.org/latest.tar.gz -o latest.tar.gz

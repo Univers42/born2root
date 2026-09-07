@@ -268,8 +268,11 @@ remove_non_running_hwe_kernels() {
     dpkg --configure -a || warn "dpkg --configure -a reported issues"
 
     info "Reloading VirtualBox kernel driver..."
-    modprobe vboxdrv 2>/dev/null && success "vboxdrv loaded" ||
+    if modprobe vboxdrv 2>/dev/null; then
+        success "vboxdrv loaded"
+    else
         warn "modprobe vboxdrv failed — try: sudo apt install --reinstall virtualbox-dkms"
+    fi
 
     success "Stale HWE kernels removed."
 }

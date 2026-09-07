@@ -305,7 +305,7 @@ EOF
         echo -e "${YELLOW}Updating system configuration files...${NC}"
         # Update /etc/fstab
         echo -e "${CYAN}Learning note: fstab contains mount points that reference the VG${NC}"
-        sudo cp /etc/fstab /etc/fstab.backup.$(date +%Y%m%d)
+        sudo cp /etc/fstab "/etc/fstab.backup.$(date +%Y%m%d)"
         sudo sed -i "s|/dev/${old_vg_name}|/dev/${new_vg_name}|g" /etc/fstab
         sudo sed -i "s|/dev/mapper/${old_vg_name}-|/dev/mapper/${new_vg_name}-|g" /etc/fstab
 

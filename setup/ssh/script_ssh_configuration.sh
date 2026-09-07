@@ -94,7 +94,7 @@ change_port() {
     fi
 
     # Backup sshd_config
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
     # Update port in sshd_config
     sed -i "s/^#*Port .*/Port $new_port/" /etc/ssh/sshd_config
@@ -131,7 +131,7 @@ configure_key_auth() {
         echo -e "${GREEN}✓ SSH key authentication is already enabled${NC}"
     else
         # Backup sshd_config
-        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
         # Update sshd_config to enable key auth
         sed -i "s/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/" /etc/ssh/sshd_config
@@ -270,7 +270,7 @@ disable_password_auth() {
 
     if [[ "$disable" == "y" || "$disable" == "Y" ]]; then
         # Backup sshd_config
-        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
         # Update sshd_config to disable password auth
         sed -i "s/^#*PasswordAuthentication .*/PasswordAuthentication no/" /etc/ssh/sshd_config
@@ -281,7 +281,7 @@ disable_password_auth() {
         echo -e "${GREEN}✓ Password authentication disabled${NC}"
     else
         # Backup sshd_config
-        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
         # Update sshd_config to enable password auth
         sed -i "s/^#*PasswordAuthentication .*/PasswordAuthentication yes/" /etc/ssh/sshd_config
@@ -306,7 +306,7 @@ disable_root_login() {
 
     if [[ "$disable_root" == "y" || "$disable_root" == "Y" ]]; then
         # Backup sshd_config
-        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
         # Update sshd_config to disable root login
         sed -i "s/^#*PermitRootLogin .*/PermitRootLogin no/" /etc/ssh/sshd_config
@@ -317,7 +317,7 @@ disable_root_login() {
         echo -e "${GREEN}✓ Root login disabled${NC}"
     else
         # Backup sshd_config
-        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
         # Update sshd_config to enable root login
         sed -i "s/^#*PermitRootLogin .*/PermitRootLogin yes/" /etc/ssh/sshd_config
@@ -351,7 +351,7 @@ configure_login_grace() {
     fi
 
     # Backup sshd_config
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
     # Update login grace time in sshd_config
     sed -i "s/^#*LoginGraceTime .*/LoginGraceTime $new_time/" /etc/ssh/sshd_config
@@ -384,7 +384,7 @@ configure_max_auth() {
     fi
 
     # Backup sshd_config
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
     # Update max auth tries in sshd_config
     sed -i "s/^#*MaxAuthTries .*/MaxAuthTries $new_max/" /etc/ssh/sshd_config
@@ -411,7 +411,7 @@ configure_protocol() {
 
         if [ "$current_protocol" != "2" ]; then
             # Backup sshd_config
-            cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+            cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
             # Force Protocol 2
             sed -i "s/^Protocol .*/Protocol 2/" /etc/ssh/sshd_config
@@ -425,7 +425,7 @@ configure_protocol() {
 
         if [[ "$set_protocol" == "y" || "$set_protocol" == "Y" ]]; then
             # Backup sshd_config
-            cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+            cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
             # Add Protocol 2
             echo "Protocol 2" >>/etc/ssh/sshd_config
@@ -475,7 +475,7 @@ configure_idle_timeout() {
     echo -e "${YELLOW}! Total idle timeout will be $total_timeout seconds ($((total_timeout / 60)) minutes)${NC}"
 
     # Backup sshd_config
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak."$(date +%Y%m%d%H%M%S)"
 
     # Update client alive settings in sshd_config
     sed -i "s/^#*ClientAliveInterval .*/ClientAliveInterval $new_interval/" /etc/ssh/sshd_config

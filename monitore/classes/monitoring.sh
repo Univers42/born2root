@@ -45,7 +45,7 @@ last_boot=$(who -b | awk '{print $3 " " $4}')
 echo "- Got last boot info"
 
 # LVM check
-lvm_check=$(if [ $(lsblk | grep -c "lvm") -gt 0 ]; then echo "yes"; else echo "no"; fi)
+lvm_check=$(if [ "$(lsblk | grep -c "lvm")" -gt 0 ]; then echo "yes"; else echo "no"; fi)
 echo "- Got LVM status"
 
 # Active connections - using ss instead of netstat

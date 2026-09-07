@@ -27,7 +27,7 @@ disk_percent=$(df -Bm | grep '^/dev/' | grep -v '/boot$' | awk '{ut += $3} {ft+=
 # CPU load and other system info
 cpu_load=$(top -bn1 | grep "Cpu" | awk '{printf "%.1f", $2 + $4}')
 last_boot=$(who -b | awk '$1 == "system" {print $3 " " $4}')
-lvm_use=$(if [ $(lsblk | grep -c "lvm") -gt 0 ]; then echo yes; else echo no; fi)
+lvm_use=$(if [ "$(lsblk | grep -c "lvm")" -gt 0 ]; then echo yes; else echo no; fi)
 tcp_count=$(ss -ta | grep -c ESTAB)
 user_count=$(who | wc -l)
 ip=$(hostname -I | awk '{print $1}')

@@ -51,8 +51,8 @@ get_forward_port() { vm_forward_port "$1"; }
 head_ "NAT port forwarding"
 P_HTTPS=$(get_forward_port https)
 P_STATIC=$(get_forward_port inception-static)
-[ -n "$P_HTTPS" ] && pass "https  host:${P_HTTPS} → guest:443" || fail "no 'https' NAT rule"
-[ -n "$P_STATIC" ] && pass "static host:${P_STATIC} → guest:8090" || fail "no 'inception-static' NAT rule"
+if [ -n "$P_HTTPS" ]; then pass "https  host:${P_HTTPS} → guest:443"; else fail "no 'https' NAT rule"; fi
+if [ -n "$P_STATIC" ]; then pass "static host:${P_STATIC} → guest:8090"; else fail "no 'inception-static' NAT rule"; fi
 : "${P_HTTPS:=8443}"
 : "${P_STATIC:=8090}"
 
@@ -60,8 +60,8 @@ P_STATIC=$(get_forward_port inception-static)
 head_ "Serving the real domain to the host"
 code=$(curl -ks -o /dev/null -w '%{http_code}' --max-time 15 \
     --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" "https://${DOMAIN}:${P_HTTPS}/")
-[ "$code" = "200" ] && pass "https://${DOMAIN}:${P_HTTPS}/ → 200" ||
-    fail "https://${DOMAIN}:${P_HTTPS}/ → ${code:-no response}"
+if [ "$code" = "200" ]; then pass "https://${DOMAIN}:${P_HTTPS}/ → 200"; else
+    fail "https://${DOMAIN}:${P_HTTPS}/ → ${code:-no response}"; fi
 
 cn=$(
     curl -ks -o /dev/null --max-time 15 --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" \
@@ -76,8 +76,8 @@ esac
 
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
     --resolve "${DOMAIN}:${P_STATIC}:127.0.0.1" "http://${DOMAIN}:${P_STATIC}/")
-[ "$code" = "200" ] && pass "http://${DOMAIN}:${P_STATIC}/ → 200 (bonus static site)" ||
-    fail "http://${DOMAIN}:${P_STATIC}/ → ${code:-no response}"
+if [ "$code" = "200" ]; then pass "http://${DOMAIN}:${P_STATIC}/ → 200 (bonus static site)"; else
+    fail "http://${DOMAIN}:${P_STATIC}/ → ${code:-no response}"; fi
 
 # ── 4. The redirect trap ────────────────────────────────────────────────────
 # WordPress 301s any request whose Host differs from its stored siteurl. With a
@@ -138,8 +138,8 @@ if [ -s "$ca_tmp" ]; then
 else
     res=$(curl -ks --proxy "127.0.0.1:${PROXY_PORT}" --max-time 20 \
         -o /dev/null -w '%{http_code}' "https://${DOMAIN}/")
-    [ "$res" = "200" ] && pass "https://${DOMAIN}/ → 200 through the proxy" ||
-        fail "https://${DOMAIN}/ → ${res:-no response} through the proxy"
+    if [ "$res" = "200" ]; then pass "https://${DOMAIN}/ → 200 through the proxy"; else
+        fail "https://${DOMAIN}/ → ${res:-no response} through the proxy"; fi
 fi
 
 # Chrome takes its PAC from the desktop proxy setting and refuses a file:// URL
@@ -167,8 +167,8 @@ fi
 # The proxy must serve this domain and nothing else.
 other=$(curl -s --proxy "127.0.0.1:${PROXY_PORT}" --max-time 10 \
     -o /dev/null -w '%{http_code}' "http://example.com/" 2>/dev/null)
-[ "$other" = "403" ] && pass "proxy refuses every other host (example.com → 403)" ||
-    warn "proxy returned ${other:-nothing} for example.com — expected 403"
+if [ "$other" = "403" ]; then pass "proxy refuses every other host (example.com → 403)"; else
+    warn "proxy returned ${other:-nothing} for example.com — expected 403"; fi
 
 # ── 5. Firefox ──────────────────────────────────────────────────────────────
 head_ "Firefox"
