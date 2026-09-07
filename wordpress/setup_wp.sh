@@ -17,7 +17,7 @@ else
     echo "Failed to connect to database. Checking if user exists..."
 
     # Try to connect as root to check/create user
-    read -sp "Enter MySQL root password: " ROOT_PASSWORD
+    read -r -sp "Enter MySQL root password: " ROOT_PASSWORD
     echo
 
     # Check if wp_user exists
@@ -45,10 +45,10 @@ if [ -z "$TABLES_COUNT" ] || [ "$TABLES_COUNT" -eq 0 ]; then
 
     # Get WordPress admin configuration
     echo "Setting up WordPress initial configuration"
-    read -p "Site Title: " SITE_TITLE
-    read -p "Admin Username: " ADMIN_USER
-    read -p "Admin Password: " ADMIN_PASSWORD
-    read -p "Admin Email: " ADMIN_EMAIL
+    read -r -p "Site Title: " SITE_TITLE
+    read -r -p "Admin Username: " ADMIN_USER
+    read -r -p "Admin Password: " ADMIN_PASSWORD
+    read -r -p "Admin Email: " ADMIN_EMAIL
 
     # Find WordPress installation directory
     WP_DIR="/var/www/html"

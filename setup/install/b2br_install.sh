@@ -58,7 +58,7 @@ install_package "htop"
 # Optional: Install bonus part packages if requested
 print_header "WOULD YOU LIKE TO INSTALL BONUS PACKAGES?"
 echo -e "${YELLOW}The bonus part requires a web server with WordPress${NC}"
-read -p "Install bonus packages? (y/n): " install_bonus
+read -r -p "Install bonus packages? (y/n): " install_bonus
 
 if [[ "$install_bonus" =~ ^[Yy]$ ]]; then
     print_header "INSTALLING BONUS PACKAGES"

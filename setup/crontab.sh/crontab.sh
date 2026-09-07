@@ -25,7 +25,7 @@ MONITORING_SCRIPT="/home/LESdylan/monitoring.sh"
 # Check if monitoring script exists
 if [ ! -f "$MONITORING_SCRIPT" ]; then
     echo -e "${RED}Error: Monitoring script not found at $MONITORING_SCRIPT${NC}"
-    read -p "Enter the correct path to monitoring.sh: " MONITORING_SCRIPT
+    read -r -p "Enter the correct path to monitoring.sh: " MONITORING_SCRIPT
 
     if [ ! -f "$MONITORING_SCRIPT" ]; then
         echo -e "${RED}Error: Script still not found. Exiting.${NC}"
@@ -121,7 +121,7 @@ modify_schedule() {
     echo "5. Once a day at midnight: 0 0 * * *"
     echo "6. Custom schedule"
 
-    read -p "Select schedule [1-6]: " schedule_option
+    read -r -p "Select schedule [1-6]: " schedule_option
 
     case $schedule_option in
     1) new_schedule="*/10 * * * *" ;;
@@ -131,7 +131,7 @@ modify_schedule() {
     5) new_schedule="0 0 * * *" ;;
     6)
         echo -e "${YELLOW}Enter custom cron schedule (5 fields: minute hour day month weekday):${NC}"
-        read -p "> " new_schedule
+        read -r -p "> " new_schedule
         ;;
     *)
         echo -e "${RED}Invalid option. Using default (every 10 minutes).${NC}"
@@ -167,7 +167,7 @@ while true; do
     echo "4. Modify monitoring schedule"
     echo "5. Exit"
 
-    read -p "Select an option [1-5]: " option
+    read -r -p "Select an option [1-5]: " option
 
     case $option in
     1) check_crontab ;;
@@ -184,5 +184,5 @@ while true; do
     esac
 
     echo ""
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 done

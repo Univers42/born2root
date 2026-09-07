@@ -21,7 +21,7 @@ echo ""
 echo -e "${YELLOW}Select operation mode:${NC}"
 echo -e "1. Deploy theme for the first time"
 echo -e "2. Update existing theme with changes"
-read -p "Enter your choice (1 or 2): " MODE
+read -r -p "Enter your choice (1 or 2): " MODE
 
 if [ "$MODE" != "1" ] && [ "$MODE" != "2" ]; then
     echo -e "${RED}Invalid choice. Please run the script again.${NC}"
@@ -31,7 +31,7 @@ fi
 # Get user input for source theme path
 echo -e "\n${YELLOW}Enter the full path to your theme directory:${NC}"
 echo -e "(This is where your theme files are located in VS)"
-read -p "> " SOURCE_THEME_PATH
+read -r -p "> " SOURCE_THEME_PATH
 
 # Check if source directory exists
 if [ ! -d "$SOURCE_THEME_PATH" ]; then
@@ -46,7 +46,7 @@ echo -e "Theme name detected as: ${GREEN}$THEME_NAME${NC}"
 # Get WordPress install path
 echo -e "\n${YELLOW}Enter the path to your WordPress installation:${NC}"
 echo -e "(Usually /var/www/html or similar)"
-read -p "> " WP_PATH
+read -r -p "> " WP_PATH
 
 # Default to /var/www/html if empty
 if [ -z "$WP_PATH" ]; then
@@ -76,7 +76,7 @@ if [ "$MODE" == "1" ]; then
     # Deploying for the first time
     if [ -d "$DEST_THEME_DIR" ]; then
         echo -e "${YELLOW}Theme directory already exists at: $DEST_THEME_DIR${NC}"
-        read -p "Do you want to replace it? (y/n): " REPLACE
+        read -r -p "Do you want to replace it? (y/n): " REPLACE
 
         if [ "$REPLACE" != "y" ] && [ "$REPLACE" != "Y" ]; then
             echo -e "${RED}Deployment cancelled.${NC}"

@@ -273,7 +273,7 @@ function FindProxyForURL(url, host) {
 PACEOF
 }
 
-# Chrome and the rest of the desktop read GNOME's proxy setting. Only touched
+# Chrome and the rest of the desktop read -r GNOME's proxy setting. Only touched
 # when nothing else has configured it, so an existing proxy is never clobbered.
 configure_desktop_proxy() {
     command -v gsettings >/dev/null 2>&1 || return 0
@@ -436,14 +436,14 @@ warn_if_firefox_running() {
     pid=$(firefox_main_pid)
     [ -n "$pid" ] || return 0
     printf "\n  ${C_YELLOW}${C_BOLD}Firefox is running and will NOT pick this up yet.${C_RESET}\n"
-    printf "  ${C_DIM}user.js is only read when a profile starts, so the pref is inert${C_RESET}\n"
+    printf "  ${C_DIM}user.js is only read -r when a profile starts, so the pref is inert${C_RESET}\n"
     printf "  ${C_DIM}until it restarts, and that now covers the proxy settings too,${C_RESET}\n"
     printf "  ${C_DIM}so about:config is no longer a shortcut worth taking.${C_RESET}\n\n"
     printf "    ${C_BOLD}Quit Firefox completely${C_RESET} — every window, the process must exit —\n"
     printf "    then reopen it. Everything is already written to disk.\n"
 }
 
-# Chrome and Chromium do not read Firefox's certificate store; they use NSS's
+# Chrome and Chromium do not read -r Firefox's certificate store; they use NSS's
 # shared database instead. Without the CA there, plain Chrome reaches the site
 # and then refuses it with ERR_CERT_AUTHORITY_INVALID. The snap build cannot see
 # ~/.pki (snap confinement hides dot-directories in $HOME) and keeps its own
@@ -740,7 +740,7 @@ if have_vm; then
 elif [ "$(vm_backend)" = "qemu" ]; then
     # A QEMU VM forwards with -netdev hostfwd=, decided when it was launched.
     # There is nothing to create here and nothing that could be changed now, so
-    # just read the map qemu_vm.sh published and use it.
+    # just read -r the map qemu_vm.sh published and use it.
     P_HTTPS=$(vm_forward_port https) || P_HTTPS="$PREF_HTTPS_PORT"
     P_STATIC=$(vm_forward_port inception-static) || P_STATIC="$PREF_STATIC_PORT"
     P_HTTP=$(vm_forward_port http) || P_HTTP="$PREF_HTTP_PORT"

@@ -218,41 +218,41 @@ main() {
         echo -e "  ${GREEN}q)${RESET} Quit"
         echo
 
-        read -p "Enter your choice: " choice
+        read -r -p "Enter your choice: " choice
         echo
 
         case $choice in
         1)
             show_system_summary
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         2)
             show_cpu_info
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         3)
             show_memory_info
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         4)
             show_gpu_info
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         5)
             show_disk_info
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         6)
             show_network_info
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         7)
             show_system_load
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         8)
             show_top_processes
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         9)
             show_system_summary
@@ -263,7 +263,7 @@ main() {
             show_network_info
             show_system_load
             show_top_processes
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             ;;
         m | M)
             clear
@@ -280,7 +280,7 @@ main() {
             ;;
         *)
             echo -e "${RED}Invalid option. Press Enter to continue...${RESET}"
-            read
+            read -r
             ;;
         esac
     done

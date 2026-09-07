@@ -259,7 +259,7 @@ show_menu() {
     echo -e "0. Exit"
     echo
     echo -ne "${YELLOW}Select an option: ${NC}"
-    read option
+    read -r option
     
     case $option in
         1) /root/wordpress-security-demo/toggle-protection.sh off ;;
@@ -340,7 +340,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected) {
   /var/log/php8.2-fpm.log rw,
   /var/log/php/** rw,
   
-  # Web directories - allow read for all files
+  # Web directories - allow read -r for all files
   /var/www/html/ r,
   /var/www/html/** r,
   
@@ -364,7 +364,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected) {
   deny /root/** rwklmx,
   deny /home/** rwklmx,
   
-  # Allow PHP to read itself
+  # Allow PHP to read -r itself
   /usr/bin/php* rix,
   
   # Device access

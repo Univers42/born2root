@@ -37,7 +37,7 @@ trap 'rm -rf "$TMP"' EXIT
 . ./utils/vbox_driver.sh
 
 # ── The SIGPIPE regression: a big /proc/modules-shaped file, vboxdrv near
-# the end, read under pipefail. The old `lsmod | grep -q` pattern died here.
+# the end, read -r under pipefail. The old `lsmod | grep -q` pattern died here.
 big_modules="$TMP/modules"
 {
     i=0

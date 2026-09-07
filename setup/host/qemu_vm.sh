@@ -61,7 +61,7 @@
 #
 # Env
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (122880)
-#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (read from vm_pass.txt)
+#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (read -r from vm_pass.txt)
 #   ISO (newest debian-*preseed.iso in the repo root)
 # ============================================================================ #
 
@@ -165,7 +165,7 @@ vm_pass() {
 }
 
 # Alive? /proc, not `kill -0`: kill -0 answers EPERM for a process owned by
-# someone else, which read as "not running" for a guest root had started.
+# someone else, which read -r as "not running" for a guest root had started.
 pid_alive() { [ -d "/proc/$1" ]; }
 
 # The pid of the guest at $VM_DIR. The pidfile is the normal source; when it
@@ -752,7 +752,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         rm -f "$STAMP"
         launch cdrom
         printf "\n  ${C_BOLD}Unattended install running.${C_RESET} ${C_DIM}What follows is the installer's own log,\n"
-        printf "  read off its serial port. Ctrl+C detaches; re-attach with: %s watch${C_RESET}\n\n" "$0"
+        printf "  read -r off its serial port. Ctrl+C detaches; re-attach with: %s watch${C_RESET}\n\n" "$0"
         # finish-install writes B2B-INSTALL-COMPLETE to ttyS0, then d-i halts.
         if ! watch_install; then
             printf "    ${C_DIM}The VM is left running for a look. Stop it with: %s stop${C_RESET}\n" "$0"

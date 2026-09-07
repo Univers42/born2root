@@ -20,7 +20,7 @@ echo ""
 # Get user input for source theme path
 echo -e "${YELLOW}Enter the full path to your theme directory:${NC}"
 echo -e "(This is where your theme files are located in VS)"
-read -p "> " SOURCE_THEME_PATH
+read -r -p "> " SOURCE_THEME_PATH
 
 # Check if source directory exists
 if [ ! -d "$SOURCE_THEME_PATH" ]; then
@@ -35,7 +35,7 @@ echo -e "Theme name detected as: ${GREEN}$THEME_NAME${NC}"
 # Get WordPress install path
 echo -e "\n${YELLOW}Enter the path to your WordPress installation:${NC}"
 echo -e "(Usually /var/www/html or similar)"
-read -p "> " WP_PATH
+read -r -p "> " WP_PATH
 
 # Default to /var/www/html if empty
 if [ -z "$WP_PATH" ]; then
@@ -63,7 +63,7 @@ DEST_THEME_DIR="$THEMES_DIR/$THEME_NAME"
 # Check if destination already exists
 if [ -d "$DEST_THEME_DIR" ]; then
     echo -e "${YELLOW}Theme directory already exists at: $DEST_THEME_DIR${NC}"
-    read -p "Do you want to replace it? (y/n): " REPLACE
+    read -r -p "Do you want to replace it? (y/n): " REPLACE
 
     if [ "$REPLACE" != "y" ] && [ "$REPLACE" != "Y" ]; then
         echo -e "${RED}Deployment cancelled.${NC}"

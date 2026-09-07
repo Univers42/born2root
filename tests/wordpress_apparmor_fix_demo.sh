@@ -174,7 +174,7 @@ $system_files = [
 foreach ($system_files as $file => $description) {
     $content = null;
     
-    // Only actually try to read if we're in "vulnerable" mode
+    // Only actually try to read -r if we're in "vulnerable" mode
     if (!$protection_enabled) {
         $content = @file_get_contents($file);
     }
@@ -289,7 +289,7 @@ show_menu() {
     echo -e "0. Exit"
     echo
     echo -ne "${YELLOW}Select an option: ${NC}"
-    read option
+    read -r option
     
     case $option in
         1) /root/wordpress-security-demo/toggle-demo-protection.sh off ;;

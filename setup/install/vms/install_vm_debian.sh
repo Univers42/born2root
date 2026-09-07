@@ -431,7 +431,7 @@ fi
 
 # Record the machine that owns this disk. The repo lives on a shared NFS home,
 # so the same disk_images/ directory is visible from every workstation -- but
-# the VM only ever runs on one of them. Destructive targets read this stamp so
+# the VM only ever runs on one of them. Destructive targets read -r this stamp so
 # a run here cannot silently delete a VM that belongs to another machine.
 printf '%s (kernel %s, %s)\n' "$(hostname -f 2>/dev/null || hostname)" \
     "$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" \

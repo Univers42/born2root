@@ -25,7 +25,7 @@ mkdir -p "$VM_BASE_PATH/$VM_NAME"
 
 # Check if VM already exists
 if VBoxManage showvminfo "$VM_NAME" &>/dev/null; then
-    read -p "VM '$VM_NAME' already exists. Delete and recreate? (y/n): " confirm
+    read -r -p "VM '$VM_NAME' already exists. Delete and recreate? (y/n): " confirm
     if [[ $confirm == [yY] ]]; then
         echo "Removing existing VM..."
         VBoxManage unregistervm "$VM_NAME" --delete

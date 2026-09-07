@@ -72,7 +72,7 @@ else
     printf 'ok   %-40s\n' "report returns 1 when none"
 fi
 
-# ── qemu_pid: a pidfile that exists but cannot be read is not "not running" ──
+# ── qemu_pid: a pidfile that exists but cannot be read -r is not "not running" ──
 # (root-owned, from `sudo make all`). Fixture pids are not processes, so
 # liveness is the seam.
 pid_alive() {

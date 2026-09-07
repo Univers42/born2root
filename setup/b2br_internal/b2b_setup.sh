@@ -34,7 +34,7 @@ configure_hostname() {
     echo -e "${YELLOW}Current hostname: $current_hostname${NC}"
 
     # Ask for login
-    read -p "Enter your 42 login (without 42 suffix): " login
+    read -r -p "Enter your 42 login (without 42 suffix): " login
 
     if [ -z "$login" ]; then
         echo -e "${RED}✗ Login cannot be empty${NC}"
@@ -158,7 +158,7 @@ configure_user() {
     echo -e "\n${BLUE}=== User and Group Configuration ===${NC}"
 
     # Ask for login
-    read -p "Enter your 42 login: " login
+    read -r -p "Enter your 42 login: " login
 
     if [ -z "$login" ]; then
         echo -e "${RED}✗ Login cannot be empty${NC}"
@@ -297,7 +297,7 @@ while true; do
     echo "8. Exit"
     echo ""
 
-    read -p "Select an option [1-8]: " option
+    read -r -p "Select an option [1-8]: " option
 
     case $option in
     1) configure_hostname ;;
@@ -315,7 +315,7 @@ while true; do
         configure_ufw
         echo -e "\n${GREEN}✓ All Born2beRoot configurations have been applied!${NC}"
         echo -e "${YELLOW}! Some changes may require a reboot to take effect.${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
     8)
         echo -e "${GREEN}Exiting Born2beRoot Setup Utility${NC}"
@@ -323,9 +323,9 @@ while true; do
         ;;
     *)
         echo -e "${RED}Invalid option. Please try again.${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
     esac
 
-    read -p "Press Enter to return to the main menu..."
+    read -r -p "Press Enter to return to the main menu..."
 done

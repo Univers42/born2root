@@ -86,7 +86,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected) {
   /var/log/php8.2-fpm.log rw,
   /var/log/php/** rw,
   
-  # Web directories - allow read for all files
+  # Web directories - allow read -r for all files
   /var/www/html/ r,
   /var/www/html/** r,
   

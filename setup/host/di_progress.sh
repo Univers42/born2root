@@ -1,6 +1,6 @@
 #!/usr/bin/env hellish
 # ============================================================================ #
-#  di_progress.sh — read the Debian installer's progress off the serial log    #
+#  di_progress.sh — read -r the Debian installer's progress off the serial log    #
 # ============================================================================ #
 #
 # Sourced by qemu_vm.sh and generate/orchestrate.sh, not run. Provides:
@@ -93,7 +93,7 @@ di_failed_step() {
     printf '%s' "$line"
 }
 
-# Does a line read like the reason an install stopped? Used only together
+# Does a line read -r like the reason an install stopped? Used only together
 # with silence: a healthy install never sits still for minutes right after
 # one of these, but it does log benign warnings all the time ("WARNING **:
 # Started DHCP client", "warning: Unable to find contrib/.../Packages"), so

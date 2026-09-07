@@ -91,7 +91,7 @@ if [ "$WORDPRESS_FOUND" = false ]; then
     echo -e "${YELLOW}WordPress installation not found automatically.${NC}"
     echo -e "Please enter the full path to your WordPress installation:"
     echo -e "(This is the folder that contains wp-content, wp-includes, etc.)"
-    read -p "> " CUSTOM_PATH
+    read -r -p "> " CUSTOM_PATH
 
     if [ -d "$CUSTOM_PATH" ] && is_wordpress_dir "$CUSTOM_PATH"; then
         WORDPRESS_PATH="$CUSTOM_PATH"
@@ -107,7 +107,7 @@ fi
 echo ""
 echo -e "${BLUE}Step 2: Locate your plugin folder${NC}"
 echo -e "Enter the full path to your plugin folder:"
-read -p "> " PLUGIN_PATH
+read -r -p "> " PLUGIN_PATH
 
 if [ ! -d "$PLUGIN_PATH" ]; then
     echo -e "${RED}Error: The specified directory doesn't exist.${NC}"
@@ -123,7 +123,7 @@ if ! is_plugin_dir "$PLUGIN_PATH"; then
     echo -e "${YELLOW}Warning: This doesn't look like a standard WordPress plugin.${NC}"
     echo -e "The folder should contain PHP files with a 'Plugin Name:' header."
     echo -e "Do you want to continue anyway? (y/n)"
-    read -p "> " CONTINUE
+    read -r -p "> " CONTINUE
 
     if [[ "$CONTINUE" != "y" && "$CONTINUE" != "Y" ]]; then
         echo -e "${YELLOW}Installation cancelled.${NC}"
@@ -145,7 +145,7 @@ fi
 # Check if plugin already exists at destination and remove if necessary
 if [ -d "$WP_PLUGINS_DIR/$PLUGIN_NAME" ]; then
     echo -e "${YELLOW}Plugin '$PLUGIN_NAME' already exists in WordPress plugins directory.${NC}"
-    read -p "Do you want to replace it? (y/n): " REPLACE
+    read -r -p "Do you want to replace it? (y/n): " REPLACE
 
     if [[ "$REPLACE" == "y" || "$REPLACE" == "Y" ]]; then
         echo -e "Removing existing plugin..."

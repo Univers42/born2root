@@ -94,7 +94,7 @@ if ! is_installed lftp && ! is_installed curl && ! is_installed ftp; then
     echo -e "${YELLOW}For CentOS/RHEL:${NC} sudo yum install lftp"
     echo -e "${YELLOW}For macOS:${NC} brew install lftp"
 
-    read -p "Would you like to continue with configuration anyway? (y/n): " CONTINUE
+    read -r -p "Would you like to continue with configuration anyway? (y/n): " CONTINUE
     if [[ "$CONTINUE" != "y" && "$CONTINUE" != "Y" ]]; then
         echo -e "${RED}Exiting. Please install an FTP client and run this script again.${NC}"
         exit 1
@@ -121,7 +121,7 @@ echo -e "1. Shared hosting (like Bluehost, HostGator, SiteGround)"
 echo -e "2. Managed WordPress hosting (like WP Engine, Kinsta)"
 echo -e "3. VPS or dedicated server"
 echo -e "4. Local development (XAMPP, Local, etc.)"
-read -p "What type of hosting are you using? (1-4): " HOSTING_TYPE
+read -r -p "What type of hosting are you using? (1-4): " HOSTING_TYPE
 
 case $HOSTING_TYPE in
 1)
@@ -140,7 +140,7 @@ case $HOSTING_TYPE in
     echo -e "${YELLOW}For local development, you typically don't need FTP.${NC}"
     echo -e "You can directly access the plugins folder at: wp-content/plugins/"
     echo -e "Simply copy your plugin folder there and activate it in WordPress admin."
-    read -p "Do you still want to configure FTP? (y/n): " CONFIGURE_LOCAL
+    read -r -p "Do you still want to configure FTP? (y/n): " CONFIGURE_LOCAL
     if [[ "$CONFIGURE_LOCAL" != "y" && "$CONFIGURE_LOCAL" != "Y" ]]; then
         echo -e "${GREEN}For local installations, just copy your 'tech-blog-toolkit' folder to your WordPress plugins directory.${NC}"
         exit 0
@@ -152,11 +152,11 @@ case $HOSTING_TYPE in
 esac
 
 # Get FTP credentials
-read -p "FTP Server (e.g., ftp.yourdomain.com): " FTP_SERVER
-read -p "FTP Username: " FTP_USER
-read -s -p "FTP Password: " FTP_PASS
+read -r -p "FTP Server (e.g., ftp.yourdomain.com): " FTP_SERVER
+read -r -p "FTP Username: " FTP_USER
+read -r -s -p "FTP Password: " FTP_PASS
 echo ""
-read -p "FTP Port (default: 21): " FTP_PORT
+read -r -p "FTP Port (default: 21): " FTP_PORT
 FTP_PORT=${FTP_PORT:-21}
 
 # Ask about WordPress path
@@ -164,18 +164,18 @@ echo -e "\n${BLUE}Now, let's determine your WordPress plugins path:${NC}"
 echo -e "1. Standard path (public_html/wp-content/plugins)"
 echo -e "2. Custom installation path"
 echo -e "3. I don't know (try to auto-detect)"
-read -p "Select option (1-3): " WP_PATH_OPTION
+read -r -p "Select option (1-3): " WP_PATH_OPTION
 
 case $WP_PATH_OPTION in
 1)
     echo -e "${YELLOW}Using standard WordPress path structure...${NC}"
-    read -p "Enter your web root folder (default: public_html): " WEB_ROOT
+    read -r -p "Enter your web root folder (default: public_html): " WEB_ROOT
     WEB_ROOT=${WEB_ROOT:-public_html}
     WP_PLUGINS_PATH="/$WEB_ROOT/wp-content/plugins"
     ;;
 2)
     echo -e "${YELLOW}Enter custom WordPress plugins path:${NC}"
-    read -p "Full path to plugins directory (e.g., /public_html/blog/wp-content/plugins): " WP_PLUGINS_PATH
+    read -r -p "Full path to plugins directory (e.g., /public_html/blog/wp-content/plugins): " WP_PLUGINS_PATH
     ;;
 3)
     echo -e "${YELLOW}Will try to auto-detect WordPress path when connecting...${NC}"

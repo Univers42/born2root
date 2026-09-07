@@ -117,7 +117,7 @@ restore_lvm_config() {
         i=$((i + 1))
     done
 
-    read -p "Select a backup to restore (1-${#backups[@]}, or 'c' to cancel): " choice
+    read -r -p "Select a backup to restore (1-${#backups[@]}, or 'c' to cancel): " choice
 
     if [[ "$choice" == "c" || "$choice" == "C" ]]; then
         echo -e "${YELLOW}Restore operation cancelled.${NC}"
@@ -135,7 +135,7 @@ restore_lvm_config() {
 
     echo -e "${RED}WARNING: Restoring will revert all LVM changes made since backup!${NC}"
     echo -e "${RED}This can potentially make your system unbootable if not done correctly.${NC}"
-    read -p "Are you absolutely sure you want to proceed? (yes/no): " confirm
+    read -r -p "Are you absolutely sure you want to proceed? (yes/no): " confirm
 
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${YELLOW}Restore operation cancelled.${NC}"
@@ -204,7 +204,7 @@ extend_logical_volume() {
 
     # Confirm action
     echo -e "${YELLOW}About to extend /dev/${vg_name}/${lv_name} by ${extension}${NC}"
-    read -p "Proceed? (y/n): " confirm
+    read -r -p "Proceed? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then
         echo -e "${YELLOW}Operation cancelled by user${NC}"
         return 0
@@ -269,7 +269,7 @@ rename_volume_group() {
         echo -e "${RED}Renaming while the system is running is DANGEROUS!${NC}"
         echo -e "${CYAN}Learning note: System VGs are used by the running system and bootloader${NC}"
         echo -e "${YELLOW}Recommended approach: Boot from Live USB and rename from there.${NC}"
-        read -p "I understand the risks and want to proceed anyway (yes/no): " force_confirm
+        read -r -p "I understand the risks and want to proceed anyway (yes/no): " force_confirm
         if [[ "$force_confirm" != "yes" ]]; then
             echo -e "${YELLOW}Operation cancelled for safety reasons.${NC}"
             return 0
@@ -277,7 +277,7 @@ rename_volume_group() {
     fi
 
     # Final confirmation
-    read -p "Proceed with renaming $old_vg_name to $new_vg_name? (yes/no): " confirm
+    read -r -p "Proceed with renaming $old_vg_name to $new_vg_name? (yes/no): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${YELLOW}Operation cancelled by user${NC}"
         return 0
@@ -366,7 +366,7 @@ create_logical_volume() {
     echo -e "Available space: ${free_space}${free_unit}"
 
     # Confirm action
-    read -p "Proceed with creating ${lv_name} (${size})? (y/n): " confirm
+    read -r -p "Proceed with creating ${lv_name} (${size})? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then
         echo -e "${YELLOW}Operation cancelled by user${NC}"
         return 0
@@ -452,7 +452,7 @@ show_lvm_tutorial() {
     echo -e "• ${YELLOW}Test changes${NC} in a non-production environment first"
     echo -e "• ${YELLOW}Keep recovery media${NC} handy in case of boot problems"
     echo ""
-    read -p "Press Enter to return to main menu..."
+    read -r -p "Press Enter to return to main menu..."
 }
 
 # Main menu function
@@ -473,7 +473,7 @@ show_menu() {
     echo -e "${YELLOW}7.${NC} LVM concepts tutorial (educational)"
     echo -e "${YELLOW}8.${NC} Exit"
     echo ""
-    read -p "Select an option (1-8): " choice
+    read -r -p "Select an option (1-8): " choice
 
     case $choice in
     1)
@@ -481,24 +481,24 @@ show_menu() {
         ;;
     2)
         echo ""
-        read -p "Enter volume group name (e.g., ubuntu-vg): " vg_name
-        read -p "Enter logical volume name (e.g., ubuntu-lv): " lv_name
-        read -p "Enter size to extend (e.g., 10G, 200G): " extension
+        read -r -p "Enter volume group name (e.g., ubuntu-vg): " vg_name
+        read -r -p "Enter logical volume name (e.g., ubuntu-lv): " lv_name
+        read -r -p "Enter size to extend (e.g., 10G, 200G): " extension
         extend_logical_volume "$vg_name" "$lv_name" "$extension"
         ;;
     3)
         echo ""
         echo -e "${RED}WARNING: Renaming system volume groups can break your system!${NC}"
-        read -p "Enter current volume group name: " old_vg
-        read -p "Enter new volume group name: " new_vg
+        read -r -p "Enter current volume group name: " old_vg
+        read -r -p "Enter new volume group name: " new_vg
         rename_volume_group "$old_vg" "$new_vg"
         ;;
     4)
         echo ""
-        read -p "Enter volume group name: " vg_name
-        read -p "Enter new logical volume name: " lv_name
-        read -p "Enter size (e.g., 10G, 200G): " size
-        read -p "Enter mount point (leave empty to skip mounting): " mount_point
+        read -r -p "Enter volume group name: " vg_name
+        read -r -p "Enter new logical volume name: " lv_name
+        read -r -p "Enter size (e.g., 10G, 200G): " size
+        read -r -p "Enter mount point (leave empty to skip mounting): " mount_point
         create_logical_volume "$vg_name" "$lv_name" "$size" "$mount_point"
         ;;
     5)
@@ -523,7 +523,7 @@ show_menu() {
     esac
 
     echo ""
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
     show_menu
 }
 

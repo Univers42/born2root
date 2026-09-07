@@ -84,7 +84,7 @@ if [ "$WORDPRESS_FOUND" = false ]; then
     echo -e "${YELLOW}WordPress installation not found automatically.${NC}"
     echo -e "Please enter the full path to your WordPress installation:"
     echo -e "(This is the folder that contains wp-content, wp-includes, etc.)"
-    read -p "> " CUSTOM_PATH
+    read -r -p "> " CUSTOM_PATH
 
     if [ -d "$CUSTOM_PATH" ] && is_wordpress_dir "$CUSTOM_PATH"; then
         WORDPRESS_PATH="$CUSTOM_PATH"
@@ -191,7 +191,7 @@ echo -e "${YELLOW}Enter the IDs of plugins you want to delete (separated by spac
 echo -e "${YELLOW}For example: 0 3 5${NC}"
 echo -e "${RED}WARNING: This action cannot be undone!${NC}"
 echo -e "Enter 'all' to delete all plugins or 'q' to quit."
-read -p "> " SELECTION
+read -r -p "> " SELECTION
 
 if [[ "$SELECTION" == "q" || "$SELECTION" == "Q" ]]; then
     echo -e "${YELLOW}Operation cancelled. No changes were made.${NC}"
@@ -227,7 +227,7 @@ for id in "${SELECTED_PLUGINS[@]}"; do
 done
 echo ""
 echo -e "${RED}Are you sure you want to delete these plugins? This cannot be undone!${NC}"
-read -p "Type 'yes' to confirm: " CONFIRM
+read -r -p "Type 'yes' to confirm: " CONFIRM
 
 if [[ "$CONFIRM" != "yes" ]]; then
     echo -e "${YELLOW}Deletion cancelled. No changes were made.${NC}"

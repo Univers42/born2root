@@ -149,7 +149,7 @@ _ensure_vm_dir() {
 
     # Fill the array WITHOUT process substitution: a non-bash shell (hellish)
     # does not make shell functions visible inside <(...), so
-    # `mapfile -t lines < <(_vm_path_recipe ...)` read an empty list there. A
+    # `mapfile -t lines < <(_vm_path_recipe ...)` read -r an empty list there. A
     # command substitution DOES see functions, and filling the array in the
     # current shell keeps the sudo loop's stdin on the terminal for the
     # password prompt. (Univers42/hellish: process substitution drops functions.)
@@ -177,7 +177,7 @@ _ensure_vm_dir() {
 # ── Where does this VM live? ────────────────────────────────────────────────
 # VirtualBox remembers a VM's disk itself; QEMU has nothing, so after a
 # `make all VM_PATH=/mnt/storage/qemu` every later `make qemu_*` had to be
-# told VM_PATH again -- and forgetting it read as "nothing installed" or "not
+# told VM_PATH again -- and forgetting it read -r as "nothing installed" or "not
 # running". The location is recorded per VM_NAME, and the Makefile reads it
 # back as the default VM_PATH. Repo-local (disk_images/ is gitignored); the
 # tests point it elsewhere.

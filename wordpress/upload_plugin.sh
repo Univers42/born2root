@@ -27,13 +27,13 @@ if [ ! -d "$LOCAL_PLUGIN_PATH" ]; then
 fi
 
 # Collect FTP credentials
-read -p "FTP Server (e.g., ftp.example.com): " FTP_SERVER
-read -p "FTP Username: " FTP_USER
-read -s -p "FTP Password: " FTP_PASS
+read -r -p "FTP Server (e.g., ftp.example.com): " FTP_SERVER
+read -r -p "FTP Username: " FTP_USER
+read -r -s -p "FTP Password: " FTP_PASS
 echo ""
-read -p "FTP Port (default: 21): " FTP_PORT
+read -r -p "FTP Port (default: 21): " FTP_PORT
 FTP_PORT=${FTP_PORT:-21}
-read -p "WordPress plugins path (e.g., /public_html/wp-content/plugins): " WP_PLUGINS_PATH
+read -r -p "WordPress plugins path (e.g., /public_html/wp-content/plugins): " WP_PLUGINS_PATH
 
 # Check if required utilities are installed
 if ! command -v lftp &>/dev/null; then

@@ -79,7 +79,7 @@ set_default_policies() {
     echo -e "2. Allow outgoing traffic (${BOLD}allow${NC})"
     echo ""
 
-    read -p "Do you want to set recommended default policies? (y/n): " set_defaults
+    read -r -p "Do you want to set recommended default policies? (y/n): " set_defaults
 
     if [[ "$set_defaults" == "y" || "$set_defaults" == "Y" ]]; then
         echo -e "${YELLOW}! Setting default policies...${NC}"
@@ -90,7 +90,7 @@ set_default_policies() {
         echo "1. Allow all incoming traffic"
         echo "2. Deny all incoming traffic"
         echo "3. Reject all incoming traffic"
-        read -p "Select incoming policy [1-3]: " incoming_policy
+        read -r -p "Select incoming policy [1-3]: " incoming_policy
 
         case $incoming_policy in
         1) ufw default allow incoming ;;
@@ -105,7 +105,7 @@ set_default_policies() {
         echo "1. Allow all outgoing traffic"
         echo "2. Deny all outgoing traffic"
         echo "3. Reject all outgoing traffic"
-        read -p "Select outgoing policy [1-3]: " outgoing_policy
+        read -r -p "Select outgoing policy [1-3]: " outgoing_policy
 
         case $outgoing_policy in
         1) ufw default allow outgoing ;;
@@ -133,12 +133,12 @@ add_rule() {
     echo "4. Deny a specific IP address"
     echo "5. Allow a service (by name)"
     echo "6. Advanced rule"
-    read -p "Select rule type [1-6]: " rule_type
+    read -r -p "Select rule type [1-6]: " rule_type
 
     case $rule_type in
     1) # Allow a port
-        read -p "Enter port number to allow: " port
-        read -p "Protocol (tcp/udp/both): " protocol
+        read -r -p "Enter port number to allow: " port
+        read -r -p "Protocol (tcp/udp/both): " protocol
 
         if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
             echo -e "${RED}✗ Invalid port number. Must be between 1-65535${NC}"
@@ -159,8 +159,8 @@ add_rule() {
         ;;
 
     2) # Deny a port
-        read -p "Enter port number to deny: " port
-        read -p "Protocol (tcp/udp/both): " protocol
+        read -r -p "Enter port number to deny: " port
+        read -r -p "Protocol (tcp/udp/both): " protocol
 
         if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
             echo -e "${RED}✗ Invalid port number. Must be between 1-65535${NC}"
@@ -181,7 +181,7 @@ add_rule() {
         ;;
 
     3) # Allow an IP address
-        read -p "Enter IP address to allow: " ip
+        read -r -p "Enter IP address to allow: " ip
 
         # Simple IP validation (not perfect but catches obvious errors)
         if ! [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
@@ -194,7 +194,7 @@ add_rule() {
         ;;
 
     4) # Deny an IP address
-        read -p "Enter IP address to deny: " ip
+        read -r -p "Enter IP address to deny: " ip
 
         # Simple IP validation
         if ! [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
@@ -209,7 +209,7 @@ add_rule() {
     5) # Allow a service by name
         echo -e "${YELLOW}Common services:${NC}"
         echo "ssh, http, https, ftp, smtp, pop3, imap, dns, ntp"
-        read -p "Enter service name to allow: " service
+        read -r -p "Enter service name to allow: " service
 
         ufw allow $service
         if [ $? -eq 0 ]; then
@@ -223,7 +223,7 @@ add_rule() {
     6) # Advanced rule
         echo -e "${YELLOW}Enter the full UFW command (without 'ufw' prefix):${NC}"
         echo -e "${YELLOW}Example: allow 22/tcp comment 'SSH'${NC}"
-        read -p "Command: " command
+        read -r -p "Command: " command
 
         ufw $command
         if [ $? -eq 0 ]; then
@@ -254,7 +254,7 @@ delete_rule() {
     echo -e "${YELLOW}Current UFW Rules:${NC}"
     ufw status numbered
 
-    read -p "Enter rule number to delete (or 0 to cancel): " rule_num
+    read -r -p "Enter rule number to delete (or 0 to cancel): " rule_num
 
     if [ "$rule_num" == "0" ]; then
         echo -e "${YELLOW}! Operation canceled${NC}"
@@ -284,7 +284,7 @@ reset_rules() {
     echo -e "\n${BLUE}=== Reset UFW Rules ===${NC}"
 
     echo -e "${RED}! WARNING: This will delete all existing firewall rules!${NC}"
-    read -p "Are you sure you want to continue? (y/n): " confirm
+    read -r -p "Are you sure you want to continue? (y/n): " confirm
 
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         echo -e "${YELLOW}! Resetting all UFW rules...${NC}"
@@ -305,7 +305,7 @@ toggle_ufw() {
 
     if [ "$ufw_status" == "active" ]; then
         echo -e "${YELLOW}! UFW is currently ENABLED${NC}"
-        read -p "Do you want to disable UFW? (y/n): " disable
+        read -r -p "Do you want to disable UFW? (y/n): " disable
 
         if [[ "$disable" == "y" || "$disable" == "Y" ]]; then
             echo -e "${YELLOW}! Disabling UFW...${NC}"
@@ -314,7 +314,7 @@ toggle_ufw() {
         fi
     else
         echo -e "${YELLOW}! UFW is currently DISABLED${NC}"
-        read -p "Do you want to enable UFW? (y/n): " enable
+        read -r -p "Do you want to enable UFW? (y/n): " enable
 
         if [[ "$enable" == "y" || "$enable" == "Y" ]]; then
             # Check for SSH rule to avoid lockout
@@ -325,14 +325,14 @@ toggle_ufw() {
 
             if ! ufw status | grep -q "$ssh_port"; then
                 echo -e "${YELLOW}! No rule found for SSH port $ssh_port. Adding it to prevent lockout...${NC}"
-                read -p "Would you like to add a rule for SSH port $ssh_port first? (y/n): " add_ssh
+                read -r -p "Would you like to add a rule for SSH port $ssh_port first? (y/n): " add_ssh
 
                 if [[ "$add_ssh" == "y" || "$add_ssh" == "Y" ]]; then
                     ufw allow $ssh_port/tcp
                     echo -e "${GREEN}✓ SSH port $ssh_port/tcp allowed${NC}"
                 else
                     echo -e "${RED}! WARNING: Enabling UFW without SSH access rule may lock you out!${NC}"
-                    read -p "Are you ABSOLUTELY sure you want to continue? (yes/no): " really_sure
+                    read -r -p "Are you ABSOLUTELY sure you want to continue? (yes/no): " really_sure
 
                     if [ "$really_sure" != "yes" ]; then
                         echo -e "${YELLOW}! Operation canceled${NC}"
@@ -364,7 +364,7 @@ configure_logging() {
     echo "4. high      - Very detailed logging"
     echo "5. full      - Full logging (very verbose)"
 
-    read -p "Select logging level [1-5]: " log_level
+    read -r -p "Select logging level [1-5]: " log_level
 
     case $log_level in
     1) ufw logging off ;;
@@ -430,7 +430,7 @@ setup_born2beroot() {
     echo -e "3. Enable UFW"
     echo -e "4. Set logging to low"
 
-    read -p "Do you want to apply this configuration? (y/n): " apply_config
+    read -r -p "Do you want to apply this configuration? (y/n): " apply_config
 
     if [[ "$apply_config" == "y" || "$apply_config" == "Y" ]]; then
         # Get SSH port from sshd_config
@@ -438,7 +438,7 @@ setup_born2beroot() {
         if [ -z "$ssh_port" ]; then
             ssh_port="22"
             echo -e "${YELLOW}! SSH port not found in config. Using default port 22${NC}"
-            read -p "Is this correct? If not, enter the correct SSH port: " new_port
+            read -r -p "Is this correct? If not, enter the correct SSH port: " new_port
             if [[ "$new_port" =~ ^[0-9]+$ ]]; then
                 ssh_port=$new_port
             fi
@@ -520,7 +520,7 @@ while true; do
     echo "11. Exit"
     echo ""
 
-    read -p "Select an option [1-11]: " option
+    read -r -p "Select an option [1-11]: " option
 
     case $option in
     1) install_ufw ;;
@@ -539,9 +539,9 @@ while true; do
         ;;
     *)
         echo -e "${RED}Invalid option. Please try again.${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
     esac
 
-    read -p "Press Enter to return to the main menu..."
+    read -r -p "Press Enter to return to the main menu..."
 done

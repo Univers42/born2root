@@ -8,7 +8,7 @@
 # rebuild — for iterating on the scripts, for re-running after a failed first
 # boot, or for adding them to a machine that predates them.
 #
-# The VM's SSH port is read back from VirtualBox's NAT rules rather than
+# The VM's SSH port is read -r back from VirtualBox's NAT rules rather than
 # assumed to be 4242: when a second VM is built beside an existing one, the
 # host-port allocator (utils/host_ports.sh) walks past ports already in use, so
 # the second machine's ssh rule lands on 4243 or higher.
@@ -153,7 +153,7 @@ setup_sudo() {
     # with `sudo -S` because the pty that requiretty forces us to allocate echoes
     # everything written to its stdin -- a piped password would be printed
     # straight into the build log. Nothing here puts the secret on a command line
-    # either, so it cannot be read out of the VM's process list while it runs.
+    # either, so it cannot be read -r out of the VM's process list while it runs.
     if ! printf '%s' "$pass" | vm_ssh "umask 077; cat > '$PASS_REMOTE'"; then
         die "could not upload the sudo password to the VM"
     fi
@@ -205,7 +205,7 @@ run_provisioner() {
     vm_ssh_tty "chmod +x /tmp/${remote} && ${SUDO_CMD} env ${envs} bash /tmp/${remote}"
     local rc=${PIPESTATUS[0]}
     vm_ssh "rm -f /tmp/${remote}" >/dev/null 2>&1 || true
-    [ "$rc" -eq 0 ] || warn "${label} exited ${rc} -- read the output above before trusting it"
+    [ "$rc" -eq 0 ] || warn "${label} exited ${rc} -- read -r the output above before trusting it"
 }
 
 show_health() {

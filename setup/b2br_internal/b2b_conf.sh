@@ -104,7 +104,7 @@ echo -e "${YELLOW}Setting up user42 group...${NC}"
 groupadd -f user42
 
 echo -e "${YELLOW}Please enter username to add to user42 group:${NC}"
-read username
+read -r username
 
 if id "$username" &>/dev/null; then
     usermod -aG user42 $username

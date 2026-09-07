@@ -309,7 +309,7 @@ $system_files = [
 foreach ($system_files as $file => $description) {
     $content = null;
     
-    // Only actually try to read if we're in "vulnerable" mode
+    // Only actually try to read -r if we're in "vulnerable" mode
     if (!$protection_enabled) {
         $content = @file_get_contents($file);
     }

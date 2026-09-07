@@ -1081,7 +1081,7 @@ setup_host_ssh_config() {
     # Remove any previous Born2beRoot block
     if grep -qxF "$marker" "$ssh_config" 2>/dev/null; then
         # Two escaping concerns here:
-        #  - the scoped marker contains [ ] and . , which sed would read as a
+        #  - the scoped marker contains [ ] and . , which sed would read -r as a
         #    bracket expression / any-char instead of literals;
         #  - the plain "debian" marker is a PREFIX of every scoped marker, so an
         #    unanchored address would make a rebuild of "debian" also delete the

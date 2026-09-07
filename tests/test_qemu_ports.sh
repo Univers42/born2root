@@ -68,7 +68,7 @@ case "$hostfwd" in
     ;;
 esac
 
-# Once a VM is up, ports.env is authoritative: host_port_of must read it
+# Once a VM is up, ports.env is authoritative: host_port_of must read -r it
 # instead of re-probing (which would see the running QEMU's own listener).
 mkdir -p "$VM_DIR"
 printf 'ssh=4242\nmariadb=3307\nfrontend=5173\n' >"$VM_DIR/ports.env"

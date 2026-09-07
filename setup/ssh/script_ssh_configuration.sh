@@ -80,7 +80,7 @@ change_port() {
     fi
 
     echo -e "${YELLOW}Current SSH port: ${current_port}${NC}"
-    read -p "Enter new SSH port (1024-65535, recommended: 4242): " new_port
+    read -r -p "Enter new SSH port (1024-65535, recommended: 4242): " new_port
 
     # Validate port number
     if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1024 ] || [ "$new_port" -gt 65535 ]; then
@@ -111,7 +111,7 @@ change_port() {
         echo -e "${YELLOW}! UFW detected. Updating firewall rules...${NC}"
         ufw allow $new_port/tcp
         if [ "$current_port" != "22 (default)" ]; then
-            read -p "Do you want to remove the old port $current_port from firewall? (y/n): " remove_old
+            read -r -p "Do you want to remove the old port $current_port from firewall? (y/n): " remove_old
             if [[ "$remove_old" == "y" || "$remove_old" == "Y" ]]; then
                 ufw delete allow $current_port/tcp
                 echo -e "${GREEN}✓ Old port rule removed from firewall${NC}"
@@ -147,13 +147,13 @@ configure_key_auth() {
     echo "1. Generate a new SSH key pair"
     echo "2. Add an existing public key"
     echo "3. Skip key setup"
-    read -p "Select an option [1-3]: " key_option
+    read -r -p "Select an option [1-3]: " key_option
 
     case $key_option in
     1)
         # Generate new key pair
         echo -e "\n${BLUE}=== Generate New SSH Key Pair ===${NC}"
-        read -p "Enter username to create key for: " key_user
+        read -r -p "Enter username to create key for: " key_user
 
         # Check if user exists
         if ! id "$key_user" &>/dev/null; then
@@ -177,7 +177,7 @@ configure_key_auth() {
 
         # Check if key already exists
         if [ -f "$key_file" ]; then
-            read -p "SSH key already exists. Overwrite? (y/n): " overwrite
+            read -r -p "SSH key already exists. Overwrite? (y/n): " overwrite
             if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
                 echo -e "${YELLOW}! Key generation skipped${NC}"
                 return 0
@@ -205,7 +205,7 @@ configure_key_auth() {
     2)
         # Add existing public key
         echo -e "\n${BLUE}=== Add Existing Public Key ===${NC}"
-        read -p "Enter username to add key for: " key_user
+        read -r -p "Enter username to add key for: " key_user
 
         # Check if user exists
         if ! id "$key_user" &>/dev/null; then
@@ -265,7 +265,7 @@ disable_password_auth() {
 
     echo -e "${YELLOW}! WARNING: Disabling password authentication requires SSH key setup${NC}"
     echo -e "${YELLOW}! Make sure you have added SSH keys before proceeding${NC}"
-    read -p "Do you want to disable password authentication? (y/n): " disable
+    read -r -p "Do you want to disable password authentication? (y/n): " disable
 
     if [[ "$disable" == "y" || "$disable" == "Y" ]]; then
         # Backup sshd_config
@@ -301,7 +301,7 @@ disable_root_login() {
     echo -e "${YELLOW}! Current setting:${NC}"
     grep "^PermitRootLogin " /etc/ssh/sshd_config || echo "Using default (PermitRootLogin yes)"
 
-    read -p "Do you want to disable root login? (y/n): " disable_root
+    read -r -p "Do you want to disable root login? (y/n): " disable_root
 
     if [[ "$disable_root" == "y" || "$disable_root" == "Y" ]]; then
         # Backup sshd_config
@@ -341,7 +341,7 @@ configure_login_grace() {
     fi
 
     echo -e "${YELLOW}Current login grace time: ${current_time}${NC}"
-    read -p "Enter new login grace time (e.g., 30s, 2m, recommended: 1m): " new_time
+    read -r -p "Enter new login grace time (e.g., 30s, 2m, recommended: 1m): " new_time
 
     # Validate time format
     if ! [[ "$new_time" =~ ^[0-9]+[smh]?$ ]]; then
@@ -374,7 +374,7 @@ configure_max_auth() {
     fi
 
     echo -e "${YELLOW}Current maximum authentication attempts: ${current_max}${NC}"
-    read -p "Enter new maximum attempts (recommended: 3): " new_max
+    read -r -p "Enter new maximum attempts (recommended: 3): " new_max
 
     # Validate input
     if ! [[ "$new_max" =~ ^[0-9]+$ ]] || [ "$new_max" -lt 1 ]; then
@@ -420,7 +420,7 @@ configure_protocol() {
         fi
     else
         echo -e "${GREEN}✓ Protocol version not explicitly set (defaults to 2 in modern SSH)${NC}"
-        read -p "Do you want to explicitly set Protocol 2? (y/n): " set_protocol
+        read -r -p "Do you want to explicitly set Protocol 2? (y/n): " set_protocol
 
         if [[ "$set_protocol" == "y" || "$set_protocol" == "Y" ]]; then
             # Backup sshd_config
@@ -455,8 +455,8 @@ configure_idle_timeout() {
     echo -e "${YELLOW}! Total timeout = interval × count${NC}"
 
     # Get new settings
-    read -p "Enter new client alive interval in seconds (recommended: 300): " new_interval
-    read -p "Enter new client alive count max (recommended: 2): " new_count
+    read -r -p "Enter new client alive interval in seconds (recommended: 300): " new_interval
+    read -r -p "Enter new client alive count max (recommended: 2): " new_count
 
     # Validate inputs
     if ! [[ "$new_interval" =~ ^[0-9]+$ ]]; then
@@ -498,7 +498,7 @@ setup_port_forwarding() {
 
     echo -e "${YELLOW}! Note: This applies to VirtualBox VMs and assumes VBoxManage is available on the host${NC}"
     echo -e "${YELLOW}! If you're running directly on hardware, you can skip this${NC}"
-    read -p "Do you want to display port forwarding setup instructions? (y/n): " show_instructions
+    read -r -p "Do you want to display port forwarding setup instructions? (y/n): " show_instructions
 
     if [[ "$show_instructions" == "y" || "$show_instructions" == "Y" ]]; then
         # Get SSH port from config
@@ -576,7 +576,7 @@ show_firewall_status() {
             echo -e "\n${GREEN}✓ SSH port $ssh_port is allowed through firewall${NC}"
         else
             echo -e "\n${RED}✗ SSH port $ssh_port is not explicitly allowed through firewall${NC}"
-            read -p "Do you want to allow SSH port $ssh_port through firewall? (y/n): " allow_ssh
+            read -r -p "Do you want to allow SSH port $ssh_port through firewall? (y/n): " allow_ssh
             if [[ "$allow_ssh" == "y" || "$allow_ssh" == "Y" ]]; then
                 ufw allow $ssh_port/tcp
                 echo -e "${GREEN}✓ SSH port $ssh_port allowed through firewall${NC}"
@@ -584,7 +584,7 @@ show_firewall_status() {
         fi
     else
         echo -e "${YELLOW}! UFW is not installed${NC}"
-        read -p "Do you want to install UFW? (y/n): " install_ufw
+        read -r -p "Do you want to install UFW? (y/n): " install_ufw
         if [[ "$install_ufw" == "y" || "$install_ufw" == "Y" ]]; then
             apt update
             apt install -y ufw
@@ -631,7 +631,7 @@ while true; do
     echo "13. Exit"
     echo ""
 
-    read -p "Select an option [1-13]: " option
+    read -r -p "Select an option [1-13]: " option
 
     case $option in
     1) install_ssh ;;
@@ -652,9 +652,9 @@ while true; do
         ;;
     *)
         echo -e "${RED}Invalid option. Please try again.${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
     esac
 
-    read -p "Press Enter to return to the main menu..."
+    read -r -p "Press Enter to return to the main menu..."
 done

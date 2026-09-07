@@ -62,16 +62,16 @@ fi
 
 # Ask user if they want to test a connection to their hosting provider
 echo -e "${YELLOW}Would you like to test connection to your web hosting provider?${NC} (y/n)"
-read -p "> " TEST_CONNECTION
+read -r -p "> " TEST_CONNECTION
 
 if [ "$TEST_CONNECTION" = "y" ] || [ "$TEST_CONNECTION" = "Y" ]; then
     # Collect hosting provider information
     echo -e "\n${BLUE}Enter your web hosting FTP details:${NC}"
-    read -p "FTP Server (e.g., ftp.yourdomain.com): " FTP_SERVER
-    read -p "FTP Username: " FTP_USER
-    read -s -p "FTP Password: " FTP_PASS
+    read -r -p "FTP Server (e.g., ftp.yourdomain.com): " FTP_SERVER
+    read -r -p "FTP Username: " FTP_USER
+    read -r -s -p "FTP Password: " FTP_PASS
     echo ""
-    read -p "FTP Port (default: 21): " FTP_PORT
+    read -r -p "FTP Port (default: 21): " FTP_PORT
     FTP_PORT=${FTP_PORT:-21}
 
     echo -e "\n${YELLOW}Testing connection to $FTP_SERVER...${NC}"

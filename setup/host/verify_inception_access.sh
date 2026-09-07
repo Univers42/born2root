@@ -232,7 +232,7 @@ fi
 # A scratch profile always starts fresh and therefore always loads the pref —
 # which means the check below proves the MECHANISM, not the browser the user is
 # actually looking at. A Firefox that was already running when user.js was
-# written never read it and shows "Server Not Found". That combination once
+# written never read -r it and shows "Server Not Found". That combination once
 # reported "all checks passed" over a genuinely broken browser, so check it
 # explicitly and fail.
 ff_pid=$(pgrep -f '/firefox/firefox' 2>/dev/null | head -1)
@@ -251,7 +251,7 @@ if [ -n "$ff_pid" ] && [ "$configured" -gt 0 ]; then
             done
         done
         if [ "$ff_started" -lt "$newest_userjs" ]; then
-            fail "the running Firefox started before the pref was written — it has not read it"
+            fail "the running Firefox started before the pref was written — it has not read -r it"
             printf "      ${C_DIM}quit Firefox completely — every window — and reopen it${C_RESET}\n"
         else
             pass "the running Firefox started after the pref was written"
@@ -342,7 +342,7 @@ if command -v firefox >/dev/null 2>&1 && [ "$found" -gt 0 ]; then
     rm -rf "$tmpdir"
 fi
 
-# Chrome does not read Firefox's certificate store; it uses NSS's shared
+# Chrome does not read -r Firefox's certificate store; it uses NSS's shared
 # database. Without the CA there it reaches the site and then refuses it with
 # ERR_CERT_AUTHORITY_INVALID.
 if [ -n "${certutil_bin:-}" ]; then

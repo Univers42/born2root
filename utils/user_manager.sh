@@ -26,13 +26,13 @@ list_users() {
 
     # List users with UID >= 1000 (normal users, not system users)
     awk -F':' '$3 >= 1000 && $3 != 65534 {print $1,$3,$4,$6}' /etc/passwd |
-        while read username uid gid homedir; do
+        while read -r username uid gid homedir; do
             group=$(getent group $gid | cut -d: -f1)
             printf "%-15s %-10s %-10s %-20s\n" "$username" "$uid" "$group" "$homedir"
         done
 
     echo ""
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 }
 
 # Create a new user
@@ -41,16 +41,16 @@ create_user() {
     echo -e "${GREEN}CREATE NEW USER${NC}"
     echo -e "${YELLOW}-----------------------------------------${NC}"
 
-    read -p "Enter username: " username
+    read -r -p "Enter username: " username
 
     # Check if user already exists
     if id "$username" &>/dev/null; then
         echo -e "${RED}Error: User $username already exists!${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         return
     fi
 
-    read -p "Enter full name: " fullname
+    read -r -p "Enter full name: " fullname
 
     # Create user
     useradd -m -c "$fullname" "$username"
@@ -60,14 +60,14 @@ create_user() {
     passwd $username
 
     # Ask if user should be added to sudo group
-    read -p "Add user to sudo group? (y/n): " add_sudo
+    read -r -p "Add user to sudo group? (y/n): " add_sudo
     if [[ $add_sudo == "y" || $add_sudo == "Y" ]]; then
         usermod -aG sudo "$username"
         echo -e "${GREEN}User $username added to sudo group${NC}"
     fi
 
     echo -e "${GREEN}User $username created successfully!${NC}"
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 }
 
 # Delete an existing user
@@ -76,16 +76,16 @@ delete_user() {
     echo -e "${RED}DELETE USER${NC}"
     echo -e "${YELLOW}-----------------------------------------${NC}"
 
-    read -p "Enter username to delete: " username
+    read -r -p "Enter username to delete: " username
 
     # Check if user exists
     if ! id "$username" &>/dev/null; then
         echo -e "${RED}Error: User $username does not exist!${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         return
     fi
 
-    read -p "Delete home directory? (y/n): " del_home
+    read -r -p "Delete home directory? (y/n): " del_home
 
     if [[ $del_home == "y" || $del_home == "Y" ]]; then
         userdel -r "$username"
@@ -95,7 +95,7 @@ delete_user() {
         echo -e "${GREEN}User $username deleted. Home directory preserved.${NC}"
     fi
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 }
 
 # Modify user properties
@@ -104,12 +104,12 @@ modify_user() {
     echo -e "${BLUE}MODIFY USER${NC}"
     echo -e "${YELLOW}-----------------------------------------${NC}"
 
-    read -p "Enter username to modify: " username
+    read -r -p "Enter username to modify: " username
 
     # Check if user exists
     if ! id "$username" &>/dev/null; then
         echo -e "${RED}Error: User $username does not exist!${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         return
     fi
 
@@ -120,7 +120,7 @@ modify_user() {
     echo "4. Lock/unlock account"
     echo "5. Go back"
 
-    read -p "Select option [1-5]: " option
+    read -r -p "Select option [1-5]: " option
 
     case $option in
     1) # Change password
@@ -128,16 +128,16 @@ modify_user() {
         echo -e "${GREEN}Password changed for $username${NC}"
         ;;
     2) # Add to group
-        read -p "Enter group name: " groupname
+        read -r -p "Enter group name: " groupname
 
         # Check if group exists
         if ! getent group "$groupname" &>/dev/null; then
-            read -p "Group doesn't exist. Create it? (y/n): " create_group
+            read -r -p "Group doesn't exist. Create it? (y/n): " create_group
             if [[ $create_group == "y" || $create_group == "Y" ]]; then
                 groupadd "$groupname"
             else
                 echo -e "${RED}Operation canceled.${NC}"
-                read -p "Press Enter to continue..."
+                read -r -p "Press Enter to continue..."
                 return
             fi
         fi
@@ -148,7 +148,7 @@ modify_user() {
     3) # Change shell
         echo "Available shells:"
         cat /etc/shells
-        read -p "Enter new shell path: " shellpath
+        read -r -p "Enter new shell path: " shellpath
 
         # Verify shell exists
         if grep -q "^$shellpath$" /etc/shells; then
@@ -161,7 +161,7 @@ modify_user() {
     4) # Lock/unlock account
         echo "1. Lock account"
         echo "2. Unlock account"
-        read -p "Select option [1-2]: " lock_option
+        read -r -p "Select option [1-2]: " lock_option
 
         if [ "$lock_option" == "1" ]; then
             passwd -l "$username"
@@ -181,7 +181,7 @@ modify_user() {
         ;;
     esac
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 }
 
 # Check detailed user information
@@ -190,12 +190,12 @@ user_info() {
     echo -e "${BLUE}USER INFORMATION${NC}"
     echo -e "${YELLOW}-----------------------------------------${NC}"
 
-    read -p "Enter username: " username
+    read -r -p "Enter username: " username
 
     # Check if user exists
     if ! id "$username" &>/dev/null; then
         echo -e "${RED}Error: User $username does not exist!${NC}"
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         return
     fi
 
@@ -221,7 +221,7 @@ user_info() {
         echo -e "${RED}No, $username does not have sudo privileges${NC}"
     fi
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 }
 
 # Show password policy
@@ -245,7 +245,7 @@ show_password_policy() {
         grep -v "^#" /etc/security/pwquality.conf | grep -v "^$"
     fi
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
 }
 
 # Main menu
@@ -259,7 +259,7 @@ while true; do
     echo "6. Show password policy"
     echo "7. Exit"
     echo ""
-    read -p "Select an option [1-7]: " choice
+    read -r -p "Select an option [1-7]: " choice
 
     case $choice in
     1) list_users ;;

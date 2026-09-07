@@ -142,7 +142,7 @@ die() {
 #             needs no Mason package, no codelldb download and no rust toolchain.
 #   sh linting  the shellcheck binary, which nvim-lint drives for sh/bash —
 #             which is most of THIS repo. (Naming it at the start of a comment
-#             line would be read as a `# shellcheck` directive, hence the wrap.)
+#             line would be read -r as a `# shellcheck` directive, hence the wrap.)
 #   mariadb-client  vim-dadbod shells out to `mysql` to talk to the WordPress DB
 install_deps() {
     log "installing fzf, bat, lazygit, gdb and friends"
@@ -1933,7 +1933,7 @@ set -ga terminal-overrides ",*256col*:Tc,xterm-256color:Tc"
 set -sg escape-time 10
 
 # Long enough that a scrollback is actually useful, and focus events so
-# Neovim's autoread notices files changed by another pane.
+# Neovim's autoread -r notices files changed by another pane.
 set -g history-limit 50000
 set -g focus-events on
 
@@ -2036,7 +2036,7 @@ install_blink_fuzzy() {
         return 0
     fi
 
-    # The binary must match the checked-out tag, so read it from the checkout
+    # The binary must match the checked-out tag, so read -r it from the checkout
     # rather than assuming the newest release.
     #
     # Read it AS THE OWNING USER. This function runs as root while the plugin
@@ -2290,7 +2290,7 @@ bootstrap_user() {
     # be captured through :redir, and two things had to be got right:
     #  - each piece needs its own -c, because `redir` takes the whole rest of
     #    the line as its argument: `redir >> /dev/stdout | silent B2BExtras` is
-    #    read as a redirect to a file named "/dev/stdout | silent B2BExtras"
+    #    read -r as a redirect to a file named "/dev/stdout | silent B2BExtras"
     #    and fails with E488;
     #  - it cannot redirect to /dev/stdout at all, because under runuser stdout
     #    is a pipe, and Neovim refuses to open a pipe by name (E190).

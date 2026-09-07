@@ -15,7 +15,7 @@ sudo mkdir -p "$BACKUP_DIR"
 echo "=== Creating full system backup ==="
 echo "This will create a complete image of your system disk"
 echo "Please connect an external drive with at least 150GB free space"
-read -p "Press Enter when ready..."
+read -r -p "Press Enter when ready..."
 
 # Option 1: Using dd (raw disk image)
 echo "Creating disk image using dd (this may take 1-2 hours)..."

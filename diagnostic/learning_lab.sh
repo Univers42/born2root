@@ -96,7 +96,7 @@ restore_config() {
         i=$((i + 1))
     done
 
-    read -p "Select a backup to restore (1-${#backups[@]}, or 'c' to cancel): " choice
+    read -r -p "Select a backup to restore (1-${#backups[@]}, or 'c' to cancel): " choice
 
     if [[ "$choice" == "c" || "$choice" == "C" ]]; then
         echo -e "${YELLOW}Restore operation cancelled.${NC}"
@@ -113,7 +113,7 @@ restore_config() {
     local backup_path="$BACKUP_DIR/$selected_backup"
 
     echo -e "${RED}WARNING: Restoring will overwrite current $component configuration!${NC}"
-    read -p "Are you sure you want to proceed? (yes/no): " confirm
+    read -r -p "Are you sure you want to proceed? (yes/no): " confirm
 
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${YELLOW}Restore operation cancelled.${NC}"
@@ -196,7 +196,7 @@ configure_ssh() {
     echo -e "${YELLOW}7.${NC} Show SSH educational notes"
     echo -e "${YELLOW}8.${NC} Return to main menu"
 
-    read -p "Select an option (1-8): " ssh_choice
+    read -r -p "Select an option (1-8): " ssh_choice
 
     case $ssh_choice in
     1)
@@ -276,7 +276,7 @@ configure_ssh() {
         echo -e ""
         echo -e "${WHITE}3. Once you've confirmed key login works, you can disable password auth:${NC}"
 
-        read -p "Do you want to disable password authentication? (yes/no): " disable_pass
+        read -r -p "Do you want to disable password authentication? (yes/no): " disable_pass
 
         if [[ "$disable_pass" == "yes" ]]; then
             backup_config "ssh"
@@ -313,7 +313,7 @@ configure_ssh() {
         echo -e "${PURPLE}Educational note: Most configuration changes in Linux services require${NC}"
         echo -e "${PURPLE}restarting or reloading the service to take effect.${NC}"
 
-        read -p "Are you sure you want to restart the SSH service? (yes/no): " restart_ssh
+        read -r -p "Are you sure you want to restart the SSH service? (yes/no): " restart_ssh
 
         if [[ "$restart_ssh" == "yes" ]]; then
             systemctl restart sshd
@@ -358,7 +358,7 @@ configure_ssh() {
         echo -e "${PURPLE}ssh-keygen - Generate new SSH key pair${NC}"
         echo -e "${PURPLE}ssh-copy-id -i key.pub user@hostname - Copy public key to server${NC}"
         echo -e ""
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
 
     8)
@@ -370,7 +370,7 @@ configure_ssh() {
         ;;
     esac
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
     configure_ssh
 }
 
@@ -409,7 +409,7 @@ configure_ufw() {
     echo -e "${YELLOW}8.${NC} Show UFW educational notes"
     echo -e "${YELLOW}9.${NC} Return to main menu"
 
-    read -p "Select an option (1-9): " ufw_choice
+    read -r -p "Select an option (1-9): " ufw_choice
 
     case $ufw_choice in
     1)
@@ -419,7 +419,7 @@ configure_ufw() {
         echo -e "${PURPLE}making it easier to configure a firewall without the complexity of direct${NC}"
         echo -e "${PURPLE}iptables commands. It's ideal for basic firewall needs.${NC}"
 
-        read -p "Proceed with UFW installation? (yes/no): " install_ufw
+        read -r -p "Proceed with UFW installation? (yes/no): " install_ufw
 
         if [[ "$install_ufw" == "yes" ]]; then
             if command -v apt-get >/dev/null 2>&1; then
@@ -431,7 +431,7 @@ configure_ufw() {
                 yum install -y ufw
             else
                 echo -e "${RED}Package manager not found. Please install UFW manually.${NC}"
-                read -p "Press Enter to continue..."
+                read -r -p "Press Enter to continue..."
                 configure_ufw
                 return
             fi
@@ -451,7 +451,7 @@ configure_ufw() {
 
         if ! command -v ufw >/dev/null 2>&1; then
             echo -e "${RED}UFW is not installed. Please install it first.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_ufw
             return
         fi
@@ -460,10 +460,10 @@ configure_ufw() {
         if ! ufw status | grep -qE "(SSH|4242)/tcp"; then
             echo -e "${RED}WARNING: No SSH rules detected. Enabling UFW might lock you out!${NC}"
             echo -e "${YELLOW}It's recommended to add an SSH rule first (Option 3 or 4).${NC}"
-            read -p "Still proceed with enabling UFW? (yes/no): " force_enable
+            read -r -p "Still proceed with enabling UFW? (yes/no): " force_enable
             if [[ "$force_enable" != "yes" ]]; then
                 echo -e "${YELLOW}UFW enabling cancelled.${NC}"
-                read -p "Press Enter to continue..."
+                read -r -p "Press Enter to continue..."
                 configure_ufw
                 return
             fi
@@ -472,7 +472,7 @@ configure_ufw() {
         echo -e "${YELLOW}Enabling UFW with default policies:${NC}"
         echo -e "${YELLOW}- Block all incoming connections${NC}"
         echo -e "${YELLOW}- Allow all outgoing connections${NC}"
-        read -p "Proceed? (yes/no): " enable_ufw
+        read -r -p "Proceed? (yes/no): " enable_ufw
 
         if [[ "$enable_ufw" == "yes" ]]; then
             backup_config "ufw"
@@ -498,12 +498,12 @@ configure_ufw() {
 
         if ! command -v ufw >/dev/null 2>&1; then
             echo -e "${RED}UFW is not installed. Please install it first.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_ufw
             return
         fi
 
-        read -p "Apply Born2beroot firewall rules? (yes/no): " apply_rules
+        read -r -p "Apply Born2beroot firewall rules? (yes/no): " apply_rules
 
         if [[ "$apply_rules" == "yes" ]]; then
             backup_config "ufw"
@@ -537,7 +537,7 @@ configure_ufw() {
 
         if ! command -v ufw >/dev/null 2>&1; then
             echo -e "${RED}UFW is not installed. Please install it first.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_ufw
             return
         fi
@@ -549,13 +549,13 @@ configure_ufw() {
         echo -e "${WHITE}FTP:${NC} 21/tcp"
         echo -e "${WHITE}MySQL/MariaDB:${NC} 3306/tcp"
 
-        read -p "Enter port number: " port
-        read -p "Enter protocol (tcp/udp): " protocol
-        read -p "Enter rule comment (optional): " comment
+        read -r -p "Enter port number: " port
+        read -r -p "Enter protocol (tcp/udp): " protocol
+        read -r -p "Enter rule comment (optional): " comment
 
         if [[ -z "$port" || -z "$protocol" ]]; then
             echo -e "${RED}Port and protocol are required.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_ufw
             return
         fi
@@ -579,7 +579,7 @@ configure_ufw() {
 
         if ! command -v ufw >/dev/null 2>&1; then
             echo -e "${RED}UFW is not installed. Please install it first.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_ufw
             return
         fi
@@ -587,7 +587,7 @@ configure_ufw() {
         echo -e "\n${CYAN}Current numbered rules:${NC}"
         ufw status numbered
 
-        read -p "Enter rule number to delete (or c to cancel): " rule_num
+        read -r -p "Enter rule number to delete (or c to cancel): " rule_num
 
         if [[ "$rule_num" == "c" || "$rule_num" == "C" ]]; then
             echo -e "${YELLOW}Operation cancelled.${NC}"
@@ -638,7 +638,7 @@ configure_ufw() {
         echo -e "${PURPLE}3. Only open ports that are absolutely necessary (SSH on 4242)${NC}"
         echo -e "${PURPLE}4. Use specific IPs when possible (ufw allow from 192.168.1.100 to any port 4242)${NC}"
         echo -e ""
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
 
     9)
@@ -650,7 +650,7 @@ configure_ufw() {
         ;;
     esac
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
     configure_ufw
 }
 
@@ -700,7 +700,7 @@ configure_sudo() {
     echo -e "${YELLOW}7.${NC} Show sudo educational notes"
     echo -e "${YELLOW}8.${NC} Return to main menu"
 
-    read -p "Select an option (1-8): " sudo_choice
+    read -r -p "Select an option (1-8): " sudo_choice
 
     case $sudo_choice in
     1)
@@ -709,7 +709,7 @@ configure_sudo() {
         echo -e "${PURPLE}Educational note: sudo (superuser do) allows a user to execute${NC}"
         echo -e "${PURPLE}commands with the security privileges of another user, typically root.${NC}"
 
-        read -p "Proceed with sudo installation? (yes/no): " install_sudo
+        read -r -p "Proceed with sudo installation? (yes/no): " install_sudo
 
         if [[ "$install_sudo" == "yes" ]]; then
             if command -v apt-get >/dev/null 2>&1; then
@@ -721,7 +721,7 @@ configure_sudo() {
                 yum install -y sudo
             else
                 echo -e "${RED}Package manager not found. Please install sudo manually.${NC}"
-                read -p "Press Enter to continue..."
+                read -r -p "Press Enter to continue..."
                 configure_sudo
                 return
             fi
@@ -745,12 +745,12 @@ configure_sudo() {
 
         if ! command -v sudo >/dev/null 2>&1; then
             echo -e "${RED}Sudo is not installed. Please install it first.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_sudo
             return
         fi
 
-        read -p "Apply Born2beroot sudo policies? (yes/no): " apply_policies
+        read -r -p "Apply Born2beroot sudo policies? (yes/no): " apply_policies
 
         if [[ "$apply_policies" == "yes" ]]; then
             backup_config "sudo"
@@ -786,12 +786,12 @@ EOF
 
         if ! command -v sudo >/dev/null 2>&1; then
             echo -e "${RED}Sudo is not installed. Please install it first.${NC}"
-            read -p "Press Enter to continue..."
+            read -r -p "Press Enter to continue..."
             configure_sudo
             return
         fi
 
-        read -p "Enter username to add to sudo group: " username
+        read -r -p "Enter username to add to sudo group: " username
 
         if [[ -z "$username" ]]; then
             echo -e "${RED}Username cannot be empty.${NC}"
@@ -877,7 +877,7 @@ EOF
         echo -e "${PURPLE}sudo -u username command - Execute as specified user instead of root${NC}"
         echo -e "${PURPLE}sudo -i - Start a login shell as the target user (usually root)${NC}"
         echo -e ""
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
 
     8)
@@ -889,7 +889,7 @@ EOF
         ;;
     esac
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
     configure_sudo
 }
 
@@ -945,7 +945,7 @@ configure_password_policy() {
     echo -e "${YELLOW}7.${NC} Show password policy educational notes"
     echo -e "${YELLOW}8.${NC} Return to main menu"
 
-    read -p "Select an option (1-8): " pw_choice
+    read -r -p "Select an option (1-8): " pw_choice
 
     case $pw_choice in
     1)
@@ -959,7 +959,7 @@ configure_password_policy() {
         echo -e "${PURPLE}Educational note: Password complexity ensures users don't choose easily${NC}"
         echo -e "${PURPLE}guessable passwords, which are vulnerable to brute force or dictionary attacks.${NC}"
 
-        read -p "Apply Born2beroot password complexity policy? (yes/no): " apply_complexity
+        read -r -p "Apply Born2beroot password complexity policy? (yes/no): " apply_complexity
 
         if [[ "$apply_complexity" == "yes" ]]; then
             backup_config "password-policy"
@@ -976,7 +976,7 @@ configure_password_policy() {
                     yum install -y libpam-pwquality
                 else
                     echo -e "${RED}Package manager not found. Please install libpam-pwquality manually.${NC}"
-                    read -p "Press Enter to continue..."
+                    read -r -p "Press Enter to continue..."
                     configure_password_policy
                     return
                 fi
@@ -1019,7 +1019,7 @@ configure_password_policy() {
         echo -e "${PURPLE}Educational note: Password expiration forces users to change passwords${NC}"
         echo -e "${PURPLE}regularly, reducing the window of opportunity if a password is compromised.${NC}"
 
-        read -p "Apply Born2beroot password expiration policy? (yes/no): " apply_expiration
+        read -r -p "Apply Born2beroot password expiration policy? (yes/no): " apply_expiration
 
         if [[ "$apply_expiration" == "yes" ]]; then
             backup_config "password-policy"
@@ -1063,13 +1063,13 @@ configure_password_policy() {
                 yum install -y libpwquality-tools
             else
                 echo -e "${RED}Package manager not found. Cannot install pwscore.${NC}"
-                read -p "Press Enter to continue..."
+                read -r -p "Press Enter to continue..."
                 configure_password_policy
                 return
             fi
         fi
 
-        read -p "Enter username (or leave blank to skip user check): " check_user
+        read -r -p "Enter username (or leave blank to skip user check): " check_user
         echo -e "${YELLOW}Enter password to check (not stored):${NC}"
 
         if [[ -z "$check_user" ]]; then
@@ -1094,7 +1094,7 @@ configure_password_policy() {
         echo -e "${PURPLE}Educational note: This is useful when implementing a new password policy,${NC}"
         echo -e "${PURPLE}as it ensures all users will soon have passwords that comply with it.${NC}"
 
-        read -p "Enter username to force password change: " force_user
+        read -r -p "Enter username to force password change: " force_user
 
         if [[ -z "$force_user" ]]; then
             echo -e "${RED}Username cannot be empty.${NC}"
@@ -1153,7 +1153,7 @@ configure_password_policy() {
         echo -e "${PURPLE}/etc/pam.d/common-password - Controls password complexity via PAM modules${NC}"
         echo -e "${PURPLE}/etc/security/pwquality.conf - Detailed password quality settings${NC}"
         echo -e ""
-        read -p "Press Enter to continue..."
+        read -r -p "Press Enter to continue..."
         ;;
 
     8)
@@ -1165,7 +1165,7 @@ configure_password_policy() {
         ;;
     esac
 
-    read -p "Press Enter to continue..."
+    read -r -p "Press Enter to continue..."
     configure_password_policy
 }
 
@@ -1197,7 +1197,7 @@ configure_hostname_users() {
     echo -e "${YELLOW}8.${NC} Show hostname/user educational notes"
     echo -e "${YELLOW}9.${NC} Return to main menu"
 
-    read -p "Select an option (1-9): " user_choice
+    read -r -p "Select an option (1-9): " user_choice
 
     case $user_choice in
     1)
@@ -1206,14 +1206,14 @@ configure_hostname_users() {
         echo -e "${PURPLE}Educational note: The hostname identifies your system on a network${NC}"
         echo -e "${PURPLE}and is used in various network communications.${NC}"
 
-        read -p "Enter your 42 login: " login
+        read -r -p "Enter your 42 login: " login
 
         if [[ -z "$login" ]]; then
             echo -e "${RED}Login cannot be empty.${NC}"
         else
             new_hostname="${login}42"
 
-            read -p "Change hostname to $new_hostname? (yes/no): " confirm
+            read -r -p "Change hostname to $new_hostname? (yes/no): " confirm
 
             if [[ "$confirm" == "yes" ]]; then
                 backup_config "hostname"
@@ -1238,7 +1238,7 @@ configure_hostname_users() {
         echo -e "${PURPLE}Educational note: Each user should have their own account${NC}"
         echo -e "${PURPLE}for accountability and proper permission management.${NC}"
 
-        read -p "Enter username for the new user: " new_username
+        read -r -p "Enter username for the new user: " new_username
         # TODO: rest of user creation logic was truncated
         ;;
     esac

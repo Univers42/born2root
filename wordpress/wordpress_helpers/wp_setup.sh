@@ -80,9 +80,9 @@ configure_mariadb() {
     echo -e "\n${YELLOW}! Creating WordPress database...${NC}"
 
     # Get database credentials
-    read -p "Enter a name for the WordPress database: " db_name
-    read -p "Enter a username for the WordPress database: " db_user
-    read -p "Enter a password for the WordPress database user: " db_password
+    read -r -p "Enter a name for the WordPress database: " db_name
+    read -r -p "Enter a username for the WordPress database: " db_user
+    read -r -p "Enter a password for the WordPress database user: " db_password
 
     # Create database and user
     mysql -e "CREATE DATABASE $db_name;"
@@ -162,7 +162,7 @@ configure_ufw() {
 main() {
     echo -e "${YELLOW}This script will install and configure WordPress with Lighttpd, MariaDB, and PHP${NC}"
     echo -e "${YELLOW}Press Ctrl+C to cancel or Enter to continue...${NC}"
-    read
+    read -r
 
     install_packages
     configure_lighttpd
