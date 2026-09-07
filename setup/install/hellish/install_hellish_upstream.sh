@@ -189,6 +189,12 @@ normalize_guest_interpreters() {
 		sed -i "s|^@reboot root /bin/bash /root/first-boot-setup.sh|@reboot root $REAL /root/first-boot-setup.sh|" /etc/crontab
 		changed=$((changed + 1))
 	fi
+	# cron starts every job as `$SHELL -c`; Debian's SHELL=/bin/sh is dash.
+	if [ -f /etc/crontab ] && [ "$(sed -n 's/^SHELL=//p' /etc/crontab | head -1)" != "$REAL" ]; then
+		if grep -q '^SHELL=' /etc/crontab; then sed -i "s|^SHELL=.*|SHELL=$REAL|" /etc/crontab
+		else sed -i "1i SHELL=$REAL" /etc/crontab; fi
+		changed=$((changed + 1))
+	fi
 	if [ -f /etc/b2b_custom_shell.conf ]; then
 		grep -q '^B2B_GUEST_SH=' /etc/b2b_custom_shell.conf \
 			&& sed -i "s|^B2B_GUEST_SH=.*|B2B_GUEST_SH=$REAL|" /etc/b2b_custom_shell.conf \

@@ -590,9 +590,15 @@ echo "[OK] Git configured"
 chmod +x /usr/local/bin/monitoring.sh 2> /dev/null || true
 pin_shebang /usr/local/bin/monitoring.sh
 
-# Crontab: every 10 minutes, broadcast to all terminals
+# Crontab: every 10 minutes, broadcast to all terminals. cron runs every
+# line as `$SHELL -c '<line>'`, and Debian's crontab says SHELL=/bin/sh: that
+# is dash, started for each job before the script's own shebang is read. The
+# guest shell takes that seat too, so nothing the guest starts itself passes
+# through another shell -- first boot's @reboot line included.
+sed -i "s|^SHELL=.*|SHELL=$B2B_GUEST_SH|" /etc/crontab
+grep -q '^SHELL=' /etc/crontab || sed -i "1i SHELL=$B2B_GUEST_SH" /etc/crontab
 echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >> /etc/crontab
-echo "[OK] Monitoring cron set"
+echo "[OK] Monitoring cron set (SHELL=$B2B_GUEST_SH)"
 
 ### ─── 12. Lighttpd + PHP-FPM + WordPress routing ────────────────────────────
 # Detect installed PHP-FPM version and socket path

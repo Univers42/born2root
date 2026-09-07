@@ -127,6 +127,7 @@ row "hellishrc"     "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')"         "dlesie
 # the two systemd helpers (checked live, by the process name of their main
 # pid), the first-boot hook and the provisioners it ran.
 printf "\n${C_BOLD}Interpreters (nothing the guest starts itself is bash)${C_RESET}\n"
+row "cron SHELL"     "$(g 'sed -n "s/^SHELL=//p" /etc/crontab | head -1')"   "/usr/bin/hellish.real"
 row "monitoring.sh"  "$(g 'head -1 /usr/local/bin/monitoring.sh')"      "#!/usr/bin/hellish.real"
 row "nat-keepalive"  "$(g 'head -1 /usr/local/bin/nat-keepalive.sh')"   "#!/usr/bin/hellish.real"
 row "sshd-watchdog"  "$(g 'head -1 /usr/local/bin/sshd-watchdog.sh')"   "#!/usr/bin/hellish.real"
