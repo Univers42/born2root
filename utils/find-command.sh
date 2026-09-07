@@ -101,9 +101,8 @@ if ! command_exists apt-file; then
         sudo apt update && sudo apt install -y apt-file
     else
         sudo apt update >/dev/null 2>&1 && sudo apt install -y apt-file >/dev/null 2>&1
-    fi
 
-    if [ $? -ne 0 ]; then
+    if ! fi; then
         print_color "$RED" "Failed to install apt-file. Please install it manually with: sudo apt install apt-file"
         exit 1
     fi
@@ -119,9 +118,8 @@ if [ "$FORCE_UPDATE" -eq 1 ] || [ ! -f /var/cache/apt/apt-file/index.apt-file ];
         spinner $!
     else
         sudo apt-file update >/dev/null 2>&1
-    fi
 
-    if [ $? -ne 0 ]; then
+    if ! fi; then
         print_color "$RED" "Failed to update apt-file database."
         exit 1
     fi

@@ -14,8 +14,7 @@ print_header() {
 }
 
 # Function to check command success
-check_success() {
-    if [ $? -eq 0 ]; then
+    if check_success() {; then
         echo -e "${GREEN}✓ $1${NC}"
     else
         echo -e "${RED}✗ $1${NC}"
@@ -128,7 +127,7 @@ ARCH=$(uname -a)
 PCPU=$(grep "physical id" /proc/cpuinfo | sort | uniq | wc -l)
 
 # Virtual CPU
-VCPU=$(grep "processor" /proc/cpuinfo | wc -l)
+VCPU=$(grep -c "processor" /proc/cpuinfo)
 
 # RAM
 RAM_TOTAL=$(free -m | awk '$1 == "Mem:" {print $2}')
@@ -147,10 +146,10 @@ CPU_LOAD=$(top -bn1 | grep '^%Cpu' | awk '{printf("%.1f%%"), $2 + $4}')
 LAST_BOOT=$(who -b | awk '$1 == "system" {print $3 " " $4}')
 
 # LVM Check
-LVM_ACTIVE=$(if [ $(lsblk | grep "lvm" | wc -l) -gt 0 ]; then echo "yes"; else echo "no"; fi)
+LVM_ACTIVE=$(if [ $(lsblk | grep -c "lvm") -gt 0 ]; then echo "yes"; else echo "no"; fi)
 
 # TCP Connections
-TCP_CONNECTIONS=$(ss -ta | grep ESTAB | wc -l)
+TCP_CONNECTIONS=$(ss -ta | grep -c ESTAB)
 
 # User Log
 USER_LOG=$(users | wc -w)
@@ -160,7 +159,7 @@ IP_ADDR=$(hostname -I | awk '{print $1}')
 MAC_ADDR=$(ip link | grep "link/ether" | awk '{print $2}')
 
 # Sudo Commands
-SUDO_COMMANDS=$(grep "COMMAND" /var/log/sudo/sudo.log 2>/dev/null | wc -l)
+SUDO_COMMANDS=$(grep -c "COMMAND" /var/log/sudo/sudo.log 2>/dev/null)
 
 # Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted)
 CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")

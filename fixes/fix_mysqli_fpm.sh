@@ -91,8 +91,7 @@ fi
 
 # Step 5: Ensure PHP-FPM service is running
 echo "Checking PHP-FPM service status..."
-systemctl status php8.2-fpm
-if [ $? -ne 0 ]; then
+if ! systemctl status php8.2-fpm; then
     echo "Starting PHP-FPM service"
     systemctl enable php8.2-fpm
     systemctl start php8.2-fpm

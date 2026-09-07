@@ -70,9 +70,8 @@ add_to_crontab() {
             echo "$crontab_content"
         fi
         echo "*/10 * * * * $MONITORING_SCRIPT"
-    } | sudo crontab -
 
-    if [ $? -eq 0 ]; then
+    if } | sudo crontab -; then
         echo -e "${GREEN}✓ Monitoring script added to crontab successfully${NC}"
         echo -e "${GREEN}✓ Script will run every 10 minutes${NC}"
     else
@@ -94,9 +93,8 @@ remove_from_crontab() {
     fi
 
     # Get existing crontab content and remove our script
-    sudo crontab -l 2>/dev/null | grep -v "$MONITORING_SCRIPT" | sudo crontab -
 
-    if [ $? -eq 0 ]; then
+    if sudo crontab -l 2>/dev/null | grep -v "$MONITORING_SCRIPT" | sudo crontab -; then
         echo -e "${GREEN}✓ Monitoring script removed from crontab successfully${NC}"
     else
         echo -e "${RED}✗ Failed to update crontab${NC}"
@@ -145,9 +143,8 @@ modify_schedule() {
     {
         sudo crontab -l 2>/dev/null
         echo "$new_schedule $MONITORING_SCRIPT"
-    } | sudo crontab -
 
-    if [ $? -eq 0 ]; then
+    if } | sudo crontab -; then
         echo -e "${GREEN}✓ Cron schedule updated successfully${NC}"
         echo -e "${GREEN}✓ New schedule: $new_schedule${NC}"
     else

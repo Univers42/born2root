@@ -26,8 +26,7 @@ grep "sshd" /var/log/auth.log | grep "error\|failed\|invalid" | tail -10
 # 2. Check SSH config file for errors
 echo -e "\n${YELLOW}${BOLD}VERIFYING SSH CONFIGURATION${NC}"
 echo -e "${YELLOW}Running SSH config test...${NC}"
-sshd -t
-if [ $? -eq 0 ]; then
+if sshd -t; then
     echo -e "${GREEN}✓ SSH configuration syntax is valid${NC}"
 else
     echo -e "${RED}✗ SSH configuration has syntax errors${NC}"

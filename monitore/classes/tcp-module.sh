@@ -8,7 +8,7 @@ tcp_module() {
     get_tcp_netstat() {
         if command -v netstat &>/dev/null; then
             local tcp_count
-            tcp_count=$(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l)
+            tcp_count=$(netstat -an 2>/dev/null | grep -c ESTABLISHED)
             if [ -n "$tcp_count" ]; then
                 echo "$tcp_count"
             else
@@ -23,7 +23,7 @@ tcp_module() {
     get_tcp_ss() {
         if command -v ss &>/dev/null; then
             local tcp_count
-            tcp_count=$(ss -t state established 2>/dev/null | grep -v "State" | wc -l)
+            tcp_count=$(ss -t state established 2>/dev/null | grep -c -v "State")
             if [ -n "$tcp_count" ]; then
                 echo "$tcp_count"
             else
@@ -38,7 +38,7 @@ tcp_module() {
     get_tcp_lsof() {
         if command -v lsof &>/dev/null; then
             local tcp_count
-            tcp_count=$(lsof -i TCP 2>/dev/null | grep ESTABLISHED | wc -l)
+            tcp_count=$(lsof -i TCP 2>/dev/null | grep -c ESTABLISHED)
             if [ -n "$tcp_count" ]; then
                 echo "$tcp_count"
             else
@@ -53,7 +53,7 @@ tcp_module() {
     get_tcp_proc() {
         if [ -f /proc/net/tcp ]; then
             local tcp_count
-            tcp_count=$(cat /proc/net/tcp 2>/dev/null | grep " 01 " | wc -l)
+            tcp_count=$(cat /proc/net/tcp 2>/dev/null | grep -c " 01 ")
             if [ -n "$tcp_count" ]; then
                 echo "$tcp_count"
             else

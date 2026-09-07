@@ -54,7 +54,7 @@ echo -e "• User Group Management: ✓"
 
 # Final Information
 last_boot=$(who -b | awk '{print $3, $4}')
-failed_logins=$(grep "Failed password" /var/log/auth.log | wc -l)
+failed_logins=$(grep -c "Failed password" /var/log/auth.log)
 
 echo -e "\n${BOLD}Last Boot:${RESET} $last_boot"
 echo -e "${BOLD}Failed Login Attempts:${RESET} $failed_logins"

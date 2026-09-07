@@ -53,9 +53,9 @@ user_login_module() {
     get_last_count() {
         if command -v last &>/dev/null; then
             local last_output
-            last_output=$(last 2>/dev/null | grep "still logged in")
+            last_output=$(last 2>/dev/null | grep -c "still logged in")
             if [ -n "$last_output" ]; then
-                echo "$(echo "$last_output" | wc -l)"
+                echo "$(echo "$last_output")"
             else
                 echo "0" # No users still logged in is valid
             fi

@@ -12,7 +12,7 @@ date_time=$(date -u +"%Y-%m-%d %H:%M:%S")
 # System information gathering
 architecture=$(uname -a)
 cpu_physical=$(grep "physical id" /proc/cpuinfo | sort -u | wc -l)
-vcpu=$(grep "processor" /proc/cpuinfo | wc -l)
+vcpu=$(grep -c "processor" /proc/cpuinfo)
 
 # Memory information
 mem_used=$(free -m | awk '$1 == "Mem:" {print $3}')
@@ -27,12 +27,12 @@ disk_percent=$(df -Bm | grep '^/dev/' | grep -v '/boot$' | awk '{ut += $3} {ft+=
 # CPU load and other system info
 cpu_load=$(top -bn1 | grep "Cpu" | awk '{printf "%.1f", $2 + $4}')
 last_boot=$(who -b | awk '$1 == "system" {print $3 " " $4}')
-lvm_use=$(if [ $(lsblk | grep "lvm" | wc -l) -gt 0 ]; then echo yes; else echo no; fi)
-tcp_count=$(ss -ta | grep ESTAB | wc -l)
+lvm_use=$(if [ $(lsblk | grep -c "lvm") -gt 0 ]; then echo yes; else echo no; fi)
+tcp_count=$(ss -ta | grep -c ESTAB)
 user_count=$(who | wc -l)
 ip=$(hostname -I | awk '{print $1}')
 mac=$(ip link show | grep "link/ether" | awk '{print $2}' | head -1)
-sudo_count=$(grep "COMMAND" /var/log/sudo/sudo.log 2>/dev/null | wc -l)
+sudo_count=$(grep -c "COMMAND" /var/log/sudo/sudo.log 2>/dev/null)
 
 # Get terminal width for centered text
 TERM_WIDTH=$(tput cols)

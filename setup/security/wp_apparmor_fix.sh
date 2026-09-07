@@ -27,8 +27,7 @@ echo "Step 2: Checking for configuration errors..."
 
 # PHP-FPM configuration test
 echo "Testing PHP-FPM configuration..."
-php-fpm8.2 -t
-if [ $? -ne 0 ]; then
+if ! php-fpm8.2 -t; then
     echo "❌ PHP-FPM configuration has errors"
 else
     echo "✅ PHP-FPM configuration is valid"
@@ -36,8 +35,7 @@ fi
 
 # Lighttpd configuration test
 echo "Testing Lighttpd configuration..."
-lighttpd -t -f /etc/lighttpd/lighttpd.conf
-if [ $? -ne 0 ]; then
+if ! lighttpd -t -f /etc/lighttpd/lighttpd.conf; then
     echo "❌ Lighttpd configuration has errors"
 else
     echo "✅ Lighttpd configuration is valid"
@@ -79,8 +77,7 @@ rm -f /run/lighttpd.pid 2>/dev/null || true
 echo "Step 5: Restarting services one by one..."
 
 echo "Starting PHP-FPM..."
-systemctl restart php8.2-fpm
-if [ $? -ne 0 ]; then
+if ! systemctl restart php8.2-fpm; then
     echo "❌ PHP-FPM failed to start"
     echo "--- PHP-FPM service status ---"
     systemctl status php8.2-fpm --no-pager
@@ -91,8 +88,7 @@ else
 fi
 
 echo "Starting Lighttpd..."
-systemctl restart lighttpd
-if [ $? -ne 0 ]; then
+if ! systemctl restart lighttpd; then
     echo "❌ Lighttpd failed to start"
     echo "--- Lighttpd service status ---"
     systemctl status lighttpd --no-pager
@@ -103,8 +99,7 @@ else
 fi
 
 echo "Starting MariaDB..."
-systemctl restart mariadb
-if [ $? -ne 0 ]; then
+if ! systemctl restart mariadb; then
     echo "❌ MariaDB failed to start"
 else
     echo "✅ MariaDB started successfully"

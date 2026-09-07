@@ -47,8 +47,7 @@ install_ssh() {
     else
         echo -e "${YELLOW}! OpenSSH Server is not installed. Installing...${NC}"
         apt update
-        apt install -y openssh-server
-        if [ $? -eq 0 ]; then
+        if apt install -y openssh-server; then
             echo -e "${GREEN}✓ OpenSSH Server installed successfully${NC}"
         else
             echo -e "${RED}✗ Failed to install OpenSSH Server${NC}"

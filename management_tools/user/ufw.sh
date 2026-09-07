@@ -48,8 +48,7 @@ install_ufw() {
     else
         echo -e "${YELLOW}! UFW is not installed. Installing...${NC}"
         apt update
-        apt install -y ufw
-        if [ $? -eq 0 ]; then
+        if apt install -y ufw; then
             echo -e "${GREEN}✓ UFW installed successfully${NC}"
         else
             echo -e "${RED}✗ Failed to install UFW${NC}"
@@ -210,9 +209,7 @@ add_rule() {
         echo -e "${YELLOW}Common services:${NC}"
         echo "ssh, http, https, ftp, smtp, pop3, imap, dns, ntp"
         read -r -p "Enter service name to allow: " service
-
-        ufw allow $service
-        if [ $? -eq 0 ]; then
+        if ufw allow $service; then
             echo -e "${GREEN}✓ Service $service allowed${NC}"
         else
             echo -e "${RED}✗ Failed to add rule. Check if service name is valid${NC}"
@@ -224,9 +221,7 @@ add_rule() {
         echo -e "${YELLOW}Enter the full UFW command (without 'ufw' prefix):${NC}"
         echo -e "${YELLOW}Example: allow 22/tcp comment 'SSH'${NC}"
         read -r -p "Command: " command
-
-        ufw $command
-        if [ $? -eq 0 ]; then
+        if ufw $command; then
             echo -e "${GREEN}✓ Rule added successfully${NC}"
         else
             echo -e "${RED}✗ Failed to add rule. Check syntax${NC}"
@@ -267,9 +262,8 @@ delete_rule() {
     fi
 
     echo -e "${YELLOW}! Deleting rule number $rule_num...${NC}"
-    ufw delete $rule_num
 
-    if [ $? -eq 0 ]; then
+    if ufw delete $rule_num; then
         echo -e "${GREEN}✓ Rule deleted successfully${NC}"
     else
         echo -e "${RED}✗ Failed to delete rule. Check rule number${NC}"

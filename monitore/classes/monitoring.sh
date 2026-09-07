@@ -21,7 +21,7 @@ fi
 echo "- Got CPU physical info"
 
 # CPU virtual cores
-cpu_virtual=$(grep "processor" /proc/cpuinfo | wc -l)
+cpu_virtual=$(grep -c "processor" /proc/cpuinfo)
 echo "- Got CPU virtual info"
 
 # RAM usage
@@ -45,12 +45,12 @@ last_boot=$(who -b | awk '{print $3 " " $4}')
 echo "- Got last boot info"
 
 # LVM check
-lvm_check=$(if [ $(lsblk | grep "lvm" | wc -l) -gt 0 ]; then echo "yes"; else echo "no"; fi)
+lvm_check=$(if [ $(lsblk | grep -c "lvm") -gt 0 ]; then echo "yes"; else echo "no"; fi)
 echo "- Got LVM status"
 
 # Active connections - using ss instead of netstat
 if command -v netstat >/dev/null 2>&1; then
-    tcp_connections=$(netstat -ant | grep ESTABLISHED | wc -l)
+    tcp_connections=$(netstat -ant | grep -c ESTABLISHED)
 else
     # Use ss if netstat is not available
     tcp_connections=$(ss -t state established | wc -l)
@@ -72,11 +72,11 @@ echo "- Got network info"
 
 # Sudo command count - adjust based on your system's sudo log location
 if [ -f "/var/log/sudo/sudo.log" ]; then
-    sudo_count=$(grep COMMAND /var/log/sudo/sudo.log | wc -l)
+    sudo_count=$(grep -c COMMAND /var/log/sudo/sudo.log)
 elif [ -f "/var/log/auth.log" ]; then
-    sudo_count=$(grep "sudo:" /var/log/auth.log | grep COMMAND | wc -l)
+    sudo_count=$(grep "sudo:" /var/log/auth.log | grep -c COMMAND)
 else
-    sudo_count=$(journalctl _COMM=sudo 2>/dev/null | grep COMMAND | wc -l)
+    sudo_count=$(journalctl _COMM=sudo 2>/dev/null | grep -c COMMAND)
 fi
 echo "- Got sudo command count"
 

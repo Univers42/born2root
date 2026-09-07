@@ -105,9 +105,8 @@ with open(settings_file, 'w') as f:
     json.dump(settings, f, indent=2)
 
 print("✓ VS Code settings updated")
-PYTHON_EOF
 
-if [ $? -eq 0 ]; then
+if PYTHON_EOF; then
     echo -e "${GREEN}✓ VS Code Remote SSH settings configured${NC}\n"
 else
     echo -e "${YELLOW}⚠ Could not auto-configure settings${NC}"

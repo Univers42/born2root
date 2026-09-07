@@ -8,7 +8,7 @@ lvm_module() {
     get_lvm_lsblk() {
         if command -v lsblk &>/dev/null; then
             local lvm_count
-            lvm_count=$(lsblk 2>/dev/null | grep "lvm" | wc -l)
+            lvm_count=$(lsblk 2>/dev/null | grep -c "lvm")
             if [ $lvm_count -eq 0 ]; then
                 echo "no"
             else
@@ -53,7 +53,7 @@ lvm_module() {
     get_lvm_mapper() {
         if [ -d /dev/mapper ]; then
             local mapper_entries
-            mapper_entries=$(ls -la /dev/mapper/ 2>/dev/null | grep -v control | wc -l)
+            mapper_entries=$(ls -la /dev/mapper/ 2>/dev/null | grep -c -v control)
             if [ $mapper_entries -le 1 ]; then
                 echo "no"
             else
@@ -68,7 +68,7 @@ lvm_module() {
     get_lvm_fstab() {
         if [ -f /etc/fstab ]; then
             local fstab_lvm
-            fstab_lvm=$(grep "/dev/mapper" /etc/fstab 2>/dev/null | wc -l)
+            fstab_lvm=$(grep -c "/dev/mapper" /etc/fstab 2>/dev/null)
             if [ $fstab_lvm -eq 0 ]; then
                 echo "no"
             else

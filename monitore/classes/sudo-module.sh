@@ -8,7 +8,7 @@ sudo_command_module() {
     get_sudo_journalctl() {
         if command -v journalctl &>/dev/null; then
             local sudo_count
-            sudo_count=$(journalctl _COMM=sudo 2>/dev/null | grep COMMAND | wc -l)
+            sudo_count=$(journalctl _COMM=sudo 2>/dev/null | grep -c COMMAND)
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -23,7 +23,7 @@ sudo_command_module() {
     get_sudo_authlog() {
         if [ -f /var/log/auth.log ]; then
             local sudo_count
-            sudo_count=$(grep "sudo:" /var/log/auth.log 2>/dev/null | grep "COMMAND" | wc -l)
+            sudo_count=$(grep "sudo:" /var/log/auth.log 2>/dev/null | grep -c "COMMAND")
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -38,7 +38,7 @@ sudo_command_module() {
     get_sudo_secure() {
         if [ -f /var/log/secure ]; then
             local sudo_count
-            sudo_count=$(grep "sudo:" /var/log/secure 2>/dev/null | grep "COMMAND" | wc -l)
+            sudo_count=$(grep "sudo:" /var/log/secure 2>/dev/null | grep -c "COMMAND")
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else
@@ -53,7 +53,7 @@ sudo_command_module() {
     get_sudo_custom() {
         if [ -f /var/log/sudo.log ]; then
             local sudo_count
-            sudo_count=$(grep "COMMAND" /var/log/sudo.log 2>/dev/null | wc -l)
+            sudo_count=$(grep -c "COMMAND" /var/log/sudo.log 2>/dev/null)
             if [ -n "$sudo_count" ]; then
                 echo "$sudo_count"
             else

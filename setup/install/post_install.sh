@@ -44,7 +44,7 @@ arch=$(uname -a)
 pcpu=$(grep "physical id" /proc/cpuinfo | sort | uniq | wc -l)
 
 # Virtual processors
-vcpu=$(grep "processor" /proc/cpuinfo | wc -l)
+vcpu=$(grep -c "processor" /proc/cpuinfo)
 
 # RAM usage
 total_ram=$(free -m | grep Mem | awk '{print $2}')
@@ -63,10 +63,10 @@ cpu_load=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}')
 last_boot=$(who -b | awk '{print $3 " " $4}')
 
 # LVM check
-lvm_status=$(if [ $(lsblk | grep "lvm" | wc -l) -gt 0 ]; then echo "yes"; else echo "no"; fi)
+lvm_status=$(if [ $(lsblk | grep -c "lvm") -gt 0 ]; then echo "yes"; else echo "no"; fi)
 
 # TCP connections
-tcp_conn=$(ss -ta | grep ESTAB | wc -l)
+tcp_conn=$(ss -ta | grep -c ESTAB)
 
 # User log
 user_log=$(who | wc -l)
@@ -76,7 +76,7 @@ ip=$(hostname -I)
 mac=$(ip link | grep "link/ether" | awk '{print $2}')
 
 # Sudo commands
-sudo_cmd=$(grep "COMMAND" /var/log/sudo/sudo.log 2>/dev/null | wc -l)
+sudo_cmd=$(grep -c "COMMAND" /var/log/sudo/sudo.log 2>/dev/null)
 
 # Display all information
 wall "

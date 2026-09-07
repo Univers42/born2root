@@ -17,8 +17,7 @@ fi
 
 # Step 1: Verify AppArmor is running
 echo -e "\nStep 1: Verifying AppArmor status..."
-aa-status >/dev/null 2>&1
-if [ $? -ne 0 ]; then
+if ! aa-status >/dev/null 2>&1; then
     echo "❌ AppArmor is not running. Please run the configuration script first."
     exit 1
 fi

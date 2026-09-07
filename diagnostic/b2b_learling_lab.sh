@@ -1525,7 +1525,7 @@ arch=$(uname -a)
 cpu_physical=$(grep "physical id" /proc/cpuinfo | sort | uniq | wc -l)
 
 # CPU Virtual
-cpu_virtual=$(grep "processor" /proc/cpuinfo | wc -l)
+cpu_virtual=$(grep -c "processor" /proc/cpuinfo)
 
 # RAM
 ram_total=$(free -m | awk '$1 == "Mem:" {print $2}')
@@ -1544,7 +1544,7 @@ cpu_load=$(top -bn1 | grep "Cpu(s)" | awk '{printf("%.1f%%", $2 + $4)}')
 last_boot=$(who -b | awk '{print $3 " " $4}')
 
 # LVM Use
-lvm_count=$(lsblk | grep "lvm" | wc -l)
+lvm_count=$(lsblk | grep -c "lvm")
 if [ $lvm_count -gt 0 ]; then
     lvm_use="yes"
 else
@@ -1552,7 +1552,7 @@ else
 fi
 
 # TCP Connections
-tcp_connections=$(ss -ta | grep ESTAB | wc -l)
+tcp_connections=$(ss -ta | grep -c ESTAB)
 
 # User Log
 user_count=$(who | wc -l)
@@ -1562,7 +1562,7 @@ ip_address=$(hostname -I | awk '{print $1}')
 mac_address=$(ip link show | grep "link/ether" | awk '{print $2}')
 
 # Sudo Commands
-sudo_count=$(journalctl _COMM=sudo | grep COMMAND | wc -l)
+sudo_count=$(journalctl _COMM=sudo | grep -c COMMAND)
 
 # Display wall message
 wall "

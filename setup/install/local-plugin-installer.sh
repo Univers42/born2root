@@ -158,9 +158,8 @@ fi
 
 # Copy plugin to WordPress plugins directory
 echo -e "Copying plugin to WordPress plugins directory..."
-cp -r "$PLUGIN_PATH" "$WP_PLUGINS_DIR/"
 
-if [ $? -eq 0 ]; then
+if cp -r "$PLUGIN_PATH" "$WP_PLUGINS_DIR/"; then
     echo -e "${GREEN}✓ Plugin '$PLUGIN_NAME' installed successfully to: $WP_PLUGINS_DIR/$PLUGIN_NAME${NC}"
 
     # Set proper permissions

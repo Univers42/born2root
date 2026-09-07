@@ -36,15 +36,13 @@ apt-get install -y ${PHP_PKG_PREFIX}-mysql || true
 
 # Verify mysqli extension is installed
 echo "Verifying mysqli extension..."
-php -m | grep -i mysqli
-if [ $? -eq 0 ]; then
+if php -m | grep -i mysqli; then
     echo "mysqli extension is now installed!"
 else
     echo "Warning: mysqli extension installation may have failed. Checking alternatives..."
     # Try to install with legacy naming pattern
     apt-get install -y php-mysqli
-    php -m | grep -i mysqli
-    if [ $? -eq 0 ]; then
+    if php -m | grep -i mysqli; then
         echo "mysqli extension is now installed (using alternate package)!"
     else
         echo "Error: Could not install mysqli extension. Please check your PHP configuration."

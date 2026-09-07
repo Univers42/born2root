@@ -74,10 +74,7 @@ EOF
 
 # Execute the upload script
 echo -e "${YELLOW}Uploading plugin to server...${NC}"
-lftp -f $TEMP_SCRIPT
-
-# Check if the upload was successful
-if [ $? -ne 0 ]; then
+if ! lftp -f $TEMP_SCRIPT; then
     echo -e "${RED}\nError: Failed to upload plugin. Please check your FTP credentials and paths.${NC}"
     rm $TEMP_SCRIPT
     exit 1

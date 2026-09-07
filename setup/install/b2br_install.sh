@@ -16,8 +16,7 @@ print_header() {
 # Function to install a package with status check
 install_package() {
     echo -e "${YELLOW}Installing $1...${NC}"
-    apt-get install -y $1 >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    if apt-get install -y $1 >/dev/null 2>&1; then
         echo -e "${GREEN}✓ $1 installed successfully${NC}"
     else
         echo -e "${RED}✗ Failed to install $1${NC}"
