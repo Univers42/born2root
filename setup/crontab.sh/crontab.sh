@@ -65,13 +65,12 @@ add_to_crontab() {
     echo -e "${YELLOW}Adding entry to run every 10 minutes...${NC}"
 
     # We use a here-document to create the new crontab content
-    {
+    if {
         if [ -n "$crontab_content" ]; then
             echo "$crontab_content"
         fi
         echo "*/10 * * * * $MONITORING_SCRIPT"
-
-    if } | sudo crontab -; then
+    } | sudo crontab -; then
         echo -e "${GREEN}✓ Monitoring script added to crontab successfully${NC}"
         echo -e "${GREEN}✓ Script will run every 10 minutes${NC}"
     else
@@ -140,11 +139,10 @@ modify_schedule() {
     # Update crontab with new schedule
     sudo crontab -l 2>/dev/null | grep -v "$MONITORING_SCRIPT" | sudo crontab -
 
-    {
+    if {
         sudo crontab -l 2>/dev/null
         echo "$new_schedule $MONITORING_SCRIPT"
-
-    if } | sudo crontab -; then
+    } | sudo crontab -; then
         echo -e "${GREEN}✓ Cron schedule updated successfully${NC}"
         echo -e "${GREEN}✓ New schedule: $new_schedule${NC}"
     else

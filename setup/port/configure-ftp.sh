@@ -43,7 +43,9 @@ install_package() {
         echo -e "${RED}Could not determine package manager. Please install $package manually.${NC}"
         return 1
 
-    if fi; then
+    fi
+
+    if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ $package installed successfully${NC}"
         return 0
     else

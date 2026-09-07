@@ -27,12 +27,12 @@ backup_lvm_config() {
 
     # Backup current state using various commands
     echo -e "${CYAN}Saving current LVM state details...${NC}"
-    sudo pvs -v >"$backup_path/pvs.txt"
-    sudo vgs -v >"$backup_path/vgs.txt"
-    sudo lvs -v >"$backup_path/lvs.txt"
-    sudo pvdisplay >"$backup_path/pvdisplay.txt"
-    sudo vgdisplay >"$backup_path/vgdisplay.txt"
-    sudo lvdisplay >"$backup_path/lvdisplay.txt"
+    sudo pvs -v | sudo tee "$backup_path/pvs.txt" >/dev/null
+    sudo vgs -v | sudo tee "$backup_path/vgs.txt" >/dev/null
+    sudo lvs -v | sudo tee "$backup_path/lvs.txt" >/dev/null
+    sudo pvdisplay | sudo tee "$backup_path/pvdisplay.txt" >/dev/null
+    sudo vgdisplay | sudo tee "$backup_path/vgdisplay.txt" >/dev/null
+    sudo lvdisplay | sudo tee "$backup_path/lvdisplay.txt" >/dev/null
 
     # Backup critical system files
     echo -e "${CYAN}Backing up system configuration files...${NC}"

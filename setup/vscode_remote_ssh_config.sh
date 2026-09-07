@@ -76,7 +76,7 @@ else
 fi
 
 # Use Python to safely merge JSON settings (handles existing settings gracefully)
-python3 <<PYTHON_EOF
+if python3 <<PYTHON_EOF
 import json
 import sys
 
@@ -106,7 +106,8 @@ with open(settings_file, 'w') as f:
 
 print("✓ VS Code settings updated")
 
-if PYTHON_EOF; then
+PYTHON_EOF
+then
     echo -e "${GREEN}✓ VS Code Remote SSH settings configured${NC}\n"
 else
     echo -e "${YELLOW}⚠ Could not auto-configure settings${NC}"
