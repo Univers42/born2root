@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot Port Connectivity Fix
 # For both SSH (4242) and Web Server (80)
 

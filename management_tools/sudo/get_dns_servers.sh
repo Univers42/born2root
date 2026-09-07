@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 function get_dns_server {
     if [ -f /etc/resolv.conf ]; then

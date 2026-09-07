@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  qemu_pipeline.sh — `make all`, on the QEMU/KVM backend                      #
 # ============================================================================ #
@@ -20,7 +20,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 QEMU_VM="$HERE/qemu_vm.sh"
 
@@ -64,7 +64,7 @@ fi
 
 # ── 2. Disk ─────────────────────────────────────────────────────────────────
 phase "Virtual disk"
-bash "$QEMU_VM" create || die "disk creation failed"
+"${SCRIPT_SH:-bash}" "$QEMU_VM" create || die "disk creation failed"
 
 # ── 3. Install ──────────────────────────────────────────────────────────────
 # Whether the disk holds a system is RECORDED by qemu_vm.sh, not guessed:
@@ -92,20 +92,20 @@ elif [ "$disk_bytes" -gt 1073741824 ] && [ -z "$phase_now" ] && [ "${FORCE_INSTA
     ok "disk holds $(du -h "$DISK" | cut -f1) but no .installed stamp (built before stamps existed) — treating it as installed"
     ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
 else
-    [ "$phase_now" = installing ] &&
-        printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
-    printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
-    printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
-    bash "$QEMU_VM" install || die "the install phase failed"
+	[ "$phase_now" = installing ] \
+		&& printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
+	printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
+	printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
+	"${SCRIPT_SH:-bash}" "$QEMU_VM" install || die "the install phase failed"
 fi
 
 # ── 4. First boot + LUKS ────────────────────────────────────────────────────
 phase "First boot"
-bash "$QEMU_VM" start || die "the VM did not come up"
+"${SCRIPT_SH:-bash}" "$QEMU_VM" start || die "the VM did not come up"
 
 # ── 5. Host wiring ──────────────────────────────────────────────────────────
 phase "Host configuration"
-bash "$QEMU_VM" ssh-config || die "could not write ~/.ssh/config"
+"${SCRIPT_SH:-bash}" "$QEMU_VM" ssh-config || die "could not write ~/.ssh/config"
 
 if timeout 20 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \

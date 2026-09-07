@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 #
 # provision_vm.sh — run a provisioner script inside a running VM, over SSH.
 #
@@ -14,18 +14,18 @@
 # the second machine's ssh rule lands on 4243 or higher.
 #
 # USAGE
-#   bash setup/host/provision_vm.sh <vm-name> nvim
-#   bash setup/host/provision_vm.sh <vm-name> hellish
-#   bash setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
-#   bash setup/host/provision_vm.sh <vm-name> health          # print checkhealth
-#   bash setup/host/provision_vm.sh <vm-name> all
+#   setup/host/provision_vm.sh <vm-name> nvim
+#   setup/host/provision_vm.sh <vm-name> hellish
+#   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
+#   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
+#   setup/host/provision_vm.sh <vm-name> all
 #
 # Environment passed through to the guest script, e.g.
-#   NVIM_VERSION=latest bash setup/host/provision_vm.sh debian-nvim nvim
+#   NVIM_VERSION=latest setup/host/provision_vm.sh debian-nvim nvim
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 VM_NAME="${1:-debian}"
@@ -47,22 +47,21 @@ die() {
     exit 1
 }
 
-command -v VBoxManage >/dev/null 2>&1 || die "VBoxManage not found"
-
-VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1 ||
-    die "VM \"$VM_NAME\" does not exist. Existing VMs: $(VBoxManage list vms | tr '\n' ' ')"
-
-state=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null |
-    grep '^VMState=' | cut -d'"' -f2)
-[ "$state" = "running" ] ||
-    die "VM \"$VM_NAME\" is $state, not running. Start it with: make start_vm VM_NAME=$VM_NAME"
-
 # ── Where does this VM's SSH live on the host? ──────────────────────────────
-SSH_PORT=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null |
-    awk -F'"' '$1 ~ /^Forwarding/ && $2 ~ /^ssh,tcp,/ { print $2; exit }' |
-    cut -d',' -f4)
-[ -n "$SSH_PORT" ] || die "VM \"$VM_NAME\" has no NAT rule named 'ssh'"
-info "VM \"$VM_NAME\" — ssh on 127.0.0.1:${SSH_PORT} as ${VM_USER}"
+# vm_ports.sh knows both backends: a VirtualBox NAT rule, or the hostfwd map
+# QEMU's driver recorded in ports.env under VM_PATH (the Makefile exports it).
+# A VirtualBox VM is also asked whether it is running; a QEMU guest simply has
+# to answer on its port.
+. "$REPO_ROOT/setup/host/vm_ports.sh"
+if command -v VBoxManage >/dev/null 2>&1 && VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1; then
+	state=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null \
+		| grep '^VMState=' | cut -d'"' -f2)
+	[ "$state" = "running" ] \
+		|| die "VM \"$VM_NAME\" is $state, not running. Start it with: make start_vm VM_NAME=$VM_NAME"
+fi
+SSH_PORT=$(vm_forward_port ssh 2>/dev/null) || SSH_PORT=
+[ -n "$SSH_PORT" ] || die "VM \"$VM_NAME\" has no 'ssh' forward: no VirtualBox NAT rule by that name, and no QEMU ports.env under VM_PATH (${VM_PATH:-unset}) -- is the guest running?"
+info "VM \"$VM_NAME\" ($(vm_backend 2>/dev/null || echo unknown)) — ssh on 127.0.0.1:${SSH_PORT} as ${VM_USER}"
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
     -o LogLevel=ERROR -o ConnectTimeout=15 -o ServerAliveInterval=15
@@ -149,19 +148,21 @@ setup_sudo() {
         or point at a file:  VM_SUDO_PASS_FILE=/path/to/file make provision"
     fi
 
-    # The password travels on stdin and lands in a mode-600 file; the askpass
-    # helper is a two-line script that cats it. It is done this way rather than
-    # with `sudo -S` because the pty that requiretty forces us to allocate echoes
-    # everything written to its stdin -- a piped password would be printed
-    # straight into the build log. Nothing here puts the secret on a command line
-    # either, so it cannot be read out of the VM's process list while it runs.
-    if ! printf '%s' "$pass" | vm_ssh "umask 077; cat > '$PASS_REMOTE'"; then
-        die "could not upload the sudo password to the VM"
-    fi
-    askpass_installed=1
-    if ! vm_ssh "umask 077; printf '#!/bin/sh\\ncat %s\\n' '$PASS_REMOTE' > '$ASKPASS_REMOTE'; chmod 700 '$ASKPASS_REMOTE'"; then
-        die "could not install the sudo askpass helper in the VM"
-    fi
+	# The password travels on stdin and lands in a mode-600 file; the askpass
+	# helper is a two-line script that cats it. It is done this way rather than
+	# with `sudo -S` because the pty that requiretty forces us to allocate echoes
+	# everything written to its stdin -- a piped password would be printed
+	# straight into the build log. Nothing here puts the secret on a command line
+	# either, so it cannot be read out of the VM's process list while it runs.
+	if ! printf '%s' "$pass" | vm_ssh "umask 077; cat > '$PASS_REMOTE'"; then
+		die "could not upload the sudo password to the VM"
+	fi
+	askpass_installed=1
+	# The askpass helper is a two-line script sudo runs in the guest; its
+	# interpreter is the guest's hellish.real when there is one.
+	if ! vm_ssh "umask 077; i=\$(command -v hellish.real 2>/dev/null || echo /bin/sh); printf '#!%s\\ncat %s\\n' \"\$i\" '$PASS_REMOTE' > '$ASKPASS_REMOTE'; chmod 700 '$ASKPASS_REMOTE'"; then
+		die "could not install the sudo askpass helper in the VM"
+	fi
 
     if ! vm_ssh_tty "SUDO_ASKPASS='$ASKPASS_REMOTE' sudo -A true" >/dev/null 2>&1; then
         die "the sudo password was rejected by the VM (set VM_SUDO_PASS to the right one)"

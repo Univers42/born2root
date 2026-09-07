@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # FTP Verification Script
 # Created: 2025-04-04
 # Author: LESdylan

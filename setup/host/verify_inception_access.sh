@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  born2root — prove the Inception domain really works FROM THE HOST           #
 # ============================================================================ #
@@ -20,7 +20,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 VM_NAME="${VM_NAME:-debian}"
 DOMAIN="${INCEPTION_DOMAIN:-dlesieur.42.fr}"
 SSH_ALIAS="${SSH_ALIAS:-b2b}"
@@ -43,7 +43,7 @@ head_() { printf "\n${C_BOLD}%s${C_RESET}\n" "$*"; }
 
 # Backend-aware: a VirtualBox NAT rule or a QEMU hostfwd, whichever exists.
 # shellcheck source=setup/host/vm_ports.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vm_ports.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/vm_ports.sh"
 
 get_forward_port() { vm_forward_port "$1"; }
 
@@ -113,10 +113,13 @@ PROXY_PORT=$(sed -n 's/.*--port \([0-9]\+\).*/\1/p' \
     "$HOME/.config/systemd/user/inception-proxy.service" 2>/dev/null | head -1)
 : "${PROXY_PORT:=8118}"
 
-if systemctl --user is-active inception-proxy.service >/dev/null 2>&1; then
-    pass "proxy service active on 127.0.0.1:${PROXY_PORT}"
+if systemctl --user is-active inception-proxy.service > /dev/null 2>&1; then
+	pass "proxy service active on 127.0.0.1:${PROXY_PORT}"
+elif proxy_pid=$(cat "$HOME/.local/share/born2root/inception-proxy.pid" 2> /dev/null) \
+	&& [ -n "$proxy_pid" ] && kill -0 "$proxy_pid" 2> /dev/null; then
+	pass "proxy running detached on 127.0.0.1:${PROXY_PORT} (pid ${proxy_pid}; no systemd --user in this session)"
 else
-    fail "inception-proxy.service is not running — run: make host_access"
+	fail "the inception proxy is not running — run: make host_access"
 fi
 
 # Fetch the CA so the check can demand a genuinely valid chain rather than -k.
@@ -138,7 +141,6 @@ else
     [ "$res" = "200" ] && pass "https://${DOMAIN}/ → 200 through the proxy" ||
         fail "https://${DOMAIN}/ → ${res:-no response} through the proxy"
 fi
-rm -f "$ca_tmp"
 
 # Chrome takes its PAC from the desktop proxy setting and refuses a file:// URL
 # there, so the proxy serves the PAC itself over http. If this endpoint is not
@@ -368,35 +370,53 @@ launcher="$HOME/.local/bin/inception-browser"
 if [ ! -x "$launcher" ]; then
     warn "launcher missing — run: make host_access"
 else
-    pass "launcher present: $launcher"
-    browser=""
-    # Same order as inception_host_access.sh's CHROMIUM_CANDIDATES, so this
-    # tests the browser the launcher will actually run.
-    for c in chromium chromium-browser google-chrome google-chrome-stable brave-browser; do
-        command -v "$c" >/dev/null 2>&1 && {
-            browser=$(command -v "$c")
-            break
-        }
-    done
-    if [ -n "$browser" ]; then
-        rules="MAP ${DOMAIN}:443 127.0.0.1:${P_HTTPS},MAP ${DOMAIN}:${P_STATIC} 127.0.0.1:${P_STATIC}"
-        tmpdir=$(mktemp -d)
-        dom=$(timeout 90 "$browser" --headless --no-sandbox --disable-gpu \
-            --disable-dev-shm-usage --no-first-run \
-            --user-data-dir="$tmpdir" \
-            --host-resolver-rules="$rules" \
-            --dump-dom "https://${DOMAIN}/" 2>/dev/null)
-        rm -rf "$tmpdir"
-        if printf '%s' "$dom" | grep -qi '<title'; then
-            title=$(printf '%s' "$dom" | grep -oiE '<title[^>]*>[^<]*' | head -1 | sed 's/.*>//')
-            pass "loaded https://${DOMAIN}/ with no port — title: ${title:-(untitled)}"
-        else
-            fail "Chromium could not load https://${DOMAIN}/"
-        fi
-    else
-        warn "no Chromium/Chrome binary found to test with"
-    fi
+	pass "launcher present: $launcher"
+	browser=""
+	# Same order as inception_host_access.sh's CHROMIUM_CANDIDATES, so this
+	# tests the browser the launcher will actually run.
+	for c in chromium chromium-browser google-chrome google-chrome-stable brave-browser; do
+		command -v "$c" > /dev/null 2>&1 && { browser=$(command -v "$c"); break; }
+	done
+	if [ -n "$browser" ]; then
+		rules="MAP ${DOMAIN}:443 127.0.0.1:${P_HTTPS},MAP ${DOMAIN}:${P_STATIC} 127.0.0.1:${P_STATIC}"
+		# Which certificate store this Chromium reads is its packaging's
+		# business (the snap reads the real home's, whatever $HOME says), and
+		# the CA-in-store question has its own check above. This one asks
+		# whether the browser loads the site the guest serves, so it is told to
+		# accept exactly that certificate -- pinned by public key, nothing else.
+		# --ignore-certificate-errors-spki-list matches the LEAF the server
+		# presents, not the CA that signed it, so hash the served cert; add the
+		# CA's too, harmlessly, in case a future chain pins there.
+		spki=$(echo | openssl s_client -connect "127.0.0.1:${P_HTTPS}" -servername "$DOMAIN" 2> /dev/null \
+			| openssl x509 -pubkey -noout 2> /dev/null \
+			| openssl pkey -pubin -outform der 2> /dev/null \
+			| openssl dgst -sha256 -binary 2> /dev/null | base64)
+		if [ -s "$ca_tmp" ]; then
+			ca_spki=$(openssl x509 -in "$ca_tmp" -pubkey -noout 2> /dev/null \
+				| openssl pkey -pubin -outform der 2> /dev/null \
+				| openssl dgst -sha256 -binary 2> /dev/null | base64)
+			spki="${spki:+$spki,}${ca_spki}"
+		fi
+		tmpdir=$(mktemp -d)
+		dom=$(timeout 90 "$browser" --headless --no-sandbox --disable-gpu \
+			--disable-dev-shm-usage --no-first-run \
+			--user-data-dir="$tmpdir" \
+			--host-resolver-rules="$rules" \
+			${spki:+--ignore-certificate-errors-spki-list="$spki"} \
+			--dump-dom "https://${DOMAIN}/" 2> /dev/null)
+		rm -rf "$tmpdir"
+		if printf '%s' "$dom" | grep -qi '<title'; then
+			title=$(printf '%s' "$dom" | grep -oiE '<title[^>]*>[^<]*' | head -1 | sed 's/.*>//')
+			pass "loaded https://${DOMAIN}/ with no port — title: ${title:-(untitled)}"
+		else
+			fail "Chromium could not load https://${DOMAIN}/"
+		fi
+	else
+		warn "no Chromium/Chrome binary found to test with"
+	fi
 fi
+
+rm -f "$ca_tmp"
 
 # ── Verdict ─────────────────────────────────────────────────────────────────
 printf "\n"

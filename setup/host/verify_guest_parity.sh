@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  verify_guest_parity.sh — is the guest the SAME on QEMU as on VirtualBox?    #
 # ============================================================================ #
@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ALIAS="${1:-b2b}"
 PRESEED_FILE="${PRESEED_FILE:-$REPO_ROOT/preseeds/preseed.cfg}"
@@ -131,13 +131,47 @@ if g 'pgrep -f "first[-]boot-setup" >/dev/null'; then
     printf "     framework installs near the end of it. Re-run this when it finishes:\n"
     printf "     ${C_DIM}ssh %s 'pgrep -f first-boot-setup.sh || echo done'${C_RESET}\n" "$ALIAS"
 fi
-row "login shell" "$(g 'getent passwd dlesieur | cut -d: -f7')" "/usr/bin/hellish"
-row "root shell" "$(g 'getent passwd root | cut -d: -f7')" "/bin/bash"
-row "hellish" "$(g '/usr/bin/hellish.real --version 2>/dev/null | head -1')" "hellish"
-row "ssh wrapper" "$(g 'head -1 /usr/bin/hellish')" "#!/bin/bash"
-row "non-interactive" "$(g 'echo $0')" "bash"
-row "plugins" "$(g 'ls ~/.hellish/plugins 2>/dev/null | wc -l')" "--"
-row "hellishrc" "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')" "dlesieur"
+row "login shell"   "$(g 'getent passwd dlesieur | cut -d: -f7')"        "/usr/bin/hellish"
+row "root shell"    "$(g 'getent passwd root | cut -d: -f7')"            "/bin/bash"
+row "hellish"       "$(g '/usr/bin/hellish.real --version 2>/dev/null | head -1')" "hellish"
+row "shell link"    "$(g 'readlink /usr/bin/hellish')"                   "/usr/bin/hellish.real"
+row "ssh command"   "$(g 'x=$(readlink /proc/$$/exe); echo "$x"')"       "/usr/bin/hellish.real"
+row "ssh \$0"       "$(g 'echo $0')"                                     "hellish"
+row "plugins"       "$(g 'ls ~/.hellish/plugins 2>/dev/null | wc -l')"   "--"
+row "hellishrc"     "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')"         "dlesieur"
+
+# (`ssh b2b 'readlink /proc/$$/exe'` would be answered by readlink itself: a
+# shell execs a lone command in place of itself; the substitution keeps $$
+# the shell sshd started.)
+# What the guest starts on its own runs under the same shell: the cron job,
+# the two systemd helpers (checked live, by the process name of their main
+# pid), the first-boot hook and the provisioners it ran.
+printf "\n${C_BOLD}Interpreters (nothing the guest starts itself is bash)${C_RESET}\n"
+row "cron SHELL"     "$(g 'sed -n "s/^SHELL=//p" /etc/crontab | head -1')"   "/usr/bin/hellish.real"
+row "monitoring.sh"  "$(g 'head -1 /usr/local/bin/monitoring.sh')"      "#!/usr/bin/hellish.real"
+row "nat-keepalive"  "$(g 'head -1 /usr/local/bin/nat-keepalive.sh')"   "#!/usr/bin/hellish.real"
+row "sshd-watchdog"  "$(g 'head -1 /usr/local/bin/sshd-watchdog.sh')"   "#!/usr/bin/hellish.real"
+# A script's process is named after the script (comm), so the interpreter is
+# argv[0] of the unit's main pid, readable by anyone in /proc/<pid>/cmdline.
+# Both units are Restart=always with RestartSec=5, and sshd-watchdog
+# Requires=ssh.service, so first boot's (and shell_vm's) `systemctl restart
+# ssh` restarts it: for a few seconds the unit has no main pid at all, and a
+# table drawn in that window said "(none)" of a unit that was fine. Wait it
+# out; a unit that never comes back still reads (none).
+unit_interp() { # unit_interp <unit>  -> argv[0] of its main process
+	g 'p=0; for _ in 1 2 3 4 5 6 7 8; do p=$(systemctl show -p MainPID --value '"$1"'); [ "$p" != 0 ] && break; sleep 3; done; tr "\\0" " " < /proc/$p/cmdline | cut -d" " -f1'
+}
+row "keepalive pid"  "$(unit_interp nat-keepalive)" "/usr/bin/hellish.real"
+row "watchdog pid"   "$(unit_interp sshd-watchdog)" "/usr/bin/hellish.real"
+row "guest sh conf"  "$(g 'sed -n "s/^B2B_GUEST_SH=//p" /etc/b2b_custom_shell.conf')" "/usr/bin/hellish.real"
+# The provisioners live in /root, so the glob must expand as root, under the
+# guest's own shell; first-boot's log keeps what interpreted them when it ran.
+row "provisioners"   "$(groot "/usr/bin/hellish.real -c 'head -qn1 /root/install_*.sh 2>/dev/null | sort -u'" | tr '\n' ' ')" "#!/usr/bin/hellish.real"
+# A guest converted by `make shell_vm` after its first boot has no such line:
+# then the row is informational (the rows above already say what runs now).
+fb="$(groot 'grep -m1 -o "provisioners run under .*" /var/log/first-boot.log 2>/dev/null')"
+if [ -n "$fb" ]; then row "first-boot ran" "$fb" "/usr/bin/hellish.real"; else row "first-boot ran" "(before the interpreter pin; converted since)" "--"; fi
+row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/null; echo "(line removed after it ran)"' | head -1)" "--"
 
 printf "\n${C_BOLD}Services${C_RESET}\n"
 row "docker" "$(g 'systemctl is-active docker')" "active"

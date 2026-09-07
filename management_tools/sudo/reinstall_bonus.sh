@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Complete WordPress, PHP, MySQL reinstallation script
 echo "=========================================================="

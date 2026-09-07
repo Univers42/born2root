@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # WordPress Plugin Manager
 # Created: 2025-04-05
 # Author: LESdylan

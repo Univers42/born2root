@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  kvm_probe.sh — can THIS user create a KVM virtual machine RIGHT NOW?        #
 # ============================================================================ #

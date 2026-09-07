@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Source color and header library
 source ./color_scheme.sh # Adjust path as needed

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 source ./color_scheme.sh
 # Check if running as root

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## LVM USAGE MODULE
 lvm_module() {

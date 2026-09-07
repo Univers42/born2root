@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## CPU PHYSICAL MODULE
 cpu_physical_module() {

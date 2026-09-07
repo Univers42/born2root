@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Script to fix PHP mysqli extension loading in Lighttpd
 echo "===================================================="

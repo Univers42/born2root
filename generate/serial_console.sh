@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Show the VM's serial console — the only view of a headless VM.
 #
 # `make all` never opens a VirtualBox window: the installer runs headless and

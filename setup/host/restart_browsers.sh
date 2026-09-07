@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  born2root — restart the browsers so they pick up the Inception config       #
 # ============================================================================ #

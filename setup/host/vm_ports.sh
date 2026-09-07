@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  vm_ports.sh — "which host port reaches guest service X?", either backend    #
 # ============================================================================ #
@@ -28,7 +28,7 @@ VM_PORTS_SH_LOADED=1
 # Resolved ONCE, here, while BASH_SOURCE still points at this file. Computing
 # it inside the function instead gave the wrong answer, because BASH_SOURCE is
 # re-evaluated in the caller's context and walked up from the wrong directory.
-_VM_PORTS_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
+_VM_PORTS_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." 2> /dev/null && pwd)"
 
 _vm_ports_file() {
     local vm="${VM_NAME:-debian}"
@@ -55,19 +55,18 @@ _vm_forward_port_qemu() {
 # VirtualBox first (it is authoritative when the VM is registered there), then
 # QEMU. Prints nothing when neither knows the rule, which callers treat as
 # "not forwarded".
+# `|| p=` is not redundant: a resolver returns non-zero when it does not know
+# the rule (VBoxManage absent, or no ports.env), and a bare `p=$(resolver)`
+# under `set -e` aborts THIS function before the next resolver is tried -- in
+# every POSIX shell (dash, and bash --posix; plain bash is the lone exception,
+# which is why a caller run under one masked it). The || keeps the fallthrough.
 vm_forward_port() {
-    local p
-    p=$(_vm_forward_port_vbox "$1" 2>/dev/null)
-    [ -n "$p" ] && {
-        printf '%s' "$p"
-        return 0
-    }
-    p=$(_vm_forward_port_qemu "$1" 2>/dev/null)
-    [ -n "$p" ] && {
-        printf '%s' "$p"
-        return 0
-    }
-    return 1
+	local p
+	p=$(_vm_forward_port_vbox "$1" 2> /dev/null) || p=
+	[ -n "$p" ] && { printf '%s' "$p"; return 0; }
+	p=$(_vm_forward_port_qemu "$1" 2> /dev/null) || p=
+	[ -n "$p" ] && { printf '%s' "$p"; return 0; }
+	return 1
 }
 
 # Which backend is actually providing the forwards right now.

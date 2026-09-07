@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## USER LOGIN MODULE
 user_login_module() {

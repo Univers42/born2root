@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot Learning Laboratory
 # Created: 2025-04-04 18:21:00
 # Author: GitHub Copilot for LESdylan

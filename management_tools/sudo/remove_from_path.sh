@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Function to remove a program from PATH and delete symbolic links
 remove_program() {

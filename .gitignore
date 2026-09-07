@@ -10,3 +10,7 @@ dist/
 
 # ISO build lock (generate/create_custom_iso.sh)
 .gen_iso.lock
+
+# Local secrets (GH_PAT and friends): never committed
+.env
+.env.*

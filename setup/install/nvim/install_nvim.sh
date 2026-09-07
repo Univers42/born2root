@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 #
 # install_nvim.sh — install a CURRENT Neovim plus kickstart.nvim on Debian.
 #

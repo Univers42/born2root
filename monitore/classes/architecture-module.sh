@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## ARCHITECTURE MODULE
 architecture_module() {

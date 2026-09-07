@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # ANSI color codes for a more vibrant display
 RED='\033[0;31m'

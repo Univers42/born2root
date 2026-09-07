@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Fix mysqli extension for PHP-FPM with Lighttpd
 echo "===================================================="

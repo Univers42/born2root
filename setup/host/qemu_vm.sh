@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env hellish
 # ============================================================================ #
 #  qemu_vm.sh — run the Born2beRoot VM with QEMU/KVM instead of VirtualBox     #
 # ============================================================================ #
@@ -41,12 +41,23 @@
 #   qemu_vm.sh create      create the qcow2 disk (no-op if it exists)
 #   qemu_vm.sh install     boot the preseed ISO and run the unattended install
 #   qemu_vm.sh start       boot from disk, headless, and unlock LUKS
+#   qemu_vm.sh restart     stop, then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
-#   qemu_vm.sh stop        ACPI power button, then wait
+#   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
 #   qemu_vm.sh kill        last resort: SIGTERM the QEMU process
+#   qemu_vm.sh reset       hard reset;  pause / resume  freeze and continue
 #   qemu_vm.sh status      pid, ports, disk size, what the console last said
+#   qemu_vm.sh list        every QEMU guest on this host, any VM_PATH, its owner
 #   qemu_vm.sh console     follow the serial log
+#   qemu_vm.sh screenshot  dump the VGA screen (LUKS prompt, boot errors)
+#   qemu_vm.sh monitor CMD any human-monitor command, e.g. "info block"
+#   qemu_vm.sh ssh [CMD]   a shell (or one command) in the guest
 #   qemu_vm.sh ssh-config  write the ~/.ssh/config b2b block for these ports
+#
+#   stop, kill & co. act on the guest at $VM_PATH -- or, when nothing runs
+#   there and exactly one guest of this VM runs from another VM_PATH, on that
+#   one. A guest another user started (sudo make all) is named, with the sudo
+#   command that reaches it, instead of being reported stopped.
 #
 # Env
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (122880)
@@ -56,28 +67,38 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # Reads the installer's own progress off serial.log (shared with orchestrate.sh).
 . "$HERE/di_progress.sh"
+# Is $VM_PATH/$VM_NAME usable by this user -- and if not, why, and what fixes it.
+. "$REPO_ROOT/utils/vm_path.sh"
 
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
-VM_DIR="$VM_PATH/$VM_NAME"
-DISK="$VM_DIR/$VM_NAME.qcow2"
-SERIAL="$VM_DIR/serial.log"
-MONITOR="$VM_DIR/monitor.sock"
-PIDFILE="$VM_DIR/qemu.pid"
-# What the disk holds is recorded, not guessed from its size: a qcow2 grows
-# past 1 GB minutes into an install, long before there is a system on it.
-PHASE="$VM_DIR/.phase"     # "installing" while d-i owns the disk
-STAMP="$VM_DIR/.installed" # written once B2B-INSTALL-COMPLETE arrived
+VM_USER="${VM_USER:-dlesieur}"
+# Everything below is keyed on VM_PATH. It is a function because stop/kill may
+# re-key onto a guest of this VM found running from ANOTHER VM_PATH (see
+# adopt_other_guest), and every derived path has to follow.
+vm_paths() {
+	VM_DIR="$VM_PATH/$VM_NAME"
+	DISK="$VM_DIR/$VM_NAME.qcow2"
+	SERIAL="$VM_DIR/serial.log"
+	MONITOR="$VM_DIR/monitor.sock"
+	PIDFILE="$VM_DIR/qemu.pid"
+	# What the disk holds is recorded, not guessed from its size: a qcow2 grows
+	# past 1 GB minutes into an install, long before there is a system on it.
+	PHASE="$VM_DIR/.phase"     # "installing" while d-i owns the disk
+	STAMP="$VM_DIR/.installed" # written once B2B-INSTALL-COMPLETE arrived
+}
+vm_paths
 
 DISK_SIZE_MB="${DISK_SIZE_MB:-122880}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 VM_CPUS="${VM_CPUS:-3}"
 
-# Host:guest port pairs, matching the VirtualBox NAT rule set.
+# Host:guest port pairs, matching the VirtualBox NAT rule set. These are
+# PREFERRED host ports, not guaranteed ones -- see resolve_ports() below.
 PORTS_SPEC="${PORTS_SPEC:-ssh:4242:4242 http:8082:80 https:8443:443 inception-static:8090:8090 inception-adminer:8081:8080 mariadb:3306:3306 frontend:5173:5173 backend:3000:3000}"
 
 C_RESET=$'\033[0m'
@@ -105,7 +126,9 @@ die() {
 }
 
 QEMU=$(command -v qemu-system-x86_64 || true)
-[ -n "$QEMU" ] || die "qemu-system-x86_64 not installed"
+if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
+	[ -n "$QEMU" ] || die "qemu-system-x86_64 not installed"
+fi
 
 # ── Is KVM usable by THIS user? ─────────────────────────────────────────────
 # Membership in the kvm group is the usual route, but an ACL grant works just
@@ -118,7 +141,7 @@ kvm_ok() { [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; }
 # EBUSY and QEMU dies with "Device or resource busy". kvm_probe.sh performs
 # that exact call and says why it failed, so launch() can refuse with a real
 # reason instead of a raw ioctl error -- and never silently drop to TCG.
-kvm_why() { bash "$HERE/kvm_probe.sh"; }
+kvm_why() { "${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh"; }
 
 ACCEL="tcg"
 if kvm_ok; then
@@ -141,14 +164,174 @@ vm_pass() {
     [ -r "$REPO_ROOT/vm_pass.txt" ] && head -n1 "$REPO_ROOT/vm_pass.txt" | tr -d '\r\n'
 }
 
+# Alive? /proc, not `kill -0`: kill -0 answers EPERM for a process owned by
+# someone else, which read as "not running" for a guest root had started.
+pid_alive() { [ -d "/proc/$1" ]; }
+
+# The pid of the guest at $VM_DIR. The pidfile is the normal source; when it
+# exists but cannot be read (root-owned, from a `sudo make all`) the guest is
+# recovered from the process list by the very -pidfile path QEMU was given,
+# instead of an unreadable file being reported as "not running".
 qemu_pid() {
-    [ -r "$PIDFILE" ] || return 1
-    local p
-    p=$(head -n1 "$PIDFILE" 2>/dev/null)
-    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && printf '%s' "$p"
+	local p=
+	# Every step is written so a caller running under `set -e` is never
+	# aborted here: `|| p=` swallows a failed read (the pidfile can be
+	# unreadable when another user started the guest), the two conditions are
+	# NESTED rather than `[ -z ] && [ -e ]` (a failing second half of an
+	# if-condition trips some shells' set -e), and the tail uses explicit
+	# `|| return 1` instead of a bare `&&`-chain.
+	p=$(head -n1 "$PIDFILE" 2> /dev/null) || p=
+	if [ -z "$p" ]; then
+		if [ -e "$PIDFILE" ]; then
+			p=$(qemu_cmdlines | awk -v pf=" -pidfile $PIDFILE " 'index($0, pf) { print $1; exit }') || p=
+		fi
+	fi
+	[ -n "$p" ] || return 1
+	pid_alive "$p" || return 1
+	printf '%s' "$p"
 }
 
-is_running() { qemu_pid >/dev/null 2>&1; }
+is_running() { qemu_pid > /dev/null 2>&1; }
+
+# Who started the guest -- the user who can control it without sudo.
+guest_owner() { stat -c %U "/proc/$1" 2> /dev/null; }
+
+# ── Guests of this VM started from ANOTHER VM_PATH ──────────────────────────
+# Every path above is keyed on VM_PATH, so `make qemu_stop` run without the
+# VM_PATH the build used looks at the wrong pidfile, finds nothing, and said
+# "✓ not running" while the VM kept running -- and kept holding VT-x, so the
+# next `make all` reported VirtualBox "blocked" with the culprit invisible.
+# Happened here twice in one afternoon. QEMU is always started with -name
+# VM_NAME and -pidfile <VM_PATH>/<VM_NAME>/qemu.pid, so both the guest and
+# the VM_PATH it belongs to can be recovered from its own command line.
+#
+# "<pid> <cmdline>" per running qemu-system-x86_64. The one seam tests
+# override. -x matches the 15-char comm name, so a shell whose ARGUMENTS
+# mention qemu (a grep, this script itself) can never match.
+qemu_cmdlines() {
+	local pid
+	for pid in $(pgrep -x qemu-system-x86 2> /dev/null); do
+		printf '%s %s\n' "$pid" "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> /dev/null)"
+	done
+}
+
+# "<pid> <VM_PATH>" per guest named VM_NAME whose pidfile is not ours.
+other_guests() {
+	local pid args pf
+	qemu_cmdlines | while read -r pid args; do
+		case " $args" in *" -name ${VM_NAME} "*) ;; *) continue ;; esac
+		pf=${args##* -pidfile }; pf=${pf%% *}
+		[ "${pf##*/}" = qemu.pid ] || continue
+		[ "$pf" = "$PIDFILE" ] && continue
+		printf '%s %s\n' "$pid" "$(dirname "$(dirname "$pf")")"
+	done
+}
+
+# Say where the running guests are and how to reach them. Returns 0 if there
+# were any -- the caller then must NOT claim success.
+report_other_guests() {
+	local others pid path
+	others=$(other_guests)
+	[ -n "$others" ] || return 1
+	warn "nothing is running at $VM_DIR, but QEMU '$VM_NAME' IS running from another VM_PATH:"
+	printf '%s\n' "$others" | while read -r pid path; do
+		printf "     pid %-8s VM_PATH=%s\n" "$pid" "$path"
+		printf "     ${C_DIM}stop it:  VM_PATH=%s make qemu_stop${C_RESET}\n" "$path"
+	done
+	return 0
+}
+
+# The user asked to stop "debian" and exactly one guest of that name is
+# running -- from another VM_PATH. Refusing and printing the command to type
+# was one round trip too many (make qemu_stop, then make qemu_stop VM_PATH=…):
+# re-key onto it and carry on. Two or more candidates ARE ambiguous: list
+# them and let the caller refuse.
+#   0 adopted (VM_PATH and every derived path now point at it)
+#   1 none      2 ambiguous (already reported)
+adopt_other_guest() {
+	local others pid path
+	others=$(other_guests)
+	[ -n "$others" ] || return 1
+	if [ "$(printf '%s\n' "$others" | wc -l)" -gt 1 ]; then
+		report_other_guests
+		return 2
+	fi
+	read -r pid path <<< "$others"
+	warn "nothing at $VM_DIR — QEMU '$VM_NAME' is running from VM_PATH=$path (pid $pid), using that"
+	VM_PATH=$path
+	vm_paths
+	return 0
+}
+
+# stop/kill semantics: something to act on, or "not running" is the truth.
+need_running() {
+	is_running && return 0
+	adopt_other_guest && return 0
+	[ $? = 2 ] && exit 1
+	ok "not running"
+	exit 0
+}
+
+# For actions where "not running" is an error (unlock, screenshot, monitor…).
+need_running_or_die() {
+	is_running && return 0
+	adopt_other_guest && return 0
+	[ $? = 2 ] && exit 1
+	die "not running"
+}
+
+# A guest root started (sudo make all) has a root-owned pidfile and monitor
+# socket: the ACPI button never reaches it and kill answers EPERM -- and this
+# script used to print "✓ stopped" over both. Say what is actually needed.
+# $1 = the make target to repeat under sudo.
+need_control() {
+	local pid owner me
+	pid=$(qemu_pid) || return 0
+	owner=$(guest_owner "$pid"); me=$(id -un)
+	[ "$owner" = "$me" ] || [ "$(id -u)" = 0 ] && return 0
+	die "QEMU '$VM_NAME' (pid $pid) was started by $owner, not $me — this needs sudo:   sudo make $1 VM_PATH=$VM_PATH"
+}
+
+# ── Host port collision avoidance ───────────────────────────────────────────
+# The same problem the VirtualBox path already solves (utils/host_ports.sh):
+# on a real dev machine SOMETHING is usually already on 3306/3000/5173/etc,
+# and QEMU's -netdev takes every hostfwd= as one argument -- ONE busy port
+# fails the whole netdev, not just that one forward, and the VM never boots.
+# Reproduced on this repo: an unrelated Docker container already held 3306,
+# and `make all` died with "Could not set up host forwarding rule" instead of
+# picking another port the way the VirtualBox NAT rules already do.
+. "$REPO_ROOT/utils/host_ports.sh"
+
+# Walk PORTS_SPEC ("name:preferred_host:guest ...") to the host ports this run
+# will actually use, bumping past anything already listening. Sets
+# RESOLVED_SPEC as "name:actual_host:guest ..."; resolve_host_port reserves
+# each pick against the rest so two services in this spec can never collide
+# with EACH OTHER either.
+RESOLVED_SPEC=""
+resolve_ports() {
+	local spec name hp gp actual out=""
+	for spec in $PORTS_SPEC; do
+		name="${spec%%:*}"; hp="${spec#*:}"; gp="${hp#*:}"; hp="${hp%%:*}"
+		resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
+		[ "$actual" != "$hp" ] && warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
+		out="${out} ${name}:${actual}:${gp}"
+	done
+	RESOLVED_SPEC="${out# }"
+}
+
+# The host port actually forwarding a given name. While ports.env exists it is
+# authoritative -- by then QEMU itself holds the port, so re-probing "is it
+# free?" would see its own listener and wrongly walk to a different one. Only
+# before any launch is there nothing to be authoritative about yet.
+host_port_of() {
+	local name="$1"
+	if [ -r "$VM_DIR/ports.env" ]; then
+		awk -F= -v n="$name" '$1==n{print $2; exit}' "$VM_DIR/ports.env"
+		return
+	fi
+	[ -n "$RESOLVED_SPEC" ] || resolve_ports
+	printf '%s\n' "$RESOLVED_SPEC" | tr ' ' '\n' | awk -F: -v n="$name" '$1==n{print $2; exit}'
+}
 
 # ── The QEMU monitor ────────────────────────────────────────────────────────
 # A unix socket speaking QEMU's human monitor protocol. Used for sendkey (the
@@ -244,36 +427,41 @@ sendkey_string() {
 }
 
 build_hostfwd() {
-    local spec name hp gp out=""
-    for spec in $PORTS_SPEC; do
-        name="${spec%%:*}"
-        hp="${spec#*:}"
-        gp="${hp#*:}"
-        hp="${hp%%:*}"
-        out="${out},hostfwd=tcp:127.0.0.1:${hp}-:${gp}"
-    done
-    printf '%s' "$out"
+	local spec name hp gp out=""
+	for spec in $RESOLVED_SPEC; do
+		name="${spec%%:*}"; hp="${spec#*:}"; gp="${hp#*:}"; hp="${hp%%:*}"
+		out="${out},hostfwd=tcp:127.0.0.1:${hp}-:${gp}"
+	done
+	printf '%s' "$out"
 }
 
 # ── Launch ──────────────────────────────────────────────────────────────────
 # $1 = "cdrom" to boot the installer, "disk" to boot the installed system.
 launch() {
-    local boot="$1" iso cd_args=() hd_index=1 cd_index=2
+	local boot="$1" iso cd_args=() cpu_args=() hd_index=1 cd_index=2
+	# Same array idiom as cd_args: an empty array expands to nothing, where an
+	# empty string would hand QEMU a bogus "" argument under TCG.
+	[ "$ACCEL" = kvm ] && cpu_args=(-cpu host)
 
-    mkdir -p "$VM_DIR"
-    [ -f "$DISK" ] || die "no disk yet — run: $0 create"
+	# Checked before the first write: a root-owned VM_DIR (sudo make all) used
+	# to surface here as a dozen "Permission denied" lines from serial.log,
+	# ports.env and the pidfile. Now it is explained, and fixable in place.
+	ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
+	[ -f "$DISK" ] || die "no disk yet — run: $0 create"
 
-    # Check KVM before touching anything (the serial log is truncated below).
-    if [ "$ACCEL" = "kvm" ]; then
-        local why
-        if ! why=$(kvm_why); then
-            printf "  ${C_RED}✗${C_RESET} KVM %s\n" "$why" >&2
-            printf "    ${C_DIM}QEMU and VirtualBox cannot both run a VM on this host at once.${C_RESET}\n" >&2
-            printf "    ${C_DIM}Either wait for / stop the VirtualBox VM:  VBoxManage controlvm <name> acpipowerbutton${C_RESET}\n" >&2
-            printf "    ${C_DIM}or build with it instead:                  make all BACKEND=virtualbox${C_RESET}\n" >&2
-            die "cannot start QEMU with KVM"
-        fi
-    fi
+	# Check KVM before touching anything (the serial log is truncated below).
+	if [ "$ACCEL" = "kvm" ]; then
+		local why
+		if ! why=$(kvm_why); then
+			printf "  ${C_RED}✗${C_RESET} KVM %s\n" "$why" >&2
+			printf "    ${C_DIM}QEMU and VirtualBox cannot both run a VM on this host at once.${C_RESET}\n" >&2
+			printf "    ${C_DIM}Either wait for / stop the VirtualBox VM:  VBoxManage controlvm <name> acpipowerbutton${C_RESET}\n" >&2
+			printf "    ${C_DIM}or build with it instead:                  make all BACKEND=virtualbox${C_RESET}\n" >&2
+			die "cannot start QEMU with KVM"
+		fi
+	fi
+
+	resolve_ports
 
     if [ "$boot" = "cdrom" ]; then
         iso=$(find_iso)
@@ -293,39 +481,38 @@ launch() {
     : >"$SERIAL"
     rm -f "$MONITOR"
 
-    # Publish the forwards. A QEMU hostfwd= lives only on the command line, so
-    # without this the Inception host-access scripts -- which ask VBoxManage
-    # for a named NAT rule -- would conclude nothing is forwarded, and report
-    # "no 'https' NAT rule" about a port that works. See vm_ports.sh.
-    : >"$VM_DIR/ports.env"
-    for _spec in $PORTS_SPEC; do
-        _n="${_spec%%:*}"
-        _rest="${_spec#*:}"
-        printf '%s=%s\n' "$_n" "${_rest%%:*}" >>"$VM_DIR/ports.env"
-    done
+	# Publish the forwards. A QEMU hostfwd= lives only on the command line, so
+	# without this the Inception host-access scripts -- which ask VBoxManage
+	# for a named NAT rule -- would conclude nothing is forwarded, and report
+	# "no 'https' NAT rule" about a port that works. See vm_ports.sh.
+	: > "$VM_DIR/ports.env"
+	for _spec in $RESOLVED_SPEC; do
+		_n="${_spec%%:*}"; _rest="${_spec#*:}"
+		printf '%s=%s\n' "$_n" "${_rest%%:*}" >> "$VM_DIR/ports.env"
+	done
 
-    # -device ich9-ahci gives the guest a SATA controller, so the disk appears
-    # as /dev/sda and preseed.cfg's partman recipe applies unchanged. virtio
-    # would be faster but shows up as /dev/vda and would silently not match.
-    "$QEMU" \
-        -name "$VM_NAME" \
-        -machine "pc,accel=${ACCEL}" \
-        $([ "$ACCEL" = "kvm" ] && printf '%s' "-cpu host") \
-        -smp "$VM_CPUS" \
-        -m "$VM_RAM_MB" \
-        -device ich9-ahci,id=ahci \
-        -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap" \
-        -device "ide-hd,drive=hd0,bus=ahci.0,bootindex=${hd_index}" \
-        "${cd_args[@]}" \
-        -netdev "user,id=net0$(build_hostfwd)" \
-        -device e1000,netdev=net0 \
-        -device virtio-rng-pci \
-        -serial "file:${SERIAL}" \
-        -monitor "unix:${MONITOR},server=on,wait=off" \
-        -display none \
-        -daemonize \
-        -pidfile "$PIDFILE" ||
-        die "QEMU failed to start"
+	# -device ich9-ahci gives the guest a SATA controller, so the disk appears
+	# as /dev/sda and preseed.cfg's partman recipe applies unchanged. virtio
+	# would be faster but shows up as /dev/vda and would silently not match.
+	"$QEMU" \
+		-name "$VM_NAME" \
+		-machine "pc,accel=${ACCEL}" \
+		"${cpu_args[@]}" \
+		-smp "$VM_CPUS" \
+		-m "$VM_RAM_MB" \
+		-device ich9-ahci,id=ahci \
+		-drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap" \
+		-device "ide-hd,drive=hd0,bus=ahci.0,bootindex=${hd_index}" \
+		"${cd_args[@]}" \
+		-netdev "user,id=net0$(build_hostfwd)" \
+		-device e1000,netdev=net0 \
+		-device virtio-rng-pci \
+		-serial "file:${SERIAL}" \
+		-monitor "unix:${MONITOR},server=on,wait=off" \
+		-display none \
+		-daemonize \
+		-pidfile "$PIDFILE" \
+		|| die "QEMU failed to start"
 
     sleep 1
     is_running || die "QEMU exited immediately — see $SERIAL"
@@ -506,115 +693,133 @@ watch_install() {
     done
 }
 
+# ── Waiting for a guest to power off ────────────────────────────────────────
+# QEMU exits the instant its guest powers off, so is_running going false IS
+# the shutdown finishing -- no need to poll the guest. On a terminal the
+# guest's own serial log is shown while we wait, so an orderly shutdown (which
+# CAN take 30s+) never looks like a hang. 0 if it went down, 1 on timeout.
+# The 1s tick is a seam the test overrides.
+STOP_TICK="${STOP_TICK:-1}"
+STOP_PROGRESS="${STOP_PROGRESS:-auto}"
+_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac; }
+await_shutdown() {
+	local grace="$1" waited=0 last
+	while is_running && [ "$waited" -lt "$grace" ]; do
+		sleep "$STOP_TICK"; waited=$((waited + STOP_TICK))
+		if _progress_on; then
+			last=$(tail -c 300 "$SERIAL" 2> /dev/null | tr -d '\r' | grep -a . | tail -1 | cut -c1-56)
+			printf '\r    %3ss  %-56s' "$waited" "${last:-shutting down}"
+		fi
+	done
+	_progress_on && printf '\r%*s\r' 72 ''
+	! is_running
+}
+
 # ── Actions ─────────────────────────────────────────────────────────────────
+# Guarded so tests/test_qemu_ports.sh can source this file for its port
+# resolution functions without also running whatever action $1 says.
+if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 case "${1:-status}" in
-create)
-    mkdir -p "$VM_DIR"
-    if [ -f "$DISK" ]; then
-        ok "disk already exists: $DISK ($(du -h "$DISK" | cut -f1) on host)"
-    else
-        qemu-img create -f qcow2 "$DISK" "${DISK_SIZE_MB}M" >/dev/null ||
-            die "qemu-img create failed"
-        ok "created $DISK (${DISK_SIZE_MB}MB virtual, grows on demand)"
-    fi
-    printf '%s (qemu/kvm, kernel %s, %s)\n' "$(hostname -f 2>/dev/null || hostname)" \
-        "$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" >"$VM_DIR/.built-on" 2>/dev/null || true
-    ;;
+	create)
+		refuse_sudo_build "make qemu_create VM_PATH=$VM_PATH" || exit 1
+		ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
+		if [ -f "$DISK" ]; then
+			ok "disk already exists: $DISK ($(du -h "$DISK" | cut -f1) on host)"
+		else
+			qemu-img create -f qcow2 "$DISK" "${DISK_SIZE_MB}M" > /dev/null \
+				|| die "qemu-img create failed"
+			ok "created $DISK (${DISK_SIZE_MB}MB virtual, grows on demand)"
+		fi
+		printf '%s (qemu/kvm, kernel %s, %s)\n' "$(hostname -f 2> /dev/null || hostname)" \
+			"$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" > "$VM_DIR/.built-on" 2> /dev/null || true
+		;;
 
-install)
-    is_running && die "already running (pid $(qemu_pid)) — stop it first: $0 stop"
-    printf 'installing\n' >"$PHASE"
-    rm -f "$STAMP"
-    launch cdrom
-    printf "\n  ${C_BOLD}Unattended install running.${C_RESET} ${C_DIM}What follows is the installer's own log,\n"
-    printf "  read off its serial port. Ctrl+C detaches; re-attach with: %s watch${C_RESET}\n\n" "$0"
-    # finish-install writes B2B-INSTALL-COMPLETE to ttyS0, then d-i halts.
-    if ! watch_install; then
-        printf "    ${C_DIM}The VM is left running for a look. Stop it with: %s stop${C_RESET}\n" "$0"
-        die "the install did not finish"
-    fi
-    # The marker is written by the second-to-last hook, so d-i still has
-    # 95umount to run. Give it that, then take the machine down: it ends
-    # on `halt`, and a halted kernel does not answer the ACPI power
-    # button, so SIGTERM is the normal end of this sequence -- not a
-    # failure. Bounded at ~70s instead of the 5 minutes this used to wait.
-    if is_running; then
-        info "letting the installer unmount and halt"
-        for _ in $(seq 1 15); do
-            is_running || break
-            sleep 2
-        done
-        if is_running; then
-            mon "system_powerdown" >/dev/null
-            for _ in $(seq 1 10); do
-                is_running || break
-                sleep 2
-            done
-        fi
-        if is_running; then
-            info "the guest is halted (it ignores ACPI) — stopping QEMU"
-            kill "$(qemu_pid)" 2>/dev/null
-            sleep 2
-            kill -9 "$(qemu_pid)" 2>/dev/null
-        fi
-    fi
-    rm -f "$MONITOR"
-    rm -f "$PIDFILE"
-    date '+%Y-%m-%d %H:%M:%S' >"$STAMP"
-    rm -f "$PHASE"
-    ok "install phase done — boot it with: $0 start"
-    ;;
+	install)
+		refuse_sudo_build "make qemu_install VM_PATH=$VM_PATH" || exit 1
+		is_running && die "already running (pid $(qemu_pid)) — stop it first: $0 stop"
+		ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
+		printf 'installing\n' > "$PHASE"
+		rm -f "$STAMP"
+		launch cdrom
+		printf "\n  ${C_BOLD}Unattended install running.${C_RESET} ${C_DIM}What follows is the installer's own log,\n"
+		printf "  read off its serial port. Ctrl+C detaches; re-attach with: %s watch${C_RESET}\n\n" "$0"
+		# finish-install writes B2B-INSTALL-COMPLETE to ttyS0, then d-i halts.
+		if ! watch_install; then
+			printf "    ${C_DIM}The VM is left running for a look. Stop it with: %s stop${C_RESET}\n" "$0"
+			die "the install did not finish"
+		fi
+		# The marker is written by the second-to-last hook, so d-i still has
+		# 95umount to run. Give it that, then take the machine down: it ends
+		# on `halt`, and a halted kernel does not answer the ACPI power
+		# button, so SIGTERM is the normal end of this sequence -- not a
+		# failure. Bounded at ~70s instead of the 5 minutes this used to wait.
+		if is_running; then
+			info "letting the installer unmount and halt"
+			for _ in $(seq 1 15); do is_running || break; sleep 2; done
+			if is_running; then
+				mon "system_powerdown" > /dev/null
+				for _ in $(seq 1 10); do is_running || break; sleep 2; done
+			fi
+			if is_running; then
+				info "the guest is halted (it ignores ACPI) — stopping QEMU"
+				kill "$(qemu_pid)" 2> /dev/null; sleep 2
+				kill -9 "$(qemu_pid)" 2> /dev/null
+			fi
+		fi
+		rm -f "$MONITOR"
+		rm -f "$PIDFILE"
+		date '+%Y-%m-%d %H:%M:%S' > "$STAMP"
+		rm -f "$PHASE"
+		ok "install phase done — boot it with: $0 start"
+		;;
 
-start)
-    # A running QEMU is not necessarily the installed system booting: it
-    # may still be d-i owning the disk, and typing a LUKS passphrase at
-    # the installer is 45 seconds of nothing followed by a wrong diagnosis.
-    if is_running && [ "$(cat "$PHASE" 2>/dev/null)" = installing ]; then
-        printf "  ${C_RED}✗${C_RESET} the installer is still running in this VM (pid %s)\n" "$(qemu_pid)" >&2
-        die "re-attach to it with: $0 watch   (or stop it: $0 stop)"
-    fi
-    # .phase still says "installing" with no QEMU behind it: the install
-    # was interrupted (Ctrl+C, a crash, a stall). Whatever is on the disk
-    # is half of a system; booting it would sit at a broken GRUB or an
-    # initramfs prompt and then be blamed on the LUKS unlock.
-    if ! is_running && [ "$(cat "$PHASE" 2>/dev/null)" = installing ]; then
-        die "the last install of this disk was interrupted — run it again: $0 install"
-    fi
-    if ! is_running && [ ! -f "$STAMP" ] &&
-        [ "$(stat -c %s "$DISK" 2>/dev/null || echo 0)" -le 1073741824 ]; then
-        die "nothing is installed on this disk yet — run: $0 install"
-    fi
-    if is_running; then
-        ok "already running (pid $(qemu_pid))"
-    else
-        launch disk
-    fi
-    # The LUKS prompt is drawn by the guest's initramfs, long before any
-    # network exists, so the keyboard is the only channel that can answer
-    # it -- exactly as unlock_vm.sh does with VirtualBox.
-    # The LUKS prompt CANNOT be waited for on the serial log. b2b-setup.sh
-    # sets GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200n8 console=tty0",
-    # and Linux gives /dev/console to the LAST console listed -- tty0. So
-    # kernel printk reaches the serial log but cryptsetup's prompt, which is
-    # userspace in the initramfs, is drawn on the VGA text screen only.
-    #
-    # So do what unlock_vm.sh does under VirtualBox: type blind, then prove
-    # it worked by the SSH banner, and retry if it did not. Typing the
-    # passphrase at a prompt that is not ready yet is harmless -- the
-    # characters are discarded, and the next attempt types it again.
-    pass=$(vm_pass)
-    ssh_port=$(printf '%s' "$PORTS_SPEC" | tr ' ' '\n' | awk -F: '$1=="ssh"{print $2}')
+	start)
+		refuse_sudo_build "make qemu_start VM_PATH=$VM_PATH" || exit 1
+		# A running QEMU is not necessarily the installed system booting: it
+		# may still be d-i owning the disk, and typing a LUKS passphrase at
+		# the installer is 45 seconds of nothing followed by a wrong diagnosis.
+		if is_running && [ "$(cat "$PHASE" 2> /dev/null)" = installing ]; then
+			printf "  ${C_RED}✗${C_RESET} the installer is still running in this VM (pid %s)\n" "$(qemu_pid)" >&2
+			die "re-attach to it with: $0 watch   (or stop it: $0 stop)"
+		fi
+		# .phase still says "installing" with no QEMU behind it: the install
+		# was interrupted (Ctrl+C, a crash, a stall). Whatever is on the disk
+		# is half of a system; booting it would sit at a broken GRUB or an
+		# initramfs prompt and then be blamed on the LUKS unlock.
+		if ! is_running && [ "$(cat "$PHASE" 2> /dev/null)" = installing ]; then
+			die "the last install of this disk was interrupted — run it again: $0 install"
+		fi
+		if ! is_running && [ ! -f "$STAMP" ] \
+			&& [ "$(stat -c %s "$DISK" 2> /dev/null || echo 0)" -le 1073741824 ]; then
+			die "nothing is installed at $VM_DIR — run: $0 install   (built somewhere else? pass its VM_PATH)"
+		fi
+		if is_running; then
+			ok "already running (pid $(qemu_pid))"
+		else
+			launch disk
+		fi
+		# The LUKS prompt is drawn by the guest's initramfs, long before any
+		# network exists, so the keyboard is the only channel that can answer
+		# it -- exactly as unlock_vm.sh does with VirtualBox.
+		# The LUKS prompt CANNOT be waited for on the serial log. b2b-setup.sh
+		# sets GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0,115200n8 console=tty0",
+		# and Linux gives /dev/console to the LAST console listed -- tty0. So
+		# kernel printk reaches the serial log but cryptsetup's prompt, which is
+		# userspace in the initramfs, is drawn on the VGA text screen only.
+		#
+		# So do what unlock_vm.sh does under VirtualBox: type blind, then prove
+		# it worked by the SSH banner, and retry if it did not. Typing the
+		# passphrase at a prompt that is not ready yet is harmless -- the
+		# characters are discarded, and the next attempt types it again.
+		pass=$(vm_pass)
+		ssh_port=$(host_port_of ssh)
 
-    ssh_banner_up() {
-        local b
-        b=$(timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${ssh_port} && head -c 40 <&3" 2>/dev/null)
-        case "$b" in *SSH-2.0*)
-            printf '%s' "${b%%$'\r'*}"
-            return 0
-            ;;
-        esac
-        return 1
-    }
+		ssh_banner_up() {
+			local b
+			b=$(timeout 3 "${SCRIPT_SH:-bash}" -c "exec 3<>/dev/tcp/127.0.0.1/${ssh_port} && head -c 40 <&3" 2> /dev/null)
+			case "$b" in *SSH-2.0*) printf '%s' "${b%%$'\r'*}"; return 0 ;; esac
+			return 1
+		}
 
     if [ -z "$pass" ]; then
         warn "no passphrase (set VM_PASS or vm_pass.txt) — unlock it yourself"
@@ -652,79 +857,144 @@ start)
     ssh_banner_up >/dev/null || warn "sshd never answered — look at the screen: $0 screenshot"
     ;;
 
-screenshot)
-    # The VGA text screen is where the LUKS prompt and any boot error live,
-    # precisely because they do not reach the serial log (see above).
-    is_running || die "not running"
-    out="${2:-$VM_DIR/screen.ppm}"
-    mon "screendump $out" >/dev/null
-    sleep 1
-    [ -s "$out" ] || die "screendump produced nothing"
-    if command -v python3 >/dev/null 2>&1 && python3 -c 'import PIL' 2>/dev/null; then
-        python3 -c "from PIL import Image; Image.open('$out').save('${out%.ppm}.png')" 2>/dev/null &&
-            ok "screen: ${out%.ppm}.png"
-    else
-        ok "screen: $out (PPM)"
-    fi
-    ;;
+	screenshot)
+		# The VGA text screen is where the LUKS prompt and any boot error live,
+		# precisely because they do not reach the serial log (see above).
+		need_running_or_die
+		need_control qemu_screenshot
+		out="${2:-$VM_DIR/screen.ppm}"
+		mon "screendump $out" > /dev/null
+		sleep 1
+		[ -s "$out" ] || die "screendump produced nothing"
+		if command -v python3 > /dev/null 2>&1 && python3 -c 'import PIL' 2> /dev/null; then
+			python3 -c "from PIL import Image; Image.open('$out').save('${out%.ppm}.png')" 2> /dev/null \
+				&& ok "screen: ${out%.ppm}.png"
+		else
+			ok "screen: $out (PPM)"
+		fi
+		;;
 
-unlock)
-    is_running || die "not running"
-    pass=$(vm_pass)
-    [ -n "$pass" ] || die "no passphrase available"
-    sendkey_string "$pass" && ok "passphrase sent"
-    ;;
+	unlock)
+		need_running_or_die
+		need_control qemu_unlock
+		pass=$(vm_pass); [ -n "$pass" ] || die "no passphrase available"
+		sendkey_string "$pass" && ok "passphrase sent"
+		;;
 
-stop)
-    is_running || {
-        ok "not running"
-        exit 0
-    }
-    info "ACPI power button"
-    mon "system_powerdown" >/dev/null
-    for _ in $(seq 1 40); do
-        is_running || break
-        sleep 2
-    done
-    if is_running; then
-        warn "still up after 80s — sending SIGTERM"
-        kill "$(qemu_pid)" 2>/dev/null
-        sleep 3
-    fi
-    rm -f "$PIDFILE" "$MONITOR"
-    ok "stopped"
-    ;;
+	stop)
+		need_running
+		need_control qemu_stop
+		pid=$(qemu_pid)
+		# Immediate by default -- like VirtualBox's `controlvm poweroff`, and what
+		# people mean by "stop". The monitor `quit` exits QEMU at once AND flushes
+		# the qcow2 (kill -9 would not), so the guest's journal replays cleanly on
+		# the next boot. GRACEFUL=1 asks the guest to shut its services down first,
+		# which is the slow path this used to always take.
+		if [ -n "${GRACEFUL:-}" ]; then
+			info "orderly shutdown (pid $pid) — letting the guest stop its services"
+			mon "system_powerdown" > /dev/null
+			await_shutdown "${STOP_GRACE:-90}" || warn "still up after ${STOP_GRACE:-90}s — pulling the plug"
+		else
+			info "powering off (pid $pid)"
+			mon "quit" > /dev/null 2>&1
+		fi
+		# Confirm it is really gone, escalating only if it is not.
+		await_shutdown 3 || true
+		is_running && { kill "$pid" 2> /dev/null; await_shutdown 3 || true; }
+		is_running && { kill -9 "$pid" 2> /dev/null; sleep 1; }
+		is_running && die "could not stop pid $pid — force it: $0 kill"
+		rm -f "$PIDFILE" "$MONITOR"
+		ok "stopped"
+		;;
 
-kill)
-    p=$(qemu_pid) && {
-        kill "$p" 2>/dev/null
-        sleep 2
-        kill -9 "$p" 2>/dev/null
-    }
-    rm -f "$PIDFILE" "$MONITOR"
-    ok "killed"
-    ;;
+	kill)
+		need_running
+		need_control qemu_kill
+		p=$(qemu_pid)
+		kill "$p" 2> /dev/null; sleep 2; kill -9 "$p" 2> /dev/null
+		is_running && die "could not kill pid $p"
+		rm -f "$PIDFILE" "$MONITOR"
+		ok "killed"
+		;;
 
-watch)
-    is_running || die "nothing is running for $VM_NAME"
-    watch_install
-    ;;
-console)
-    [ -f "$SERIAL" ] || die "no serial log yet"
-    printf "  ${C_DIM}Ctrl+C stops watching, not the VM${C_RESET}\n\n"
-    tail -f "$SERIAL"
-    ;;
+	restart)
+		refuse_sudo_build "make qemu_restart VM_PATH=$VM_PATH" || exit 1
+		# stop may adopt another VM_PATH; start must follow it.
+		is_running || adopt_other_guest
+		case $? in
+			0) VM_PATH="$VM_PATH" "$0" stop || exit 1 ;;
+			2) exit 1 ;;
+		esac
+		exec env VM_PATH="$VM_PATH" "$0" start
+		;;
 
-ssh-config)
-    ssh_port=$(printf '%s' "$PORTS_SPEC" | tr ' ' '\n' | awk -F: '$1=="ssh"{print $2}')
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
-    touch "$HOME/.ssh/config"
-    chmod 600 "$HOME/.ssh/config"
-    marker="# Born2beRoot VM (auto-generated, qemu)"
-    python3 - "$HOME/.ssh/config" "$marker" "$ssh_port" <<'PYEOF'
+	reset)
+		need_running_or_die
+		need_control qemu_reset
+		mon "system_reset" > /dev/null && ok "hard reset sent (pid $(qemu_pid))"
+		;;
+
+	pause)
+		need_running_or_die
+		need_control qemu_pause
+		mon "stop" > /dev/null && ok "paused (pid $(qemu_pid)) — continue with: $0 resume"
+		;;
+
+	resume)
+		need_running_or_die
+		need_control qemu_resume
+		mon "cont" > /dev/null && ok "resumed (pid $(qemu_pid))"
+		;;
+
+	monitor)
+		# Any human-monitor command, e.g. monitor "info status". The reply
+		# comes back with the echoed command and the prompt; strip those.
+		need_running_or_die
+		need_control qemu_monitor
+		[ -n "${2:-}" ] || die "usage: $0 monitor '<command>'   (try: info status, info block, info network)"
+		mon "$2" | tr -d '\r' | sed -e '1d' -e '/^(qemu)/d' -e 's/^(qemu) //'
+		;;
+
+	list)
+		# Every QEMU guest on this host, whoever started it, from whatever
+		# VM_PATH -- the view that answers "who is holding VT-x?".
+		found=0
+		while read -r pid args; do
+			[ -n "$pid" ] || continue
+			found=1; name='?'; path='?'
+			case " $args" in *" -name "*) name=${args##* -name }; name=${name%% *} ;; esac
+			case " $args" in *" -pidfile "*) pf=${args##* -pidfile }; pf=${pf%% *}; path=$(dirname "$(dirname "$pf")") ;; esac
+			printf "  pid %-8s %-10s %-14s VM_PATH=%s\n" "$pid" "$(guest_owner "$pid")" "$name" "$path"
+		done <<< "$(qemu_cmdlines)"
+		[ "$found" = 1 ] || ok "no QEMU guest is running on this host"
+		;;
+
+	ssh)
+		# A shell (or one command) in the guest, on the port it actually got.
+		need_running_or_die
+		exec ssh -p "$(host_port_of ssh)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+			-o LogLevel=ERROR "${VM_USER}@127.0.0.1" "${@:2}"
+		;;
+
+	watch)
+		need_running_or_die
+		watch_install
+		;;
+	console)
+		[ -f "$SERIAL" ] || need_running_or_die
+		[ -f "$SERIAL" ] || die "no serial log yet"
+		printf "  ${C_DIM}Ctrl+C stops watching, not the VM${C_RESET}\n\n"
+		tail -f "$SERIAL"
+		;;
+
+	ssh-config)
+		ssh_port=$(host_port_of ssh)
+		mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+		touch "$HOME/.ssh/config"; chmod 600 "$HOME/.ssh/config"
+		marker="# Born2beRoot VM (auto-generated, qemu)"
+		python3 - "$HOME/.ssh/config" "$marker" "$ssh_port" "$VM_USER" << 'PYEOF'
 import sys
-path, marker, port = sys.argv[1], sys.argv[2], sys.argv[3]
+path, marker, port, user = sys.argv[1:5]
 lines = open(path).read().split("\n")
 out, skip = [], False
 for ln in lines:
@@ -739,7 +1009,7 @@ for ln in lines:
             continue
     out.append(ln)
 block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
-         f"    Port {port}", "    User dlesieur",
+         f"    Port {port}", f"    User {user}",
          "    ServerAliveInterval 15", "    ServerAliveCountMax 6",
          "    TCPKeepAlive yes", "    ConnectionAttempts 5", "    ConnectTimeout 15",
          "    StrictHostKeyChecking no", "    UserKnownHostsFile /dev/null",
@@ -751,34 +1021,41 @@ PYEOF
     ok "ssh b2b now points at 127.0.0.1:${ssh_port}"
     ;;
 
-status)
-    printf "\n${C_BOLD}QEMU VM: %s${C_RESET}\n" "$VM_NAME"
-    printf "  %-12s %s\n" "accel:" "$ACCEL$([ "$ACCEL" = tcg ] && printf ' (NO KVM — emulated, very slow)')"
-    printf "  %-12s %s\n" "/dev/kvm:" "$(kvm_ok && echo 'usable by us' || echo 'NOT usable')"
-    printf "  %-12s %s\n" "KVM now:" "$(kvm_why)"
-    if [ -f "$STAMP" ]; then
-        printf "  %-12s installed %s\n" "system:" "$(cat "$STAMP")"
-    elif [ "$(cat "$PHASE" 2>/dev/null)" = installing ]; then
-        printf "  %-12s install in progress (or interrupted)\n" "system:"
-    else printf "  %-12s nothing installed yet\n" "system:"; fi
-    if is_running && guest_halted; then
-        printf "  %-12s ${C_YELLOW}halted${C_RESET} (pid %s — stopped itself; QEMU is still up)\n" \
-            "state:" "$(qemu_pid)"
-    elif is_running; then
-        printf "  %-12s ${C_GREEN}running${C_RESET} (pid %s)\n" "state:" "$(qemu_pid)"
-    else
-        printf "  %-12s stopped\n" "state:"
-    fi
-    [ -f "$DISK" ] && printf "  %-12s %s (%s on host)\n" "disk:" "$DISK" "$(du -h "$DISK" 2>/dev/null | cut -f1)"
-    printf "  %-12s %s\n" "iso:" "$(basename "$(find_iso)" 2>/dev/null || echo none)"
-    printf "  %-12s " "ports:"
-    printf '%s' "$PORTS_SPEC" | tr ' ' '\n' | awk -F: '{printf "%s→%s ", $2, $3}'
-    printf "\n"
-    if [ -f "$SERIAL" ]; then
-        printf "  %-12s %s\n" "console:" "$(tail -c 400 "$SERIAL" 2>/dev/null | tr -d '\r' | grep -a . | tail -1 | cut -c1-70)"
-    fi
-    printf "\n"
-    ;;
+	status)
+		printf "\n${C_BOLD}QEMU VM: %s${C_RESET}\n" "$VM_NAME"
+		printf "  %-12s %s\n" "accel:" "$ACCEL$( [ "$ACCEL" = tcg ] && printf ' (NO KVM — emulated, very slow)' )"
+		printf "  %-12s %s\n" "/dev/kvm:" "$( kvm_ok && echo 'usable by us' || echo 'NOT usable' )"
+		printf "  %-12s %s\n" "KVM now:" "$(kvm_why)"
+		if [ -f "$STAMP" ]; then printf "  %-12s installed %s\n" "system:" "$(cat "$STAMP")"
+		elif [ "$(cat "$PHASE" 2> /dev/null)" = installing ]; then printf "  %-12s install in progress (or interrupted)\n" "system:"
+		else printf "  %-12s nothing installed yet\n" "system:"; fi
+		if is_running && guest_halted; then
+			printf "  %-12s ${C_YELLOW}halted${C_RESET} (pid %s — stopped itself; QEMU is still up)\n" \
+				"state:" "$(qemu_pid)"
+		elif is_running; then
+			printf "  %-12s ${C_GREEN}running${C_RESET} (pid %s)\n" "state:" "$(qemu_pid)"
+			_owner=$(guest_owner "$(qemu_pid)")
+			[ "$_owner" = "$(id -un)" ] || printf "  %-12s ${C_YELLOW}%s${C_RESET} — stop/kill/unlock need sudo\n" "started by:" "$_owner"
+		else
+			printf "  %-12s stopped\n" "state:"
+		fi
+		others=$(other_guests)
+		[ -n "$others" ] && printf "  %-12s ${C_YELLOW}%s${C_RESET}\n" "elsewhere:" \
+			"$(printf '%s\n' "$others" | awk '{printf "pid %s (VM_PATH=%s) ", $1, $2}')"
+		[ -f "$DISK" ] && printf "  %-12s %s (%s on host)\n" "disk:" "$DISK" "$(du -h "$DISK" 2>/dev/null | cut -f1)"
+		printf "  %-12s %s\n" "iso:" "$(basename "$(find_iso)" 2>/dev/null || echo none)"
+		printf "  %-12s " "ports:"
+		for _spec in $PORTS_SPEC; do
+			_n="${_spec%%:*}"; _rest="${_spec#*:}"; _gp="${_rest#*:}"
+			printf '%s→%s ' "$(host_port_of "$_n")" "$_gp"
+		done
+		printf "\n"
+		if [ -f "$SERIAL" ]; then
+			printf "  %-12s %s\n" "console:" "$(tail -c 400 "$SERIAL" 2>/dev/null | tr -d '\r' | grep -a . | tail -1 | cut -c1-70)"
+		fi
+		printf "\n"
+		;;
 
-*) die "unknown action '${1}' (create|install|start|unlock|stop|kill|status|console|screenshot|ssh-config)" ;;
+	*) die "unknown action '${1}' (create|install|start|restart|stop|kill|reset|pause|resume|unlock|status|list|console|watch|screenshot|monitor|ssh|ssh-config)" ;;
 esac
+fi

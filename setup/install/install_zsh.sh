@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Function to change default shell to zsh
 change_default_shell() {

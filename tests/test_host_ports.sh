@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Regression test for utils/host_ports.sh.
 #
 # The bug it guards: resolve_host_port used to echo its result, so every caller

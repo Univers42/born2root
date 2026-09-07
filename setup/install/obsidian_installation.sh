@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Install Flatpak if not already installed
 sudo apt install flatpak

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ssh -p 4242 dlesieur@127.0.0.1
 # Inside VM:

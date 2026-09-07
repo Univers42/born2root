@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## SUDO COMMAND COUNT MODULE
 sudo_command_module() {

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Fix: Show SSH Targets instead of Tunnels in Remote Explorer
 # The Remote Explorer can show different views - we need to switch to "SSH Targets"
 

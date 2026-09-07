@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # check_deps.sh — verify and install host developer dependencies for born2root
 # Called by: make deps
 #
@@ -250,18 +250,72 @@ check_vbox() {
         ver=$(VBoxManage --version 2>/dev/null | sed 's/r.*//')
         ok "VBoxManage ${ver} ($(command -v VBoxManage))"
 
-        if ! VBoxManage list extpacks 2>/dev/null |
-            grep -qiE "oracle (vm )?virtualbox extension pack"; then
-            # Optional, and this project never touches it: the pack adds USB
-            # 2.0/3.0 passthrough, VRDP, NVMe, PXE and VDI encryption, while the
-            # VM here runs on NAT + SATA + guest-side LUKS + a serial console.
-            printf "${DIM}·${RST} VirtualBox Extension Pack not installed ${DIM}(optional — make extpack)${RST}\n"
-            VBOX_NEED_EXTPACK=true
-        fi
-    else
-        warn "VBoxManage not found"
-        VBOX_OK=false
-    fi
+		if ! VBoxManage list extpacks 2>/dev/null \
+				| grep -qiE "oracle (vm )?virtualbox extension pack"; then
+			# Optional, and this project never touches it: the pack adds USB
+			# 2.0/3.0 passthrough, VRDP, NVMe, PXE and VDI encryption, while the
+			# VM here runs on NAT + SATA + guest-side LUKS + a serial console.
+			printf "${DIM}·${RST} VirtualBox Extension Pack not installed ${DIM}(optional — make extpack)${RST}\n"
+			VBOX_NEED_EXTPACK=true
+		fi
+	else
+		warn "VBoxManage not found"
+		VBOX_OK=false
+	fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Group membership — the other half of "installed" for both hypervisors
+# ─────────────────────────────────────────────────────────────────────────────
+# A package can be installed and its kernel driver loaded while this account
+# still cannot touch it: VirtualBox needs the vboxusers group, QEMU/KVM needs
+# the kvm group (or an equivalent ACL grant some campus machines set up
+# out-of-band — see setup/host/qemu_vm.sh's kvm_ok(), which is why this is
+# skipped when access already works some other way). Both are additive,
+# harmless to run twice, and need a NEW login to take effect — so this only
+# offers them, once, with the same sudo courtesy as install_vbox_extpack
+# below, and never blocks the build on them.
+ensure_group_membership() {
+	local group="$1" why="$2"
+	command -v getent > /dev/null 2>&1 || return 0
+	getent group "$group" > /dev/null 2>&1 || return 0
+	id -nG 2> /dev/null | tr ' ' '\n' | grep -qx "$group" && return 0
+
+	printf "\n"
+	warn "$(id -un) is not in the '${group}' group -- ${why}"
+
+	# A school machine has the sudo BINARY installed but does not put student
+	# accounts in the sudo group -- checking only `command -v sudo` would still
+	# run `sudo usermod` there, and get "user is not in the sudoers file. This
+	# incident will be reported" instead of a plain, expected "cannot fix this
+	# here". Test authorization, the same way check_vbox_driver.sh's CAN_SUDO
+	# does, not just whether the binary exists.
+	if ! command -v sudo > /dev/null 2>&1 \
+		|| ! id -nG 2> /dev/null | tr ' ' '\n' | grep -qx sudo; then
+		warn "This account cannot sudo — ask whoever administers this machine to run:"
+		warn "  sudo usermod -aG ${group} $(id -un)"
+		return 0
+	fi
+	printf "${DIM}sudo is about to ask for YOUR password on THIS machine (%s@%s), to add you\n" \
+		"$(id -un)" "$(hostname -s 2> /dev/null || echo host)"
+	printf "to the '${group}' group. Press Ctrl+C to skip.${RST}\n"
+	if sudo usermod -aG "$group" "$(id -un)"; then
+		ok "Added to '${group}' — log out and back in for it to take effect."
+	else
+		warn "Could not add you to '${group}' — do it later with: sudo usermod -aG ${group} $(id -un)"
+	fi
+}
+
+check_group_membership() {
+	if [ "$VBOX_OK" = true ]; then
+		ensure_group_membership vboxusers \
+			"needed to use /dev/vboxdrv (start a VM) without root"
+	fi
+	if command -v qemu-system-x86_64 > /dev/null 2>&1 \
+		&& [ -c /dev/kvm ] && { [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; }; then
+		ensure_group_membership kvm \
+			"needed to use /dev/kvm (hardware-accelerated QEMU) without root"
+	fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,43 +324,55 @@ check_vbox() {
 
 # Format: "binary:package[:package ...]"
 # Special binary "__pkg" checks via package manager instead of command -v.
+#
+# qemu-system-x86_64 and qemu-img are here, not in check_vbox(), because they
+# are the OTHER hypervisor (setup/host/qemu_vm.sh): `make all` chooses between
+# them (setup/host/select_backend.sh) based on which one this machine can
+# actually run, and that choice is only real if both are ever installed by
+# `make deps` -- not just VirtualBox by default.
 if [ "$PKG_MGR" = "apt" ]; then
-    declare -a CHECKS=(
-        "xorriso:xorriso"
-        "curl:curl"
-        "cc:gcc"
-        "__pkg:libreadline-dev"
-        "python3:python3"
-        "git:git"
-        "ssh:openssh-client"
-        "make:make"
-    )
-    VBOX_PKG="virtualbox-7.1"
+	declare -a CHECKS=(
+		"xorriso:xorriso"
+		"curl:curl"
+		"cc:gcc"
+		"__pkg:libreadline-dev"
+		"python3:python3"
+		"git:git"
+		"ssh:openssh-client"
+		"make:make"
+		"qemu-system-x86_64:qemu-system-x86"
+		"qemu-img:qemu-utils"
+	)
+	VBOX_PKG="virtualbox-7.1"
 elif [ "$PKG_MGR" = "dnf" ]; then
-    declare -a CHECKS=(
-        "xorriso:xorriso"
-        "curl:curl"
-        "cc:gcc"
-        "__pkg:readline-devel"
-        "python3:python3"
-        "git:git"
-        "ssh:openssh-clients"
-        "make:make"
-    )
-    VBOX_PKG="VirtualBox"
+	declare -a CHECKS=(
+		"xorriso:xorriso"
+		"curl:curl"
+		"cc:gcc"
+		"__pkg:readline-devel"
+		"python3:python3"
+		"git:git"
+		"ssh:openssh-clients"
+		"make:make"
+		"qemu-system-x86_64:qemu-system-x86"
+		"qemu-img:qemu-img"
+	)
+	VBOX_PKG="VirtualBox"
 else
-    # Fallback for unknown
-    declare -a CHECKS=(
-        "xorriso:xorriso"
-        "curl:curl"
-        "cc:gcc"
-        "__pkg:readline-devel"
-        "python3:python3"
-        "git:git"
-        "ssh:openssh-client"
-        "make:make"
-    )
-    VBOX_PKG="VirtualBox"
+	# Fallback for unknown
+	declare -a CHECKS=(
+		"xorriso:xorriso"
+		"curl:curl"
+		"cc:gcc"
+		"__pkg:readline-devel"
+		"python3:python3"
+		"git:git"
+		"ssh:openssh-client"
+		"make:make"
+		"qemu-system-x86_64:qemu-system-x86"
+		"qemu-img:qemu-img"
+	)
+	VBOX_PKG="VirtualBox"
 fi
 
 MISSING_PKGS=""
@@ -367,16 +433,17 @@ fi
 
 # ── If everything is already present ─────────────────────────────────────────
 if [ "$VBOX_OK" = true ] && [ -z "$MISSING_PKGS" ]; then
-    # The ext-pack is deliberately NOT installed here. `make all` would stop on
-    # a sudo prompt for something the build never uses, and a mistyped password
-    # there reads like the build itself failed. `make extpack` asks for it.
-    if [ "$VBOX_NEED_EXTPACK" = true ] && [ "$INSTALL_EXTPACK" = "1" ]; then
-        printf "\n"
-        install_vbox_extpack
-    fi
-    printf "\n"
-    ok "All dependencies are present. Ready to build."
-    exit 0
+	# The ext-pack is deliberately NOT installed here. `make all` would stop on
+	# a sudo prompt for something the build never uses, and a mistyped password
+	# there reads like the build itself failed. `make extpack` asks for it.
+	if [ "$VBOX_NEED_EXTPACK" = true ] && [ "$INSTALL_EXTPACK" = "1" ]; then
+		printf "\n"
+		install_vbox_extpack
+	fi
+	check_group_membership
+	printf "\n"
+	ok "All dependencies are present. Ready to build."
+	exit 0
 fi
 
 # ── Install VirtualBox if missing ─────────────────────────────────────────────
@@ -448,5 +515,6 @@ if [ "$VBOX_OK" = false ] || [ "$ALL_OK" = false ]; then
     exit 1
 fi
 
+check_group_membership
 ok "All dependencies satisfied. You can now run: make all"
 exit 0

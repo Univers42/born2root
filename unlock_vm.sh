@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Start the VM headless and answer the guest's LUKS prompt from the host.
 #
 # The guest's LVM lives inside a LUKS container (preseeds/preseed.cfg sets
@@ -157,7 +157,7 @@ main() {
 }
 
 # Only run when executed, so tests can source this for the pure helpers.
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-    set -e
-    main "$@"
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+	set -e
+	main "$@"
 fi

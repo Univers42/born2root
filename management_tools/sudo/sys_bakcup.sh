@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # Create backup destination
 BACKUP_DIR="/media/dlesieur/UBUNTU_INST/ubuntu_backup_$(date +%Y%m%d)"

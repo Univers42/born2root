@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # WordPress Security Attack & Defense Demonstration
 # Created by: Github Copilot for LESdylan

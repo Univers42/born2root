@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 VM_NAME="${VM_NAME:-debian}"
 

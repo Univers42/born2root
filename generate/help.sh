@@ -1,17 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Born2beRoot — Makefile help
 # Called by: make help (the default goal — plain `make` lands here)
 set -e
 
 # ── Colours ──────────────────────────────────────────────────────────────────
-RST='\033[0m'
-BLD='\033[1m'
-DIM='\033[2m'
-GRN='\033[32m'
-YLW='\033[33m'
-RED='\033[31m'
-CYN='\033[36m'
-WHT='\033[97m'
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+	RST='\033[0m'; BLD='\033[1m'; DIM='\033[2m'
+	GRN='\033[32m'; YLW='\033[33m'; RED='\033[31m'; CYN='\033[36m'; WHT='\033[97m'
+else
+	RST=''; BLD=''; DIM=''; GRN=''; YLW=''; RED=''; CYN=''; WHT=''
+fi
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
 # Adaptive width: the descriptions here are full sentences, and at a hard 60
@@ -70,7 +68,7 @@ blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
 # Pad to a visible width. bash's printf '%-18s' pads by BYTES, so a name
 # holding a multibyte character (VM_NAME=…) came out three columns short and
 # the description column went ragged.
-NAMEW=18
+NAMEW=22
 _pad() {
     local s="$1" n
     n=$(printf '%s' "$s" | wc -m)
@@ -78,6 +76,17 @@ _pad() {
     [ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
     return 0
 }
+
+# Width left for the description, and a word-wrapper that fills it. fold -s
+# breaks on spaces; each line is then <= DESCW, so row() pads it to the
+# border and nothing overflows.
+DESCW=$((W - 2 - NAMEW - 1))
+[ "$DESCW" -lt 20 ] && DESCW=20
+_wrap() { printf '%s' "$1" | fold -s -w "$2"; }
+
+# A continuation line in the description column (aligned under the text,
+# not the name). $2 optional colour, default dim.
+contline() { row "  $(_pad '') ${2:-$DIM}$1${RST}"; }
 
 # Section heading. Closes the previous section with a blank line first, so the
 # last command of a group never sits flush against the divider.
@@ -92,15 +101,26 @@ sec() {
 # One command + what it does. The description gets whatever the name column
 # leaves, and is trimmed rather than allowed to break the border.
 cmd() {
-    local name="$1" desc="$2" color="${3:-${BLD}}"
-    local avail
-    avail=$((W - 2 - NAMEW - 1))
-    [ "$(printf '%s' "$desc" | wc -m)" -gt "$avail" ] && desc="${desc:0:$((avail - 1))}…"
-    row "  ${color}$(_pad "$name")${RST} ${desc}"
+	local name="$1" desc="$2" color="${3:-${BLD}}" first=1 line
+	if [ "$(printf '%s' "$name" | wc -m)" -gt "$NAMEW" ]; then
+		row "  ${color}${name}${RST}"
+		while IFS= read -r line; do contline "$line" ""; done <<< "$(_wrap "$desc" "$DESCW")"
+		return 0
+	fi
+	while IFS= read -r line; do
+		if [ "$first" = 1 ]; then
+			row "  ${color}$(_pad "$name")${RST} ${line}"; first=0
+		else
+			contline "$line" ""
+		fi
+	done <<< "$(_wrap "$desc" "$DESCW")"
 }
 
-# An indented continuation line under a command.
-note() { row "  $(_pad '')  ${DIM}$1${RST}"; }
+# An indented, wrapped continuation line under a command.
+note() {
+	local line
+	while IFS= read -r line; do contline "$line"; done <<< "$(_wrap "$1" "$DESCW")"
+}
 
 # ═════════════════════════════════════════════════════════════════════════════
 printf "\n"
@@ -124,10 +144,21 @@ sec "Hypervisor backend (the guest is identical either way)"
 cmd "make all BACKEND=qemu" "Force QEMU/KVM — no kernel module, no root"
 cmd "make all BACKEND=virtualbox" "Force VirtualBox — needs vboxdrv (root)"
 cmd "make qemu_start" "Boot the QEMU VM and unlock its disk"
-cmd "make qemu_stop" "Shut the QEMU VM down"
+cmd "make qemu_stop" "Power off the QEMU VM now (GRACEFUL=1 = orderly)"
 cmd "make qemu_status" "QEMU pid, ports, disk, last console line"
 cmd "make qemu_console" "Follow the QEMU VM's serial console"
 cmd "make qemu_watch" "Re-attach the install progress tracker"
+cmd "make qemu_restart" "Stop, then boot and unlock again"
+cmd "make qemu_ssh" "A shell in the guest, or CMD=\"uname -a\" for one"
+cmd "make qemu_list" "All QEMU guests here: pid, owner, name, VM_PATH"
+cmd "make qemu_kill" "Pull the plug (SIGTERM, then SIGKILL)"
+cmd "make qemu_pause" "Freeze the guest; qemu_resume continues it"
+cmd "make qemu_reset" "Hard reset (the reset button)"
+cmd "make qemu_screenshot" "Grab the VGA screen (LUKS prompt, boot errors)"
+cmd "make qemu_monitor" "Any QEMU monitor command: CMD=\"info block\""
+cmd "make qemu_unlock" "Type the LUKS passphrase (qemu_start does it)"
+cmd "make qemu_create" "Just the disk; qemu_install = create + install"
+cmd "make qemu_ssh_config" "Re-point ssh b2b at this VM's port"
 cmd "make verify_guest" "Prove the guest matches the spec (partitions, LUKS…)"
 
 sec "Use it"

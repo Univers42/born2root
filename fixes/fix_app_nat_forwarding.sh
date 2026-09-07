@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 # Repair VirtualBox NAT forwarding for the osionos / ft_transcendence app stack.
 # Run this on the host, not inside the VM.
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## MEMORY USAGE MODULE
 memory_module() {

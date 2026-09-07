@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # ANSI Color codes
 BLUE="\033[0;34m"

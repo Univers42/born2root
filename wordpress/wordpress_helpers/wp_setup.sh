@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 # WordPress Installation Script for Born2beRoot
 # Author: LESdylan

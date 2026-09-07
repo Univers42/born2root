@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env hellish
 
 ## LAST BOOT MODULE
 last_boot_module() {
