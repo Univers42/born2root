@@ -695,17 +695,17 @@ what this setup is modelled on:
 `50-b2b-markdown.lua` and `60-b2b-ide.lua` cover what is left:
 
 | VS Code feature | Here | Where |
-|-----------------|------|-------|
+| --------------- | ---- | ----- |
 | Markdown preview, in the buffer | [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) | `<leader>mr` |
 | Markdown preview, in a browser | [markdown-preview.nvim](https://github.com/iamcco/markdown-preview.nvim) — mermaid + KaTeX | `<leader>mp` |
-| Autocomplete | blink.cmp | *kickstart* |
-| Go to definition / references / rename | `vim.lsp` | *kickstart* |
-| Inline errors | LSP diagnostics | *kickstart* |
-| Auto formatting | conform.nvim | *kickstart*, `<leader>f` |
+| Autocomplete | blink.cmp | _kickstart_ |
+| Go to definition / references / rename | `vim.lsp` | _kickstart_ |
+| Inline errors | LSP diagnostics | _kickstart_ |
+| Auto formatting | conform.nvim | _kickstart_, `<leader>f` |
 | Linting | [nvim-lint](https://github.com/mfussenegger/nvim-lint) + shellcheck / markdownlint-cli2 | on write |
 | File explorer | oil.nvim / neo-tree | `-` / `Ctrl+B` |
 | Fuzzy search | telescope / fzf | `Ctrl+P` |
-| Git gutter | gitsigns | *kickstart*, `<leader>h…` |
+| Git gutter | gitsigns | _kickstart_, `<leader>h…` |
 | Git UI | **lazygit** (Debian package) in a floating terminal | `<leader>gg` |
 | Debugger | [nvim-dap](https://github.com/mfussenegger/nvim-dap) + dap-ui | `F5` / `F9`, `<leader>d…` |
 | Test runner | [neotest](https://github.com/nvim-neotest/neotest) (+ the python adapter) | `<leader>r…` |
@@ -739,7 +739,7 @@ Run **`:B2BExtras`** inside Neovim to see exactly what loaded and what did not.
 
 #### Seeing the markdown preview from your host
 
-The preview is a web server *inside the VM*, and the VM has no browser. So it
+The preview is a web server _inside the VM_, and the VM has no browser. So it
 binds to **`127.0.0.1:8420`** only, prints its URL instead of trying to launch
 anything, and you reach it over an SSH tunnel:
 
