@@ -22,7 +22,7 @@ SHOW_CUR='\033[?25h'
 CLR='\033[2K'
 
 # Early trap (before functions are defined)
-# shellcheck disable=SC2329
+# shellcheck disable=SC2329,SC2317
 cleanup() {
     local sig="$1"
     stop_spinner 2>/dev/null || true
@@ -416,7 +416,7 @@ get_host_ip() {
 # what keeps the dashboard alive during that wait instead of leaving a frozen
 # spinner that looks like a hang.
 UNLOCK_T0=0
-# shellcheck disable=SC2329
+# shellcheck disable=SC2329,SC2317
 unlock_sleep() {
     sleep "$1"
     local e
@@ -1188,7 +1188,7 @@ setup_vscode_remote_ssh() {
     [ -f "$vscode_settings" ] || printf '{}\n' >"$vscode_settings"
 
     # Use python3 to safely merge JSON settings
-    python3 -c "
+    if python3 -c "
 import json, sys
 try:
     with open('$vscode_settings', 'r') as f:
@@ -1223,9 +1223,7 @@ s['less.validate'] = False
 
 with open('$vscode_settings', 'w') as f:
     json.dump(s, f, indent=4)
-" 2>/dev/null && echo "  ✓ VS Code Remote SSH settings configured (Terminal Mode, no SOCKS proxy)" || true
-
-    # Clean stale server data that causes 'Running server is stale' errors
+" 2>/dev/null; then echo "  ✓ VS Code Remote SSH settings configured (Terminal Mode, no SOCKS proxy)"; fi
     rm -rf "$HOME/.config/Code/User/globalStorage/ms-vscode-remote.remote-ssh/vscode-ssh-host-"* 2>/dev/null
 }
 

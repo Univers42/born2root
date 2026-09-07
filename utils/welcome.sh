@@ -16,7 +16,7 @@ LAST_LOGIN=$(last -1 "$USER_NAME" | head -1 | awk '{print $4, $5, $6, $7}')
 CURRENT_DATE=$(date +"%Y-%m-%d %H:%M:%S")
 HOSTNAME=$(hostname)
 UPTIME=$(uptime -p)
-LOAD=$(cat /proc/loadavg | awk '{print $1, $2, $3}')
+LOAD=$(awk '{print $1, $2, $3}' < /proc/loadavg)
 
 # Clear the screen for a clean display
 clear

@@ -493,7 +493,7 @@ purge() {
     local user home
     for user in $NVIM_USERS; do
         home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
-        [ -n "$home" ] && [ -d "$home" ] || continue
+        if [ -z "$home" ] || [ ! -d "$home" ]; then continue; fi
         log "  ${user}: config, plugins, parsers, state, cache"
         rm -rf "${home}/.config/nvim" \
             "${home}/.local/share/nvim" \

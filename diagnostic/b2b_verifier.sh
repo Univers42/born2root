@@ -172,7 +172,7 @@ fi
 
 # Check Sudo Configuration (comprehensive)
 echo -e "\n${BLUE}=== CHECKING SUDO CONFIGURATION ===${NC}"
-SUDO_CONFIG_OK=true
+#SUDO_CONFIG_OK=true
 
 # Check sudo log file configuration
 sudo_log_file=$(sudo grep "logfile=" /etc/sudoers /etc/sudoers.d/* 2>/dev/null | grep -o "/[^ ]*" | head -1)

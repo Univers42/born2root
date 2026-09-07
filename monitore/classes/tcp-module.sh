@@ -53,7 +53,7 @@ tcp_module() {
     get_tcp_proc() {
         if [ -f /proc/net/tcp ]; then
             local tcp_count
-            tcp_count=$(cat /proc/net/tcp 2>/dev/null | grep -c " 01 ")
+            tcp_count=$(grep -c " 01 " /proc/net/tcp 2>/dev/null)
             if [ -n "$tcp_count" ]; then
                 echo "$tcp_count"
             else

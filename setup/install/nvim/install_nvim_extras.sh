@@ -127,8 +127,9 @@ die() {
 
 [ "$(id -u)" -eq 0 ] || die "must run as root (use sudo)"
 [ -x "$NVIM_BIN" ] || NVIM_BIN=$(command -v nvim 2>/dev/null || true)
-[ -n "$NVIM_BIN" ] && [ -x "$NVIM_BIN" ] ||
+if [ -z "$NVIM_BIN" ] || [ ! -x "$NVIM_BIN" ]; then
     die "nvim is not installed — run install_nvim.sh first"
+fi
 
 # ── Extra system packages these plugins shell out to ────────────────────────
 #   fzf       fzf.vim drives the `fzf` binary; the plugin is only the glue

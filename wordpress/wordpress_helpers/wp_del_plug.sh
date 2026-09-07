@@ -153,7 +153,7 @@ for plugin_dir in "$PLUGINS_DIR"/*; do
                 if grep -q "Plugin Name:" "$php_file"; then
                     # Extract version from "Version:" line
                     v=$(grep "Version:" "$php_file" | head -1 | cut -d ":" -f 2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                    if [ ! -z "$v" ]; then
+                    if [ -n "$v" ]; then
                         version="$v"
                         break
                     fi

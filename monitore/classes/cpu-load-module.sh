@@ -39,10 +39,11 @@ cpu_load_module() {
     get_cpu_proc() {
         if [ -f /proc/stat ]; then
             # Take two samples with a slightly longer interval for better accuracy
-            local stat1 stat2
-            stat1=$(cat /proc/stat 2>/dev/null | grep '^cpu ')
+            local stat1
+            stat1=$(grep '^cpu ' /proc/stat 2>/dev/null)
             sleep 0.5
-            stat2=$(cat /proc/stat 2>/dev/null | grep '^cpu ')
+            local stat2
+            stat2=$(grep '^cpu ' /proc/stat 2>/dev/null)
 
             if [[ -n "$stat1" && -n "$stat2" ]]; then
                 # Parse the stats
@@ -207,7 +208,8 @@ cpu_load_module() {
 
     # Load average as additional info (not verified)
     if [ -f /proc/loadavg ]; then
-        load_avg=$(cat /proc/loadavg 2>/dev/null | awk '{print $1", "$2", "$3}')
+        local load_avg
+        load_avg=$(awk '{print $1", "$2", "$3}' /proc/loadavg 2>/dev/null)
         METRIC_VALUES["load_avg"]="$load_avg"
     else
         METRIC_VALUES["load_avg"]="N/A"

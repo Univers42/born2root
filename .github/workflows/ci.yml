@@ -33,7 +33,7 @@ jobs:
       - name: Run ShellCheck
         run: |
           echo "Running ShellCheck on all .sh files..."
-          find . -type f -name "*.sh" -print0 | xargs -0 shellcheck --color=always
+          find . -type f -name "*.sh" -print0 | xargs -0 shellcheck --color=always -e SC1091
 
       - name: Run Bashate
         if: always()

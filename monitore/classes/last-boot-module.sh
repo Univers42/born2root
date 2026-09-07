@@ -71,7 +71,8 @@ last_boot_module() {
         if [[ -f /proc/uptime ]]; then
             local current_time uptime_seconds boot_time
             current_time=$(date +%s)
-            uptime_seconds=$(cat /proc/uptime 2>/dev/null | awk '{print $1}' | cut -d. -f1)
+            local uptime_seconds
+            uptime_seconds=$(awk '{print $1}' /proc/uptime 2>/dev/null | cut -d. -f1)
             if [ -n "$uptime_seconds" ]; then
                 boot_time=$((current_time - uptime_seconds))
                 date -d "@$boot_time" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "N/A"

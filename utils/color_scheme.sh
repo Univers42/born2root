@@ -167,7 +167,7 @@ show_datetime() {
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
     # Script is being executed directly - show demo
     clear
-    show_datetime
+    show_datetime "$@"
     simple_header "SIMPLE HEADER EXAMPLE"
     box_header "BOX HEADER EXAMPLE"
     double_header "DOUBLE LINE HEADER EXAMPLE"

@@ -56,7 +56,7 @@ check "enter scancode is make+break" "$(enter_scancode)" "1c 9c"
 # --- unlock_loop scheduling -------------------------------------------------
 # Stub the clock, the port probe and the send so the loop runs instantly and
 # records exactly when it would have typed the passphrase.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2329,SC2317
 unlock_sleep() { :; }
 SENT_AT=""
 NOW=0

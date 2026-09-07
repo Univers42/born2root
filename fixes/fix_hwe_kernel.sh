@@ -255,7 +255,7 @@ remove_non_running_hwe_kernels() {
         else
             REMOVABLE+=("$pkg")
             for extra in "linux-headers-${ver}" "linux-modules-${ver}" "linux-modules-extra-${ver}"; do
-                dpkg -l "$extra" &>/dev/null && REMOVABLE+=("$extra") || true
+                if dpkg -l "$extra" &>/dev/null; then REMOVABLE+=("$extra"); fi
             done
         fi
     done

@@ -476,7 +476,7 @@ launch() {
 
     if [ "$boot" = "cdrom" ]; then
         iso=$(find_iso)
-        [ -n "$iso" ] && [ -f "$iso" ] || die "no preseed ISO found — run: make gen_iso"
+        if [ -z "$iso" ] || [ ! -f "$iso" ]; then die "no preseed ISO found — run: make gen_iso"; fi
         hd_index=2
         cd_index=1
         cd_args=(

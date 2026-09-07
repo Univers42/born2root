@@ -39,7 +39,8 @@ cpu_core_module() {
     fi
 
     if [ -f /sys/devices/system/cpu/present ]; then
-        present_count=$(cat /sys/devices/system/cpu/present 2>/dev/null | awk -F- '{print $2+1}')
+        local present_count
+        present_count=$(awk -F- '{print $2+1}' /sys/devices/system/cpu/present 2>/dev/null)
         if [ -z "$present_count" ] || [ "$present_count" -eq 0 ]; then
             present_count="N/A"
         fi

@@ -209,10 +209,10 @@ setup_herdr_service() {
     local user home group
     for user in $DEVTOOLS_USERS; do
         home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
-        [ -n "$home" ] && [ -d "$home" ] || {
+        if [ -z "$home" ] || [ ! -d "$home" ]; then
             warn "user '${user}' has no home — skipping"
             continue
-        }
+        fi
         group=$(id -gn "$user" 2>/dev/null || echo "$user")
 
         mkdir -p "${home}/.config/systemd/user"
@@ -259,9 +259,10 @@ UNITEOF
         if [ -d "/run/user/${uid}" ]; then
             runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
                 systemctl --user daemon-reload >/dev/null 2>&1 || true
-            runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
-                systemctl --user start herdr.service >/dev/null 2>&1 &&
-                log "${user}: herdr server started" || true
+            if runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
+                systemctl --user start herdr.service >/dev/null 2>&1; then
+                log "${user}: herdr server started"
+            fi
         fi
     done
 }
