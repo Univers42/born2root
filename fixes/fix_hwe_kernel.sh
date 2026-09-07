@@ -47,6 +47,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 hr
+# shellcheck disable=SC2059
 printf "${BOLD}  VirtualBox / HWE Kernel Compatibility Fix${NC}\n"
 hr
 
@@ -210,15 +211,22 @@ install_safe_kernel_and_set_grub() {
     fi
 
     hr
+    # shellcheck disable=SC2059
     printf "${Y}${BOLD}  ACTION REQUIRED — reboot needed${NC}\n"
     hr
+    # shellcheck disable=SC2059
     printf "  ✔  GA kernel ${G}${SAFE_VER}${NC} installed and set as next boot target.\n"
+    # shellcheck disable=SC2059
     printf "  ✘  HWE kernel ${R}${RUNNING_KERNEL}${NC} is still running — cannot remove it yet.\n\n"
+    # shellcheck disable=SC2059
     printf "  After rebooting into ${G}${SAFE_VER}${NC}, run:\n"
+    # shellcheck disable=SC2059
     printf "    ${G}make fix_hwe${NC}\n"
+    # shellcheck disable=SC2059
     printf "  …to finish removing linux-image-${RUNNING_KERNEL}.\n"
     hr
 
+    # shellcheck disable=SC2059
     read -r -p "$(printf "${C}Reboot now?${NC} [y/N] ")" REPLY || REPLY="n"
     if [[ "${REPLY,,}" == "y" ]]; then
         info "Rebooting in 5 seconds... (Ctrl-C to cancel)"

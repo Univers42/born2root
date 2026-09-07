@@ -146,8 +146,10 @@ progress_bar() {
     completed=$((percent * width / 100))
     remaining=$((width - completed))
 
+    # shellcheck disable=SC2059
     printf "${BOLD_BLUE}[${BOLD_GREEN}"
     printf "%0.s█" $(seq 1 $completed)
+    # shellcheck disable=SC2059
     printf "${BOLD_RED}"
     printf "%0.s▒" $(seq 1 $remaining)
     printf "${BOLD_BLUE}] ${percent}%%${NC}\r"

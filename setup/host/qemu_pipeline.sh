@@ -50,6 +50,7 @@ die() {
 
 cd "$REPO_ROOT" || die "cannot enter $REPO_ROOT"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Born2beRoot — QEMU/KVM build${C_RESET} ${C_DIM}(guest identical to the VirtualBox path)${C_RESET}\n"
 
 # ── 1. ISO ──────────────────────────────────────────────────────────────────
@@ -83,6 +84,7 @@ qemu_pid=$(head -n1 "$VM_DIR/qemu.pid" 2>/dev/null || true)
 [ -n "$qemu_pid" ] && kill -0 "$qemu_pid" 2>/dev/null || qemu_pid=""
 if [ -n "$qemu_pid" ] && [ "$phase_now" = installing ]; then
     printf "  ${C_RED}✗${C_RESET} an install is already running in this VM (pid %s)\n" "$qemu_pid"
+    # shellcheck disable=SC2059
     printf "    ${C_DIM}re-attach to it:  make qemu_watch        stop it:  make qemu_stop${C_RESET}\n"
     exit 1
 elif [ -f "$VM_DIR/.installed" ] && [ "${FORCE_INSTALL:-0}" != "1" ]; then
@@ -93,8 +95,11 @@ elif [ "$disk_bytes" -gt 1073741824 ] && [ -z "$phase_now" ] && [ "${FORCE_INSTA
     ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
 else
     [ "$phase_now" = installing ] &&
+        # shellcheck disable=SC2059
         printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
+    # shellcheck disable=SC2059
     printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
     "${SCRIPT_SH:-bash}" "$QEMU_VM" install || die "the install phase failed"
 fi
@@ -113,10 +118,13 @@ if timeout 20 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
     ok "ssh b2b works: $(ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR b2b 'hostname' 2>/dev/null)"
 else
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}ssh b2b is not answering yet — first boot installs Docker and\n"
+    # shellcheck disable=SC2059
     printf "  WordPress, which takes a few minutes. Watch: make qemu_console${C_RESET}\n"
 fi
 
+# shellcheck disable=SC2059
 printf "\n${C_GREEN}${C_BOLD}  QEMU build finished.${C_RESET}\n\n"
 printf "    ssh b2b                 log in\n"
 printf "    make qemu_console       the serial console\n"

@@ -30,14 +30,17 @@ serial_path=$(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null |
 
 if [ -z "$serial_path" ]; then
     printf "${RED}✗${RST} VM \"%s\" has no serial console attached.\n" "$VM_NAME"
+    # shellcheck disable=SC2059
     printf "${DIM}  A VM created before this was added has no COM1 file. Attach one with:\n"
     printf "    VBoxManage modifyvm %s --uart1 0x3F8 4 --uartmode1 file <path>\n" "$VM_NAME"
+    # shellcheck disable=SC2059
     printf "  (the VM must be powered off), or rebuild it with: make fclean all${RST}\n"
     exit 1
 fi
 
 if [ ! -f "$serial_path" ]; then
     printf "${YLW}⚠${RST}  Serial log not created yet: %s\n" "$serial_path"
+    # shellcheck disable=SC2059
     printf "${DIM}  VirtualBox creates it when the VM starts. Try: make all${RST}\n"
     exit 1
 fi
@@ -59,6 +62,7 @@ dump)
     ;;
 *)
     printf "${CYN}▶${RST} %s serial console — ${DIM}%s${RST}\n" "$VM_NAME" "$serial_path"
+    # shellcheck disable=SC2059
     printf "${DIM}  Ctrl+C stops watching; it does not stop the VM.${RST}\n\n"
     tail -n 200 -f "$serial_path" | clean
     ;;

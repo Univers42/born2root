@@ -252,6 +252,7 @@ if [ -n "$ff_pid" ] && [ "$configured" -gt 0 ]; then
         done
         if [ "$ff_started" -lt "$newest_userjs" ]; then
             fail "the running Firefox started before the pref was written — it has not read -r it"
+            # shellcheck disable=SC2059
             printf "      ${C_DIM}quit Firefox completely — every window — and reopen it${C_RESET}\n"
         else
             pass "the running Firefox started after the pref was written"
@@ -424,6 +425,7 @@ rm -f "$ca_tmp"
 # ── Verdict ─────────────────────────────────────────────────────────────────
 printf "\n"
 if [ "$FAILED" -eq 0 ]; then
+    # shellcheck disable=SC2059
     printf "${C_GREEN}${C_BOLD}  All required checks passed.${C_RESET}\n\n"
     printf "    Any browser  ${C_BOLD}https://%s${C_RESET}   ${C_DIM}(no port, trusted certificate)${C_RESET}\n" "$DOMAIN"
     printf "    Bonus site   ${C_BOLD}http://%s:%s${C_RESET}\n" "$DOMAIN" "$P_STATIC"

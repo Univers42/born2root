@@ -26,7 +26,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 VM_NAME="${1:-debian}"
 ACTION="${2:-all}"
@@ -216,10 +216,13 @@ show_health() {
         # Neovim decorates these with an emoji between the bullet and the word
         # ("- \u274c ERROR ...", "- \u26a0\ufe0f WARNING ..."), so an anchored '^- ERROR'
         # finds nothing and every report reads as clean.
+        # shellcheck disable=SC2059
         printf "\n${C_B}--- errors ---${C_R}\n"
         vm_ssh "grep -nE '^- .*\\bERROR\\b' '$log' || echo '(none)'"
+        # shellcheck disable=SC2059
         printf "\n${C_B}--- warnings ---${C_R}\n"
         vm_ssh "grep -nE '^- .*\\bWARNING\\b' '$log' || echo '(none)'"
+        # shellcheck disable=SC2059
         printf "\n${C_B}--- extras loaded ---${C_R}\n"
         # redir cannot target /dev/stdout when stdout is a pipe (E190), so it
         # goes to a temp file inside the VM which is then printed.

@@ -198,10 +198,13 @@ install_vbox_extpack() {
     # for. The account name in sudo's prompt is the same "dlesieur" that owns
     # the VM, so typing the VM's password here is the obvious mistake to make.
     printf "\n"
+    # shellcheck disable=SC2059
     printf "${BLD}The Extension Pack installs into /usr/lib/virtualbox — that needs root.${RST}\n"
     printf "${DIM}sudo is about to ask for YOUR password on THIS machine (%s@%s).${RST}\n" \
         "$(id -un)" "$(hostname -s 2>/dev/null || echo host)"
+    # shellcheck disable=SC2059
     printf "${DIM}It is not the VM's password, and not the disk passphrase.${RST}\n"
+    # shellcheck disable=SC2059
     printf "${DIM}Press Ctrl+C to skip — nothing in this project needs the pack.${RST}\n\n"
 
     if ! sudo -v; then
@@ -255,6 +258,7 @@ check_vbox() {
             # Optional, and this project never touches it: the pack adds USB
             # 2.0/3.0 passthrough, VRDP, NVMe, PXE and VDI encryption, while the
             # VM here runs on NAT + SATA + guest-side LUKS + a serial console.
+            # shellcheck disable=SC2059
             printf "${DIM}·${RST} VirtualBox Extension Pack not installed ${DIM}(optional — make extpack)${RST}\n"
             VBOX_NEED_EXTPACK=true
         fi
@@ -298,6 +302,7 @@ ensure_group_membership() {
     fi
     printf "${DIM}sudo is about to ask for YOUR password on THIS machine (%s@%s), to add you\n" \
         "$(id -un)" "$(hostname -s 2>/dev/null || echo host)"
+    # shellcheck disable=SC2059
     printf "to the '${group}' group. Press Ctrl+C to skip.${RST}\n"
     if sudo usermod -aG "$group" "$(id -un)"; then
         ok "Added to '${group}' — log out and back in for it to take effect."
@@ -455,13 +460,16 @@ if [ "$VBOX_OK" = false ]; then
     fi
 
     printf "\n"
+    # shellcheck disable=SC2059
     printf "${YLW}⚠${RST}  VirtualBox is missing.\n"
     if [ "$PKG_MGR" = "apt" ]; then
         printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$VBOX_PKG"
+        # shellcheck disable=SC2059
         printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
         sudo apt install ${CI:+-y} "$VBOX_PKG"
     elif [ "$PKG_MGR" = "dnf" ]; then
         printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$VBOX_PKG"
+        # shellcheck disable=SC2059
         printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
         sudo dnf install ${CI:+-y} "$VBOX_PKG"
     else
@@ -481,11 +489,13 @@ if [ -n "$MISSING_PKGS" ]; then
     printf "${YLW}⚠${RST}  Missing packages: ${BLD}%s${RST}\n" "$MISSING_PKGS"
     if [ "$PKG_MGR" = "apt" ]; then
         printf "${BLU}▶${RST} Running: ${BLD}sudo apt install %s${RST}\n" "$MISSING_PKGS"
+        # shellcheck disable=SC2059
         printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
         sudo apt-get update -qq 2>/dev/null || true
         sudo apt install ${CI:+-y} $MISSING_PKGS
     elif [ "$PKG_MGR" = "dnf" ]; then
         printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$MISSING_PKGS"
+        # shellcheck disable=SC2059
         printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
         sudo dnf install ${CI:+-y} $MISSING_PKGS
     else

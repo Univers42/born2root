@@ -110,7 +110,9 @@ if vboxdrv_ok; then
     if kvm_users=$("${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh" users); then
         bad "VirtualBox cannot start a VM right now: a KVM guest holds VT-x"
         printf '%s\n' "$kvm_users" | sed 's/^/     running: /'
+        # shellcheck disable=SC2059
         printf "  One hypervisor at a time. Stop it first:  ${C_BOLD}make qemu_stop${C_RESET}\n"
+        # shellcheck disable=SC2059
         printf "  or build with it instead:                ${C_BOLD}make all BACKEND=qemu${C_RESET}\n"
         exit 1
     fi
@@ -122,13 +124,16 @@ fi
 # A distinct failure from "not loaded": rebuilding or modprobing the module
 # fixes nothing here, since the module already works — for root.
 if [ -c /dev/vboxdrv ] && vboxdrv_loaded && ! vboxdrv_accessible; then
+    # shellcheck disable=SC2059
     printf "\n${C_RED}${C_BOLD}  This machine cannot start a VM.${C_RESET}\n"
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}Nothing in this project is broken: this is a permission on this machine's /dev/vboxdrv.${C_RESET}\n\n"
     bad "VirtualBox ${VER:-unknown}'s kernel driver works, but not for $(id -un)"
     printf "     %-22s %s\n" "machine:" "$(hostname -f 2>/dev/null || hostname)"
     printf "     %-22s %s\n" "/dev/vboxdrv:" "$(stat -c '%U:%G mode %a' /dev/vboxdrv 2>/dev/null || echo present)"
     printf "     %-22s %s\n" "your groups:" "$(id -Gn 2>/dev/null | tr ' ' ',')"
 
+    # shellcheck disable=SC2059
     printf "\n${C_BOLD}  Why${C_RESET}\n"
     note "The kernel driver is loaded and working, but the device node is not"
     note "owned by a group $(id -un) belongs to. VirtualBox expects root:vboxusers"
@@ -139,6 +144,7 @@ if [ -c /dev/vboxdrv ] && vboxdrv_loaded && ! vboxdrv_accessible; then
         CAN_SUDO=1
     fi
 
+    # shellcheck disable=SC2059
     printf "\n${C_BOLD}  What fixes it${C_RESET}\n"
     if [ "$CAN_SUDO" = "1" ]; then
         note "Join the group that should own it, then start a NEW session (group"
@@ -164,6 +170,7 @@ if [ -c /dev/vboxdrv ] && vboxdrv_loaded && ! vboxdrv_accessible; then
 fi
 
 # ── Not usable. Explain exactly why, in the order that matters. ─────────────
+# shellcheck disable=SC2059
 printf "\n${C_RED}${C_BOLD}  This machine cannot start a VM.${C_RESET}\n"
 printf "  ${C_DIM}Nothing in this project is broken: this is %s's kernel driver.${C_RESET}\n\n" "$(hostname -s)"
 bad "VirtualBox ${VER:-unknown} is installed, but its kernel driver is not usable"
@@ -203,6 +210,7 @@ if command -v sudo >/dev/null 2>&1 && [ -x /usr/bin/sudo ] && id -nG 2>/dev/null
     CAN_SUDO=1
 fi
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}  Why${C_RESET}\n"
 if [ "$BUILT" = "1" ] && [ "$SECUREBOOT" = "1" ]; then
     note "The module is compiled for this kernel but was never loaded. With Secure"
@@ -217,13 +225,16 @@ else
     note "has to be rebuilt against this kernel's headers."
 fi
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}  What fixes it${C_RESET}\n"
 if [ "$CAN_SUDO" = "1" ]; then
     note "You are in the sudo group, so you can do it here:"
     if [ "$BUILT" = "1" ]; then
+        # shellcheck disable=SC2059
         printf "      ${C_BOLD}sudo modprobe vboxdrv vboxnetflt vboxnetadp${C_RESET}\n"
         note "or, if that is refused: sudo /sbin/vboxconfig"
     else
+        # shellcheck disable=SC2059
         printf "      ${C_BOLD}sudo /sbin/vboxconfig${C_RESET}   ${C_DIM}(rebuilds the module)${C_RESET}\n"
         note "this repo also has: make fix_hwe"
     fi
@@ -231,12 +242,14 @@ if [ "$CAN_SUDO" = "1" ]; then
 else
     note "Loading a kernel module needs root, and this account is not in the sudo"
     note "group — so it cannot be fixed from here. Two ways forward:"
+    # shellcheck disable=SC2059
     printf "      ${C_BOLD}1.${C_RESET} Build on a machine whose VirtualBox driver works.\n"
     note "   The repo is on /sgoinfre (shared), so the ISO and the VM's disk are"
     note "   already there. \$HOME is LOCAL to each machine, so the VM"
     note "   registration and your browser trust are not -- on that machine run:"
     note "     make all      (registers the VM and installs)"
     note "     make host_access   (browser trust for https://<login>.42.fr)"
+    # shellcheck disable=SC2059
     printf "      ${C_BOLD}2.${C_RESET} Ask 42 staff to fix vboxdrv on $(hostname -s) (it has been failing\n"
     note "   since that machine booted, so every user of it is affected)."
 fi
@@ -244,10 +257,12 @@ fi
 # Where did the VM last get built? That is the machine to go back to.
 STAMP="${VM_PATH}/${VM_NAME}/.built-on"
 if [ -r "$STAMP" ]; then
+    # shellcheck disable=SC2059
     printf "\n${C_BOLD}  This VM was last built on${C_RESET}\n"
     note "$(head -1 "$STAMP")"
 fi
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}  What still works on this machine${C_RESET}\n"
 note "make gen_iso      build the preseeded ISO (no VM needed)"
 note "make status       show where everything stands"

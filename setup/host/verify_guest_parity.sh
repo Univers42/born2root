@@ -89,16 +89,20 @@ g true || {
     exit 1
 }
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Guest parity report${C_RESET}"
 [ -n "${BACKEND_LABEL:-}" ] && printf " ${C_DIM}(backend: %s)${C_RESET}" "$BACKEND_LABEL"
+# shellcheck disable=SC2059
 printf "\n${C_DIM}  Everything below comes from the preseeded ISO, not from the hypervisor.${C_RESET}\n"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}System${C_RESET}\n"
 row "hostname" "$(g hostname)" "dlesieur42"
 row "debian" "$(g 'cat /etc/debian_version')" "13"
 row "kernel" "$(g 'uname -r')" "--"
 row "cpus / ram" "$(g 'nproc; free -m | awk "/Mem:/{print \$2\"MB\"}"')" "--"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Disk: the partition layout (the subject's core requirement)${C_RESET}\n"
 printf "${C_DIM}%s${C_RESET}\n" "$(g 'lsblk -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINT' | sed 's/^/    /')"
 row "/boot" "$(g 'lsblk -no FSTYPE,SIZE,MOUNTPOINT /dev/sda2 | head -1')" "/boot"
@@ -106,14 +110,17 @@ row "biosgrub (sda1)" "$(g 'lsblk -no SIZE /dev/sda1 | head -1')" "--"
 row "LUKS container" "$(g 'lsblk -no FSTYPE /dev/sda5 | head -1')" "crypto_LUKS"
 row "LVM on LUKS" "$(g 'lsblk -no TYPE /dev/mapper/sda5_crypt | head -1')" "crypt"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Encryption${C_RESET}\n"
 row "cipher" "$(groot 'cryptsetup luksDump /dev/sda5' | awk -F': *' '/cipher:/{print $2; exit}')" "aes-xts-plain64"
 row "kdf" "$(groot 'cryptsetup luksDump /dev/sda5' | awk -F': *' '/PBKDF:/{print $2; exit}')" "argon2"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Logical volumes${C_RESET}\n"
 printf "${C_DIM}%s${C_RESET}\n" "$(g 'lsblk -no NAME,SIZE,MOUNTPOINT /dev/mapper/sda5_crypt | tail -n +2' | sed 's/^/    /')"
 row "free extents in VG" "$(groot 'vgs --noheadings -o vg_free' | tr -d ' ')" "--"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Born2beRoot policy${C_RESET}\n"
 row "sshd port" "$(g 'ss -tlnH | awk "{print \$4}" | grep -o ":4242$" | head -1')" ":4242"
 row "root ssh" "$(g 'grep -iE "^permitrootlogin" /etc/ssh/sshd_config* 2>/dev/null | head -1' | awk '{print $NF}')" "no"
@@ -125,8 +132,10 @@ row "pwd minlen" "$(g 'grep -h minlen /etc/security/pwquality.conf 2>/dev/null |
 row "monitoring" "$(g 'ls /usr/local/bin/monitoring.sh 2>/dev/null')" "monitoring.sh"
 row "cron entry" "$(groot 'grep -rh monitoring /etc/crontab /etc/cron.d/ /var/spool/cron/crontabs/ 2>/dev/null' | grep -c . | awk '{print ($1>0)?"scheduled":"MISSING"}')" "scheduled"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Login shell (installed from upstream on first boot)${C_RESET}\n"
 if g 'pgrep -f "first[-]boot-setup" >/dev/null'; then
+    # shellcheck disable=SC2059
     printf "  ${C_YELLOW}⚠${C_RESET}  first-boot-setup.sh is STILL RUNNING — the hellish plugin\n"
     printf "     framework installs near the end of it. Re-run this when it finishes:\n"
     printf "     ${C_DIM}ssh %s 'pgrep -f first-boot-setup.sh || echo done'${C_RESET}\n" "$ALIAS"
@@ -146,6 +155,7 @@ row "hellishrc" "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')" "dlesieur"
 # What the guest starts on its own runs under the same shell: the cron job,
 # the two systemd helpers (checked live, by the process name of their main
 # pid), the first-boot hook and the provisioners it ran.
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Interpreters (nothing the guest starts itself is bash)${C_RESET}\n"
 row "cron SHELL" "$(g 'sed -n "s/^SHELL=//p" /etc/crontab | head -1')" "/usr/bin/hellish.real"
 row "monitoring.sh" "$(g 'head -1 /usr/local/bin/monitoring.sh')" "#!/usr/bin/hellish.real"
@@ -177,6 +187,7 @@ else
 fi
 row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/null; echo "(line removed after it ran)"' | head -1)" "--"
 
+# shellcheck disable=SC2059
 printf "\n${C_BOLD}Services${C_RESET}\n"
 row "docker" "$(g 'systemctl is-active docker')" "active"
 row "ssh" "$(g 'systemctl is-active ssh')" "active"

@@ -435,10 +435,15 @@ warn_if_firefox_running() {
     local pid
     pid=$(firefox_main_pid)
     [ -n "$pid" ] || return 0
+    # shellcheck disable=SC2059
     printf "\n  ${C_YELLOW}${C_BOLD}Firefox is running and will NOT pick this up yet.${C_RESET}\n"
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}user.js is only read -r when a profile starts, so the pref is inert${C_RESET}\n"
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}until it restarts, and that now covers the proxy settings too,${C_RESET}\n"
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}so about:config is no longer a shortcut worth taking.${C_RESET}\n\n"
+    # shellcheck disable=SC2059
     printf "    ${C_BOLD}Quit Firefox completely${C_RESET} — every window, the process must exit —\n"
     printf "    then reopen it. Everything is already written to disk.\n"
 }
@@ -763,6 +768,7 @@ configure_chromium "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 configure_curl_wrapper "$P_HTTPS" "$P_STATIC" "$P_HTTP"
 [ "$PROXY_OK" = "1" ] && configure_desktop_proxy
 
+# shellcheck disable=SC2059
 printf "\n  ${C_BOLD}Open from this host:${C_RESET}\n"
 if [ "$PROXY_OK" = "1" ]; then
     printf "    Any browser  ${C_BOLD}https://%s${C_RESET}   ${C_DIM}(no port)${C_RESET}\n" "$DOMAIN"
@@ -774,9 +780,12 @@ else
 fi
 printf "    Terminal     ${C_BOLD}inception-curl https://%s/${C_RESET}\n" "$DOMAIN"
 if [ "$CA_TRUSTED" = "1" ]; then
+    # shellcheck disable=SC2059
     printf "\n  ${C_DIM}The local CA is trusted in both browsers — no certificate warning.${C_RESET}\n"
 else
+    # shellcheck disable=SC2059
     printf "\n  ${C_DIM}Firefox will warn about the certificate: the CA is local and${C_RESET}\n"
+    # shellcheck disable=SC2059
     printf "  ${C_DIM}self-signed, and could not be added to its store. Accept it once.${C_RESET}\n"
 fi
 # Only restart once there is a complete configuration to pick up. During

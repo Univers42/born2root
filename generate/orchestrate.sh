@@ -25,16 +25,20 @@ CLR='\033[2K'
 cleanup() {
     local sig="$1"
     stop_spinner 2>/dev/null || true
+    # shellcheck disable=SC2059
     printf "${SHOW_CUR}"
     rm -rf "$LOG_DIR"
     if [ "$sig" = "INT" ] || [ "$sig" = "TERM" ]; then
         # Ctrl+C stops this dashboard, not the VM: VirtualBox runs it in its own
         # process. Saying so avoids the obvious wrong conclusion — that the
         # install was cancelled and has to be started over from scratch.
+        # shellcheck disable=SC2059
         printf "\n${YLW}${BLD}  ⚠  Dashboard stopped — the VM keeps running${RST}\n"
         if VBoxManage list runningvms 2>/dev/null | grep -q "\"${VM_NAME}\""; then
+            # shellcheck disable=SC2059
             printf "${DIM}     watch it     make console\n"
             printf "     reattach     make all\n"
+            # shellcheck disable=SC2059
             printf "     stop the VM  make poweroff${RST}\n"
         fi
         printf "\n"
@@ -62,18 +66,24 @@ _dashboard_width() {
 }
 
 top() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}╭"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "╮${RST}\n"
 }
 mid() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}├"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "┤${RST}\n"
 }
 bot() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}╰"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "╯${RST}\n"
 }
 blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
@@ -137,9 +147,11 @@ row() {
     local pad
     pad=$((W - vlen))
     [ "$pad" -lt 0 ] && pad=0
+    # shellcheck disable=SC2059
     printf "  ${CYN}│${RST}"
     printf '%b' "$content"
     printf '%*s' "$pad" ""
+    # shellcheck disable=SC2059
     printf "${CYN}│${RST}\n"
 }
 
@@ -156,10 +168,12 @@ crow() {
     rpad=$((total_pad - lpad))
     [ "$lpad" -lt 0 ] && lpad=0
     [ "$rpad" -lt 0 ] && rpad=0
+    # shellcheck disable=SC2059
     printf "  ${CYN}│${RST}"
     printf '%*s' "$lpad" ""
     printf '%b' "$content"
     printf '%*s' "$rpad" ""
+    # shellcheck disable=SC2059
     printf "${CYN}│${RST}\n"
 }
 
@@ -185,16 +199,20 @@ SPIN_LEN=${#SPIN_FRAMES[@]}
 draw_dashboard() {
     local first_draw="${1:-false}"
     if [ "$first_draw" != "true" ] && [ "$DASHBOARD_LINES" -gt 0 ]; then
+        # shellcheck disable=SC2059
         printf "\033[${DASHBOARD_LINES}A"
     fi
     local lines=0
 
+    # shellcheck disable=SC2059
     printf "${CLR}"
     top
     lines=$((lines + 1))
+    # shellcheck disable=SC2059
     printf "${CLR}"
     crow "${BLD}${WHT}Born2beRoot  ─  VM Provisioner${RST}"
     lines=$((lines + 1))
+    # shellcheck disable=SC2059
     printf "${CLR}"
     mid
     lines=$((lines + 1))
@@ -259,11 +277,13 @@ draw_dashboard() {
             det_str=" ${DIM}${det}${RST}"
         fi
 
+        # shellcheck disable=SC2059
         printf "${CLR}"
         row "  ${color}${BLD}${icon}${RST}  ${color}${padded_name}${RST} ${color}${label}${RST}${det_str}"
         lines=$((lines + 1))
     done
 
+    # shellcheck disable=SC2059
     printf "${CLR}"
     bot
     lines=$((lines + 1))
@@ -330,12 +350,14 @@ run_phase() {
     if [ "$rc" -ne 0 ]; then
         STEP_STATUS[$idx]="fail"
         draw_dashboard
+        # shellcheck disable=SC2059
         printf "\n${RED}${BLD}  ── Error log: ${STEPS[$idx]} ──${RST}\n${DIM}"
         if [ -f "$log" ]; then
             tail -30 "$log" | sed 's/^/    /'
         else
             printf "    (log file was cleaned up)\n"
         fi
+        # shellcheck disable=SC2059
         printf "${RST}\n"
         exit 1
     fi
@@ -532,6 +554,7 @@ ensure_vm_nat_forwarding() {
 # ═════════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════════
+# shellcheck disable=SC2059
 printf "${HIDE_CUR}\n"
 _dashboard_width
 draw_dashboard true
@@ -993,15 +1016,20 @@ if [ "$BOOT1" = "dvd" ]; then
     INSTALL_MINS=$((($(date +%s) - INSTALL_START) / 60))
     if [ "$INSTALL_OK" != true ]; then
         set_step $S_INSTALL fail "install timed out after ~${INSTALL_MINS}m"
+        # shellcheck disable=SC2059
         printf "\n${RED}${BLD}  ── The installer never finished ──${RST}\n"
+        # shellcheck disable=SC2059
         printf "${DIM}    Look at what it was doing:  make console\n"
         printf "    Or at its screen:           VBoxManage controlvm %s screenshotpng /tmp/vm.png${RST}\n\n" "${VM_NAME}"
         exit 1
     fi
     if ! install_wrote_data; then
         set_step $S_INSTALL fail "installer wrote nothing to the disk"
+        # shellcheck disable=SC2059
         printf "\n${RED}${BLD}  ── The disk is still empty ──${RST}\n"
+        # shellcheck disable=SC2059
         printf "${DIM}    The installer booted but never installed. Usually this means it\n"
+        # shellcheck disable=SC2059
         printf "    stopped on a prompt nothing answered. Check with: make console${RST}\n\n"
         exit 1
     fi
@@ -1217,6 +1245,7 @@ setup_ssh_key_auth 2>/dev/null || true
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 HOST_IP=$(get_host_ip)
+# shellcheck disable=SC2059
 printf "${SHOW_CUR}\n"
 
 # Compute responsive box width from the longest content line

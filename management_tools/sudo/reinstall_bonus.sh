@@ -163,7 +163,7 @@ systemctl enable php8.2-fpm
 
 # Step 7: Download and configure WordPress
 echo "Step 7: Downloading and configuring WordPress..."
-cd /tmp
+cd /tmp || exit 1
 wget https://wordpress.org/latest.tar.gz
 tar -xf latest.tar.gz
 cp -a /tmp/wordpress/. /var/www/html/

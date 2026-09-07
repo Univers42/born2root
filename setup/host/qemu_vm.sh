@@ -462,8 +462,11 @@ launch() {
         local why
         if ! why=$(kvm_why); then
             printf "  ${C_RED}✗${C_RESET} KVM %s\n" "$why" >&2
+            # shellcheck disable=SC2059
             printf "    ${C_DIM}QEMU and VirtualBox cannot both run a VM on this host at once.${C_RESET}\n" >&2
+            # shellcheck disable=SC2059
             printf "    ${C_DIM}Either wait for / stop the VirtualBox VM:  VBoxManage controlvm <name> acpipowerbutton${C_RESET}\n" >&2
+            # shellcheck disable=SC2059
             printf "    ${C_DIM}or build with it instead:                  make all BACKEND=virtualbox${C_RESET}\n" >&2
             die "cannot start QEMU with KVM"
         fi
@@ -751,6 +754,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         printf 'installing\n' >"$PHASE"
         rm -f "$STAMP"
         launch cdrom
+        # shellcheck disable=SC2059
         printf "\n  ${C_BOLD}Unattended install running.${C_RESET} ${C_DIM}What follows is the installer's own log,\n"
         printf "  read -r off its serial port. Ctrl+C detaches; re-attach with: %s watch${C_RESET}\n\n" "$0"
         # finish-install writes B2B-INSTALL-COMPLETE to ttyS0, then d-i halts.
@@ -1024,6 +1028,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
     console)
         [ -f "$SERIAL" ] || need_running_or_die
         [ -f "$SERIAL" ] || die "no serial log yet"
+        # shellcheck disable=SC2059
         printf "  ${C_DIM}Ctrl+C stops watching, not the VM${C_RESET}\n\n"
         tail -f "$SERIAL"
         ;;

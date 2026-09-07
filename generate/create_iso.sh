@@ -6,7 +6,7 @@ MODIFIED_ISO="debian-11-auto.iso"
 
 # Create a temporary working directory
 TEMP_DIR=$(mktemp -d)
-cd "$TEMP_DIR"
+cd "$TEMP_DIR" || exit 1
 
 # Extract the original ISO
 mkdir -p iso

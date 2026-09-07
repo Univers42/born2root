@@ -32,18 +32,24 @@ W=$(($(tput cols 2>/dev/null || echo 100) - 6))
 [ "$W" -gt 78 ] && W=78
 
 top() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}╭"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "╮${RST}\n"
 }
 mid() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}├"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "┤${RST}\n"
 }
 bot() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}╰"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "╯${RST}\n"
 }
 
@@ -57,9 +63,11 @@ row() {
     local content="$1" pad
     pad=$((W - $(_vlen "$content")))
     [ "$pad" -lt 0 ] && pad=0
+    # shellcheck disable=SC2059
     printf "  ${CYN}│${RST}"
     printf '%b' "$content"
     printf '%*s' "$pad" ""
+    # shellcheck disable=SC2059
     printf "${CYN}│${RST}\n"
 }
 
@@ -69,10 +77,12 @@ crow() {
     [ "$total" -lt 0 ] && total=0
     lpad=$((total / 2))
     rpad=$((total - lpad))
+    # shellcheck disable=SC2059
     printf "  ${CYN}│${RST}"
     printf '%*s' "$lpad" ""
     printf '%b' "$content"
     printf '%*s' "$rpad" ""
+    # shellcheck disable=SC2059
     printf "${CYN}│${RST}\n"
 }
 

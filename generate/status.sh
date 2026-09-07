@@ -21,18 +21,24 @@ BLU='\033[34m'
 W=60 # inner visible width between │ chars
 
 top() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}╭"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "╮${RST}\n"
 }
 mid() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}├"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "┤${RST}\n"
 }
 bot() {
+    # shellcheck disable=SC2059
     printf "  ${CYN}╰"
     printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
     printf "╯${RST}\n"
 }
 
@@ -46,9 +52,11 @@ row() {
     local pad
     pad=$((W - vlen))
     [ "$pad" -lt 0 ] && pad=0
+    # shellcheck disable=SC2059
     printf "  ${CYN}│${RST}"
     printf '%b' "$content"
     printf '%*s' "$pad" ""
+    # shellcheck disable=SC2059
     printf "${CYN}│${RST}\n"
 }
 
@@ -65,10 +73,12 @@ crow() {
     rpad=$((total_pad - lpad))
     [ "$lpad" -lt 0 ] && lpad=0
     [ "$rpad" -lt 0 ] && rpad=0
+    # shellcheck disable=SC2059
     printf "  ${CYN}│${RST}"
     printf '%*s' "$lpad" ""
     printf '%b' "$content"
     printf '%*s' "$rpad" ""
+    # shellcheck disable=SC2059
     printf "${CYN}│${RST}\n"
 }
 

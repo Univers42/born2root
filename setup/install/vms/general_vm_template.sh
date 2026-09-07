@@ -14,7 +14,7 @@ VM_BASE_PATH="/sgoinfre/students/dlesieur/dlesieur42/m_virtual_machine"
 ISO_PATH="$VM_BASE_PATH/debian-12.10.0-amd64-netinst.iso"
 VM_DISK_PATH="$VM_BASE_PATH/$VM_NAME/$VM_NAME.vdi"
 SSH_PORT="4242" # 42 project requires SSH on port 4242
-HTTP__HOST_PORT="8080"
+HTTP_HOST_PORT="8080"
 HTTP_GUEST_PORT="80"
 HOSTNAME="dlesieur" # Your login as hostname (set during OS installation)
 

@@ -149,7 +149,7 @@ if [ -d "$WP_PLUGINS_DIR/$PLUGIN_NAME" ]; then
 
     if [[ "$REPLACE" == "y" || "$REPLACE" == "Y" ]]; then
         echo -e "Removing existing plugin..."
-        rm -rf "$WP_PLUGINS_DIR/$PLUGIN_NAME"
+        rm -rf "${WP_PLUGINS_DIR:?}/${PLUGIN_NAME:?}"
     else
         echo -e "${YELLOW}Installation cancelled.${NC}"
         exit 0

@@ -101,7 +101,7 @@ mysql -u root -e "FLUSH PRIVILEGES;"
 echo "[OK] MariaDB configured"
 
 # WordPress download — always pull the latest release via curl
-cd /var/www/html
+cd /var/www/html || exit 1
 if [ -d wordpress ]; then
     echo "WordPress directory already exists — backing up and re-downloading"
     mv wordpress wordpress.bak.$(date +%s)
