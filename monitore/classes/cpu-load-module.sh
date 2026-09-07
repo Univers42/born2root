@@ -46,8 +46,10 @@ cpu_load_module() {
 
             if [[ -n "$stat1" && -n "$stat2" ]]; then
                 # Parse the stats
-                local cpu1=($stat1)
-                local cpu2=($stat2)
+                local cpu1
+                read -r -a cpu1 <<< "$stat1"
+                local cpu2
+                read -r -a cpu2 <<< "$stat2"
 
                 # Calculate total CPU time for each sample (include all fields)
                 local total1=0

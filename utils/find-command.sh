@@ -43,7 +43,7 @@ command_exists() {
 spinner() {
     local pid=$1
     local delay=0.1
-    local spinstr='|/-\'
+    local spinstr="|/-\\"
     while ps -p "$pid" >/dev/null; do
         local temp=${spinstr#?}
         printf " [%c]  " "$spinstr"
@@ -104,6 +104,7 @@ if ! command_exists apt-file; then
 
     fi
 
+    # shellcheck disable=SC2181
     if [ $? -ne 0 ]; then
         print_color "$RED" "Failed to install apt-file. Please install it manually with: sudo apt install apt-file"
         exit 1
@@ -112,7 +113,7 @@ if ! command_exists apt-file; then
 fi
 
 # Update apt-file database if needed
-APT_FILE_UPDATED=0
+
 if [ "$FORCE_UPDATE" -eq 1 ] || [ ! -f /var/cache/apt/apt-file/index.apt-file ]; then
     print_color "$YELLOW" "Updating apt-file database (this may take a moment)..."
     if [ "$QUIET" -eq 0 ]; then
@@ -123,6 +124,7 @@ if [ "$FORCE_UPDATE" -eq 1 ] || [ ! -f /var/cache/apt/apt-file/index.apt-file ];
 
     fi
 
+    # shellcheck disable=SC2181
     if [ $? -ne 0 ]; then
         print_color "$RED" "Failed to update apt-file database."
         exit 1

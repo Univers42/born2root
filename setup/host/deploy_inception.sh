@@ -53,6 +53,7 @@ die() {
     exit 1
 }
 
+# shellcheck disable=SC2029
 vm_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$@"; }
 
 # ── The guest sudo password ─────────────────────────────────────────────────

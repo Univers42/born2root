@@ -95,9 +95,7 @@ network_module() {
 
     # For network, mainly check if we get a consistent IP address
     # Extract IP addresses
-    extract_ip() {
-        echo "$1" | grep -o "IP [0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+" | cut -d' ' -f2
-    }
+
 
     # Variables removed because they are unused.
     # Determine the best available method

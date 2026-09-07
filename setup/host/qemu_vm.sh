@@ -401,7 +401,7 @@ sendkey_string() {
         ch="${s:$i:1}"
         case "$ch" in
         [a-z0-9]) key="$ch" ;;
-        [A-Z]) key="shift-$(printf '%s' "$ch" | tr 'A-Z' 'a-z')" ;;
+        [A-Z]) key="shift-$(printf '%s' "$ch" | tr '[:upper:]' '[:lower:]')" ;;
         '-') key="minus" ;;
         '_') key="shift-minus" ;;
         '.') key="dot" ;;

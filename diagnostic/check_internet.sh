@@ -6,7 +6,7 @@ echo -e "==============================================================="
 echo -e "	BORN2BEROOT CHECK CONNECTIONS TO NETWORK		"
 echo -e "================================================================"
 echo -e "Create Date and time (UTC): $(date -u + "%Y-%m-%d %H:%M:%S")${NC}"
-echo -e "Current User: ${whoami}"
+echo -e "Current User: $(whoami)"
 # verirfy prerequisites of installation
 
 prerequisites_check

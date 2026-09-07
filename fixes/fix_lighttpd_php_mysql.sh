@@ -57,7 +57,7 @@ else
     echo "This is unusual. Searching for PHP configuration directories..."
 
     # Try to find PHP directories
-    PHP_DIRS=$(find /etc -name "php*.ini" 2>/dev/null | xargs dirname 2>/dev/null)
+    PHP_DIRS=$(find /etc -name "php*.ini" -print0 2>/dev/null | xargs -0 dirname 2>/dev/null)
 
     if [ -n "$PHP_DIRS" ]; then
         echo "Found PHP configuration in: $PHP_DIRS"
@@ -111,9 +111,11 @@ if [ -d "/etc/php/8.2/fpm/pool.d" ]; then
         # Check if mysqli is already in the php_admin_value
         if ! grep -q "php_admin_value\[extension\] = mysqli.so" "$POOL_CONF"; then
             echo "Adding mysqli to PHP-FPM pool configuration..."
-            echo "" >>"$POOL_CONF"
-            echo "; Force load mysqli extension" >>"$POOL_CONF"
-            echo "php_admin_value[extension] = mysqli.so" >>"$POOL_CONF"
+            {
+                echo ""
+                echo "; Force load mysqli extension"
+                echo "php_admin_value[extension] = mysqli.so"
+            } >>"$POOL_CONF"
         fi
     fi
 fi

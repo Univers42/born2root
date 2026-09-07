@@ -79,7 +79,8 @@ restore_config() {
     echo -e "${BLUE}=== Configuration Restore Tool for $component ===${NC}"
 
     # List available backups for the component
-    local backups=($(ls -1 "$BACKUP_DIR" | grep "^${component}_"))
+    local backups=()
+    mapfile -t backups < <(find "$BACKUP_DIR" -maxdepth 1 -name "${component}_*" -printf '%f\n' 2>/dev/null | sort)
 
     if [ ${#backups[@]} -eq 0 ]; then
         echo -e "${RED}No backups found for $component${NC}"
@@ -90,7 +91,8 @@ restore_config() {
     local i=1
     for backup in "${backups[@]}"; do
         local backup_date
-        backup_date=$(echo "$backup" | sed "s/${component}_\([0-9]\{8\}_[0-9]\{6\}\).*/\1/")
+        backup_date="${backup#${component}_}"
+        backup_date="${backup_date:0:15}"
         backup_date=$(date -d "${backup_date:0:8} ${backup_date:9:2}:${backup_date:11:2}:${backup_date:13:2}" "+%Y-%m-%d %H:%M:%S")
         echo -e "  ${YELLOW}$i)${NC} $backup_date"
         i=$((i + 1))

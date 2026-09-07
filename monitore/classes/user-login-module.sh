@@ -10,7 +10,7 @@ user_login_module() {
             local users_output
             users_output=$(users 2>/dev/null)
             if [ -n "$users_output" ]; then
-                echo "$(echo "$users_output" | wc -w)"
+                echo "$users_output" | wc -w
             else
                 echo "N/A"
             fi
@@ -25,7 +25,7 @@ user_login_module() {
             local who_output
             who_output=$(who 2>/dev/null)
             if [ -n "$who_output" ]; then
-                echo "$(echo "$who_output" | wc -l)"
+                echo "$who_output" | wc -l
             else
                 echo "N/A"
             fi
@@ -40,7 +40,7 @@ user_login_module() {
             local w_output
             w_output=$(w -h 2>/dev/null)
             if [ -n "$w_output" ]; then
-                echo "$(echo "$w_output" | wc -l)"
+                echo "$w_output" | wc -l
             else
                 echo "N/A"
             fi
@@ -55,7 +55,7 @@ user_login_module() {
             local last_output
             last_output=$(last 2>/dev/null | grep -c "still logged in")
             if [ -n "$last_output" ]; then
-                echo "$(echo "$last_output")"
+                echo "$last_output"
             else
                 echo "0" # No users still logged in is valid
             fi
@@ -70,7 +70,7 @@ user_login_module() {
             local loginctl_output
             loginctl_output=$(loginctl list-sessions --no-legend 2>/dev/null)
             if [ -n "$loginctl_output" ]; then
-                echo "$(echo "$loginctl_output" | wc -l)"
+                echo "$loginctl_output" | wc -l
             else
                 echo "N/A"
             fi

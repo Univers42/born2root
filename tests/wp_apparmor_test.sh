@@ -131,7 +131,7 @@ echo -e "\nStep 6: Checking for AppArmor denial logs..."
 DENIALS=$(dmesg | grep -i "apparmor.*DENIED" | tail -10)
 if [ -n "$DENIALS" ]; then
     echo -e "AppArmor security events detected (good!):\n"
-    echo "$DENIALS" | sed 's/^/   /'
+    echo "$DENIALS" | while read -r line; do echo "   $line"; done
 else
     echo "No AppArmor denials found. Security may not be enforcing properly."
 fi

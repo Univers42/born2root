@@ -45,6 +45,7 @@ install_package() {
 
     fi
 
+    # shellcheck disable=SC2181
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ $package installed successfully${NC}"
         return 0

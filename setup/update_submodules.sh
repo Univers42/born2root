@@ -87,7 +87,7 @@ repair_orphans() {
     while read -r _ path; do
         [ -n "$path" ] || continue
         is_registered "$repo" "$path" && continue
-        say "${Y}⚠${Z}  Orphan gitlink in ${repo#$ROOT/}: ${path} (missing from .gitmodules)"
+        say "${Y}⚠${Z}  Orphan gitlink in ${repo#"$ROOT/"}: ${path} (missing from .gitmodules)"
         url=$(infer_url "$repo" "$path") || {
             say "${R}✗${Z} Cannot infer URL for ${path}"
             continue
@@ -121,7 +121,7 @@ process_repo() {
     # recursion branch, so an A->B->A (or A->A) submodule cycle terminates.
     origin=$(norm_url "$(git -C "$repo" config --get remote.origin.url 2>/dev/null)")
     if seen_url "$origin"; then
-        say "${Y}⚠${Z}  Cycle detected at ${repo#$ROOT/} (origin ${origin}) — not recursing"
+        say "${Y}⚠${Z}  Cycle detected at ${repo#"$ROOT/"} (origin ${origin}) — not recursing"
         return
     fi
     [ -n "$origin" ] && VISITED="${VISITED}${origin} "

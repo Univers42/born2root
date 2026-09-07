@@ -94,7 +94,7 @@ if [ "$TEST_CONNECTION" = "y" ] || [ "$TEST_CONNECTION" = "Y" ]; then
             if [ -n "$WP_PATH" ]; then
                 echo -e "${GREEN}WordPress installation found!${NC}"
                 echo -e "Possible WordPress paths:"
-                echo "$WP_PATH" | sed 's/^/  - /'
+                echo "  - $WP_PATH"
 
                 PLUGINS_PATH="${WP_PATH%/*}/plugins"
                 echo -e "\n${BLUE}Your WordPress plugins path is likely:${NC}"

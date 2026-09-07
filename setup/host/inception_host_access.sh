@@ -216,7 +216,6 @@ UNITEOF
     # of that. The proxy then runs as a plain detached process with a pid file:
     # same binary, same port, gone with the session instead of restarted at
     # login, and --undo stops it too.
-    local i
     if systemctl --user show-environment >/dev/null 2>&1; then
         systemctl --user daemon-reload >/dev/null 2>&1
         systemctl --user reset-failed inception-proxy.service >/dev/null 2>&1 || true
@@ -224,7 +223,7 @@ UNITEOF
         # an older copy of the proxy alive after an upgrade. Always restart.
         systemctl --user enable inception-proxy.service >/dev/null 2>&1
         if systemctl --user restart inception-proxy.service >/dev/null 2>&1; then
-            for i in 1 2 3 4 5 6 7 8 9 10; do
+            for _ in {1..10}; do
                 port_is_free "$PROXY_PORT" || break # bound = it is up
                 sleep 0.5
             done

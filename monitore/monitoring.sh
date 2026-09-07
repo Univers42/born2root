@@ -66,9 +66,9 @@ update_metric_state() {
 get_state_name() {
     local state=$1
     case $state in
-    $STATE_OK) echo "OK" ;;
-    $STATE_WARNING) echo "WARNING" ;;
-    $STATE_ERROR) echo "ERROR" ;;
+    "$STATE_OK") echo "OK" ;;
+    "$STATE_WARNING") echo "WARNING" ;;
+    "$STATE_ERROR") echo "ERROR" ;;
     *) echo "UNKNOWN" ;;
     esac
 }
@@ -113,9 +113,9 @@ print_verification_result() {
     # Metric name with appropriate color based on state
     local color_prefix=""
     case $state in
-    $STATE_OK) color_prefix="${GREEN}" ;;
-    $STATE_WARNING) color_prefix="${YELLOW}" ;;
-    $STATE_ERROR) color_prefix="${RED}" ;;
+    "$STATE_OK") color_prefix="${GREEN}" ;;
+    "$STATE_WARNING") color_prefix="${YELLOW}" ;;
+    "$STATE_ERROR") color_prefix="${RED}" ;;
     *) color_prefix="${LIGHT_GRAY}" ;;
     esac
 
@@ -177,8 +177,8 @@ compare_numeric_values() {
     local threshold="$3"
 
     # Remove any non-numeric characters (except decimal point)
-    reference=$(echo "$reference" | sed 's/[^0-9.]//g')
-    value=$(echo "$value" | sed 's/[^0-9.]//g')
+    reference="${reference//[^0-9.]/}"
+    value="${value//[^0-9.]/}"
 
     # Check for empty or zero reference to avoid division by zero
     if [[ -z "$reference" || "$reference" == "0" || "$reference" == "0.0" ]]; then
@@ -378,7 +378,7 @@ main() {
     if [ -n "$SUDO_USER" ]; then
         current_user=$SUDO_USER
     fi
-    BROADCAST_MSG="$(echo "Broadcast message from $current_user@$(hostname) ($(tty | sed 's/\/dev\/pts\//tty/')) ($(date '+%a %b %d %H:%M:%S %Y')):")"
+    BROADCAST_MSG="Broadcast message from $current_user@$(hostname) ($(tty | sed 's/\/dev\/pts\//tty/')) ($(date '+%a %b %d %H:%M:%S %Y')):"
 
     FINAL_OUTPUT="${ascii_header}
 ${BROADCAST_MSG}

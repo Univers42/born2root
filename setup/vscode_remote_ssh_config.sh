@@ -68,12 +68,7 @@ VSCODE_SETTINGS="${HOME}/.config/Code/User/settings.json"
 # Create directory if it doesn't exist
 mkdir -p "$(dirname "$VSCODE_SETTINGS")"
 
-# Read existing settings or start with empty object
-if [ -f "$VSCODE_SETTINGS" ]; then
-    SETTINGS=$(cat "$VSCODE_SETTINGS")
-else
-    SETTINGS='{}'
-fi
+
 
 # Use Python to safely merge JSON settings (handles existing settings gracefully)
 if python3 <<PYTHON_EOF

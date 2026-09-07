@@ -208,7 +208,7 @@ if sudo grep -q "passwd_tries" /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
 else
     echo -e "${RED}✗ Sudo password attempts limit is not configured${NC}"
     echo -e "  Fix: Add 'Defaults passwd_tries=3' to /etc/sudoers.d/sudo_config"
-    SUDO_CONFIG_OK=false
+
 fi
 
 if sudo grep -q "badpass_message" /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
@@ -216,7 +216,7 @@ if sudo grep -q "badpass_message" /etc/sudoers /etc/sudoers.d/* 2>/dev/null; the
 else
     echo -e "${RED}✗ Sudo bad password message is not configured${NC}"
     echo -e "  Fix: Add 'Defaults badpass_message=\"Password is wrong, please try again\"' to /etc/sudoers.d/sudo_config"
-    SUDO_CONFIG_OK=false
+
 fi
 
 # Check SSH Configuration

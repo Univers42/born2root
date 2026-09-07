@@ -361,7 +361,8 @@ setup_user_config() {
         log "${user}: ${cfg} already exists — leaving it alone (NVIM_FORCE_CONFIG=1 to replace)"
     else
         if [ -e "$cfg" ]; then
-            local backup="${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+            local backup
+            backup="${cfg}.bak.$(date +%Y%m%d%H%M%S)"
             log "${user}: moving existing config aside -> ${backup}"
             mv "$cfg" "$backup" || {
                 warn "${user}: could not back up ${cfg}"

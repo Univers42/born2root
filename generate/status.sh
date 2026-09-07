@@ -10,13 +10,10 @@ PRESEED_FILE="${2:-preseeds/preseed.cfg}"
 # shellcheck disable=SC2034
 RST='\033[0m'
 BLD='\033[1m'
-DIM='\033[2m'
 GRN='\033[32m'
 YLW='\033[33m'
 RED='\033[31m'
 CYN='\033[36m'
-WHT='\033[97m'
-BLU='\033[34m'
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
 W=60 # inner visible width between │ chars

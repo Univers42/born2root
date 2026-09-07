@@ -22,6 +22,7 @@ SHOW_CUR='\033[?25h'
 CLR='\033[2K'
 
 # Early trap (before functions are defined)
+# shellcheck disable=SC2329
 cleanup() {
     local sig="$1"
     stop_spinner 2>/dev/null || true
@@ -415,6 +416,7 @@ get_host_ip() {
 # what keeps the dashboard alive during that wait instead of leaving a frozen
 # spinner that looks like a hang.
 UNLOCK_T0=0
+# shellcheck disable=SC2329
 unlock_sleep() {
     sleep "$1"
     local e
@@ -1035,7 +1037,7 @@ if [ "$BOOT1" = "dvd" ]; then
     fi
     # Only now is the disk worth trusting on a later run, so stamp it only now.
     mark_install_finished
-    set_step $S_INSTALL done "Debian installed in ~${INSTALL_MINS}m"
+    set_step $S_INSTALL "done" "Debian installed in ~${INSTALL_MINS}m"
 fi
 
 # Step 5 — First boot off the disk, unlocked from the host
@@ -1053,7 +1055,7 @@ fi
 
 set_step $S_BOOT working "unlocking LUKS, waiting for sshd..."
 if unlock_booted_vm; then
-    set_step $S_BOOT done "booted and unlocked ✓"
+    set_step $S_BOOT "done" "booted and unlocked ✓"
 else
     set_step $S_BOOT warn "LUKS unlock timed out — see: make console"
 fi

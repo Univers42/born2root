@@ -45,6 +45,7 @@ fi
 
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10)
+# shellcheck disable=SC2029
 g() { ssh "${SSH_OPTS[@]}" "$ALIAS" "$@" 2>/dev/null; }
 
 guest_pass() {

@@ -118,8 +118,8 @@ else
     echo -e "${YELLOW}Finding changed files...${NC}"
     CHANGED_FILES=()
 
-    for file in $(find "$SOURCE_THEME_PATH" -type f -name "*.*"); do
-        REL_PATH=${file#$SOURCE_THEME_PATH/}
+    while IFS= read -r -d '' file; do
+        REL_PATH=${file#"$SOURCE_THEME_PATH"/}
         DEST_FILE="$DEST_THEME_DIR/$REL_PATH"
 
         if [ ! -f "$DEST_FILE" ]; then
@@ -127,17 +127,17 @@ else
         elif ! cmp -s "$file" "$DEST_FILE"; then
             CHANGED_FILES+=("Modified: $REL_PATH")
         fi
-    done
+    done < <(find "$SOURCE_THEME_PATH" -type f -name "*.*" -print0 2>/dev/null)
 
     # Find deleted files
-    for file in $(find "$DEST_THEME_DIR" -type f -name "*.*"); do
-        REL_PATH=${file#$DEST_THEME_DIR/}
+    while IFS= read -r -d '' file; do
+        REL_PATH=${file#"$DEST_THEME_DIR"/}
         SOURCE_FILE="$SOURCE_THEME_PATH/$REL_PATH"
 
         if [ ! -f "$SOURCE_FILE" ]; then
             CHANGED_FILES+=("Deleted: $REL_PATH")
         fi
-    done
+    done < <(find "$DEST_THEME_DIR" -type f -name "*.*" -print0 2>/dev/null)
 
     # Replace theme files
     echo -e "${YELLOW}Updating theme files...${NC}"

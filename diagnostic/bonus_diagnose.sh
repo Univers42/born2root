@@ -52,7 +52,7 @@ echo
 echo "=== WordPress Files Check ==="
 if [ -d /var/www/html ]; then
     echo "Web root directory exists: /var/www/html"
-    ls -la /var/www/html/ | head -n 20
+    find /var/www/html/ -maxdepth 1 -ls | head -n 20
 
     # Check for wp-config.php
     WP_CONFIG=$(find /var/www/html -name wp-config.php -type f | head -n 1)

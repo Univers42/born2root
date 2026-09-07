@@ -57,7 +57,9 @@ EOF
 
     # Generate VG restore commands for each VG
     for vg_conf in "$backup_path"/vg_*.conf; do
-        vg_name=$(basename "$vg_conf" | sed 's/vg_\(.*\)\.conf/\1/')
+        vg_name=$(basename "$vg_conf")
+        vg_name="${vg_name#vg_}"
+        vg_name="${vg_name%.conf}"
         echo "sudo vgcfgrestore -f \"$vg_conf\" $vg_name" >>"$backup_path/restore.sh"
     done
 
@@ -100,7 +102,8 @@ restore_lvm_config() {
     echo -e "${BLUE}=== LVM Configuration Restore Tool ===${NC}"
 
     # List available backups
-    local backups=($(ls -1 "$BACKUP_DIR" | grep lvm_backup_))
+    local backups=()
+    mapfile -t backups < <(find "$BACKUP_DIR" -maxdepth 1 -name "*lvm_backup_*" -printf '%f\n' 2>/dev/null | sort)
 
     if [ ${#backups[@]} -eq 0 ]; then
         echo -e "${RED}No backups found in $BACKUP_DIR${NC}"
@@ -111,7 +114,8 @@ restore_lvm_config() {
     local i=1
     for backup in "${backups[@]}"; do
         local backup_date
-        backup_date=$(echo "$backup" | sed 's/lvm_backup_\([0-9]\{8\}_[0-9]\{6\}\).*/\1/')
+        backup_date="${backup#lvm_backup_}"
+        backup_date="${backup_date:0:15}"
         backup_date=$(date -d "${backup_date:0:8} ${backup_date:9:2}:${backup_date:11:2}:${backup_date:13:2}" "+%Y-%m-%d %H:%M:%S")
         echo -e "  ${YELLOW}$i)${NC} $backup_date"
         i=$((i + 1))

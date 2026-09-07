@@ -5,7 +5,7 @@ BACKUP_DIR=~/backups
 mkdir -p $BACKUP_DIR
 
 # Set source directory and create timestamp
-SOURCE_DIR=/var/www/html/wp-content/plugins/notion_wordpress_sync
+
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 BACKUP_FILE="$BACKUP_DIR/notion_wordpress_sync_$TIMESTAMP.tar.gz"
 

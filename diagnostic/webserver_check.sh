@@ -10,9 +10,9 @@ echo "=== COMPREHENSIVE WEB SERVER CHECK ==="
 
 # Method 1: Check processes
 echo -e "${YELLOW}Method 1: Process detection${NC}"
-if ps aux | grep -v grep | grep -q "lighttpd"; then
+if pgrep -x "lighttpd" >/dev/null; then
     echo -e "${GREEN}✓ Lighttpd process is running${NC}"
-    ps aux | grep -v grep | grep "lighttpd" | sed 's/^/  /'
+    pgrep -a -x "lighttpd" | sed 's/^/  /'
 else
     echo -e "${RED}✗ No Lighttpd process found${NC}"
 fi

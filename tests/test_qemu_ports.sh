@@ -35,6 +35,7 @@ export VM_NAME VM_PATH PORTS_SPEC
 
 # Stub the host probe: pretend 3306 is already taken (the reproduced bug),
 # everything else free -- same technique as tests/test_host_ports.sh.
+# shellcheck disable=SC2329
 is_host_port_free() {
     case "$1" in
     3306) return 1 ;;

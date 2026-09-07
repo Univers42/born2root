@@ -22,7 +22,7 @@ code --install-extension ms-vscode.remote-explorer --no-verify-signatures 2>&1 |
 
 echo ""
 echo "Installed extensions:"
-ls -d ~/.vscode/extensions/ms-vscode-remote.* 2>/dev/null | xargs -I {} basename {}
+find ~/.vscode/extensions -maxdepth 1 -name "ms-vscode-remote.*" -printf "%f\n" 2>/dev/null
 
 echo ""
 echo "✓ Done! Please restart VS Code completely (close all windows)."

@@ -34,7 +34,7 @@ remove_program() {
 
     # Combine both lists and remove duplicates
     local all_found=("${found_in_path[@]}" "${found_symlinks[@]}")
-    all_found=($(printf "%s\n" "${all_found[@]}" | sort -u))
+    mapfile -t all_found < <(printf "%s\n" "${all_found[@]}" | sort -u)
 
     # Check if any programs were found
     if [ ${#all_found[@]} -eq 0 ]; then

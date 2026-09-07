@@ -143,12 +143,14 @@ show_disk_info() {
     # Show disk health if smartctl is available
     if command -v smartctl &>/dev/null; then
         echo -e "\n${CYAN}Disk Health:${RESET}"
-        for disk in $(ls /dev/sd* 2>/dev/null | grep -v [0-9]); do
+        for disk in /dev/sd*[!0-9]; do
+            [ -e "$disk" ] || continue
             echo -e "${YELLOW}$disk:${RESET}"
             sudo smartctl -H "$disk" 2>/dev/null || echo "Unable to check health"
         done
 
-        for disk in $(ls /dev/nvme* 2>/dev/null | grep -v p[0-9]); do
+        for disk in /dev/nvme*[!p][!0-9]; do
+            [ -e "$disk" ] || continue
             echo -e "${YELLOW}$disk:${RESET}"
             sudo smartctl -H "$disk" 2>/dev/null || echo "Unable to check health"
         done

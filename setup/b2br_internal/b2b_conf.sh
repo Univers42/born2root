@@ -228,7 +228,7 @@ if dpkg -l | grep -q lighttpd; then
 
     echo -e "${YELLOW}Downloading and installing WordPress...${NC}"
     # Download and configure WordPress
-    cd /var/www/html
+    cd /var/www/html || exit 1
     wget https://wordpress.org/latest.tar.gz
     tar -xzvf latest.tar.gz
     rm latest.tar.gz

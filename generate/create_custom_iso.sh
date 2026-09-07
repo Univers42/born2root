@@ -457,7 +457,7 @@ fi
 # Update MD5 sums
 echo "Updating MD5 checksums..."
 cd "$ISO_DIR"
-find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + >md5sum.txt 2>/dev/null || true
+find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + > md5sum.txt.tmp 2>/dev/null || true; mv md5sum.txt.tmp md5sum.txt
 cd "$REPO_ROOT"
 
 # Rebuild ISO
