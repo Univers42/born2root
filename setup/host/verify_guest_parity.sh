@@ -132,8 +132,16 @@ row "nat-keepalive"  "$(g 'head -1 /usr/local/bin/nat-keepalive.sh')"   "#!/usr/
 row "sshd-watchdog"  "$(g 'head -1 /usr/local/bin/sshd-watchdog.sh')"   "#!/usr/bin/hellish.real"
 # A script's process is named after the script (comm), so the interpreter is
 # argv[0] of the unit's main pid, readable by anyone in /proc/<pid>/cmdline.
-row "keepalive pid"  "$(g 'tr "\\0" " " < /proc/$(systemctl show -p MainPID --value nat-keepalive)/cmdline | cut -d" " -f1')" "/usr/bin/hellish.real"
-row "watchdog pid"   "$(g 'tr "\\0" " " < /proc/$(systemctl show -p MainPID --value sshd-watchdog)/cmdline | cut -d" " -f1')" "/usr/bin/hellish.real"
+# Both units are Restart=always with RestartSec=5, and sshd-watchdog
+# Requires=ssh.service, so first boot's (and shell_vm's) `systemctl restart
+# ssh` restarts it: for a few seconds the unit has no main pid at all, and a
+# table drawn in that window said "(none)" of a unit that was fine. Wait it
+# out; a unit that never comes back still reads (none).
+unit_interp() { # unit_interp <unit>  -> argv[0] of its main process
+	g 'p=0; for _ in 1 2 3 4 5 6 7 8; do p=$(systemctl show -p MainPID --value '"$1"'); [ "$p" != 0 ] && break; sleep 3; done; tr "\\0" " " < /proc/$p/cmdline | cut -d" " -f1'
+}
+row "keepalive pid"  "$(unit_interp nat-keepalive)" "/usr/bin/hellish.real"
+row "watchdog pid"   "$(unit_interp sshd-watchdog)" "/usr/bin/hellish.real"
 row "guest sh conf"  "$(g 'sed -n "s/^B2B_GUEST_SH=//p" /etc/b2b_custom_shell.conf')" "/usr/bin/hellish.real"
 # The provisioners live in /root, so the glob must expand as root, under the
 # guest's own shell; first-boot's log keeps what interpreted them when it ran.
