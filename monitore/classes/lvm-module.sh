@@ -9,7 +9,7 @@ lvm_module() {
         if command -v lsblk &>/dev/null; then
             local lvm_count
             lvm_count=$(lsblk 2>/dev/null | grep -c "lvm")
-            if [ $lvm_count -eq 0 ]; then
+            if [ "$lvm_count" -eq 0 ]; then
                 echo "no"
             else
                 echo "yes"
@@ -54,7 +54,7 @@ lvm_module() {
         if [ -d /dev/mapper ]; then
             local mapper_entries
             mapper_entries=$(ls -la /dev/mapper/ 2>/dev/null | grep -c -v control)
-            if [ $mapper_entries -le 1 ]; then
+            if [ "$mapper_entries" -le 1 ]; then
                 echo "no"
             else
                 echo "yes"
@@ -69,7 +69,7 @@ lvm_module() {
         if [ -f /etc/fstab ]; then
             local fstab_lvm
             fstab_lvm=$(grep -c "/dev/mapper" /etc/fstab 2>/dev/null)
-            if [ $fstab_lvm -eq 0 ]; then
+            if [ "$fstab_lvm" -eq 0 ]; then
                 echo "no"
             else
                 echo "yes"
@@ -109,11 +109,11 @@ lvm_module() {
     # If more than half of the available methods say "yes", we'll use "yes"
     if [ $available_methods -gt 0 ]; then
         if [ $yes_count -gt $((available_methods / 2)) ]; then
-            update_metric_state "lvm_use" $STATE_OK "yes" "$yes_count of $available_methods methods confirmed LVM usage"
+            update_metric_state "lvm_use" "$STATE_OK" "yes" "$yes_count of $available_methods methods confirmed LVM usage"
         else
-            update_metric_state "lvm_use" $STATE_OK "no" "Only $yes_count of $available_methods methods detected LVM"
+            update_metric_state "lvm_use" "$STATE_OK" "no" "Only $yes_count of $available_methods methods detected LVM"
         fi
     else
-        update_metric_state "lvm_use" $STATE_WARNING "N/A" "No methods available to detect LVM"
+        update_metric_state "lvm_use" "$STATE_WARNING" "N/A" "No methods available to detect LVM"
     fi
 }

@@ -118,7 +118,7 @@ memory_module() {
         done
 
         if [ "${METRIC_VALUES[memory]}" = "" ]; then
-            update_metric_state "memory" $STATE_ERROR "N/A" "All memory methods failed"
+            update_metric_state "memory" "$STATE_ERROR" "N/A" "All memory methods failed"
         fi
     fi
 }

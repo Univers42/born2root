@@ -145,12 +145,12 @@ show_disk_info() {
         echo -e "\n${CYAN}Disk Health:${RESET}"
         for disk in $(ls /dev/sd* 2>/dev/null | grep -v [0-9]); do
             echo -e "${YELLOW}$disk:${RESET}"
-            sudo smartctl -H $disk 2>/dev/null || echo "Unable to check health"
+            sudo smartctl -H "$disk" 2>/dev/null || echo "Unable to check health"
         done
 
         for disk in $(ls /dev/nvme* 2>/dev/null | grep -v p[0-9]); do
             echo -e "${YELLOW}$disk:${RESET}"
-            sudo smartctl -H $disk 2>/dev/null || echo "Unable to check health"
+            sudo smartctl -H "$disk" 2>/dev/null || echo "Unable to check health"
         done
     fi
     echo

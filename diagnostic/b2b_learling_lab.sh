@@ -578,9 +578,9 @@ configure_ufw() {
         backup_config "ufw"
 
         if [[ -z "$comment" ]]; then
-            ufw allow $port/$protocol
+            ufw allow "$port/$protocol"
         else
-            ufw allow $port/$protocol comment "$comment"
+            ufw allow "$port/$protocol" comment "$comment"
         fi
 
         echo -e "${GREEN}Rule added: Allow $port/$protocol${NC}"
@@ -609,7 +609,7 @@ configure_ufw() {
         else
             if [[ "$rule_num" =~ ^[0-9]+$ ]]; then
                 backup_config "ufw"
-                echo "y" | ufw delete $rule_num
+                echo "y" | ufw delete "$rule_num"
                 echo -e "${GREEN}Rule $rule_num deleted.${NC}"
             else
                 echo -e "${RED}Invalid rule number.${NC}"

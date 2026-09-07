@@ -15,7 +15,7 @@ print_header() {
 
 # Function to check service status
 check_service() {
-    if systemctl is-active --quiet $1; then
+    if systemctl is-active --quiet "$1"; then
         echo -e "${GREEN}✓ $1 is active${NC}"
     else
         echo -e "${RED}✗ $1 is not active${NC}"

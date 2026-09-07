@@ -46,7 +46,7 @@ configure_hostname() {
     echo -e "${YELLOW}New hostname will be: $new_hostname${NC}"
 
     # Update hostname
-    echo $new_hostname >/etc/hostname
+    echo "$new_hostname" >/etc/hostname
 
     # Update /etc/hosts
     sed -i "s/127.0.1.1.*$/127.0.1.1\t$new_hostname/" /etc/hosts

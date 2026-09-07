@@ -48,8 +48,8 @@ network_module() {
 
             if [[ -n "$interface" ]]; then
                 local ip mac
-                ip=$(ip addr show $interface 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-                mac=$(cat /sys/class/net/$interface/address 2>/dev/null)
+                ip=$(ip addr show "$interface" 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+                mac=$(cat "/sys/class/net/$interface/address" 2>/dev/null)
 
                 if [[ -n "$ip" && -n "$mac" ]]; then
                     echo "IP $ip ($mac)"
@@ -107,12 +107,12 @@ network_module() {
     # Determine the best available method
     for method in "$network_hostname_ip" "$network_ifconfig" "$network_sysfs" "$network_nmcli"; do
         if [ "$method" != "N/A" ]; then
-            update_metric_state "network" $STATE_OK "$method" "Using first available method"
+            update_metric_state "network" "$STATE_OK" "$method" "Using first available method"
             break
         fi
     done
 
     if [ "${METRIC_VALUES[network]}" = "" ]; then
-        update_metric_state "network" $STATE_ERROR "N/A" "All network methods failed"
+        update_metric_state "network" "$STATE_ERROR" "N/A" "All network methods failed"
     fi
 }

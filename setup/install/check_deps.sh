@@ -432,6 +432,7 @@ done
 
 # Deduplicate missing packages
 if [ -n "$MISSING_PKGS" ]; then
+    # shellcheck disable=SC2086
     MISSING_PKGS=$(printf '%s\n' $MISSING_PKGS |
         awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//')
 fi
@@ -492,11 +493,13 @@ if [ -n "$MISSING_PKGS" ]; then
         # shellcheck disable=SC2059
         printf "${BLU}▶${RST} apt will show the install plan — press Y to confirm.\n\n"
         sudo apt-get update -qq 2>/dev/null || true
+        # shellcheck disable=SC2086
         sudo apt install ${CI:+-y} $MISSING_PKGS
     elif [ "$PKG_MGR" = "dnf" ]; then
         printf "${BLU}▶${RST} Running: ${BLD}sudo dnf install %s${RST}\n" "$MISSING_PKGS"
         # shellcheck disable=SC2059
         printf "${BLU}▶${RST} dnf will show the install plan — press Y to confirm.\n\n"
+        # shellcheck disable=SC2086
         sudo dnf install ${CI:+-y} $MISSING_PKGS
     else
         fail "Package manager unknown. Please manually install the missing packages."

@@ -29,10 +29,10 @@ echo "Using package prefix: $PHP_PKG_PREFIX"
 # Install essential PHP extensions for WordPress
 echo "Installing required PHP extensions for WordPress..."
 apt-get update
-apt-get install -y ${PHP_PKG_PREFIX}-mysql ${PHP_PKG_PREFIX}-mysqli ${PHP_PKG_PREFIX}-gd ${PHP_PKG_PREFIX}-curl ${PHP_PKG_PREFIX}-mbstring ${PHP_PKG_PREFIX}-xml ${PHP_PKG_PREFIX}-intl ${PHP_PKG_PREFIX}-zip
+apt-get install -y "${PHP_PKG_PREFIX}-mysql" "${PHP_PKG_PREFIX}-mysqli" "${PHP_PKG_PREFIX}-gd" "${PHP_PKG_PREFIX}-curl" "${PHP_PKG_PREFIX}-mbstring" "${PHP_PKG_PREFIX}-xml" "${PHP_PKG_PREFIX}-intl" "${PHP_PKG_PREFIX}-zip"
 
 # Install php-mysql (alternative naming in some distributions)
-apt-get install -y ${PHP_PKG_PREFIX}-mysql || true
+apt-get install -y "${PHP_PKG_PREFIX}-mysql" || true
 
 # Verify mysqli extension is installed
 echo "Verifying mysqli extension..."

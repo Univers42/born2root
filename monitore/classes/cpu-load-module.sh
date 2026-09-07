@@ -23,7 +23,7 @@ cpu_load_module() {
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
                     fi
-                    echo "$(format_number $cpu_usage)%"
+                    echo "$(format_number "$cpu_usage")%"
                 else
                     echo "N/A"
                 fi
@@ -77,7 +77,7 @@ cpu_load_module() {
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
                     fi
-                    echo "$(format_number $cpu_usage)%"
+                    echo "$(format_number "$cpu_usage")%"
                 else
                     echo "N/A"
                 fi
@@ -102,7 +102,7 @@ cpu_load_module() {
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
                     fi
-                    echo "$(format_number $cpu_usage)%"
+                    echo "$(format_number "$cpu_usage")%"
                 else
                     echo "N/A"
                 fi
@@ -128,7 +128,7 @@ cpu_load_module() {
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
                     fi
-                    echo "$(format_number $cpu_usage)%"
+                    echo "$(format_number "$cpu_usage")%"
                 else
                     echo "N/A"
                 fi
@@ -163,7 +163,7 @@ cpu_load_module() {
                     if (($(echo "$cpu_usage < 0.01" | bc -l))); then
                         cpu_usage="0.01"
                     fi
-                    echo "$(format_number $cpu_usage)%"
+                    echo "$(format_number "$cpu_usage")%"
                 else
                     echo "N/A"
                 fi

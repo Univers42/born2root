@@ -112,6 +112,7 @@ install_deps() {
 
     # One package at a time would be slower but a single missing name aborts the
     # whole batch, so fall back to per-package installs only if the batch fails.
+    # shellcheck disable=SC2086
     if ! apt-get install -y -qq -o Dpkg::Options::=--force-confdef \
         -o Dpkg::Options::=--force-confold $pkgs; then
         warn "batch install failed — retrying package by package"

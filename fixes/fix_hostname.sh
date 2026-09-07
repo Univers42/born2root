@@ -46,7 +46,7 @@ cat /etc/hosts
 
 # Test hostname resolution
 echo -e "\n${YELLOW}Testing hostname resolution...${NC}"
-if ping -c 1 $CURRENT_HOSTNAME &>/dev/null; then
+if ping -c 1 "$CURRENT_HOSTNAME" &>/dev/null; then
     echo -e "${GREEN}✓ Hostname resolution is working!${NC}"
 else
     echo -e "${RED}✗ Hostname resolution still not working.${NC}"

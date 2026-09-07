@@ -108,11 +108,11 @@ change_port() {
     # Update UFW rules if installed
     if command -v ufw >/dev/null; then
         echo -e "${YELLOW}! UFW detected. Updating firewall rules...${NC}"
-        ufw allow $new_port/tcp
+        ufw allow "$new_port/tcp"
         if [ "$current_port" != "22 (default)" ]; then
             read -r -p "Do you want to remove the old port $current_port from firewall? (y/n): " remove_old
             if [[ "$remove_old" == "y" || "$remove_old" == "Y" ]]; then
-                ufw delete allow $current_port/tcp
+                ufw delete allow "$current_port/tcp"
                 echo -e "${GREEN}✓ Old port rule removed from firewall${NC}"
             fi
         fi
@@ -161,13 +161,14 @@ configure_key_auth() {
         fi
 
         # Get user's home directory
+        # shellcheck disable=SC2086
         user_home=$(eval echo ~$key_user)
 
         # Create .ssh directory if it doesn't exist
         if [ ! -d "$user_home/.ssh" ]; then
             mkdir -p "$user_home/.ssh"
             chmod 700 "$user_home/.ssh"
-            chown $key_user:$key_user "$user_home/.ssh"
+            chown "$key_user:$key_user" "$user_home/.ssh"
         fi
 
         # Generate key
@@ -185,13 +186,13 @@ configure_key_auth() {
 
         # Generate key as the user
         echo -e "${YELLOW}! Generating SSH key pair...${NC}"
-        sudo -u $key_user ssh-keygen -t rsa -b 4096 -f "$key_file" -N ""
+        sudo -u "$key_user" ssh-keygen -t rsa -b 4096 -f "$key_file" -N ""
 
         # Setup authorized_keys
         if [ -f "$key_file.pub" ]; then
             cat "$key_file.pub" >>"$ssh_dir/authorized_keys"
             chmod 600 "$ssh_dir/authorized_keys"
-            chown $key_user:$key_user "$ssh_dir/authorized_keys"
+            chown "$key_user:$key_user" "$ssh_dir/authorized_keys"
             echo -e "${GREEN}✓ SSH key pair generated and added to authorized_keys${NC}"
             echo -e "${YELLOW}! Private key location: $key_file${NC}"
             echo -e "${YELLOW}! Public key location: $key_file.pub${NC}"
@@ -213,13 +214,14 @@ configure_key_auth() {
         fi
 
         # Get user's home directory
+        # shellcheck disable=SC2086
         user_home=$(eval echo ~$key_user)
 
         # Create .ssh directory if it doesn't exist
         if [ ! -d "$user_home/.ssh" ]; then
             mkdir -p "$user_home/.ssh"
             chmod 700 "$user_home/.ssh"
-            chown $key_user:$key_user "$user_home/.ssh"
+            chown "$key_user:$key_user" "$user_home/.ssh"
         fi
 
         # Setup authorized_keys file
@@ -240,7 +242,7 @@ configure_key_auth() {
         # Add to authorized_keys
         echo "$pub_key" >>"$auth_keys"
         chmod 600 "$auth_keys"
-        chown $key_user:$key_user "$auth_keys"
+        chown "$key_user:$key_user" "$auth_keys"
 
         echo -e "${GREEN}✓ Public key added to $auth_keys${NC}"
         ;;
@@ -577,7 +579,7 @@ show_firewall_status() {
             echo -e "\n${RED}✗ SSH port $ssh_port is not explicitly allowed through firewall${NC}"
             read -r -p "Do you want to allow SSH port $ssh_port through firewall? (y/n): " allow_ssh
             if [[ "$allow_ssh" == "y" || "$allow_ssh" == "Y" ]]; then
-                ufw allow $ssh_port/tcp
+                ufw allow "$ssh_port/tcp"
                 echo -e "${GREEN}✓ SSH port $ssh_port allowed through firewall${NC}"
             fi
         fi
@@ -596,7 +598,7 @@ show_firewall_status() {
                 ssh_port="22"
             fi
 
-            ufw allow $ssh_port/tcp
+            ufw allow "$ssh_port/tcp"
             ufw enable
             echo -e "${GREEN}✓ UFW installed and configured to allow SSH${NC}"
         fi

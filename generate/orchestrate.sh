@@ -571,7 +571,7 @@ vbox_version() {
 }
 
 if ! command -v VBoxManage >/dev/null 2>&1; then
-    run_step 0 ${MAKE_CMD} --no-print-directory deps
+    run_step 0 "${MAKE_CMD}" --no-print-directory deps
 fi
 
 # The kernel driver is PER-MACHINE state: a 42 home is on NFS and follows you
@@ -588,7 +588,7 @@ draw_dashboard
 FORCE_ISO="${FORCE_ISO:-0}"
 PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
 if [ "$FORCE_ISO" = "1" ]; then
-    run_step 1 ${MAKE_CMD} --no-print-directory gen_iso
+    run_step 1 "${MAKE_CMD}" --no-print-directory gen_iso
     PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
@@ -597,7 +597,7 @@ elif [ -n "$PRESEED_ISO" ]; then
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
 else
-    run_step 1 ${MAKE_CMD} --no-print-directory gen_iso
+    run_step 1 "${MAKE_CMD}" --no-print-directory gen_iso
     PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
@@ -635,7 +635,7 @@ if [ "$VM_OK" = true ]; then
     STEP_DETAIL[2]="${VM_NAME}"
     draw_dashboard
 else
-    run_step 2 ${MAKE_CMD} --no-print-directory setup_vm
+    run_step 2 "${MAKE_CMD}" --no-print-directory setup_vm
     STEP_DETAIL[2]="${VM_NAME}"
     draw_dashboard
 fi

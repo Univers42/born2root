@@ -189,14 +189,14 @@ extend_logical_volume() {
 
     # Check if the VG has enough free space
     local free_space free_unit
-    free_space=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $7}')
-    free_unit=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $8}')
+    free_space=$(sudo vgdisplay "${vg_name}" | grep "Free" | awk '{print $7}')
+    free_unit=$(sudo vgdisplay "${vg_name}" | grep "Free" | awk '{print $8}')
 
     echo -e "Available space: ${free_space}${free_unit}"
 
     # Basic validation
     echo -e "${YELLOW}Performing pre-flight checks...${NC}"
-    if ! sudo lvdisplay /dev/${vg_name}/${lv_name} >/dev/null 2>&1; then
+    if ! sudo lvdisplay "/dev/${vg_name}/${lv_name}" >/dev/null 2>&1; then
         echo -e "${RED}ERROR: Logical volume /dev/${vg_name}/${lv_name} not found!${NC}"
         echo -e "${CYAN}Learning note: Verify your LV name with 'sudo lvs' command${NC}"
         return 1
@@ -213,12 +213,12 @@ extend_logical_volume() {
     # Perform the extension
     echo -e "${YELLOW}Extending logical volume...${NC}"
     echo -e "${CYAN}(This command increases the size of the LV container)${NC}"
-    if sudo lvextend -L +${extension} /dev/${vg_name}/${lv_name}; then
+    if sudo lvextend -L "+${extension}" "/dev/${vg_name}/${lv_name}"; then
         echo -e "${GREEN}Logical volume extended successfully!${NC}"
 
         # Get filesystem type
         local fs_type
-        fs_type=$(sudo blkid -o value -s TYPE /dev/${vg_name}/${lv_name})
+        fs_type=$(sudo blkid -o value -s TYPE "/dev/${vg_name}/${lv_name}")
         echo -e "Detected filesystem: ${fs_type}"
 
         echo -e "${YELLOW}Resizing filesystem to use new space...${NC}"
@@ -226,11 +226,11 @@ extend_logical_volume() {
         case $fs_type in
         ext4 | ext3 | ext2)
             echo -e "${CYAN}Learning note: ext4/3/2 filesystems use resize2fs command${NC}"
-            sudo resize2fs /dev/${vg_name}/${lv_name}
+            sudo resize2fs "/dev/${vg_name}/${lv_name}"
             ;;
         xfs)
             echo -e "${CYAN}Learning note: XFS filesystems use xfs_growfs command${NC}"
-            sudo xfs_growfs /dev/${vg_name}/${lv_name}
+            sudo xfs_growfs "/dev/${vg_name}/${lv_name}"
             ;;
         *)
             echo -e "${RED}Unsupported filesystem type. Manual resize required.${NC}"
@@ -299,7 +299,7 @@ EOF
     # Perform the rename
     echo -e "${YELLOW}Renaming volume group...${NC}"
     echo -e "${CYAN}Learning note: vgrename changes the VG name in LVM metadata${NC}"
-    if sudo vgrename ${old_vg_name} ${new_vg_name}; then
+    if sudo vgrename "${old_vg_name}" "${new_vg_name}"; then
         echo -e "${GREEN}Volume group renamed successfully!${NC}"
 
         echo -e "${YELLOW}Updating system configuration files...${NC}"
@@ -346,14 +346,14 @@ create_logical_volume() {
     echo -e "${GREEN}You can restore to this point using Backup ID: $backup_id${NC}"
 
     # Check if VG exists
-    if ! sudo vgdisplay ${vg_name} >/dev/null 2>&1; then
+    if ! sudo vgdisplay "${vg_name}" >/dev/null 2>&1; then
         echo -e "${RED}ERROR: Volume group ${vg_name} not found!${NC}"
         echo -e "${CYAN}Learning note: Check available VGs using 'sudo vgs' command${NC}"
         return 1
     fi
 
     # Check if LV already exists
-    if sudo lvdisplay /dev/${vg_name}/${lv_name} >/dev/null 2>&1; then
+    if sudo lvdisplay "/dev/${vg_name}/${lv_name}" >/dev/null 2>&1; then
         echo -e "${RED}ERROR: Logical volume ${lv_name} already exists!${NC}"
         echo -e "${CYAN}Learning note: LV names must be unique within a VG${NC}"
         return 1
@@ -361,8 +361,8 @@ create_logical_volume() {
 
     # Check free space
     local free_space free_unit
-    free_space=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $7}')
-    free_unit=$(sudo vgdisplay ${vg_name} | grep "Free" | awk '{print $8}')
+    free_space=$(sudo vgdisplay "${vg_name}" | grep "Free" | awk '{print $7}')
+    free_unit=$(sudo vgdisplay "${vg_name}" | grep "Free" | awk '{print $8}')
     echo -e "Available space: ${free_space}${free_unit}"
 
     # Confirm action
@@ -375,22 +375,22 @@ create_logical_volume() {
     # Create the LV
     echo -e "${YELLOW}Creating logical volume...${NC}"
     echo -e "${CYAN}Learning note: lvcreate allocates space from the VG to a new LV${NC}"
-    if sudo lvcreate -L ${size} -n ${lv_name} ${vg_name}; then
+    if sudo lvcreate -L "${size}" -n "${lv_name}" "${vg_name}"; then
         echo -e "${GREEN}Logical volume created successfully!${NC}"
 
         # Format the volume
         echo -e "${YELLOW}Formatting the volume with ext4...${NC}"
         echo -e "${CYAN}Learning note: A new LV needs a filesystem before it can store files${NC}"
-        sudo mkfs.ext4 /dev/${vg_name}/${lv_name}
+        sudo mkfs.ext4 "/dev/${vg_name}/${lv_name}"
 
         # Mount if requested
         if [[ -n "$mount_point" ]]; then
             echo -e "${YELLOW}Creating mount point at ${mount_point}...${NC}"
-            sudo mkdir -p ${mount_point}
+            sudo mkdir -p "${mount_point}"
 
             echo -e "${YELLOW}Mounting volume...${NC}"
             echo -e "${CYAN}Learning note: Mounting makes the filesystem accessible at a directory${NC}"
-            sudo mount /dev/${vg_name}/${lv_name} ${mount_point}
+            sudo mount "/dev/${vg_name}/${lv_name}" "${mount_point}"
 
             echo -e "${YELLOW}Adding to /etc/fstab for persistent mounting...${NC}"
             echo -e "${CYAN}Learning note: fstab entries make mounts persistent across reboots${NC}"

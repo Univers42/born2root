@@ -48,7 +48,7 @@ echo -e "${YELLOW}\nPreparing to upload plugin...${NC}"
 
 # Create a temporary script for lftp to avoid password in command line
 TEMP_SCRIPT=$(mktemp)
-cat >$TEMP_SCRIPT <<EOF
+cat >"$TEMP_SCRIPT" <<EOF
 open -u "$FTP_USER","$FTP_PASS" -p $FTP_PORT $FTP_SERVER
 set ssl:verify-certificate no
 set ftp:ssl-allow yes
@@ -74,9 +74,9 @@ EOF
 
 # Execute the upload script
 echo -e "${YELLOW}Uploading plugin to server...${NC}"
-if ! lftp -f $TEMP_SCRIPT; then
+if ! lftp -f "$TEMP_SCRIPT"; then
     echo -e "${RED}\nError: Failed to upload plugin. Please check your FTP credentials and paths.${NC}"
-    rm $TEMP_SCRIPT
+    rm "$TEMP_SCRIPT"
     exit 1
 else
     echo -e "${GREEN}\nPlugin '$PLUGIN_NAME' has been successfully uploaded to your server!${NC}"
@@ -87,5 +87,5 @@ else
 fi
 
 # Clean up
-rm $TEMP_SCRIPT
+rm "$TEMP_SCRIPT"
 echo -e "${GREEN}Temporary files cleaned up.${NC}"

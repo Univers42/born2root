@@ -60,6 +60,7 @@ main_pids() {
 stop_gracefully() {
     local pids="$1" name="$2" pid i alive
     [ -n "$pids" ] || return 1
+    # shellcheck disable=SC2086
     kill -TERM $pids 2>/dev/null
     for i in $(seq 1 40); do
         alive=""

@@ -44,7 +44,7 @@ fi
 # 5. Apply changes to existing users
 echo -e "${YELLOW}Applying policy to user accounts...${NC}"
 for user in $(grep "/bin/bash" /etc/passwd | cut -d: -f1); do
-    chage -M 30 -m 2 -W 7 $user
+    chage -M 30 -m 2 -W 7 "$user"
     echo "Updated policy for user: $user"
 done
 

@@ -145,14 +145,14 @@ add_rule() {
         fi
 
         if [[ "$protocol" == "both" ]]; then
-            ufw allow $port
+            ufw allow "$port"
             echo -e "${GREEN}✓ Port $port allowed (tcp & udp)${NC}"
         elif [[ "$protocol" == "tcp" || "$protocol" == "udp" ]]; then
-            ufw allow $port/$protocol
+            ufw allow "$port/$protocol"
             echo -e "${GREEN}✓ Port $port/$protocol allowed${NC}"
         else
             echo -e "${RED}✗ Invalid protocol. Using tcp as default${NC}"
-            ufw allow $port/tcp
+            ufw allow "$port/tcp"
             echo -e "${GREEN}✓ Port $port/tcp allowed${NC}"
         fi
         ;;
@@ -167,14 +167,14 @@ add_rule() {
         fi
 
         if [[ "$protocol" == "both" ]]; then
-            ufw deny $port
+            ufw deny "$port"
             echo -e "${GREEN}✓ Port $port denied (tcp & udp)${NC}"
         elif [[ "$protocol" == "tcp" || "$protocol" == "udp" ]]; then
-            ufw deny $port/$protocol
+            ufw deny "$port/$protocol"
             echo -e "${GREEN}✓ Port $port/$protocol denied${NC}"
         else
             echo -e "${RED}✗ Invalid protocol. Using tcp as default${NC}"
-            ufw deny $port/tcp
+            ufw deny "$port/tcp"
             echo -e "${GREEN}✓ Port $port/tcp denied${NC}"
         fi
         ;;
@@ -188,7 +188,7 @@ add_rule() {
             return 1
         fi
 
-        ufw allow from $ip
+        ufw allow from "$ip"
         echo -e "${GREEN}✓ Traffic from $ip allowed${NC}"
         ;;
 
@@ -201,7 +201,7 @@ add_rule() {
             return 1
         fi
 
-        ufw deny from $ip
+        ufw deny from "$ip"
         echo -e "${GREEN}✓ Traffic from $ip denied${NC}"
         ;;
 
@@ -209,7 +209,7 @@ add_rule() {
         echo -e "${YELLOW}Common services:${NC}"
         echo "ssh, http, https, ftp, smtp, pop3, imap, dns, ntp"
         read -r -p "Enter service name to allow: " service
-        if ufw allow $service; then
+        if ufw allow "$service"; then
             echo -e "${GREEN}✓ Service $service allowed${NC}"
         else
             echo -e "${RED}✗ Failed to add rule. Check if service name is valid${NC}"
@@ -221,6 +221,7 @@ add_rule() {
         echo -e "${YELLOW}Enter the full UFW command (without 'ufw' prefix):${NC}"
         echo -e "${YELLOW}Example: allow 22/tcp comment 'SSH'${NC}"
         read -r -p "Command: " command
+        # shellcheck disable=SC2086
         if ufw $command; then
             echo -e "${GREEN}✓ Rule added successfully${NC}"
         else
@@ -263,7 +264,7 @@ delete_rule() {
 
     echo -e "${YELLOW}! Deleting rule number $rule_num...${NC}"
 
-    if ufw delete $rule_num; then
+    if ufw delete "$rule_num"; then
         echo -e "${GREEN}✓ Rule deleted successfully${NC}"
     else
         echo -e "${RED}✗ Failed to delete rule. Check rule number${NC}"
@@ -322,7 +323,7 @@ toggle_ufw() {
                 read -r -p "Would you like to add a rule for SSH port $ssh_port first? (y/n): " add_ssh
 
                 if [[ "$add_ssh" == "y" || "$add_ssh" == "Y" ]]; then
-                    ufw allow $ssh_port/tcp
+                    ufw allow "$ssh_port/tcp"
                     echo -e "${GREEN}✓ SSH port $ssh_port/tcp allowed${NC}"
                 else
                     echo -e "${RED}! WARNING: Enabling UFW without SSH access rule may lock you out!${NC}"
@@ -443,7 +444,7 @@ setup_born2beroot() {
         ufw default allow outgoing
 
         echo -e "${YELLOW}! Adding rule for SSH on port $ssh_port...${NC}"
-        ufw allow $ssh_port/tcp
+        ufw allow "$ssh_port/tcp"
 
         echo -e "${YELLOW}! Setting logging level to low...${NC}"
         ufw logging low

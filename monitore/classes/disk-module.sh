@@ -55,7 +55,7 @@ disk_module() {
                     # Convert to human readable
                     local total_human used_human use_percent
                     total_human=$(numfmt --to=iec --suffix=B $total_size 2>/dev/null || echo "$(($total_size / 1073741824))GB")
-                    used_human=$(numfmt --to=iec --suffix=B ${used_size%.*} 2>/dev/null || echo "$((${used_size%.*} / 1073741824))GB")
+                    used_human=$(numfmt --to=iec --suffix=B "${used_size%.*}" 2>/dev/null || echo "$((${used_size%.*} / 1073741824))GB")
                     use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total_size>0) ? $used_size*100/$total_size : 0}")
 
                     echo "$used_human/$total_human ($use_percent)"
@@ -162,7 +162,7 @@ disk_module() {
         done
 
         if [ "${METRIC_VALUES[disk]}" = "" ]; then
-            update_metric_state "disk" $STATE_ERROR "N/A" "All disk methods failed"
+            update_metric_state "disk" "$STATE_ERROR" "N/A" "All disk methods failed"
         fi
     fi
 }

@@ -27,7 +27,7 @@ list_users() {
     # List users with UID >= 1000 (normal users, not system users)
     awk -F':' '$3 >= 1000 && $3 != 65534 {print $1,$3,$4,$6}' /etc/passwd |
         while read -r username uid gid homedir; do
-            group=$(getent group $gid | cut -d: -f1)
+            group=$(getent group "$gid" | cut -d: -f1)
             printf "%-15s %-10s %-10s %-20s\n" "$username" "$uid" "$group" "$homedir"
         done
 
@@ -57,7 +57,7 @@ create_user() {
 
     # Set password
     echo -e "${YELLOW}Setting password for $username${NC}"
-    passwd $username
+    passwd "$username"
 
     # Ask if user should be added to sudo group
     read -r -p "Add user to sudo group? (y/n): " add_sudo

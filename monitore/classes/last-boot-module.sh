@@ -99,12 +99,12 @@ last_boot_module() {
     # But we'll just use the first available method for now
     for method in "$boot_who" "$boot_uptime" "$boot_proc" "$boot_last"; do
         if [ "$method" != "N/A" ]; then
-            update_metric_state "last_boot" $STATE_OK "$method" "Using first available method"
+            update_metric_state "last_boot" "$STATE_OK" "$method" "Using first available method"
             break
         fi
     done
 
     if [ "${METRIC_VALUES[last_boot]}" = "" ]; then
-        update_metric_state "last_boot" $STATE_ERROR "N/A" "All boot time methods failed"
+        update_metric_state "last_boot" "$STATE_ERROR" "N/A" "All boot time methods failed"
     fi
 }

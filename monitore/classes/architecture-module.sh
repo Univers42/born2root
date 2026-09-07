@@ -79,18 +79,18 @@ architecture_module() {
     # For architecture, we'll mostly just check if we get a consistent result
     # Use uname as the primary method since it's most commonly available
     if [ "$arch_uname" != "N/A" ]; then
-        update_metric_state "architecture" $STATE_OK "$arch_uname" "Using uname as primary method"
+        update_metric_state "architecture" "$STATE_OK" "$arch_uname" "Using uname as primary method"
     else
         # Fall back to the first available method
         for method in "$arch_command" "$arch_dpkg" "$arch_cpuinfo"; do
             if [ "$method" != "N/A" ]; then
-                update_metric_state "architecture" $STATE_OK "$method" "Using fallback method"
+                update_metric_state "architecture" "$STATE_OK" "$method" "Using fallback method"
                 break
             fi
         done
 
         if [ "${METRIC_VALUES[architecture]}" = "" ]; then
-            update_metric_state "architecture" $STATE_ERROR "N/A" "All architecture detection methods failed"
+            update_metric_state "architecture" "$STATE_ERROR" "N/A" "All architecture detection methods failed"
         fi
     fi
 }

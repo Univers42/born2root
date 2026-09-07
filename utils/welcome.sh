@@ -12,7 +12,7 @@ RESET='\033[0m'
 
 # Get user information
 USER_NAME=$(whoami)
-LAST_LOGIN=$(last -1 $USER_NAME | head -1 | awk '{print $4, $5, $6, $7}')
+LAST_LOGIN=$(last -1 "$USER_NAME" | head -1 | awk '{print $4, $5, $6, $7}')
 CURRENT_DATE=$(date +"%Y-%m-%d %H:%M:%S")
 HOSTNAME=$(hostname)
 UPTIME=$(uptime -p)

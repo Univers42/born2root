@@ -77,9 +77,9 @@ get_state_name() {
 get_state_color() {
     local state=$1
     case $state in
-    $STATE_OK) echo "${GREEN}$(get_state_name $state)${NC}" ;;
-    $STATE_WARNING) echo "${YELLOW}$(get_state_name $state)${NC}" ;;
-    $STATE_ERROR) echo "${RED}$(get_state_name $state)${NC}" ;;
+    "$STATE_OK") echo "${GREEN}$(get_state_name "$state")${NC}" ;;
+    "$STATE_WARNING") echo "${YELLOW}$(get_state_name "$state")${NC}" ;;
+    "$STATE_ERROR") echo "${RED}$(get_state_name "$state")${NC}" ;;
     *) echo "UNKNOWN" ;;
     esac
 }
@@ -120,7 +120,7 @@ print_verification_result() {
     esac
 
     # Print metric indicator with fancy format
-    echo -e "${DARK_GRAY}├─${color_prefix}${BOLD}${metric_name}${NC} - $(get_state_color $state)${DARK_GRAY} ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄"
+    echo -e "${DARK_GRAY}├─${color_prefix}${BOLD}${metric_name}${NC} - $(get_state_color "$state")${DARK_GRAY} ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄"
 
     # Print value with appropriate color
     echo -e "${DARK_GRAY}│ ${CYAN}Value:${NC} ${LIGHT_BLUE}$value${NC}"

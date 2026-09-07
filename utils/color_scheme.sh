@@ -181,7 +181,7 @@ if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
     echo ""
     echo "Progress bar example:"
     for i in {0..100..10}; do
-        progress_bar $i
+        progress_bar "$i"
         sleep 0.1
     done
     echo -e "\n\n${BOLD_YELLOW}To use this library, source it in your scripts:${NC}"
