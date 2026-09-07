@@ -55,7 +55,7 @@ architecture_module() {
             local arch
             arch=$(grep -m1 "model name\|^vendor_id\|^machine" /proc/cpuinfo 2>/dev/null)
             if [ -n "$arch" ]; then
-                echo "$arch" | sed 's/.*: //'
+                echo "${arch#*: }"
             else
                 echo "N/A"
             fi

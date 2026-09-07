@@ -101,7 +101,7 @@ restore_config() {
     local i=1
     for backup in "${backups[@]}"; do
         local backup_date
-        backup_date="${backup#${component}_}"
+        backup_date="${backup#"${component}_"}"
         backup_date="${backup_date:0:15}"
         backup_date=$(date -d "${backup_date:0:8} ${backup_date:9:2}:${backup_date:11:2}:${backup_date:13:2}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$backup_date")
         echo -e "  ${YELLOW}$i)${NC} $backup_date"

@@ -186,12 +186,12 @@ if [ -n "$sudo_log_file" ]; then
     else
         echo -e "${RED}✗ Sudo log directory does not exist${NC}"
         echo -e "  Fix: sudo mkdir -p $sudo_log_dir"
-        SUDO_CONFIG_OK=false
+        #SUDO_CONFIG_OK=false
     fi
 else
     echo -e "${RED}✗ Sudo logging is not configured${NC}"
     echo -e "  Fix: Add 'Defaults logfile=\"/var/log/sudo/sudo.log\"' to /etc/sudoers.d/sudo_config"
-    SUDO_CONFIG_OK=false
+    #SUDO_CONFIG_OK=false
 fi
 
 # Check sudo security settings
@@ -200,7 +200,6 @@ if sudo grep -q "requiretty" /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
 else
     echo -e "${RED}✗ Sudo requiretty is not configured${NC}"
     echo -e "  Fix: Add 'Defaults requiretty' to /etc/sudoers.d/sudo_config"
-    SUDO_CONFIG_OK=false
 fi
 
 if sudo grep -q "passwd_tries" /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then

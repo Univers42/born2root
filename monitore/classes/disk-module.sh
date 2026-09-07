@@ -10,7 +10,7 @@ disk_module() {
             local df_output
             df_output=$(df -h --total 2>/dev/null | grep total)
             if [ -n "$df_output" ]; then
-                echo "$(echo "$df_output" | awk '{print $3"/"$2" ("$5")"}')"
+                echo "$df_output" | awk '{print $3"/"$2" ("$5")"}'
             else
                 echo "N/A"
             fi
