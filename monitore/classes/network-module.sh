@@ -43,7 +43,7 @@ network_module() {
         # Get first non-loopback interface
         if [ -d /sys/class/net ]; then
             local interfaces interface
-            interfaces=$(ls /sys/class/net/ 2>/dev/null | grep -v "lo")
+            interfaces=$(find /sys/class/net/ -mindepth 1 -maxdepth 1 -not -name "lo" -printf "%f\n" 2>/dev/null)
             interface=$(echo "$interfaces" | head -1)
 
             if [[ -n "$interface" ]]; then
@@ -99,11 +99,7 @@ network_module() {
         echo "$1" | grep -o "IP [0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+" | cut -d' ' -f2
     }
 
-    ip_hostname=$(extract_ip "$network_hostname_ip")
-    ip_ifconfig=$(extract_ip "$network_ifconfig")
-    ip_sysfs=$(extract_ip "$network_sysfs")
-    ip_nmcli=$(extract_ip "$network_nmcli")
-
+    # Variables removed because they are unused.
     # Determine the best available method
     for method in "$network_hostname_ip" "$network_ifconfig" "$network_sysfs" "$network_nmcli"; do
         if [ "$method" != "N/A" ]; then

@@ -51,8 +51,8 @@ if [ ! -d "$VSCODE_EXTENSIONS" ]; then
 fi
 
 # Check if Remote SSH extension is installed
-if ls "$VSCODE_EXTENSIONS"/ms-vscode-remote.remote-ssh* 1>/dev/null 2>&1; then
-    REMOTE_SSH_VERSION=$(ls -d "$VSCODE_EXTENSIONS"/ms-vscode-remote.remote-ssh* | head -1 | xargs basename)
+if find "$VSCODE_EXTENSIONS" -mindepth 1 -maxdepth 1 -name "ms-vscode-remote.remote-ssh*" | grep -q .; then
+    REMOTE_SSH_VERSION=$(find "$VSCODE_EXTENSIONS" -mindepth 1 -maxdepth 1 -name "ms-vscode-remote.remote-ssh*" | head -1 | xargs basename)
     echo -e "${GREEN}✓ Remote SSH extension found: $REMOTE_SSH_VERSION${NC}\n"
 else
     echo -e "${YELLOW}⚠ Remote SSH extension not installed${NC}"

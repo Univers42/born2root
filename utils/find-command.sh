@@ -127,7 +127,6 @@ if [ "$FORCE_UPDATE" -eq 1 ] || [ ! -f /var/cache/apt/apt-file/index.apt-file ];
         print_color "$RED" "Failed to update apt-file database."
         exit 1
     fi
-    APT_FILE_UPDATED=1
     print_color "$GREEN" "apt-file database updated successfully."
 fi
 

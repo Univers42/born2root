@@ -4,6 +4,7 @@
 # Author: Lesieur Dylan
 # Description: Reusable color and formatting functions
 #====================================================
+# shellcheck disable=SC2034
 
 # ======== COLOR DEFINITIONS ========
 # Text colors
@@ -113,9 +114,8 @@ banner_header() {
 
 # System info header (like in your monitoring script)
 system_header() {
-    local hostname username date_time
+    local hostname date_time
     hostname=$(hostname)
-    username=$(whoami)
     date_time=$(date '+%a %b %d %H:%M:%S %Y')
 
     echo -e "${YELLOW}Broadcast message from ${BOLD_YELLOW}root@${hostname}${NC} ${YELLOW}(tty1) (${date_time}):${NC}"

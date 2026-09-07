@@ -53,8 +53,8 @@ lvm_module() {
     get_lvm_mapper() {
         if [ -d /dev/mapper ]; then
             local mapper_entries
-            mapper_entries=$(ls -la /dev/mapper/ 2>/dev/null | grep -c -v control)
-            if [ "$mapper_entries" -le 1 ]; then
+            mapper_entries=$(find /dev/mapper/ -mindepth 1 -maxdepth 1 -not -name control 2>/dev/null | wc -l)
+            if [ "$mapper_entries" -eq 0 ]; then
                 echo "no"
             else
                 echo "yes"

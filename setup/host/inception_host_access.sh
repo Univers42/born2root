@@ -248,7 +248,7 @@ UNITEOF
         --map "${static_port}:${static_port}" --map "${https_port}:${https_port}" \
         >"$PROXY_DIR/inception-proxy.log" 2>&1 </dev/null &
     printf '%s\n' "$!" >"$PROXY_PID"
-    for i in 1 2 3 4 5 6 7 8 9 10; do
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         port_is_free "$PROXY_PORT" || break
         sleep 0.5
     done

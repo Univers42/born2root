@@ -83,8 +83,8 @@ infer_url() {
 
 # Register + fetch any orphan gitlinks found in repo $1.
 repair_orphans() {
-    local repo="$1" sha path url
-    while read -r sha path; do
+    local repo="$1" path url
+    while read -r _ path; do
         [ -n "$path" ] || continue
         is_registered "$repo" "$path" && continue
         say "${Y}⚠${Z}  Orphan gitlink in ${repo#$ROOT/}: ${path} (missing from .gitmodules)"

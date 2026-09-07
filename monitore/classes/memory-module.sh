@@ -42,11 +42,10 @@ memory_module() {
     # Method 3: Using vmstat
     get_memory_vmstat() {
         if command -v vmstat &>/dev/null; then
-            local total used free percent
+            local total used percent
             total=$(vmstat -s 2>/dev/null | grep "total memory" | awk '{print $1/1024}' | cut -d. -f1)
             # Some versions of vmstat use 'used memory' and 'free memory'
             used=$(vmstat -s 2>/dev/null | grep "used memory" | awk '{print $1/1024}' | cut -d. -f1)
-            free=$(vmstat -s 2>/dev/null | grep "free memory" | awk '{print $1/1024}' | cut -d. -f1)
             if [ -n "$total" ] && [ -n "$used" ] && [ "$total" -gt 0 ]; then
                 percent=$(awk "BEGIN {printf \"%.2f\", $used*100/$total}")
                 echo "$used/$total MB ($percent%)"

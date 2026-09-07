@@ -7,6 +7,7 @@ VM_NAME="${1:-debian}"
 PRESEED_FILE="${2:-preseeds/preseed.cfg}"
 
 # ── Colours ──────────────────────────────────────────────────────────────────
+# shellcheck disable=SC2034
 RST='\033[0m'
 BLD='\033[1m'
 DIM='\033[2m'
@@ -145,7 +146,7 @@ fi
 mid
 
 # ── Debian base ISO ──
-BASE=$(ls -1 debian-*-amd64-netinst.iso 2>/dev/null | head -n1)
+BASE=$(find . -maxdepth 1 -name 'debian-*-amd64-netinst.iso' | head -n1 | sed 's|^\./||')
 if [ -n "$BASE" ]; then
     status_row "${GRN}${BLD}✓${RST}" "Base ISO ........" "${GRN}${BASE}${RST}"
 else
@@ -153,7 +154,7 @@ else
 fi
 
 # ── Preseeded ISO ──
-PISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
+PISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
 if [ -n "$PISO" ]; then
     status_row "${GRN}${BLD}✓${RST}" "Preseed ISO ....." "${GRN}${PISO}${RST}"
 else

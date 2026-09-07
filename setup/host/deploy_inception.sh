@@ -42,6 +42,7 @@ C_GREEN=$'\033[32m'
 C_YELLOW=$'\033[33m'
 C_BLUE=$'\033[34m'
 C_RED=$'\033[31m'
+# shellcheck disable=SC2034
 C_DIM=$'\033[2m'
 
 step() { printf "\n${C_BLUE}▶${C_RESET} ${C_BOLD}%s${C_RESET}\n" "$*"; }

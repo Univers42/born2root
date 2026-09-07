@@ -119,8 +119,7 @@ setup_npm() {
         # provisioning order is designed to keep out of the early steps.
         if [ -n "$current" ] && [ -d "${current}/lib/node_modules" ]; then
             local stale
-            stale=$(ls "${current}/lib/node_modules" 2>/dev/null |
-                grep -vE '^(npm|corepack)$' | tr '\n' ' ')
+            stale=$(find "${current}/lib/node_modules" -mindepth 1 -maxdepth 1 -not -name npm -not -name corepack -printf '%f ' 2>/dev/null)
             if [ -n "$stale" ]; then
                 warn "these were installed at the old prefix (${current}) and are now off PATH:"
                 warn "    ${stale}"

@@ -116,8 +116,7 @@ PLUGIN_NAMES=()
 PLUGIN_VERSIONS=()
 PLUGIN_STATUSES=()
 
-# Check for activated plugins
-ACTIVE_PLUGINS=()
+# (Active plugins check removed)
 if [ -f "$WORDPRESS_PATH/wp-config.php" ]; then
     # Try to get the table prefix from wp-config.php
     DB_PREFIX=$(grep "table_prefix" "$WORDPRESS_PATH/wp-config.php" | cut -d "'" -f 2 | cut -d '"' -f 2)
@@ -202,12 +201,12 @@ SELECTED_PLUGINS=()
 
 if [[ "$SELECTION" == "all" ]]; then
     for i in "${!PLUGINS[@]}"; do
-        SELECTED_PLUGINS+=($i)
+        SELECTED_PLUGINS+=("$i")
     done
 else
     for id in $SELECTION; do
         if [[ "$id" =~ ^[0-9]+$ && $id -lt ${#PLUGINS[@]} ]]; then
-            SELECTED_PLUGINS+=($id)
+            SELECTED_PLUGINS+=("$id")
         else
             echo -e "${RED}Invalid selection: $id. Skipping.${NC}"
         fi

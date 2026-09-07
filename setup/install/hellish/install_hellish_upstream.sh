@@ -285,7 +285,7 @@ log "link   : $DEST -> $(readlink "$DEST" 2>/dev/null || echo 'NOT A LINK')"
 log "shell  : $(getent passwd "$HELLISH_USER" | cut -d: -f7)"
 if [ -f "$USER_HOME/.hellishrc" ]; then
     log "config : $USER_HOME/.hellishrc ($(stat -c '%U:%G' "$USER_HOME/.hellishrc"))"
-    log "plugins: $(ls "$USER_HOME/.hellish/plugins" 2>/dev/null | tr '\n' ' ')"
+    log "plugins: $(find "$USER_HOME/.hellish/plugins" -mindepth 1 -maxdepth 1 -printf '%f ' 2>/dev/null)"
 else
     warn "config : $USER_HOME/.hellishrc is missing — the plugin framework did not install"
     exit 2

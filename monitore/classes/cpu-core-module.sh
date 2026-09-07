@@ -33,7 +33,7 @@ cpu_core_module() {
         getconf_count="N/A"
     fi
 
-    sys_cpu_count=$(ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null | wc -l)
+    sys_cpu_count=$(find /sys/devices/system/cpu -maxdepth 1 -name 'cpu[0-9]*' -type d 2>/dev/null | wc -l)
     if [ -z "$sys_cpu_count" ] || [ "$sys_cpu_count" -eq 0 ]; then
         sys_cpu_count="N/A"
     fi

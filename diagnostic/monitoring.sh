@@ -1,6 +1,7 @@
 #!/usr/bin/env hellish
 
 # Colors for better readability (inlined instead of sourcing)
+# shellcheck disable=SC2034
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'

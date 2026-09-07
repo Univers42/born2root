@@ -1238,7 +1238,7 @@ configure_hostname_users() {
         echo -e "${PURPLE}Educational note: Each user should have their own account${NC}"
         echo -e "${PURPLE}for accountability and proper permission management.${NC}"
 
-        read -r -p "Enter username for the new user: " new_username
+        read -r -p "Enter username for the new user: " _
         # TODO: rest of user creation logic was truncated
         ;;
     esac

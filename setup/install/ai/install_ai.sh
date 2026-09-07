@@ -225,8 +225,7 @@ setup_local() {
 
     systemctl enable --now ollama 2>/dev/null || true
     # The daemon needs a moment before it will accept a pull.
-    local i
-    for i in 1 2 3 4 5 6 7 8 9 10; do
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         curl -fsS --max-time 3 http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break
         sleep 2
     done

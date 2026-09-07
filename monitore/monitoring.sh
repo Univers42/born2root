@@ -374,7 +374,6 @@ main() {
     "
 
     # Prepare wall message
-    current_date=$(date -u "+%Y-%m-%d %H:%M:%S")
     current_user=$(whoami)
     if [ -n "$SUDO_USER" ]; then
         current_user=$SUDO_USER

@@ -153,7 +153,7 @@ find_iso() {
         printf '%s' "$ISO"
         return 0
     }
-    ls -1t "$REPO_ROOT"/debian-*-amd64-*preseed.iso 2>/dev/null | head -1
+    find "$REPO_ROOT" -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
 vm_pass() {

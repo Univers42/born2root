@@ -157,9 +157,9 @@ fi
 # on the first pass while the server catches up. One retry clears it; without
 # this the whole build died on a wall of "rm: Permission denied" lines.
 purge_dir() {
-    local dir="$1" attempt
+    local dir="$1"
     [ -e "$dir" ] || return 0
-    for attempt in 1 2 3; do
+    for _ in 1 2 3; do
         chmod -R u+w "$dir" 2>/dev/null || true
         rm -rf "$dir" 2>/dev/null
         [ -e "$dir" ] || return 0

@@ -586,10 +586,10 @@ draw_dashboard
 
 # Step 2 — Preseeded ISO
 FORCE_ISO="${FORCE_ISO:-0}"
-PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
+PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
 if [ "$FORCE_ISO" = "1" ]; then
     run_step 1 "${MAKE_CMD}" --no-print-directory gen_iso
-    PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
+    PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
 elif [ -n "$PRESEED_ISO" ]; then
@@ -598,7 +598,7 @@ elif [ -n "$PRESEED_ISO" ]; then
     draw_dashboard
 else
     run_step 1 "${MAKE_CMD}" --no-print-directory gen_iso
-    PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
+    PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
 fi
@@ -1078,7 +1078,6 @@ P_OSIONOS_BRIDGE=$(get_vm_port osionos-bridge)
 P_MAIL_BRIDGE=$(get_vm_port mail-bridge)
 P_CALENDAR_BRIDGE=$(get_vm_port calendar-bridge)
 P_BAAS_GATEWAY=$(get_vm_port baas-gateway)
-P_BAAS_ADMIN=$(get_vm_port baas-admin)
 P_MAILPIT=$(get_vm_port mailpit)
 P_AUTH_GATEWAY=$(get_vm_port auth-gateway)
 P_VAULT=$(get_vm_port vault)

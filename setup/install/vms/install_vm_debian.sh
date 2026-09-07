@@ -6,7 +6,7 @@ set -e # Exit on any error
 SCRIPT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$SCRIPT_DIR"
 
-PRESEED_ISO=$(ls -1 debian-*-amd64-*preseed.iso 2>/dev/null | head -n1)
+PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
 if [ -z "$PRESEED_ISO" ]; then
     echo "Error: No preseeded ISO found in $SCRIPT_DIR"
     echo "Run 'make gen_iso' first."

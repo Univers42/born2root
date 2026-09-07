@@ -154,7 +154,7 @@ version_ge() {
 }
 
 install_neovim() {
-    local tag prefix tarball url tmp shafile expected actual
+    local tag prefix tarball url tmp expected actual
     tag=$(resolve_version) || exit 1
     prefix="${NVIM_OPT_DIR}/nvim-${tag}"
 
