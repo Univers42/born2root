@@ -165,6 +165,7 @@ verify_for_user() {
     fi
 
     local out
+    # shellcheck disable=SC2016
     out=$(runuser -u "$user" -- "$shell_bin" -c \
         '. "$HOME/.hellishrc"; printf "loaded=%s errors=%s\n" "${#HX_LOADED[@]}" "${#HX_ERRORS[@]}"' 2>&1)
     case "$out" in

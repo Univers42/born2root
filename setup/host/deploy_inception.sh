@@ -98,6 +98,7 @@ step "Waiting for guest provisioning (docker, git, openssl, make, rsync)"
 provision_deadline=$(($(date +%s) + ${PROVISION_TIMEOUT:-900}))
 reported=""
 while :; do
+    # shellcheck disable=SC2016
     missing=$(vm_ssh 'for c in git docker openssl make rsync; do command -v $c >/dev/null 2>&1 || echo $c; done' 2>/dev/null)
     if [ -z "$missing" ] && vm_ssh 'docker info >/dev/null 2>&1'; then
         break

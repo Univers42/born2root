@@ -106,7 +106,7 @@ banner_header() {
 
     echo ""
     echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
-    echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${padding}s${text}%$(($width - $padding - ${#text}))s" "")${NC}"
+    echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${padding}s${text}%$((width - padding - ${#text}))s" "")${NC}"
     echo -e "${BG_BLUE}${BOLD_WHITE}$(printf "%${width}s" "")${NC}"
     echo ""
 }

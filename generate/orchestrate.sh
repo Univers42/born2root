@@ -329,7 +329,7 @@ run_phase() {
     local idx="$1"
     shift
     local log="${LOG_DIR}/step_${idx}.log"
-    STEP_STATUS[$idx]="working"
+    STEP_STATUS[idx]="working"
     draw_dashboard
 
     # Spinner targets the row of step $idx
@@ -348,7 +348,7 @@ run_phase() {
     stop_spinner
 
     if [ "$rc" -ne 0 ]; then
-        STEP_STATUS[$idx]="fail"
+        STEP_STATUS[idx]="fail"
         draw_dashboard
         # shellcheck disable=SC2059
         printf "\n${RED}${BLD}  ── Error log: ${STEPS[$idx]} ──${RST}\n${DIM}"
@@ -369,7 +369,7 @@ run_phase() {
 run_step() {
     local idx="$1"
     run_phase "$@"
-    STEP_STATUS[$idx]="done"
+    STEP_STATUS[idx]="done"
     draw_dashboard
 }
 
@@ -419,7 +419,7 @@ unlock_sleep() {
     sleep "$1"
     local e
     e=$(($(date +%s) - UNLOCK_T0))
-    STEP_DETAIL[$S_BOOT]="unlocking LUKS, waiting for sshd... ${e}s"
+    STEP_DETAIL[S_BOOT]="unlocking LUKS, waiting for sshd... ${e}s"
     draw_dashboard
 }
 
@@ -908,7 +908,7 @@ wait_for_install() {
         # seconds is the whole point of having the marker.
         if [ -z "$complete_at" ] && install_complete_signalled; then
             complete_at=$elapsed
-            STEP_DETAIL[$S_INSTALL]="install finished, letting d-i unmount..."
+            STEP_DETAIL[S_INSTALL]="install finished, letting d-i unmount..."
             draw_dashboard
         fi
         if [ -n "$complete_at" ] && [ $((elapsed - complete_at)) -ge $complete_grace ]; then
@@ -975,7 +975,7 @@ wait_for_install() {
             fi
         fi
 
-        STEP_DETAIL[$S_INSTALL]=$(install_detail $((elapsed + prior)))
+        STEP_DETAIL[S_INSTALL]=$(install_detail $((elapsed + prior)))
         draw_dashboard
     done
     # Timed out. Returning 0 here made the caller stamp the step "Debian

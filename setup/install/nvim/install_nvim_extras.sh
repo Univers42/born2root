@@ -2217,6 +2217,7 @@ install_kulala_runtime() {
     fi
 
     log "${user}: fetching kulala-core and building its http grammar"
+    # shellcheck disable=SC2016
     run_as_user "$user" "$NVIM_BIN" --headless -c 'lua
         -- Every predicate is wrapped: these APIs throw when the thing they are
         -- asked about has never been installed, and an error inside vim.wait

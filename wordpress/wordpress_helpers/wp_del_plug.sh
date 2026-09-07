@@ -143,8 +143,8 @@ for plugin_dir in "$PLUGINS_DIR"/*; do
             continue
         fi
 
-        PLUGINS[$index]="$plugin_dir"
-        PLUGIN_NAMES[$index]="$plugin_name"
+        PLUGINS[index]="$plugin_dir"
+        PLUGIN_NAMES[index]="$plugin_name"
 
         # Try to get plugin version from main plugin file
         version="Unknown"
@@ -161,10 +161,10 @@ for plugin_dir in "$PLUGINS_DIR"/*; do
                 fi
             fi
         done
-        PLUGIN_VERSIONS[$index]="$version"
+        PLUGIN_VERSIONS[index]="$version"
 
         # Set status (since we can't easily check active status without DB access)
-        PLUGIN_STATUSES[$index]="Unknown"
+        PLUGIN_STATUSES[index]="Unknown"
 
         index=$((index + 1))
     fi

@@ -100,6 +100,7 @@ printf "\n${C_BOLD}System${C_RESET}\n"
 row "hostname" "$(g hostname)" "dlesieur42"
 row "debian" "$(g 'cat /etc/debian_version')" "13"
 row "kernel" "$(g 'uname -r')" "--"
+# shellcheck disable=SC2016
 row "cpus / ram" "$(g 'nproc; free -m | awk "/Mem:/{print \$2\"MB\"}"')" "--"
 
 # shellcheck disable=SC2059
@@ -122,6 +123,7 @@ row "free extents in VG" "$(groot 'vgs --noheadings -o vg_free' | tr -d ' ')" "-
 
 # shellcheck disable=SC2059
 printf "\n${C_BOLD}Born2beRoot policy${C_RESET}\n"
+# shellcheck disable=SC2016
 row "sshd port" "$(g 'ss -tlnH | awk "{print \$4}" | grep -o ":4242$" | head -1')" ":4242"
 row "root ssh" "$(g 'grep -iE "^permitrootlogin" /etc/ssh/sshd_config* 2>/dev/null | head -1' | awk '{print $NF}')" "no"
 row "ufw" "$(groot '/usr/sbin/ufw status' | grep -m1 'Status:')" "active"
@@ -144,7 +146,9 @@ row "login shell" "$(g 'getent passwd dlesieur | cut -d: -f7')" "/usr/bin/hellis
 row "root shell" "$(g 'getent passwd root | cut -d: -f7')" "/bin/bash"
 row "hellish" "$(g '/usr/bin/hellish.real --version 2>/dev/null | head -1')" "hellish"
 row "shell link" "$(g 'readlink /usr/bin/hellish')" "/usr/bin/hellish.real"
+# shellcheck disable=SC2016
 row "ssh command" "$(g 'x=$(readlink /proc/$$/exe); echo "$x"')" "/usr/bin/hellish.real"
+# shellcheck disable=SC2016
 row "ssh \$0" "$(g 'echo $0')" "hellish"
 row "plugins" "$(g 'ls ~/.hellish/plugins 2>/dev/null | wc -l')" "--"
 row "hellishrc" "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')" "dlesieur"
@@ -169,6 +173,7 @@ row "sshd-watchdog" "$(g 'head -1 /usr/local/bin/sshd-watchdog.sh')" "#!/usr/bin
 # table drawn in that window said "(none)" of a unit that was fine. Wait it
 # out; a unit that never comes back still reads (none).
 unit_interp() { # unit_interp <unit>  -> argv[0] of its main process
+    # shellcheck disable=SC2016
     g 'p=0; for _ in 1 2 3 4 5 6 7 8; do p=$(systemctl show -p MainPID --value '"$1"'); [ "$p" != 0 ] && break; sleep 3; done; tr "\\0" " " < /proc/$p/cmdline | cut -d" " -f1'
 }
 row "keepalive pid" "$(unit_interp nat-keepalive)" "/usr/bin/hellish.real"

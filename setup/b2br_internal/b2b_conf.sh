@@ -107,8 +107,8 @@ echo -e "${YELLOW}Please enter username to add to user42 group:${NC}"
 read -r username
 
 if id "$username" &>/dev/null; then
-    usermod -aG user42 $username
-    usermod -aG sudo $username
+    usermod -aG user42 "$username"
+    usermod -aG sudo "$username"
     check_success "User $username added to user42 and sudo groups"
 else
     echo -e "${RED}User $username does not exist. Please create the user first.${NC}"

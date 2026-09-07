@@ -23,22 +23,22 @@ install_package() {
     if command -v apt &>/dev/null; then
         # Debian/Ubuntu
         sudo apt update
-        sudo apt install -y $package
+        sudo apt install -y "$package"
     elif command -v dnf &>/dev/null; then
         # Fedora
-        sudo dnf install -y $package
+        sudo dnf install -y "$package"
     elif command -v yum &>/dev/null; then
         # CentOS/RHEL
-        sudo yum install -y $package
+        sudo yum install -y "$package"
     elif command -v pacman &>/dev/null; then
         # Arch Linux
-        sudo pacman -S --noconfirm $package
+        sudo pacman -S --noconfirm "$package"
     elif command -v zypper &>/dev/null; then
         # openSUSE
-        sudo zypper install -y $package
+        sudo zypper install -y "$package"
     elif command -v brew &>/dev/null; then
         # macOS with Homebrew
-        brew install $package
+        brew install "$package"
     else
         echo -e "${RED}Could not determine package manager. Please install $package manually.${NC}"
         return 1
@@ -56,7 +56,7 @@ install_package() {
 
 # Function to check if a package is already installed
 is_installed() {
-    if command -v $1 &>/dev/null; then
+    if command -v "$1" &>/dev/null; then
         return 0
     else
         return 1

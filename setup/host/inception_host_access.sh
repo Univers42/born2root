@@ -541,7 +541,8 @@ CA_FILE=""
 # The clone location is not fixed: Inception may sit in ~/Documents/inception,
 # in ~/inception, or wherever INCEPTION_DIR points. Hardcoding one path meant
 # the CA silently could not be found and the browsers kept warning.
-CA_FIND_CMD='for p in "$INCEPTION_DIR/secrets/ca.crt" "$HOME/Documents/inception/secrets/ca.crt" "$HOME/inception/secrets/ca.crt"; do [ -r "$p" ] && { cat "$p"; exit 0; }; done; p=$(find "$HOME" -maxdepth 4 -name ca.crt -path "*secrets*" 2>/dev/null | head -1); [ -n "$p" ] && cat "$p"'
+# shellcheck disable=SC2016
+CA_FIND_CMD='for p in "'"$INCEPTION_DIR"'/secrets/ca.crt" "$HOME/Documents/inception/secrets/ca.crt" "$HOME/inception/secrets/ca.crt"; do [ -r "$p" ] && { cat "$p"; exit 0; }; done; p=$(find "$HOME" -maxdepth 4 -name ca.crt -path "*secrets*" 2>/dev/null | head -1); [ -n "$p" ] && cat "$p"'
 fetch_ca_cert() {
     [ -n "$CA_FILE" ] && [ -s "$CA_FILE" ] && return 0
     local tmp

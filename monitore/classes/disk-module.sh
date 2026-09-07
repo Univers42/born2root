@@ -54,7 +54,7 @@ disk_module() {
                 if [[ $total_size -gt 0 ]]; then
                     # Convert to human readable
                     local total_human used_human use_percent
-                    total_human=$(numfmt --to=iec --suffix=B $total_size 2>/dev/null || echo "$(($total_size / 1073741824))GB")
+                    total_human=$(numfmt --to=iec --suffix=B $total_size 2>/dev/null || echo "$((total_size / 1073741824))GB")
                     used_human=$(numfmt --to=iec --suffix=B "${used_size%.*}" 2>/dev/null || echo "$((${used_size%.*} / 1073741824))GB")
                     use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total_size>0) ? $used_size*100/$total_size : 0}")
 
@@ -100,8 +100,8 @@ disk_module() {
                 if [[ $total -gt 0 ]]; then
                     # Convert to human readable
                     local total_human used_human use_percent
-                    total_human=$(numfmt --to=iec --suffix=B $total 2>/dev/null || echo "$(($total / 1073741824))GB")
-                    used_human=$(numfmt --to=iec --suffix=B $used 2>/dev/null || echo "$(($used / 1073741824))GB")
+                    total_human=$(numfmt --to=iec --suffix=B $total 2>/dev/null || echo "$((total / 1073741824))GB")
+                    used_human=$(numfmt --to=iec --suffix=B $used 2>/dev/null || echo "$((used / 1073741824))GB")
                     use_percent=$(awk "BEGIN {printf \"%.1f%%\", ($total>0) ? $used*100/$total : 0}")
 
                     echo "$used_human/$total_human ($use_percent)"

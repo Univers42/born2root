@@ -177,7 +177,7 @@ for term in "${SEARCH_TERMS[@]}"; do
             # If there are more results, show count
             total_results=$(echo "$apt_file_results" | wc -l)
             if [ "$total_results" -gt 3 ]; then
-                print_color "$BLUE" "    (and $(($total_results - 3)) more results, use --all to show all)"
+                print_color "$BLUE" "    (and $((total_results - 3)) more results, use --all to show all)"
             fi
         fi
 
