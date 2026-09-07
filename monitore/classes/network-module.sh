@@ -96,7 +96,6 @@ network_module() {
     # For network, mainly check if we get a consistent IP address
     # Extract IP addresses
 
-
     # Variables removed because they are unused.
     # Determine the best available method
     for method in "$network_hostname_ip" "$network_ifconfig" "$network_sysfs" "$network_nmcli"; do

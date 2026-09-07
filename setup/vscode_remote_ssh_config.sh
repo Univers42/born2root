@@ -68,10 +68,8 @@ VSCODE_SETTINGS="${HOME}/.config/Code/User/settings.json"
 # Create directory if it doesn't exist
 mkdir -p "$(dirname "$VSCODE_SETTINGS")"
 
-
-
 # Use Python to safely merge JSON settings (handles existing settings gracefully)
-if python3 <<PYTHON_EOF
+if python3 <<PYTHON_EOF; then
 import json
 import sys
 
@@ -102,7 +100,6 @@ with open(settings_file, 'w') as f:
 print("✓ VS Code settings updated")
 
 PYTHON_EOF
-then
     echo -e "${GREEN}✓ VS Code Remote SSH settings configured${NC}\n"
 else
     echo -e "${YELLOW}⚠ Could not auto-configure settings${NC}"

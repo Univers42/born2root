@@ -134,7 +134,7 @@ install_wordpress() {
 
         # Generate secure keys
         for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-            sed -i "s/define( '$key', .*/define( '$key', '$(tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w 64 | head -n 1)' );/" /var/www/html/wp-config.php
+            sed -i "s/define( '$key', .*/define( '$key', '$(tr -dc 'a-zA-Z0-9' </dev/urandom | fold -w 64 | head -n 1)' );/" /var/www/html/wp-config.php
         done
     else
         echo -e "${YELLOW}! Database credentials not found. You'll need to configure wp-config.php manually${NC}"
