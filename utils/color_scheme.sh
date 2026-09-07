@@ -163,26 +163,26 @@ show_datetime() {
 
 # Check if this script is being sourced or executed
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
-	# Script is being executed directly - show demo
-	clear
-	show_datetime
-	simple_header "SIMPLE HEADER EXAMPLE"
-	box_header "BOX HEADER EXAMPLE"
-	double_header "DOUBLE LINE HEADER EXAMPLE"
-	banner_header "BANNER HEADER EXAMPLE"
-	system_header
-	echo ""
-	success_msg "This is a success message!"
-	error_msg "This is an error message!"
-	warning_msg "This is a warning message!"
-	info_msg "This is an information message!"
-	echo ""
-	echo "Progress bar example:"
-	for i in {0..100..10}; do
-		progress_bar $i
-		sleep 0.1
-	done
-	echo -e "\n\n${BOLD_YELLOW}To use this library, source it in your scripts:${NC}"
-	echo -e "${CYAN}source colorlib.sh${NC} or ${CYAN}. colorlib.sh${NC}"
-	echo ""
+    # Script is being executed directly - show demo
+    clear
+    show_datetime
+    simple_header "SIMPLE HEADER EXAMPLE"
+    box_header "BOX HEADER EXAMPLE"
+    double_header "DOUBLE LINE HEADER EXAMPLE"
+    banner_header "BANNER HEADER EXAMPLE"
+    system_header
+    echo ""
+    success_msg "This is a success message!"
+    error_msg "This is an error message!"
+    warning_msg "This is a warning message!"
+    info_msg "This is an information message!"
+    echo ""
+    echo "Progress bar example:"
+    for i in {0..100..10}; do
+        progress_bar $i
+        sleep 0.1
+    done
+    echo -e "\n\n${BOLD_YELLOW}To use this library, source it in your scripts:${NC}"
+    echo -e "${CYAN}source colorlib.sh${NC} or ${CYAN}. colorlib.sh${NC}"
+    echo ""
 fi

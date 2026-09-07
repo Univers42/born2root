@@ -48,33 +48,33 @@ say() { printf "%b\n" "$*" >&2; }
 # ── What can this machine actually do, right now? ───────────────────────────
 vbox_ok=0
 vbox_why="VBoxManage not installed"
-if command -v VBoxManage > /dev/null 2>&1; then
-	vboxdrv_ok && vbox_ok=1
-	vbox_why=$(vboxdrv_why)
-	# A usable driver is not the whole story. VT-x belongs to one hypervisor
-	# at a time, and a running KVM guest holds it: VirtualBox would fail with
-	# VERR_VMX_IN_VMX_ROOT_MODE -- the mirror image of the EBUSY that
-	# kvm_probe.sh catches in the other direction.
-	if [ "$vbox_ok" = 1 ] && kvm_users=$("${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh" users); then
-		vbox_ok=0
-		vbox_why="blocked: a KVM guest is running ($(printf '%s' "$kvm_users" | paste -sd, -)) and holds VT-x; one hypervisor at a time"
-	fi
+if command -v VBoxManage >/dev/null 2>&1; then
+    vboxdrv_ok && vbox_ok=1
+    vbox_why=$(vboxdrv_why)
+    # A usable driver is not the whole story. VT-x belongs to one hypervisor
+    # at a time, and a running KVM guest holds it: VirtualBox would fail with
+    # VERR_VMX_IN_VMX_ROOT_MODE -- the mirror image of the EBUSY that
+    # kvm_probe.sh catches in the other direction.
+    if [ "$vbox_ok" = 1 ] && kvm_users=$("${SCRIPT_SH:-bash}" "$HERE/kvm_probe.sh" users); then
+        vbox_ok=0
+        vbox_why="blocked: a KVM guest is running ($(printf '%s' "$kvm_users" | paste -sd, -)) and holds VT-x; one hypervisor at a time"
+    fi
 fi
 
 qemu_ok=0
 qemu_why="qemu-system-x86_64 not installed"
-if command -v qemu-system-x86_64 > /dev/null 2>&1; then
-	# Ask KVM for a VM the way QEMU will, instead of trusting the permission
-	# bits on /dev/kvm. The difference matters: while a VirtualBox VM runs it
-	# owns VT-x, and KVM_CREATE_VM fails with EBUSY even though /dev/kvm is
-	# perfectly readable. See kvm_probe.sh for the mechanism.
-	# Without KVM QEMU still runs, but a Debian install under pure emulation
-	# takes hours. Offering it silently would be a trap.
-	if qemu_why=$("${SCRIPT_SH:-bash}" "$(dirname "${BASH_SOURCE[0]:-$0}")/kvm_probe.sh"); then
-		qemu_ok=1
-	else
-		qemu_why="installed, but ${qemu_why}"
-	fi
+if command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    # Ask KVM for a VM the way QEMU will, instead of trusting the permission
+    # bits on /dev/kvm. The difference matters: while a VirtualBox VM runs it
+    # owns VT-x, and KVM_CREATE_VM fails with EBUSY even though /dev/kvm is
+    # perfectly readable. See kvm_probe.sh for the mechanism.
+    # Without KVM QEMU still runs, but a Debian install under pure emulation
+    # takes hours. Offering it silently would be a trap.
+    if qemu_why=$("${SCRIPT_SH:-bash}" "$(dirname "${BASH_SOURCE[0]:-$0}")/kvm_probe.sh"); then
+        qemu_ok=1
+    else
+        qemu_why="installed, but ${qemu_why}"
+    fi
 fi
 
 # ── An explicit choice is honoured, with a warning if it looks broken ───────

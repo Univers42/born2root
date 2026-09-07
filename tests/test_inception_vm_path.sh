@@ -22,12 +22,12 @@ cd "$(dirname "$0")/.."
 
 fail=0
 check() {
-	if [ "$2" = "$3" ]; then
-		printf 'ok   %-46s = %s\n' "$1" "$2"
-	else
-		printf 'FAIL %-46s = %s (expected %s)\n' "$1" "$2" "$3"
-		fail=1
-	fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-46s = %s\n' "$1" "$2"
+    else
+        printf 'FAIL %-46s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
 }
 
 TMP=$(mktemp -d)
@@ -35,16 +35,16 @@ VM="t-$$"
 # make reads the recorded location from the real disk_images/: a throwaway
 # name keeps this record away from any real VM's, and the trap removes it.
 mkdir -p disk_images "$TMP/vm/$VM"
-printf '%s\n' "$TMP/vm" > "disk_images/.vm_path.$VM"
+printf '%s\n' "$TMP/vm" >"disk_images/.vm_path.$VM"
 trap 'rm -f "disk_images/.vm_path.$VM"; rm -rf "$TMP"' EXIT
-printf 'https=8443\ninception-static=8090\n' > "$TMP/vm/$VM/ports.env"
+printf 'https=8443\ninception-static=8090\n' >"$TMP/vm/$VM/ports.env"
 
 # 1. Every Inception recipe hands the RECORDED VM_PATH to its script, with
 #    nothing on the command line. The temp path is replaced by a fixed token
 #    so the output is the same run to run and shell to shell.
 for t in inception verify_access host_access host_access_undo; do
-	got=$(make -n "$t" VM_NAME="$VM" SRC=/x 2>/dev/null | grep -o 'VM_PATH="[^"]*"' | head -1)
-	check "make $t exports the recorded VM_PATH" "${got//"$TMP"/TMP}" 'VM_PATH="TMP/vm"'
+    got=$(make -n "$t" VM_NAME="$VM" SRC=/x 2>/dev/null | grep -o 'VM_PATH="[^"]*"' | head -1)
+    check "make $t exports the recorded VM_PATH" "${got//"$TMP"/TMP}" 'VM_PATH="TMP/vm"'
 done
 
 # 2. With that in the environment, the resolver finds QEMU's forwards.

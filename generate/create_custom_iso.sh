@@ -266,34 +266,34 @@ if [ -n "$CUSTOM_SHELL_PATH" ]; then
     CUSTOM_SHELL_NAME="${CUSTOM_SHELL_NAME:-$(basename "$CUSTOM_SHELL_PATH")}"
     CUSTOM_SHELL_DEST="${CUSTOM_SHELL_DEST:-/usr/bin/$CUSTOM_SHELL_NAME}"
 
-	cp "$CUSTOM_SHELL_PATH" "$ISO_DIR/custom_shell.bin"
-	chmod 755 "$ISO_DIR/custom_shell.bin" || true
-	printf '%s\n' "$CUSTOM_SHELL_DEST" > "$ISO_DIR/custom_shell.dest"
-	printf '%s\n' "$CUSTOM_SHELL_NAME" > "$ISO_DIR/custom_shell.name"
-	echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
-	echo "    dest: $CUSTOM_SHELL_DEST"
-	# Every in-target step of late_command then runs under the baked shell
-	# rather than /bin/bash: the guest's own setup (b2b-setup.sh), the ssh
-	# key, dpkg, grub. /tmp/custom_shell.bin is the copy late_command itself
-	# made a line earlier, so it is there whatever b2b-setup.sh decides. The
-	# poweroff hook systemd runs at shutdown gets the installed shell as its
-	# interpreter. The repository's preseed keeps /bin/bash, for an ISO built
-	# without a shell; only the ISO's copy is rewritten, and that copy is what
-	# goes into the initrd below.
-	sed -i -e "s|in-target /bin/bash |in-target /tmp/custom_shell.bin |g" \
-		-e "s|echo '#!/bin/sh' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|echo '#!${CUSTOM_SHELL_DEST}' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|" \
-		"$ISO_DIR/preseed.cfg"
-	echo "  ✓ late_command runs in-target under the baked shell"
-	# Optional extra: upstream's own shell-registration helper, if a hellish
-	# source tree happens to be checked out beside us. Not required — b2b-setup.sh
-	# appends to /etc/shells and runs usermod itself — so its absence is normal
-	# now that the sh42 submodule is gone.
-	REGISTER_SCRIPT="hellish/vendor/scripts/register_shell.sh"
-	if [ -f "$REGISTER_SCRIPT" ]; then
-		cp "$REGISTER_SCRIPT" "$ISO_DIR/register_shell.sh"
-		chmod 755 "$ISO_DIR/register_shell.sh" || true
-		echo "  ✓ register_shell.sh"
-	fi
+    cp "$CUSTOM_SHELL_PATH" "$ISO_DIR/custom_shell.bin"
+    chmod 755 "$ISO_DIR/custom_shell.bin" || true
+    printf '%s\n' "$CUSTOM_SHELL_DEST" >"$ISO_DIR/custom_shell.dest"
+    printf '%s\n' "$CUSTOM_SHELL_NAME" >"$ISO_DIR/custom_shell.name"
+    echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
+    echo "    dest: $CUSTOM_SHELL_DEST"
+    # Every in-target step of late_command then runs under the baked shell
+    # rather than /bin/bash: the guest's own setup (b2b-setup.sh), the ssh
+    # key, dpkg, grub. /tmp/custom_shell.bin is the copy late_command itself
+    # made a line earlier, so it is there whatever b2b-setup.sh decides. The
+    # poweroff hook systemd runs at shutdown gets the installed shell as its
+    # interpreter. The repository's preseed keeps /bin/bash, for an ISO built
+    # without a shell; only the ISO's copy is rewritten, and that copy is what
+    # goes into the initrd below.
+    sed -i -e "s|in-target /bin/bash |in-target /tmp/custom_shell.bin |g" \
+        -e "s|echo '#!/bin/sh' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|echo '#!${CUSTOM_SHELL_DEST}' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|" \
+        "$ISO_DIR/preseed.cfg"
+    echo "  ✓ late_command runs in-target under the baked shell"
+    # Optional extra: upstream's own shell-registration helper, if a hellish
+    # source tree happens to be checked out beside us. Not required — b2b-setup.sh
+    # appends to /etc/shells and runs usermod itself — so its absence is normal
+    # now that the sh42 submodule is gone.
+    REGISTER_SCRIPT="hellish/vendor/scripts/register_shell.sh"
+    if [ -f "$REGISTER_SCRIPT" ]; then
+        cp "$REGISTER_SCRIPT" "$ISO_DIR/register_shell.sh"
+        chmod 755 "$ISO_DIR/register_shell.sh" || true
+        echo "  ✓ register_shell.sh"
+    fi
 else
     echo "ℹ CUSTOM_SHELL_PATH not set — keeping default shell (bash)"
 fi
@@ -324,12 +324,12 @@ fi
 echo "Injecting preseed.cfg into initrd..."
 INITRD="$ISO_DIR/install.amd/initrd.gz"
 if [ -f "$INITRD" ]; then
-	INITRD_ABS="$(cd "$(dirname "$INITRD")" && pwd)/$(basename "$INITRD")"
-	INJECT_DIR=$(mktemp -d)
-	cp "$ISO_DIR/preseed.cfg" "$INJECT_DIR/preseed.cfg"
-	(cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2> /dev/null | gzip >> "$INITRD_ABS")
-	rm -rf "$INJECT_DIR"
-	echo "  ✓ preseed.cfg injected into install.amd/initrd.gz"
+    INITRD_ABS="$(cd "$(dirname "$INITRD")" && pwd)/$(basename "$INITRD")"
+    INJECT_DIR=$(mktemp -d)
+    cp "$ISO_DIR/preseed.cfg" "$INJECT_DIR/preseed.cfg"
+    (cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2>/dev/null | gzip >>"$INITRD_ABS")
+    rm -rf "$INJECT_DIR"
+    echo "  ✓ preseed.cfg injected into install.amd/initrd.gz"
 else
     # Without the preseed inside the initrd the install is interactive and
     # waits on a question forever. Never ship that ISO.
@@ -340,12 +340,12 @@ fi
 # Also inject into GTK initrd if it exists
 INITRD_GTK="$ISO_DIR/install.amd/gtk/initrd.gz"
 if [ -f "$INITRD_GTK" ]; then
-	INITRD_GTK_ABS="$(cd "$(dirname "$INITRD_GTK")" && pwd)/$(basename "$INITRD_GTK")"
-	INJECT_DIR=$(mktemp -d)
-	cp "$ISO_DIR/preseed.cfg" "$INJECT_DIR/preseed.cfg"
-	(cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2> /dev/null | gzip >> "$INITRD_GTK_ABS")
-	rm -rf "$INJECT_DIR"
-	echo "  ✓ preseed.cfg injected into install.amd/gtk/initrd.gz"
+    INITRD_GTK_ABS="$(cd "$(dirname "$INITRD_GTK")" && pwd)/$(basename "$INITRD_GTK")"
+    INJECT_DIR=$(mktemp -d)
+    cp "$ISO_DIR/preseed.cfg" "$INJECT_DIR/preseed.cfg"
+    (cd "$INJECT_DIR" && echo preseed.cfg | cpio -o -H newc 2>/dev/null | gzip >>"$INITRD_GTK_ABS")
+    rm -rf "$INJECT_DIR"
+    echo "  ✓ preseed.cfg injected into install.amd/gtk/initrd.gz"
 fi
 
 # Edit boot menu for BIOS (ISOLINUX)

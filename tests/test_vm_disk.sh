@@ -14,12 +14,12 @@ cd "$(dirname "$0")/.."
 
 fail=0
 check() {
-	if [ "$2" = "$3" ]; then
-		printf 'ok   %-42s = %s\n' "$1" "$3"
-	else
-		printf 'FAIL %-42s = %s (expected %s)\n' "$1" "$2" "$3"
-		fail=1
-	fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-42s = %s\n' "$1" "$3"
+    else
+        printf 'FAIL %-42s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
 }
 
 TMP=$(mktemp -d)
@@ -33,12 +33,14 @@ UUID="51b8c990-3255-4eb3-950b-a80c62b0156b"
 # $STUB_UUID lets a test pretend the VDI was rebuilt underneath the stamp.
 STUB_UUID="$UUID"
 VBoxManage() {
-	case "$1 $2" in
-		"showvminfo --machinereadable" | "showvminfo ${VM_NAME}")
-			printf '"SATA Controller-0-0"="%s"\n' "$VDI" ;;
-		"showmediuminfo disk")
-			printf 'UUID:           %s\n' "$STUB_UUID" ;;
-	esac
+    case "$1 $2" in
+    "showvminfo --machinereadable" | "showvminfo ${VM_NAME}")
+        printf '"SATA Controller-0-0"="%s"\n' "$VDI"
+        ;;
+    "showmediuminfo disk")
+        printf 'UUID:           %s\n' "$STUB_UUID"
+        ;;
+    esac
 }
 VM_NAME=debian
 export VM_NAME

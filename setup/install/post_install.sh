@@ -95,6 +95,6 @@ wall "
 EOF
 
 chmod +x /root/monitoring.sh
-echo "*/10 * * * * root /root/monitoring.sh" > /etc/cron.d/monitoring
+echo "*/10 * * * * root /root/monitoring.sh" >/etc/cron.d/monitoring
 
 echo "Born2beRoot post-installation configuration complete!"

@@ -92,11 +92,11 @@ elif [ "$disk_bytes" -gt 1073741824 ] && [ -z "$phase_now" ] && [ "${FORCE_INSTA
     ok "disk holds $(du -h "$DISK" | cut -f1) but no .installed stamp (built before stamps existed) — treating it as installed"
     ok "force a reinstall with: FORCE_INSTALL=1, or delete $DISK"
 else
-	[ "$phase_now" = installing ] \
-		&& printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
-	printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
-	printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
-	"${SCRIPT_SH:-bash}" "$QEMU_VM" install || die "the install phase failed"
+    [ "$phase_now" = installing ] &&
+        printf "  ${C_DIM}a previous install was interrupted — starting over (the installer reformats the disk)${C_RESET}\n"
+    printf "  ${C_DIM}~20 minutes. The tracker below reads the installer's own log; Ctrl+C\n"
+    printf "  detaches, make qemu_watch re-attaches, make qemu_console shows every line.${C_RESET}\n"
+    "${SCRIPT_SH:-bash}" "$QEMU_VM" install || die "the install phase failed"
 fi
 
 # ── 4. First boot + LUKS ────────────────────────────────────────────────────

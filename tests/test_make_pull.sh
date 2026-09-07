@@ -25,21 +25,21 @@ trap 'rm -rf "$TMP"' EXIT
 
 fail=0
 check() {
-	local what="$1" got="$2" want="$3"
-	if [ "$got" = "$want" ]; then
-		printf 'ok   %-46s = %s\n' "$what" "$got"
-	else
-		printf 'FAIL %-46s = %s (want %s)\n' "$what" "$got" "$want"
-		fail=1
-	fi
+    local what="$1" got="$2" want="$3"
+    if [ "$got" = "$want" ]; then
+        printf 'ok   %-46s = %s\n' "$what" "$got"
+    else
+        printf 'FAIL %-46s = %s (want %s)\n' "$what" "$got" "$want"
+        fail=1
+    fi
 }
 
 git_q() { git -c user.email=t@t -c user.name=t -c init.defaultBranch=main "$@"; }
 
 # ── A throwaway origin with one commit on main ──────────────────────────────
 git_q init -q --bare "$TMP/origin.git"
-git_q clone -q "$TMP/origin.git" "$TMP/seed" 2> /dev/null
-printf 'committed content\n' > "$TMP/seed/tracked.txt"
+git_q clone -q "$TMP/origin.git" "$TMP/seed" 2>/dev/null
+printf 'committed content\n' >"$TMP/seed/tracked.txt"
 git_q -C "$TMP/seed" add -A
 git_q -C "$TMP/seed" commit -qm init
 git_q -C "$TMP/seed" push -q origin main
@@ -48,13 +48,13 @@ git_q -C "$TMP/seed" push -q origin main
 git_q clone -q "$TMP/origin.git" "$TMP/work"
 cp "$MAKEFILE" "$TMP/work/Makefile"
 
-printf 'STALE WIP FROM DAYS AGO\n' > "$TMP/work/tracked.txt"
+printf 'STALE WIP FROM DAYS AGO\n' >"$TMP/work/tracked.txt"
 git_q -C "$TMP/work" stash -q
 check "stale stash is on the stack" "$(git_q -C "$TMP/work" stash list | wc -l)" 1
 check "tree is clean before the pull" "$(git_q -C "$TMP/work" status --porcelain --untracked-files=no | wc -l)" 0
 
 # ── The real recipe ─────────────────────────────────────────────────────────
-( cd "$TMP/work" && make --no-print-directory pull ) > "$TMP/pull.log" 2>&1
+(cd "$TMP/work" && make --no-print-directory pull) >"$TMP/pull.log" 2>&1
 pull_rc=$?
 
 check "pull succeeded" "$pull_rc" 0
@@ -64,13 +64,13 @@ check "stale stash left untouched" "$(git_q -C "$TMP/work" stash list | wc -l)" 
 check "no conflict markers" "$(grep -rc '^<<<<<<<' "$TMP/work/tracked.txt")" 0
 
 # ── The case autostash DOES have to handle: real local edits survive ────────
-printf 'my real local edit\n' > "$TMP/work/tracked.txt"
-printf 'new upstream line\n' >> "$TMP/seed/other.txt"
+printf 'my real local edit\n' >"$TMP/work/tracked.txt"
+printf 'new upstream line\n' >>"$TMP/seed/other.txt"
 git_q -C "$TMP/seed" add -A
 git_q -C "$TMP/seed" commit -qm "upstream moves"
 git_q -C "$TMP/seed" push -q origin main
 
-( cd "$TMP/work" && make --no-print-directory pull ) > "$TMP/pull2.log" 2>&1
+(cd "$TMP/work" && make --no-print-directory pull) >"$TMP/pull2.log" 2>&1
 check "pull with real local edits succeeded" "$?" 0
 check "local edit survived the pull" "$(cat "$TMP/work/tracked.txt")" "my real local edit"
 check "upstream commit arrived" "$([ -f "$TMP/work/other.txt" ] && echo yes || echo no)" yes

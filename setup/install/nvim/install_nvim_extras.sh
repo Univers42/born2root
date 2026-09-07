@@ -118,7 +118,7 @@ NVIM_PYTHON_VENV="${NVIM_PYTHON_VENV:-/opt/nvim-venv}"
 # which is the worst kind of bug to find later. Override with NVIM_MKDP_PORT.
 NVIM_MKDP_PORT="${NVIM_MKDP_PORT:-8420}"
 
-log()  { printf '[nvim-extras] %s\n' "$*"; }
+log() { printf '[nvim-extras] %s\n' "$*"; }
 warn() { printf '[nvim-extras] WARN: %s\n' "$*" >&2; }
 die() {
     printf '[nvim-extras] ERROR: %s\n' "$*" >&2
@@ -145,80 +145,80 @@ die() {
 #             line would be read as a `# shellcheck` directive, hence the wrap.)
 #   mariadb-client  vim-dadbod shells out to `mysql` to talk to the WordPress DB
 install_deps() {
-	log "installing fzf, bat, lazygit, gdb and friends"
-	export DEBIAN_FRONTEND=noninteractive
-	apt-get update -qq 2>/dev/null || warn "apt-get update failed — using the current index"
+    log "installing fzf, bat, lazygit, gdb and friends"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq 2>/dev/null || warn "apt-get update failed — using the current index"
 
-	# lazygit is only in trixie and newer. Install the batch first, and let a
-	# failure fall through to the per-package loop rather than taking fzf and
-	# gdb down with it on an older release.
-	local pkgs="fzf bat git ripgrep xdg-utils lazygit gdb shellcheck mariadb-client"
-	# $pkgs is deliberately unquoted: it is a space-separated package list and
-	# the word splitting is the point. Quoting it asks apt for one package with
-	# spaces in its name.
-	# shellcheck disable=SC2086
-	if ! apt-get install -y -qq -o Dpkg::Options::=--force-confdef \
-		-o Dpkg::Options::=--force-confold $pkgs 2>/dev/null; then
-		warn "batch install failed — retrying package by package"
-		local p
-		for p in $pkgs; do
-			apt-get install -y -qq "$p" 2>/dev/null || warn "could not install $p"
-		done
-	fi
+    # lazygit is only in trixie and newer. Install the batch first, and let a
+    # failure fall through to the per-package loop rather than taking fzf and
+    # gdb down with it on an older release.
+    local pkgs="fzf bat git ripgrep xdg-utils lazygit gdb shellcheck mariadb-client"
+    # $pkgs is deliberately unquoted: it is a space-separated package list and
+    # the word splitting is the point. Quoting it asks apt for one package with
+    # spaces in its name.
+    # shellcheck disable=SC2086
+    if ! apt-get install -y -qq -o Dpkg::Options::=--force-confdef \
+        -o Dpkg::Options::=--force-confold $pkgs 2>/dev/null; then
+        warn "batch install failed — retrying package by package"
+        local p
+        for p in $pkgs; do
+            apt-get install -y -qq "$p" 2>/dev/null || warn "could not install $p"
+        done
+    fi
 
-	# Debian installs bat as `batcat` (name clash with the `bacula` bat tool).
-	# fzf.vim's preview looks for `bat`, so give it one.
-	if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
-		ln -sf "$(command -v batcat)" /usr/local/bin/bat
-		log "linked batcat -> /usr/local/bin/bat"
-	fi
+    # Debian installs bat as `batcat` (name clash with the `bacula` bat tool).
+    # fzf.vim's preview looks for `bat`, so give it one.
+    if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
+        ln -sf "$(command -v batcat)" /usr/local/bin/bat
+        log "linked batcat -> /usr/local/bin/bat"
+    fi
 
-	# No mariadb->mysql symlink here, unlike fd and bat above, and that is
-	# checked rather than assumed: vim-dadbod hardcodes the binary name
-	# (autoload/db/adapter/mysql.vim opens `let command = ['mysql']`), but
-	# mariadb-client Depends on mariadb-client-core, and it is THAT package
-	# which ships /usr/bin/mysql as a symlink to mariadb. Verified on the VM:
-	#     dpkg -S /usr/bin/mysql  ->  mariadb-client-core
-	# So installing mariadb-client always brings `mysql` with it.
+    # No mariadb->mysql symlink here, unlike fd and bat above, and that is
+    # checked rather than assumed: vim-dadbod hardcodes the binary name
+    # (autoload/db/adapter/mysql.vim opens `let command = ['mysql']`), but
+    # mariadb-client Depends on mariadb-client-core, and it is THAT package
+    # which ships /usr/bin/mysql as a symlink to mariadb. Verified on the VM:
+    #     dpkg -S /usr/bin/mysql  ->  mariadb-client-core
+    # So installing mariadb-client always brings `mysql` with it.
 
-	# markdownlint is nvim-lint's markdown linter and there is no Debian package
-	# for it. Installed globally with npm, beside the node provider and the
-	# tree-sitter CLI that install_nvim.sh already puts there.
-	if command -v npm >/dev/null 2>&1; then
-		if ! command -v markdownlint-cli2 >/dev/null 2>&1; then
-			log "installing markdownlint-cli2 (nvim-lint's markdown linter)"
-			npm install -g markdownlint-cli2 >/dev/null 2>&1 \
-				|| warn "npm install -g markdownlint-cli2 failed — markdown linting will be off"
-		fi
-	else
-		warn "npm not available — skipping markdownlint-cli2"
-	fi
+    # markdownlint is nvim-lint's markdown linter and there is no Debian package
+    # for it. Installed globally with npm, beside the node provider and the
+    # tree-sitter CLI that install_nvim.sh already puts there.
+    if command -v npm >/dev/null 2>&1; then
+        if ! command -v markdownlint-cli2 >/dev/null 2>&1; then
+            log "installing markdownlint-cli2 (nvim-lint's markdown linter)"
+            npm install -g markdownlint-cli2 >/dev/null 2>&1 ||
+                warn "npm install -g markdownlint-cli2 failed — markdown linting will be off"
+        fi
+    else
+        warn "npm not available — skipping markdownlint-cli2"
+    fi
 
-	# debugpy for nvim-dap's Python adapter, into the same venv install_nvim.sh
-	# built for pynvim. Debian's python3 is PEP 668 externally-managed, so this
-	# is the only place it can go without --break-system-packages.
-	if [ -x "${NVIM_PYTHON_VENV}/bin/pip" ]; then
-		log "installing debugpy into ${NVIM_PYTHON_VENV} (nvim-dap's python adapter)"
-		"${NVIM_PYTHON_VENV}/bin/pip" install --quiet debugpy >/dev/null 2>&1 \
-			|| warn "pip install debugpy failed — python debugging will be off"
-		chmod -R a+rX "$NVIM_PYTHON_VENV" 2>/dev/null || true
-	else
-		warn "no venv at ${NVIM_PYTHON_VENV} — skipping debugpy (run install_nvim.sh first)"
-	fi
+    # debugpy for nvim-dap's Python adapter, into the same venv install_nvim.sh
+    # built for pynvim. Debian's python3 is PEP 668 externally-managed, so this
+    # is the only place it can go without --break-system-packages.
+    if [ -x "${NVIM_PYTHON_VENV}/bin/pip" ]; then
+        log "installing debugpy into ${NVIM_PYTHON_VENV} (nvim-dap's python adapter)"
+        "${NVIM_PYTHON_VENV}/bin/pip" install --quiet debugpy >/dev/null 2>&1 ||
+            warn "pip install debugpy failed — python debugging will be off"
+        chmod -R a+rX "$NVIM_PYTHON_VENV" 2>/dev/null || true
+    else
+        warn "no venv at ${NVIM_PYTHON_VENV} — skipping debugpy (run install_nvim.sh first)"
+    fi
 
-	apt-get clean 2>/dev/null || true
+    apt-get clean 2>/dev/null || true
 
-	# Report what actually landed, because "the apt line ran" is not the same
-	# thing as "the binary is on PATH" -- and every one of these is a feature
-	# that silently does nothing when its binary is missing.
-	local tool
-	for tool in fzf lazygit gdb shellcheck markdownlint-cli2 mysql; do
-		if command -v "$tool" >/dev/null 2>&1; then
-			log "  ok   ${tool}"
-		else
-			warn "  MISS ${tool} — the feature that uses it will be inactive"
-		fi
-	done
+    # Report what actually landed, because "the apt line ran" is not the same
+    # thing as "the binary is on PATH" -- and every one of these is a feature
+    # that silently does nothing when its binary is missing.
+    local tool
+    for tool in fzf lazygit gdb shellcheck markdownlint-cli2 mysql; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            log "  ok   ${tool}"
+        else
+            warn "  MISS ${tool} — the feature that uses it will be inactive"
+        fi
+    done
 }
 
 # ── The shared plugin-install helper ────────────────────────────────────────
@@ -229,9 +229,9 @@ install_deps() {
 # It loads first (05 sorts before 10) and publishes _G.B2B, so every later file
 # is `B2B.add { ... }` plus `B2B.try(...)` around its setup calls.
 write_pack_lua() {
-	local cfg="$1"
-	mkdir -p "${cfg}/plugin"
-	cat > "${cfg}/plugin/05-b2b-pack.lua" <<'LUAEOF'
+    local cfg="$1"
+    mkdir -p "${cfg}/plugin"
+    cat >"${cfg}/plugin/05-b2b-pack.lua" <<'LUAEOF'
 -- 05-b2b-pack.lua — the install helper the rest of the born2root layer uses.
 --
 -- Written by setup/install/nvim/install_nvim_extras.sh. Files in plugin/ are
@@ -370,14 +370,14 @@ vim.schedule(function()
   end
 end)
 LUAEOF
-	chmod 644 "${cfg}/plugin/05-b2b-pack.lua"
+    chmod 644 "${cfg}/plugin/05-b2b-pack.lua"
 }
 
 # ── The plugin layer ────────────────────────────────────────────────────────
 write_plugins_lua() {
-	local cfg="$1"
-	mkdir -p "${cfg}/plugin"
-	cat > "${cfg}/plugin/10-b2b-plugins.lua" <<'LUAEOF'
+    local cfg="$1"
+    mkdir -p "${cfg}/plugin"
+    cat >"${cfg}/plugin/10-b2b-plugins.lua" <<'LUAEOF'
 -- 10-b2b-plugins.lua — everything kickstart.nvim leaves out.
 --
 -- Written by setup/install/nvim/install_nvim_extras.sh. It lives in plugin/,
@@ -883,42 +883,42 @@ set -u
 SESSION_DIR="\${NVIM_SESSION_DIR:-\$HOME/${sessdir_rel}}"
 
 list_sessions() {
-	if [ ! -d "\$SESSION_DIR" ] || [ -z "\$(ls -A "\$SESSION_DIR" 2>/dev/null)" ]; then
-		echo "No sessions yet in \$SESSION_DIR."
-		echo "Start one from inside Neovim with  <leader>sS  or  :B2BSession <name>"
-		return 0
-	fi
-	printf '%-24s %s\n' "SESSION" "DIRECTORY"
-	local f dir
-	for f in "\$SESSION_DIR"/*; do
-		[ -f "\$f" ] || continue
-		# An Obsession file records the working directory as a \`cd\` line.
-		dir=\$(grep -m1 '^cd ' "\$f" 2>/dev/null | cut -d' ' -f2- || true)
-		printf '%-24s %s\n' "\$(basename "\$f")" "\${dir:-?}"
-	done
+    if [ ! -d "\$SESSION_DIR" ] || [ -z "\$(ls -A "\$SESSION_DIR" 2>/dev/null)" ]; then
+        echo "No sessions yet in \$SESSION_DIR."
+        echo "Start one from inside Neovim with  <leader>sS  or  :B2BSession <name>"
+        return 0
+    fi
+    printf '%-24s %s\n' "SESSION" "DIRECTORY"
+    local f dir
+    for f in "\$SESSION_DIR"/*; do
+        [ -f "\$f" ] || continue
+        # An Obsession file records the working directory as a \`cd\` line.
+        dir=\$(grep -m1 '^cd ' "\$f" 2>/dev/null | cut -d' ' -f2- || true)
+        printf '%-24s %s\n' "\$(basename "\$f")" "\${dir:-?}"
+    done
 }
 
 case "\${1:-}" in
-	'' | -l | --list)
-		list_sessions
-		exit 0
-		;;
-	-h | --help)
-		# Print the leading comment block, whatever length it grows to: a fixed
-		# line range silently starts printing code the moment the header is
-		# edited (it was printing 'set -u' and the SESSION_DIR line).
-		awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "\$0"
-		exit 0
-		;;
+    '' | -l | --list)
+        list_sessions
+        exit 0
+        ;;
+    -h | --help)
+        # Print the leading comment block, whatever length it grows to: a fixed
+        # line range silently starts printing code the moment the header is
+        # edited (it was printing 'set -u' and the SESSION_DIR line).
+        awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "\$0"
+        exit 0
+        ;;
 esac
 
 session="\$1"
 shift
 if [ ! -f "\$SESSION_DIR/\$session" ]; then
-	echo "vw: no session named '\$session' in \$SESSION_DIR" >&2
-	echo >&2
-	list_sessions >&2
-	exit 1
+    echo "vw: no session named '\$session' in \$SESSION_DIR" >&2
+    echo >&2
+    list_sessions >&2
+    exit 1
 fi
 
 echo "Launching \$session nvim session..." >&2
@@ -931,9 +931,9 @@ VWEOF
     cat >/etc/bash_completion.d/vw <<VWCEOF
 # bash completion for vw — see /usr/local/bin/vw
 _vw() {
-	local dir="\${NVIM_SESSION_DIR:-\$HOME/${sessdir_rel}}"
-	[ -d "\$dir" ] || return 0
-	COMPREPLY=(\$(compgen -W "\$(cd "\$dir" && ls -1 2>/dev/null)" -- "\${COMP_WORDS[COMP_CWORD]}"))
+    local dir="\${NVIM_SESSION_DIR:-\$HOME/${sessdir_rel}}"
+    [ -d "\$dir" ] || return 0
+    COMPREPLY=(\$(compgen -W "\$(cd "\$dir" && ls -1 2>/dev/null)" -- "\${COMP_WORDS[COMP_CWORD]}"))
 }
 complete -F _vw vw
 VWCEOF
@@ -1237,15 +1237,15 @@ LUAEOF
 # either punching a hole in it or being confused about why the port is refused.
 # An SSH tunnel needs neither.
 write_markdown_lua() {
-	local cfg="$1" port="$2"
-	# A tiny interpolated head, then a literal body: the Lua below contains
-	# backslashes and $-signs that an unquoted heredoc would eat.
-	cat > "${cfg}/plugin/50-b2b-markdown.lua" <<LUAHEAD
+    local cfg="$1" port="$2"
+    # A tiny interpolated head, then a literal body: the Lua below contains
+    # backslashes and $-signs that an unquoted heredoc would eat.
+    cat >"${cfg}/plugin/50-b2b-markdown.lua" <<LUAHEAD
 -- 50-b2b-markdown.lua — written by setup/install/nvim/install_nvim_extras.sh
 local PORT = '${port}'
 local SSH_PORT = '4242'
 LUAHEAD
-	cat >> "${cfg}/plugin/50-b2b-markdown.lua" <<'LUAEOF'
+    cat >>"${cfg}/plugin/50-b2b-markdown.lua" <<'LUAEOF'
 
 -- The markdown layer: render-markdown.nvim in the buffer, markdown-preview.nvim
 -- in a browser. See the installer header for why the preview needs a tunnel.
@@ -1425,7 +1425,7 @@ vim.api.nvim_create_user_command('B2BMarkdown', function()
   }, '\n'), vim.log.levels.INFO)
 end, { desc = 'How to reach the markdown preview from the host' })
 LUAEOF
-	chmod 644 "${cfg}/plugin/50-b2b-markdown.lua"
+    chmod 644 "${cfg}/plugin/50-b2b-markdown.lua"
 }
 
 # ── The rest of the VS Code feature list ────────────────────────────────────
@@ -1449,12 +1449,12 @@ LUAEOF
 # box wants. They are all lazy — nothing below starts a process until you press
 # its key — but if you routinely run several, give the VM more RAM.
 write_ide_lua() {
-	local cfg="$1" venv="$2"
-	cat > "${cfg}/plugin/60-b2b-ide.lua" <<LUAHEAD
+    local cfg="$1" venv="$2"
+    cat >"${cfg}/plugin/60-b2b-ide.lua" <<LUAHEAD
 -- 60-b2b-ide.lua — written by setup/install/nvim/install_nvim_extras.sh
 local VENV = '${venv}'
 LUAHEAD
-	cat >> "${cfg}/plugin/60-b2b-ide.lua" <<'LUAEOF'
+    cat >>"${cfg}/plugin/60-b2b-ide.lua" <<'LUAEOF'
 
 -- The IDE layer: everything on the "VS Code equivalent" list that kickstart and
 -- 10-b2b-plugins.lua do not already cover.
@@ -1872,7 +1872,7 @@ try('codecompanion', function()
     { desc = '[A]I: [a]ctions on selection', silent = true, noremap = true })
 end)
 LUAEOF
-	chmod 644 "${cfg}/plugin/60-b2b-ide.lua"
+    chmod 644 "${cfg}/plugin/60-b2b-ide.lua"
 }
 
 # ── Terminal fixes these bindings depend on ─────────────────────────────────
@@ -1888,9 +1888,9 @@ write_profile() {
 # Interactive terminals only: running stty against a pipe breaks scp, rsync and
 # every other non-interactive SSH command.
 case $- in
-	*i*)
-		[ -t 0 ] && stty -ixon 2>/dev/null
-		;;
+    *i*)
+        [ -t 0 ] && stty -ixon 2>/dev/null
+        ;;
 esac
 
 # Where `vw` and Neovim keep saved sessions.
@@ -1962,28 +1962,28 @@ setup_user() {
     group=$(id -gn "$user" 2>/dev/null || echo "$user")
     sessdir="${home}/${NVIM_SESSION_DIR_NAME}"
 
-	write_pack_lua "$cfg"
-	write_plugins_lua "$cfg"
-	write_keymaps_lua "$cfg"
-	write_sessions_lua "$cfg" "$sessdir"
-	write_startup_lua "$cfg"
-	write_markdown_lua "$cfg" "$NVIM_MKDP_PORT"
-	write_ide_lua "$cfg" "$NVIM_PYTHON_VENV"
+    write_pack_lua "$cfg"
+    write_plugins_lua "$cfg"
+    write_keymaps_lua "$cfg"
+    write_sessions_lua "$cfg" "$sessdir"
+    write_startup_lua "$cfg"
+    write_markdown_lua "$cfg" "$NVIM_MKDP_PORT"
+    write_ide_lua "$cfg" "$NVIM_PYTHON_VENV"
 
     mkdir -p "$sessdir"
 
-	# Keep the drop-ins out of `git status` in the kickstart checkout.
-	if [ -d "${cfg}/.git" ]; then
-		mkdir -p "${cfg}/.git/info"
-		local f
-		for f in plugin/05-b2b-pack.lua plugin/10-b2b-plugins.lua \
-			plugin/20-b2b-keymaps.lua plugin/30-b2b-sessions.lua \
-			plugin/40-b2b-startup.lua plugin/50-b2b-markdown.lua \
-			plugin/60-b2b-ide.lua; do
-			grep -qxF "$f" "${cfg}/.git/info/exclude" 2>/dev/null \
-				|| printf '%s\n' "$f" >> "${cfg}/.git/info/exclude"
-		done
-	fi
+    # Keep the drop-ins out of `git status` in the kickstart checkout.
+    if [ -d "${cfg}/.git" ]; then
+        mkdir -p "${cfg}/.git/info"
+        local f
+        for f in plugin/05-b2b-pack.lua plugin/10-b2b-plugins.lua \
+            plugin/20-b2b-keymaps.lua plugin/30-b2b-sessions.lua \
+            plugin/40-b2b-startup.lua plugin/50-b2b-markdown.lua \
+            plugin/60-b2b-ide.lua; do
+            grep -qxF "$f" "${cfg}/.git/info/exclude" 2>/dev/null ||
+                printf '%s\n' "$f" >>"${cfg}/.git/info/exclude"
+        done
+    fi
 
     chown -R "${user}:${group}" "$cfg" "$sessdir" 2>/dev/null || true
     configure_tmux "$user"
@@ -2115,61 +2115,74 @@ install_blink_fuzzy() {
 # publishes no arm64 build, which is why the arch check refuses rather than
 # installing an x86_64 binary under a name that promises to work.
 install_mkdp_binary() {
-	local user="$1" home plugin bin_dir tag tmp
-	home=$(getent passwd "$user" | cut -d: -f6)
-	plugin="${home}/.local/share/nvim/site/pack/core/opt/markdown-preview.nvim"
-	[ -d "$plugin" ] || { log "${user}: markdown-preview.nvim not installed — skipping its server"; return 0; }
+    local user="$1" home plugin bin_dir tag tmp
+    home=$(getent passwd "$user" | cut -d: -f6)
+    plugin="${home}/.local/share/nvim/site/pack/core/opt/markdown-preview.nvim"
+    [ -d "$plugin" ] || {
+        log "${user}: markdown-preview.nvim not installed — skipping its server"
+        return 0
+    }
 
-	bin_dir="${plugin}/app/bin"
-	if [ -x "${bin_dir}/markdown-preview-linux" ]; then
-		log "${user}: markdown-preview server binary already present"
-		return 0
-	fi
+    bin_dir="${plugin}/app/bin"
+    if [ -x "${bin_dir}/markdown-preview-linux" ]; then
+        log "${user}: markdown-preview server binary already present"
+        return 0
+    fi
 
-	if [ "$(uname -m)" != "x86_64" ] && [ "$(uname -m)" != "amd64" ]; then
-		warn "${user}: upstream publishes no markdown-preview binary for $(uname -m)"
-		warn "${user}: build it in the VM with: cd ${plugin}/app && npx --yes yarn install"
-		return 0
-	fi
+    if [ "$(uname -m)" != "x86_64" ] && [ "$(uname -m)" != "amd64" ]; then
+        warn "${user}: upstream publishes no markdown-preview binary for $(uname -m)"
+        warn "${user}: build it in the VM with: cd ${plugin}/app && npx --yes yarn install"
+        return 0
+    fi
 
-	tag=$(curl -fsSL --retry 3 --max-time 60 \
-		https://api.github.com/repos/iamcco/markdown-preview.nvim/releases/latest 2>/dev/null \
-		| sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-	# The repo has not been released since v0.0.10; pin to it when the API is
-	# unreachable (rate-limited, or a NAT'd VM with no route) rather than giving up.
-	[ -n "$tag" ] || { tag="v0.0.10"; log "${user}: GitHub API unreachable — pinning markdown-preview ${tag}"; }
+    tag=$(curl -fsSL --retry 3 --max-time 60 \
+        https://api.github.com/repos/iamcco/markdown-preview.nvim/releases/latest 2>/dev/null |
+        sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+    # The repo has not been released since v0.0.10; pin to it when the API is
+    # unreachable (rate-limited, or a NAT'd VM with no route) rather than giving up.
+    [ -n "$tag" ] || {
+        tag="v0.0.10"
+        log "${user}: GitHub API unreachable — pinning markdown-preview ${tag}"
+    }
 
-	log "${user}: fetching the markdown-preview server binary (${tag})"
-	tmp=$(mktemp -d) || { warn "${user}: mktemp failed"; return 0; }
-	if ! curl -fsSL --retry 3 --max-time 300 -o "${tmp}/mp.tar.gz" \
-		"https://github.com/iamcco/markdown-preview.nvim/releases/download/${tag}/markdown-preview-linux.tar.gz"; then
-		warn "${user}: could not download the markdown-preview binary — :MarkdownPreview will not start"
-		warn "${user}: retry from inside nvim with  :call mkdp#util#install()"
-		rm -rf "$tmp"; return 0
-	fi
-	# A truncated download unpacks as a broken binary that fails at press time
-	# with no useful message, so check the archive before trusting it.
-	if ! gzip -t "${tmp}/mp.tar.gz" 2>/dev/null; then
-		warn "${user}: the downloaded markdown-preview archive is not valid gzip (truncated?)"
-		rm -rf "$tmp"; return 0
-	fi
+    log "${user}: fetching the markdown-preview server binary (${tag})"
+    tmp=$(mktemp -d) || {
+        warn "${user}: mktemp failed"
+        return 0
+    }
+    if ! curl -fsSL --retry 3 --max-time 300 -o "${tmp}/mp.tar.gz" \
+        "https://github.com/iamcco/markdown-preview.nvim/releases/download/${tag}/markdown-preview-linux.tar.gz"; then
+        warn "${user}: could not download the markdown-preview binary — :MarkdownPreview will not start"
+        warn "${user}: retry from inside nvim with  :call mkdp#util#install()"
+        rm -rf "$tmp"
+        return 0
+    fi
+    # A truncated download unpacks as a broken binary that fails at press time
+    # with no useful message, so check the archive before trusting it.
+    if ! gzip -t "${tmp}/mp.tar.gz" 2>/dev/null; then
+        warn "${user}: the downloaded markdown-preview archive is not valid gzip (truncated?)"
+        rm -rf "$tmp"
+        return 0
+    fi
 
-	mkdir -p "$bin_dir"
-	if ! tar -xzf "${tmp}/mp.tar.gz" -C "$bin_dir"; then
-		warn "${user}: could not unpack the markdown-preview binary"
-		rm -rf "$tmp"; return 0
-	fi
-	rm -rf "$tmp"
-	chmod 755 "${bin_dir}/markdown-preview-linux" 2>/dev/null || true
+    mkdir -p "$bin_dir"
+    if ! tar -xzf "${tmp}/mp.tar.gz" -C "$bin_dir"; then
+        warn "${user}: could not unpack the markdown-preview binary"
+        rm -rf "$tmp"
+        return 0
+    fi
+    rm -rf "$tmp"
+    chmod 755 "${bin_dir}/markdown-preview-linux" 2>/dev/null || true
 
-	local group; group=$(id -gn "$user" 2>/dev/null || echo "$user")
-	chown -R "${user}:${group}" "${plugin}/app" 2>/dev/null || true
+    local group
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    chown -R "${user}:${group}" "${plugin}/app" 2>/dev/null || true
 
-	if [ -x "${bin_dir}/markdown-preview-linux" ]; then
-		log "${user}: markdown-preview server installed"
-	else
-		warn "${user}: markdown-preview binary is still missing after unpacking"
-	fi
+    if [ -x "${bin_dir}/markdown-preview-linux" ]; then
+        log "${user}: markdown-preview server installed"
+    else
+        warn "${user}: markdown-preview binary is still missing after unpacking"
+    fi
 }
 
 # kulala needs TWO things that are not in its git checkout, and fetches both on
@@ -2190,51 +2203,55 @@ install_mkdp_binary() {
 # work — it blocks while still pumping the event loop. Same trap, and the same
 # shape of answer, as the blink.cmp fuzzy library and the markdown-preview binary.
 install_kulala_runtime() {
-	local user="$1" home plugin
-	home=$(getent passwd "$user" | cut -d: -f6)
-	plugin="${home}/.local/share/nvim/site/pack/core/opt/kulala.nvim"
-	[ -d "$plugin" ] || { log "${user}: kulala.nvim not installed — skipping its runtime"; return 0; }
+    local user="$1" home plugin
+    home=$(getent passwd "$user" | cut -d: -f6)
+    plugin="${home}/.local/share/nvim/site/pack/core/opt/kulala.nvim"
+    [ -d "$plugin" ] || {
+        log "${user}: kulala.nvim not installed — skipping its runtime"
+        return 0
+    }
 
-	if ! command -v tree-sitter >/dev/null 2>&1; then
-		warn "${user}: no tree-sitter CLI on PATH — kulala's grammar cannot be built"
-		warn "${user}: install_nvim.sh installs it (npm i -g tree-sitter-cli); .http files will not parse"
-	fi
+    if ! command -v tree-sitter >/dev/null 2>&1; then
+        warn "${user}: no tree-sitter CLI on PATH — kulala's grammar cannot be built"
+        warn "${user}: install_nvim.sh installs it (npm i -g tree-sitter-cli); .http files will not parse"
+    fi
 
-	log "${user}: fetching kulala-core and building its http grammar"
-	run_as_user "$user" "$NVIM_BIN" --headless -c 'lua
-		-- Every predicate is wrapped: these APIs throw when the thing they are
-		-- asked about has never been installed, and an error inside vim.wait
-		-- aborts the wait rather than returning false.
-		local function settled(fn) return function() local ok, r = pcall(fn) return ok and r end end
+    log "${user}: fetching kulala-core and building its http grammar"
+    run_as_user "$user" "$NVIM_BIN" --headless -c 'lua
+        -- Every predicate is wrapped: these APIs throw when the thing they are
+        -- asked about has never been installed, and an error inside vim.wait
+        -- aborts the wait rather than returning false.
+        local function settled(fn) return function() local ok, r = pcall(fn) return ok and r end end
 
-		-- 300s each, not 600s. run_as_user wraps this whole invocation in
-		-- `timeout $NVIM_BOOTSTRAP_TIMEOUT` (1200s), and two 600s waits add up
-		-- to exactly that -- so a slow network would get the process killed
-		-- mid-download with no message rather than reporting what failed.
-		local WAIT = 300000
+        -- 300s each, not 600s. run_as_user wraps this whole invocation in
+        -- `timeout $NVIM_BOOTSTRAP_TIMEOUT` (1200s), and two 600s waits add up
+        -- to exactly that -- so a slow network would get the process killed
+        -- mid-download with no message rather than reporting what failed.
+        local WAIT = 300000
 
-		local ok_b, backend = pcall(require, "kulala.backend")
-		if ok_b then
-			pcall(backend.ensure_installed, function() end)
-			print(vim.wait(WAIT, settled(backend.is_up_to_date), 1000)
-				and "kulala-core ready" or "kulala-core NOT ready (network?)")
-		else
-			print("kulala.backend not available")
-		end
+        local ok_b, backend = pcall(require, "kulala.backend")
+        if ok_b then
+            pcall(backend.ensure_installed, function() end)
+            print(vim.wait(WAIT, settled(backend.is_up_to_date), 1000)
+                and "kulala-core ready" or "kulala-core NOT ready (network?)")
+        else
+            print("kulala.backend not available")
+        end
 
-		local ok_p, parser = pcall(require, "kulala.config.parser")
-		if ok_p then
-			-- 60-b2b-ide.lua already called kulala.setup() during startup, which
-			-- kicks the grammar fetch off; this only waits for it to land.
-			print(vim.wait(WAIT, settled(parser.is_up_to_date), 1000)
-				and "kulala grammar ready" or "kulala grammar NOT ready (no CLI, or network?)")
-		else
-			print("kulala.config.parser not available")
-		end
-	' -c 'qa' 2>&1 | sed 's/^/[nvim-extras]   /' || warn "${user}: kulala runtime setup returned non-zero"
+        local ok_p, parser = pcall(require, "kulala.config.parser")
+        if ok_p then
+            -- 60-b2b-ide.lua already called kulala.setup() during startup, which
+            -- kicks the grammar fetch off; this only waits for it to land.
+            print(vim.wait(WAIT, settled(parser.is_up_to_date), 1000)
+                and "kulala grammar ready" or "kulala grammar NOT ready (no CLI, or network?)")
+        else
+            print("kulala.config.parser not available")
+        end
+    ' -c 'qa' 2>&1 | sed 's/^/[nvim-extras]   /' || warn "${user}: kulala runtime setup returned non-zero"
 
-	local group; group=$(id -gn "$user" 2>/dev/null || echo "$user")
-	chown -R "${user}:${group}" "${home}/.local/share/nvim" 2>/dev/null || true
+    local group
+    group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    chown -R "${user}:${group}" "${home}/.local/share/nvim" 2>/dev/null || true
 }
 
 bootstrap_user() {
@@ -2265,9 +2282,9 @@ bootstrap_user() {
         +'silent! MasonToolsUpdateSync' +qa >/dev/null 2>&1 ||
         warn "${user}: MasonToolsUpdateSync returned non-zero"
 
-	install_blink_fuzzy "$user"
-	install_mkdp_binary "$user"
-	install_kulala_runtime "$user"
+    install_blink_fuzzy "$user"
+    install_mkdp_binary "$user"
+    install_kulala_runtime "$user"
 
     # What actually loaded. :B2BExtras writes to the message area, so it has to
     # be captured through :redir, and two things had to be got right:

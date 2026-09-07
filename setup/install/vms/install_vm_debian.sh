@@ -165,15 +165,15 @@ resolve_host_port HOST_BACKEND_PORT "$BACKEND_PORT"
 resolve_host_port HOST_OSIONOS_APP_PORT "$OSIONOS_APP_PORT"
 resolve_host_port HOST_OSIONOS_MAIL_PORT "$OSIONOS_MAIL_PORT"
 resolve_host_port HOST_OSIONOS_CALENDAR_PORT "$OSIONOS_CALENDAR_PORT"
-resolve_host_port HOST_OSIONOS_BRIDGE_PORT   "$OSIONOS_BRIDGE_PORT"
-resolve_host_port HOST_MAIL_BRIDGE_PORT      "$MAIL_BRIDGE_PORT"
-resolve_host_port HOST_CALENDAR_BRIDGE_PORT  "$CALENDAR_BRIDGE_PORT"
-resolve_host_port HOST_WEBSITE_PORT          "$WEBSITE_PORT"
-resolve_host_port HOST_BAAS_GATEWAY_PORT     "$BAAS_GATEWAY_PORT"
-resolve_host_port HOST_BAAS_ADMIN_PORT       "$BAAS_ADMIN_PORT"
-resolve_host_port HOST_MAILPIT_PORT          "$MAILPIT_PORT"
-resolve_host_port HOST_AUTH_GATEWAY_PORT     "$AUTH_GATEWAY_PORT"
-resolve_host_port HOST_VAULT_PORT            "$VAULT_PORT"
+resolve_host_port HOST_OSIONOS_BRIDGE_PORT "$OSIONOS_BRIDGE_PORT"
+resolve_host_port HOST_MAIL_BRIDGE_PORT "$MAIL_BRIDGE_PORT"
+resolve_host_port HOST_CALENDAR_BRIDGE_PORT "$CALENDAR_BRIDGE_PORT"
+resolve_host_port HOST_WEBSITE_PORT "$WEBSITE_PORT"
+resolve_host_port HOST_BAAS_GATEWAY_PORT "$BAAS_GATEWAY_PORT"
+resolve_host_port HOST_BAAS_ADMIN_PORT "$BAAS_ADMIN_PORT"
+resolve_host_port HOST_MAILPIT_PORT "$MAILPIT_PORT"
+resolve_host_port HOST_AUTH_GATEWAY_PORT "$AUTH_GATEWAY_PORT"
+resolve_host_port HOST_VAULT_PORT "$VAULT_PORT"
 
 # Function to print headers
 print_header() {
@@ -277,11 +277,11 @@ VBoxManage modifyvm "$VM_NAME" \
 # --audio-enabled is the 7.x spelling; --audio none is the 6.x one. Try both so
 # this keeps working on an older VirtualBox instead of silently leaving audio on.
 print_header "Disabling VM audio (it holds the host sound card hostage)"
-if VBoxManage modifyvm "$VM_NAME" --audio-enabled off 2> /dev/null \
-	|| VBoxManage modifyvm "$VM_NAME" --audio none 2> /dev/null; then
-	echo "  Audio device removed from the guest; host sound stays with the host"
+if VBoxManage modifyvm "$VM_NAME" --audio-enabled off 2>/dev/null ||
+    VBoxManage modifyvm "$VM_NAME" --audio none 2>/dev/null; then
+    echo "  Audio device removed from the guest; host sound stays with the host"
 else
-	echo "  Warning: could not disable VM audio -- host sound may cut out while the VM runs" >&2
+    echo "  Warning: could not disable VM audio -- host sound may cut out while the VM runs" >&2
 fi
 
 # ── Serial console: the headless install's only window ──────────────────────
@@ -371,31 +371,31 @@ add_natpf() {
 
     VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
 
-	# Twenty of these run back to back, and VBoxSVC does not always release the
-	# machine's write lock before the next one asks for it — the result is
-	# "The machine 'debian' already has a lock request pending", which used to
-	# abort the whole build a few seconds before the install would have started.
-	# It is purely a timing problem, so retry it.
-	local attempt out
-	for attempt in 1 2 3 4 5 6; do
-		if out=$(VBoxManage modifyvm "$VM_NAME" \
-				--natpf1 "${name},tcp,${NATPF_BIND},${host_port},,${guest_port}" 2>&1); then
-			return 0
-		fi
-		case "$out" in
-			*"lock request pending"*|*VBOX_E_INVALID_OBJECT_STATE*)
-				sleep 2
-				;;
-			*)
-				echo "Failed to set up NAT port forwarding for ${name}"
-				printf '%s\n' "$out" >&2
-				exit 1
-				;;
-		esac
-	done
-	echo "Failed to set up NAT port forwarding for ${name} after ${attempt} attempts"
-	printf '%s\n' "$out" >&2
-	exit 1
+    # Twenty of these run back to back, and VBoxSVC does not always release the
+    # machine's write lock before the next one asks for it — the result is
+    # "The machine 'debian' already has a lock request pending", which used to
+    # abort the whole build a few seconds before the install would have started.
+    # It is purely a timing problem, so retry it.
+    local attempt out
+    for attempt in 1 2 3 4 5 6; do
+        if out=$(VBoxManage modifyvm "$VM_NAME" \
+            --natpf1 "${name},tcp,${NATPF_BIND},${host_port},,${guest_port}" 2>&1); then
+            return 0
+        fi
+        case "$out" in
+        *"lock request pending"* | *VBOX_E_INVALID_OBJECT_STATE*)
+            sleep 2
+            ;;
+        *)
+            echo "Failed to set up NAT port forwarding for ${name}"
+            printf '%s\n' "$out" >&2
+            exit 1
+            ;;
+        esac
+    done
+    echo "Failed to set up NAT port forwarding for ${name} after ${attempt} attempts"
+    printf '%s\n' "$out" >&2
+    exit 1
 }
 
 add_natpf ssh "${HOST_SSH_PORT}" "${SSH_PORT}"

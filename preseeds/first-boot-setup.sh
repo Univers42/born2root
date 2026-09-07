@@ -604,42 +604,42 @@ fi
 # off PATH when the prefix moves afterwards.
 echo "--- Pointing machine-wide tooling at /opt ---"
 if [ -f /root/install_global_scope.sh ]; then
-	chmod +x /root/install_global_scope.sh 2>/dev/null || true
-	"$B2B_SH" /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log \
-		|| echo "[WARN] global scope setup reported errors"
+    chmod +x /root/install_global_scope.sh 2>/dev/null || true
+    "$B2B_SH" /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+        echo "[WARN] global scope setup reported errors"
 else
     echo "[SKIP] /root/install_global_scope.sh not present"
 fi
 
 echo "--- Installing Neovim + kickstart.nvim ---"
 if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
-	# kickstart clones ~30 plugins, Mason pulls language servers and treesitter
-	# compiles parsers — call it 2 GB of headroom to be safe.
-	if check_disk_space / 2000; then
-		chmod +x /root/install_nvim.sh 2>/dev/null || true
-		# Bootstrap is skipped HERE and done once by the extras script below:
-		# downloading kickstart's plugins and then immediately downloading the
-		# extras on top would pay the cold-cache cost twice.
-		if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 "$B2B_SH" /root/install_nvim.sh 2>&1 \
-			| tee -a /var/log/b2b-nvim-install.log; then
-			echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
-		else
-			echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
-		fi
+    # kickstart clones ~30 plugins, Mason pulls language servers and treesitter
+    # compiles parsers — call it 2 GB of headroom to be safe.
+    if check_disk_space / 2000; then
+        chmod +x /root/install_nvim.sh 2>/dev/null || true
+        # Bootstrap is skipped HERE and done once by the extras script below:
+        # downloading kickstart's plugins and then immediately downloading the
+        # extras on top would pay the cold-cache cost twice.
+        if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 "$B2B_SH" /root/install_nvim.sh 2>&1 |
+            tee -a /var/log/b2b-nvim-install.log; then
+            echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
+        else
+            echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
+        fi
 
-		if [ -f /root/install_nvim_extras.sh ]; then
-			echo "--- Installing the Neovim extras layer ---"
-			chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
-			if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh 2>&1 \
-				| tee -a /var/log/b2b-nvim-install.log; then
-				echo "[OK] Neovim extras installed"
-			else
-				echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
-			fi
-		fi
-	else
-		echo "[SKIP] Neovim — insufficient disk space"
-	fi
+        if [ -f /root/install_nvim_extras.sh ]; then
+            echo "--- Installing the Neovim extras layer ---"
+            chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
+            if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh 2>&1 |
+                tee -a /var/log/b2b-nvim-install.log; then
+                echo "[OK] Neovim extras installed"
+            else
+                echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+            fi
+        fi
+    else
+        echo "[SKIP] Neovim — insufficient disk space"
+    fi
 else
     echo "[SKIP] Neovim — /root/install_nvim.sh not present"
 fi
@@ -659,14 +659,14 @@ fi
 echo "--- Installing hellish from upstream (binary + plugin framework) ---"
 HELLISH_OK=0
 if [ -f /root/install_hellish_upstream.sh ]; then
-	chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
-	if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
-		"$B2B_SH" /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-		echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
-		HELLISH_OK=1
-	else
-		echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
-	fi
+    chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
+    if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
+        "$B2B_SH" /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+        echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
+        HELLISH_OK=1
+    else
+        echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
+    fi
 else
     echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
 fi
@@ -675,17 +675,17 @@ fi
 # this runs when that failed (no network, upstream down) and the framework is
 # therefore absent -- never on top of a good install.
 if [ "$HELLISH_OK" != "1" ] && [ ! -f /home/dlesieur/.hellishrc ]; then
-	echo "--- Installing hellishrc plugin framework (fallback) ---"
-	if [ -f /root/install_hellish_plugins.sh ]; then
-		chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
-		if HELLISH_USERS="dlesieur" "$B2B_SH" /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-			echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
-		else
-			echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
-		fi
-	else
-		echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
-	fi
+    echo "--- Installing hellishrc plugin framework (fallback) ---"
+    if [ -f /root/install_hellish_plugins.sh ]; then
+        chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+        if HELLISH_USERS="dlesieur" "$B2B_SH" /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+            echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
+        else
+            echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
+        fi
+    else
+        echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+    fi
 else
     echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
 fi
@@ -696,13 +696,13 @@ fi
 # and downloads nothing here.
 echo "--- Installing Herdr + Claude Code ---"
 if [ -f /root/install_devtools.sh ]; then
-	chmod +x /root/install_devtools.sh 2>/dev/null || true
-	if check_disk_space / 500; then
-		"$B2B_SH" /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log \
-			|| echo "[WARN] devtools install reported errors"
-	else
-		echo "[SKIP] devtools — insufficient disk space"
-	fi
+    chmod +x /root/install_devtools.sh 2>/dev/null || true
+    if check_disk_space / 500; then
+        "$B2B_SH" /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+            echo "[WARN] devtools install reported errors"
+    else
+        echo "[SKIP] devtools — insufficient disk space"
+    fi
 else
     echo "[SKIP] /root/install_devtools.sh not present"
 fi
@@ -711,15 +711,15 @@ B2B_AI_MODE="${B2B_AI_MODE:-off}"
 if [ "$B2B_AI_MODE" = "off" ]; then
     echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
 elif [ -f /root/install_ai.sh ]; then
-	echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
-	chmod +x /root/install_ai.sh 2>/dev/null || true
-	# A model is gigabytes; refuse rather than filling the volume it lands on.
-	if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
-		AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh 2>&1 | tee -a /var/log/b2b-provision.log \
-			|| echo "[WARN] AI install reported errors"
-	else
-		echo "[SKIP] AI — not enough free space on /opt for a model"
-	fi
+    echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
+    chmod +x /root/install_ai.sh 2>/dev/null || true
+    # A model is gigabytes; refuse rather than filling the volume it lands on.
+    if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
+        AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+            echo "[WARN] AI install reported errors"
+    else
+        echo "[SKIP] AI — not enough free space on /opt for a model"
+    fi
 else
     echo "[SKIP] AI — /root/install_ai.sh not present"
 fi

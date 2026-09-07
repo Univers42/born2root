@@ -5,10 +5,23 @@ set -e
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-	RST='\033[0m'; BLD='\033[1m'; DIM='\033[2m'
-	GRN='\033[32m'; YLW='\033[33m'; RED='\033[31m'; CYN='\033[36m'; WHT='\033[97m'
+    RST='\033[0m'
+    BLD='\033[1m'
+    DIM='\033[2m'
+    GRN='\033[32m'
+    YLW='\033[33m'
+    RED='\033[31m'
+    CYN='\033[36m'
+    WHT='\033[97m'
 else
-	RST=''; BLD=''; DIM=''; GRN=''; YLW=''; RED=''; CYN=''; WHT=''
+    RST=''
+    BLD=''
+    DIM=''
+    GRN=''
+    YLW=''
+    RED=''
+    CYN=''
+    WHT=''
 fi
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
@@ -101,25 +114,30 @@ sec() {
 # One command + what it does. The description gets whatever the name column
 # leaves, and is trimmed rather than allowed to break the border.
 cmd() {
-	local name="$1" desc="$2" color="${3:-${BLD}}" first=1 line
-	if [ "$(printf '%s' "$name" | wc -m)" -gt "$NAMEW" ]; then
-		row "  ${color}${name}${RST}"
-		while IFS= read -r line; do contline "$line" ""; done <<< "$(_wrap "$desc" "$DESCW")"
-		return 0
-	fi
-	while IFS= read -r line; do
-		if [ "$first" = 1 ]; then
-			row "  ${color}$(_pad "$name")${RST} ${line}"; first=0
-		else
-			contline "$line" ""
-		fi
-	done <<< "$(_wrap "$desc" "$DESCW")"
+    local name="$1" desc="$2" color="${3:-${BLD}}" first=1 line
+    if [ "$(printf '%s' "$name" | wc -m)" -gt "$NAMEW" ]; then
+        row "  ${color}${name}${RST}"
+        while IFS= read -r line; do
+            contline "$line" ""
+        done <<<"$(_wrap "$desc" "$DESCW")"
+        return 0
+    fi
+    while IFS= read -r line; do
+        if [ "$first" = 1 ]; then
+            row "  ${color}$(_pad "$name")${RST} ${line}"
+            first=0
+        else
+            contline "$line" ""
+        fi
+    done <<<"$(_wrap "$desc" "$DESCW")"
 }
 
 # An indented, wrapped continuation line under a command.
 note() {
-	local line
-	while IFS= read -r line; do contline "$line"; done <<< "$(_wrap "$1" "$DESCW")"
+    local line
+    while IFS= read -r line; do
+        contline "$line"
+    done <<<"$(_wrap "$1" "$DESCW")"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

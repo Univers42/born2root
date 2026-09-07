@@ -88,17 +88,17 @@ fi
 # Installing npm in d-i chroot hangs on dpkg triggers → blocks entire script
 # → SSH, sudo, UFW, password policy etc. never get configured.
 if check_disk_space / 500; then
-	$APT git build-essential gcc g++ make \
-		libreadline-dev \
-		python3 python3-venv \
-		curl wget net-tools vim nano \
-		htop tree tmux bash-completion \
-		zip unzip tar gzip bzip2 xz-utils \
-		ca-certificates gnupg lsb-release apt-transport-https \
-		rsync less file patch diffutils \
-		dnsutils iputils-ping \
-		jq bc || true
-	echo "[OK] Developer tools"
+    $APT git build-essential gcc g++ make \
+        libreadline-dev \
+        python3 python3-venv \
+        curl wget net-tools vim nano \
+        htop tree tmux bash-completion \
+        zip unzip tar gzip bzip2 xz-utils \
+        ca-certificates gnupg lsb-release apt-transport-https \
+        rsync less file patch diffutils \
+        dnsutils iputils-ping \
+        jq bc || true
+    echo "[OK] Developer tools"
 else
     echo "[SKIP] Developer tools — insufficient disk space"
 fi
@@ -122,40 +122,40 @@ if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
         install -m 755 "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST" 2>/dev/null || cp "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST"
         chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
 
-		# The login shell is the binary itself. /usr/bin/hellish is a symlink to
-		# /usr/bin/hellish.real: the binary can be refreshed (first boot installs
-		# the published release over it) without the passwd entry ever naming a
-		# file that is mid-replacement, and `command -v hellish.real` keeps
-		# naming the ELF for the tools that need one (Inception's Makefile copies
-		# it into the containers). Earlier builds put a bash script here that
-		# sent every non-interactive ssh command to bash; that made
-		# `ssh b2b '<cmd>'`, scp's server side and the whole host-driven pipeline
-		# run under bash in a VM whose point is hellish. hellish takes those
-		# itself: `hellish -c 'scp -t …'`, and `hellish -c bash` for VS Code's
-		# Remote-SSH bootstrap, which names bash explicitly.
-		if [ "$(basename "$CUSTOM_SHELL_DEST")" = "hellish" ]; then
-			CUSTOM_SHELL_REAL="${CUSTOM_SHELL_DEST}.real"
-			if [ ! -L "$CUSTOM_SHELL_DEST" ]; then
-				mv -f "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
-			fi
-			chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
-			ln -sfn "$CUSTOM_SHELL_REAL" "$CUSTOM_SHELL_DEST"
+        # The login shell is the binary itself. /usr/bin/hellish is a symlink to
+        # /usr/bin/hellish.real: the binary can be refreshed (first boot installs
+        # the published release over it) without the passwd entry ever naming a
+        # file that is mid-replacement, and `command -v hellish.real` keeps
+        # naming the ELF for the tools that need one (Inception's Makefile copies
+        # it into the containers). Earlier builds put a bash script here that
+        # sent every non-interactive ssh command to bash; that made
+        # `ssh b2b '<cmd>'`, scp's server side and the whole host-driven pipeline
+        # run under bash in a VM whose point is hellish. hellish takes those
+        # itself: `hellish -c 'scp -t …'`, and `hellish -c bash` for VS Code's
+        # Remote-SSH bootstrap, which names bash explicitly.
+        if [ "$(basename "$CUSTOM_SHELL_DEST")" = "hellish" ]; then
+            CUSTOM_SHELL_REAL="${CUSTOM_SHELL_DEST}.real"
+            if [ ! -L "$CUSTOM_SHELL_DEST" ]; then
+                mv -f "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
+            fi
+            chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
+            ln -sfn "$CUSTOM_SHELL_REAL" "$CUSTOM_SHELL_DEST"
 
-			# Keep a pristine copy outside /usr/bin so the shell guard in
-			# sshd-watchdog can put the binary back. sshd refuses any account
-			# whose login shell does not exist — it reports the user as an
-			# "invalid user", which rejects key AND password auth AND the
-			# console at the same time. A single `rm /usr/bin/hellish.real`
-			# therefore locks every door on the machine at once, and the error it
-			# produces ("Permission denied") points at credentials rather than
-			# the shell.
-			mkdir -p /usr/local/lib/b2b
-			cp "$CUSTOM_SHELL_REAL" /usr/local/lib/b2b/hellish.real 2>/dev/null || true
-			chmod 755 /usr/local/lib/b2b/hellish.real 2>/dev/null || true
-			rm -f /usr/local/lib/b2b/shell-wrapper
+            # Keep a pristine copy outside /usr/bin so the shell guard in
+            # sshd-watchdog can put the binary back. sshd refuses any account
+            # whose login shell does not exist — it reports the user as an
+            # "invalid user", which rejects key AND password auth AND the
+            # console at the same time. A single `rm /usr/bin/hellish.real`
+            # therefore locks every door on the machine at once, and the error it
+            # produces ("Permission denied") points at credentials rather than
+            # the shell.
+            mkdir -p /usr/local/lib/b2b
+            cp "$CUSTOM_SHELL_REAL" /usr/local/lib/b2b/hellish.real 2>/dev/null || true
+            chmod 755 /usr/local/lib/b2b/hellish.real 2>/dev/null || true
+            rm -f /usr/local/lib/b2b/shell-wrapper
 
-			echo "[OK] $CUSTOM_SHELL_DEST -> $CUSTOM_SHELL_REAL: interactive logins and ssh commands alike run hellish"
-		fi
+            echo "[OK] $CUSTOM_SHELL_DEST -> $CUSTOM_SHELL_REAL: interactive logins and ssh commands alike run hellish"
+        fi
 
         # Register the shell so chsh/usermod accepts it
         if [ -f /etc/shells ]; then
@@ -195,18 +195,18 @@ fi
 # B2B_GUEST_SH from /etc/b2b_custom_shell.conf for the provisioners.
 B2B_GUEST_SH=/bin/bash
 if [ -n "${CUSTOM_SHELL_REAL:-}" ] && [ -x "$CUSTOM_SHELL_REAL" ]; then
-	B2B_GUEST_SH="$CUSTOM_SHELL_REAL"
+    B2B_GUEST_SH="$CUSTOM_SHELL_REAL"
 fi
 if [ -f /etc/b2b_custom_shell.conf ]; then
-	echo "B2B_GUEST_SH=$B2B_GUEST_SH" >> /etc/b2b_custom_shell.conf
+    echo "B2B_GUEST_SH=$B2B_GUEST_SH" >>/etc/b2b_custom_shell.conf
 fi
 # pin_shebang <script>: make the script's first line name the guest interpreter.
 pin_shebang() {
-	[ -f "$1" ] || return 0
-	sed -i "1s|^#!.*|#!$B2B_GUEST_SH|" "$1" 2>/dev/null || true
+    [ -f "$1" ] || return 0
+    sed -i "1s|^#!.*|#!$B2B_GUEST_SH|" "$1" 2>/dev/null || true
 }
 for f in /root/first-boot-setup.sh /root/install_*.sh; do
-	pin_shebang "$f"
+    pin_shebang "$f"
 done
 echo "[OK] Guest-side scripts run under $B2B_GUEST_SH"
 
@@ -588,7 +588,7 @@ echo "[OK] Git configured"
 
 ### ─── 11. Monitoring script ────────────────────────────────────────────────
 # Already copied to /usr/local/bin/monitoring.sh by late_command
-chmod +x /usr/local/bin/monitoring.sh 2> /dev/null || true
+chmod +x /usr/local/bin/monitoring.sh 2>/dev/null || true
 pin_shebang /usr/local/bin/monitoring.sh
 
 # Crontab: every 10 minutes, broadcast to all terminals. cron runs every
@@ -598,7 +598,7 @@ pin_shebang /usr/local/bin/monitoring.sh
 # through another shell -- first boot's @reboot line included.
 sed -i "s|^SHELL=.*|SHELL=$B2B_GUEST_SH|" /etc/crontab
 grep -q '^SHELL=' /etc/crontab || sed -i "1i SHELL=$B2B_GUEST_SH" /etc/crontab
-echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >> /etc/crontab
+echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >>/etc/crontab
 echo "[OK] Monitoring cron set (SHELL=$B2B_GUEST_SH)"
 
 ### ─── 12. Lighttpd + PHP-FPM + WordPress routing ────────────────────────────
@@ -698,8 +698,8 @@ echo "[OK] Services enabled"
 
 ### ─── 15. First-boot script (Docker + WordPress) ───────────────────────────
 # Already copied to /root/first-boot-setup.sh by late_command
-chmod +x /root/first-boot-setup.sh 2> /dev/null || true
-echo "@reboot root $B2B_GUEST_SH /root/first-boot-setup.sh" >> /etc/crontab
+chmod +x /root/first-boot-setup.sh 2>/dev/null || true
+echo "@reboot root $B2B_GUEST_SH /root/first-boot-setup.sh" >>/etc/crontab
 echo "[OK] First-boot hook registered"
 
 ### ─── 16. MOTD ─────────────────────────────────────────────────────────────

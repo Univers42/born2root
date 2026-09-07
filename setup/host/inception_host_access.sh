@@ -177,13 +177,17 @@ pick_proxy_port() {
 }
 
 install_proxy_service() {
-	local https_port="$1" static_port="$2" http_port="$3"
-	local src="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/inception_proxy.py"
-	if [ ! -f "$src" ]; then
-		warn "inception_proxy.py missing — the bare URL will not work"
-		return 1
-	fi
-	command -v python3 > /dev/null 2>&1 || { warn "no python3 — skipping the proxy"; return 1; }
+    local https_port="$1" static_port="$2" http_port="$3"
+    local src
+    src="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/inception_proxy.py"
+    if [ ! -f "$src" ]; then
+        warn "inception_proxy.py missing — the bare URL will not work"
+        return 1
+    fi
+    command -v python3 >/dev/null 2>&1 || {
+        warn "no python3 — skipping the proxy"
+        return 1
+    }
 
     # Copied out of the repo so the service keeps working if the checkout moves.
     mkdir -p "$PROXY_DIR"
@@ -207,52 +211,53 @@ RestartSec=3
 WantedBy=default.target
 UNITEOF
 
-	# systemd --user needs a session bus and reads its units from the real
-	# home; over ssh, in a container or under a substitute HOME there is none
-	# of that. The proxy then runs as a plain detached process with a pid file:
-	# same binary, same port, gone with the session instead of restarted at
-	# login, and --undo stops it too.
-	local i
-	if systemctl --user show-environment > /dev/null 2>&1; then
-		systemctl --user daemon-reload > /dev/null 2>&1
-		systemctl --user reset-failed inception-proxy.service > /dev/null 2>&1 || true
-		# enable --now is a no-op on an already-running unit, so it would keep
-		# an older copy of the proxy alive after an upgrade. Always restart.
-		systemctl --user enable inception-proxy.service > /dev/null 2>&1
-		if systemctl --user restart inception-proxy.service > /dev/null 2>&1; then
-			for i in 1 2 3 4 5 6 7 8 9 10; do
-				port_is_free "$PROXY_PORT" || break   # bound = it is up
-				sleep 0.5
-			done
-			if port_is_free "$PROXY_PORT"; then
-				warn "proxy service did not come up on ${PROXY_PORT}"
-				return 1
-			fi
-			ok "local proxy running on 127.0.0.1:${PROXY_PORT} (systemd --user, restarts on login)"
-			return 0
-		fi
-		warn "could not start the proxy service — running it detached instead"
-	fi
-	local pid
-	if pid=$(cat "$PROXY_PID" 2> /dev/null) && [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
-		kill "$pid" 2> /dev/null; sleep 0.5
-	fi
-	nohup /usr/bin/env python3 "$PROXY_BIN" --port "$PROXY_PORT" --domain "$DOMAIN" \
-		--map "443:${https_port}" --map "80:${http_port}" \
-		--map "${P_ADMINER:-8081}:${P_ADMINER:-8081}" \
-		--map "${static_port}:${static_port}" --map "${https_port}:${https_port}" \
-		> "$PROXY_DIR/inception-proxy.log" 2>&1 < /dev/null &
-	printf '%s\n' "$!" > "$PROXY_PID"
-	for i in 1 2 3 4 5 6 7 8 9 10; do
-		port_is_free "$PROXY_PORT" || break
-		sleep 0.5
-	done
-	if port_is_free "$PROXY_PORT"; then
-		warn "proxy did not come up on ${PROXY_PORT} (see $PROXY_DIR/inception-proxy.log)"
-		return 1
-	fi
-	ok "local proxy running on 127.0.0.1:${PROXY_PORT} (pid $(cat "$PROXY_PID"); no systemd --user here, so until --undo or logout)"
-	return 0
+    # systemd --user needs a session bus and reads its units from the real
+    # home; over ssh, in a container or under a substitute HOME there is none
+    # of that. The proxy then runs as a plain detached process with a pid file:
+    # same binary, same port, gone with the session instead of restarted at
+    # login, and --undo stops it too.
+    local i
+    if systemctl --user show-environment >/dev/null 2>&1; then
+        systemctl --user daemon-reload >/dev/null 2>&1
+        systemctl --user reset-failed inception-proxy.service >/dev/null 2>&1 || true
+        # enable --now is a no-op on an already-running unit, so it would keep
+        # an older copy of the proxy alive after an upgrade. Always restart.
+        systemctl --user enable inception-proxy.service >/dev/null 2>&1
+        if systemctl --user restart inception-proxy.service >/dev/null 2>&1; then
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+                port_is_free "$PROXY_PORT" || break # bound = it is up
+                sleep 0.5
+            done
+            if port_is_free "$PROXY_PORT"; then
+                warn "proxy service did not come up on ${PROXY_PORT}"
+                return 1
+            fi
+            ok "local proxy running on 127.0.0.1:${PROXY_PORT} (systemd --user, restarts on login)"
+            return 0
+        fi
+        warn "could not start the proxy service — running it detached instead"
+    fi
+    local pid
+    if pid=$(cat "$PROXY_PID" 2>/dev/null) && [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        sleep 0.5
+    fi
+    nohup /usr/bin/env python3 "$PROXY_BIN" --port "$PROXY_PORT" --domain "$DOMAIN" \
+        --map "443:${https_port}" --map "80:${http_port}" \
+        --map "${P_ADMINER:-8081}:${P_ADMINER:-8081}" \
+        --map "${static_port}:${static_port}" --map "${https_port}:${https_port}" \
+        >"$PROXY_DIR/inception-proxy.log" 2>&1 </dev/null &
+    printf '%s\n' "$!" >"$PROXY_PID"
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        port_is_free "$PROXY_PORT" || break
+        sleep 0.5
+    done
+    if port_is_free "$PROXY_PORT"; then
+        warn "proxy did not come up on ${PROXY_PORT} (see $PROXY_DIR/inception-proxy.log)"
+        return 1
+    fi
+    ok "local proxy running on 127.0.0.1:${PROXY_PORT} (pid $(cat "$PROXY_PID"); no systemd --user here, so until --undo or logout)"
+    return 0
 }
 
 # Only this domain is proxied; everything else stays DIRECT. The trailing
@@ -304,14 +309,14 @@ undo_desktop_proxy() {
 }
 
 undo_proxy_service() {
-	local pid
-	systemctl --user disable --now inception-proxy.service > /dev/null 2>&1
-	if pid=$(cat "$PROXY_PID" 2> /dev/null) && [ -n "$pid" ]; then
-		kill "$pid" 2> /dev/null
-	fi
-	rm -f "$PROXY_UNIT" "$PROXY_BIN" "$PROXY_PID"
-	systemctl --user daemon-reload > /dev/null 2>&1
-	ok "local proxy service stopped and removed"
+    local pid
+    systemctl --user disable --now inception-proxy.service >/dev/null 2>&1
+    if pid=$(cat "$PROXY_PID" 2>/dev/null) && [ -n "$pid" ]; then
+        kill "$pid" 2>/dev/null
+    fi
+    rm -f "$PROXY_UNIT" "$PROXY_BIN" "$PROXY_PID"
+    systemctl --user daemon-reload >/dev/null 2>&1
+    ok "local proxy service stopped and removed"
 }
 
 # ── Firefox ─────────────────────────────────────────────────────────────────
@@ -328,16 +333,16 @@ firefox_roots() {
 # prefs.js/times.json avoids picking up "Crash Reports" and friends, which sit
 # in the same parent directory and are not profiles.
 firefox_profiles() {
-	local root d
-	while read -r root; do
-		[ -d "$root" ] || continue
-		for d in "$root"/*/; do
-			[ -d "$d" ] || continue
-			if [ -f "${d}prefs.js" ] || [ -f "${d}times.json" ]; then
-				printf '%s\n' "${d%/}"
-			fi
-		done
-	done <<< "$(firefox_roots)"
+    local root d
+    while read -r root; do
+        [ -d "$root" ] || continue
+        for d in "$root"/*/; do
+            [ -d "$d" ] || continue
+            if [ -f "${d}prefs.js" ] || [ -f "${d}times.json" ]; then
+                printf '%s\n' "${d%/}"
+            fi
+        done
+    done <<<"$(firefox_roots)"
 }
 
 # Rewrite user.js keeping every line the user put there themselves: the managed
@@ -353,45 +358,44 @@ strip_managed_block() {
 }
 
 configure_firefox() {
-	local n=0 profile userjs
-	while read -r profile; do
-		[ -n "$profile" ] || continue
-		userjs="$profile/user.js"
-		# Keep one backup of whatever was there before we ever touched it.
-		if [ -f "$userjs" ] && [ ! -f "$userjs.b2b-backup" ] \
-			&& ! grep -qF "$BEGIN_MARK" "$userjs" 2> /dev/null; then
-			cp "$userjs" "$userjs.b2b-backup"
-		fi
-		strip_managed_block "$userjs"
-		{
-			printf '%s\n' "$BEGIN_MARK"
-			printf '// Resolves %s to 127.0.0.1 inside Firefox only.\n' "$DOMAIN"
-			printf '// No DNS server, no /etc/hosts, no proxy, no root involved.\n'
-			printf 'user_pref("network.dns.localDomains", "%s");\n' "$DOMAIN"
-			# The site is HTTPS on a self-signed local CA. Leaving HTTPS-only
-			# mode to auto-upgrade the plain-HTTP bonus site would break it.
-			printf 'user_pref("dom.security.https_only_mode", false);\n'
-			printf 'user_pref("dom.security.https_only_mode_pbm", false);\n'
-			# https_first is a SEPARATE pref and defaults to TRUE from Firefox
-			# 129 on. It silently rewrites http:// navigations to https://, so
-			# the bonus static site -- plain HTTP on 8090 -- answered with an
-			# HTTP response that the browser then parsed as TLS:
-			#   "SSL received a record that exceeded the maximum permissible
-			#    length"
-			# which reads as a broken server and is really an upgraded request.
-			# Turning https_only_mode off does NOT cover this one.
-			printf 'user_pref("dom.security.https_first", false);\n'
-			printf 'user_pref("dom.security.https_first_pbm", false);\n'
-			# The PAC lives inside the profile because snap confinement blocks
-			# a snap Firefox from reading hidden paths elsewhere in $HOME.
-			pac_body > "$profile/$PAC_NAME"
-			printf 'user_pref("network.proxy.type", 2);\n'
-			printf 'user_pref("network.proxy.autoconfig_url", "file://%s/%s");\n' \
-				"$profile" "$PAC_NAME"
-			printf '%s\n' "$END_MARK"
-		} >> "$userjs"
-		n=$((n + 1))
-	done <<< "$(firefox_profiles)"
+    local n=0 profile userjs
+    while read -r profile; do
+        [ -n "$profile" ] || continue
+        userjs="$profile/user.js"
+        # Keep one backup of whatever was there before we ever touched it.
+        if [ -f "$userjs" ] && [ ! -f "$userjs.b2b-backup" ] && ! grep -qF "$BEGIN_MARK" "$userjs" 2>/dev/null; then
+            cp "$userjs" "$userjs.b2b-backup"
+        fi
+        strip_managed_block "$userjs"
+        {
+            printf '%s\n' "$BEGIN_MARK"
+            printf '// Resolves %s to 127.0.0.1 inside Firefox only.\n' "$DOMAIN"
+            printf '// No DNS server, no /etc/hosts, no proxy, no root involved.\n'
+            printf 'user_pref("network.dns.localDomains", "%s");\n' "$DOMAIN"
+            # The site is HTTPS on a self-signed local CA. Leaving HTTPS-only
+            # mode to auto-upgrade the plain-HTTP bonus site would break it.
+            printf 'user_pref("dom.security.https_only_mode", false);\n'
+            printf 'user_pref("dom.security.https_only_mode_pbm", false);\n'
+            # https_first is a SEPARATE pref and defaults to TRUE from Firefox
+            # 129 on. It silently rewrites http:// navigations to https://, so
+            # the bonus static site -- plain HTTP on 8090 -- answered with an
+            # HTTP response that the browser then parsed as TLS:
+            #   "SSL received a record that exceeded the maximum permissible
+            #    length"
+            # which reads as a broken server and is really an upgraded request.
+            # Turning https_only_mode off does NOT cover this one.
+            printf 'user_pref("dom.security.https_first", false);\n'
+            printf 'user_pref("dom.security.https_first_pbm", false);\n'
+            # The PAC lives inside the profile because snap confinement blocks
+            # a snap Firefox from reading hidden paths elsewhere in $HOME.
+            pac_body >"$profile/$PAC_NAME"
+            printf 'user_pref("network.proxy.type", 2);\n'
+            printf 'user_pref("network.proxy.autoconfig_url", "file://%s/%s");\n' \
+                "$profile" "$PAC_NAME"
+            printf '%s\n' "$END_MARK"
+        } >>"$userjs"
+        n=$((n + 1))
+    done <<<"$(firefox_profiles)"
 
     if [ "$n" -gt 0 ]; then
         ok "Firefox: $n profile(s) now resolve ${C_BOLD}${DOMAIN}${C_RESET} locally"
@@ -401,22 +405,22 @@ configure_firefox() {
 }
 
 undo_firefox() {
-	local n=0 profile userjs certutil_bin
-	certutil_bin=$(find_certutil 2> /dev/null) || certutil_bin=""
-	while read -r profile; do
-		userjs="$profile/user.js"
-		[ -f "$userjs" ] || continue
-		grep -qF "$BEGIN_MARK" "$userjs" || continue
-		strip_managed_block "$userjs"
-		# An empty user.js is indistinguishable from none; remove it so the
-		# profile is left exactly as it was found.
-		[ -s "$userjs" ] || rm -f "$userjs"
-		rm -f "$profile/$PAC_NAME"
-		[ -n "$certutil_bin" ] && "$certutil_bin" -D -n "$CA_NICKNAME" \
-			-d "sql:$profile" > /dev/null 2>&1
-		n=$((n + 1))
-	done <<< "$(firefox_profiles)"
-	ok "Firefox: managed block removed from $n profile(s)"
+    local n=0 profile userjs certutil_bin
+    certutil_bin=$(find_certutil 2>/dev/null) || certutil_bin=""
+    while read -r profile; do
+        userjs="$profile/user.js"
+        [ -f "$userjs" ] || continue
+        grep -qF "$BEGIN_MARK" "$userjs" || continue
+        strip_managed_block "$userjs"
+        # An empty user.js is indistinguishable from none; remove it so the
+        # profile is left exactly as it was found.
+        [ -s "$userjs" ] || rm -f "$userjs"
+        rm -f "$profile/$PAC_NAME"
+        [ -n "$certutil_bin" ] && "$certutil_bin" -D -n "$CA_NICKNAME" \
+            -d "sql:$profile" >/dev/null 2>&1
+        n=$((n + 1))
+    done <<<"$(firefox_profiles)"
+    ok "Firefox: managed block removed from $n profile(s)"
 }
 
 # Firefox reads user.js once, at profile startup. A Firefox that was already
@@ -454,35 +458,35 @@ chrome_nss_dirs() {
 }
 
 install_ca_into_chrome() {
-	local certutil_bin n=0 dir
-	fetch_ca_cert || return 0
-	certutil_bin=$(find_certutil) || return 0
-	while read -r dir; do
-		[ -n "$dir" ] || continue
-		mkdir -p "$dir" 2> /dev/null || continue
-		# A profile that has never stored a certificate has no database yet.
-		"$certutil_bin" -L -d "sql:$dir" > /dev/null 2>&1 \
-			|| "$certutil_bin" -N --empty-password -d "sql:$dir" > /dev/null 2>&1
-		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" > /dev/null 2>&1
-		if "$certutil_bin" -A -n "$CA_NICKNAME" -t "C,," -d "sql:$dir" \
-			-i "$CA_FILE" > /dev/null 2>&1; then
-			n=$((n + 1))
-		fi
-	done <<< "$(chrome_nss_dirs)"
-	if [ "$n" -gt 0 ]; then
-		ok "Chrome: local CA trusted in $n NSS store(s) — no certificate warning"
-	else
-		warn "Chrome: could not add the CA — it will warn about the certificate"
-	fi
+    local certutil_bin n=0 dir
+    fetch_ca_cert || return 0
+    certutil_bin=$(find_certutil) || return 0
+    while read -r dir; do
+        [ -n "$dir" ] || continue
+        mkdir -p "$dir" 2>/dev/null || continue
+        # A profile that has never stored a certificate has no database yet.
+        "$certutil_bin" -L -d "sql:$dir" >/dev/null 2>&1 ||
+            "$certutil_bin" -N --empty-password -d "sql:$dir" >/dev/null 2>&1
+        "$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" >/dev/null 2>&1
+        if "$certutil_bin" -A -n "$CA_NICKNAME" -t "C,," -d "sql:$dir" \
+            -i "$CA_FILE" >/dev/null 2>&1; then
+            n=$((n + 1))
+        fi
+    done <<<"$(chrome_nss_dirs)"
+    if [ "$n" -gt 0 ]; then
+        ok "Chrome: local CA trusted in $n NSS store(s) — no certificate warning"
+    else
+        warn "Chrome: could not add the CA — it will warn about the certificate"
+    fi
 }
 
 undo_ca_from_chrome() {
-	local certutil_bin dir
-	certutil_bin=$(find_certutil 2> /dev/null) || return 0
-	while read -r dir; do
-		[ -d "$dir" ] || continue
-		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" > /dev/null 2>&1
-	done <<< "$(chrome_nss_dirs)"
+    local certutil_bin dir
+    certutil_bin=$(find_certutil 2>/dev/null) || return 0
+    while read -r dir; do
+        [ -d "$dir" ] || continue
+        "$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$dir" >/dev/null 2>&1
+    done <<<"$(chrome_nss_dirs)"
 }
 
 # ── Chromium / Chrome ───────────────────────────────────────────────────────
@@ -593,31 +597,31 @@ find_certutil() {
 CA_NICKNAME="Inception Local CA"
 CA_TRUSTED=0
 install_ca_into_firefox() {
-	local certutil_bin n=0 profile
-	if ! fetch_ca_cert; then
-		warn "Firefox: CA not published yet — the certificate warning will still appear"
-		return 0
-	fi
-	if ! certutil_bin=$(find_certutil); then
-		warn "Firefox: no certutil — accept the certificate warning once per profile"
-		return 0
-	fi
-	while read -r profile; do
-		[ -n "$profile" ] || continue
-		# Delete first so a reissued CA replaces the old one instead of leaving
-		# two entries with the same nickname behind.
-		"$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$profile" > /dev/null 2>&1
-		if "$certutil_bin" -A -n "$CA_NICKNAME" -t "C,," -d "sql:$profile" \
-			-i "$CA_FILE" > /dev/null 2>&1; then
-			n=$((n + 1))
-		fi
-	done <<< "$(firefox_profiles)"
-	if [ "$n" -gt 0 ]; then
-		CA_TRUSTED=1
-		ok "Firefox: local CA trusted in $n profile(s) — no certificate warning"
-	else
-		warn "Firefox: could not add the CA — accept the warning once per profile"
-	fi
+    local certutil_bin n=0 profile
+    if ! fetch_ca_cert; then
+        warn "Firefox: CA not published yet — the certificate warning will still appear"
+        return 0
+    fi
+    if ! certutil_bin=$(find_certutil); then
+        warn "Firefox: no certutil — accept the certificate warning once per profile"
+        return 0
+    fi
+    while read -r profile; do
+        [ -n "$profile" ] || continue
+        # Delete first so a reissued CA replaces the old one instead of leaving
+        # two entries with the same nickname behind.
+        "$certutil_bin" -D -n "$CA_NICKNAME" -d "sql:$profile" >/dev/null 2>&1
+        if "$certutil_bin" -A -n "$CA_NICKNAME" -t "C,," -d "sql:$profile" \
+            -i "$CA_FILE" >/dev/null 2>&1; then
+            n=$((n + 1))
+        fi
+    done <<<"$(firefox_profiles)"
+    if [ "$n" -gt 0 ]; then
+        CA_TRUSTED=1
+        ok "Firefox: local CA trusted in $n profile(s) — no certificate warning"
+    else
+        warn "Firefox: could not add the CA — accept the warning once per profile"
+    fi
 }
 
 configure_chromium() {
@@ -647,8 +651,8 @@ configure_chromium() {
         cert_flag="--ignore-certificate-errors"
     fi
 
-	mkdir -p "$(dirname "$LAUNCHER")" "$CHROME_PROFILE"
-	cat > "$LAUNCHER" << LAUNCHEOF
+    mkdir -p "$(dirname "$LAUNCHER")" "$CHROME_PROFILE"
+    cat >"$LAUNCHER" <<LAUNCHEOF
 #!${HOST_SH}
 # Auto-generated by born2root (setup/host/inception_host_access.sh).
 # Opens the Inception site at its real domain, with no host DNS entry and no
@@ -694,9 +698,9 @@ undo_chromium() {
 
 # ── curl / shell convenience ────────────────────────────────────────────────
 configure_curl_wrapper() {
-	local https_port="$1" static_port="$2" http_port="$3"
-	mkdir -p "$(dirname "$CURL_WRAPPER")"
-	cat > "$CURL_WRAPPER" << CURLEOF
+    local https_port="$1" static_port="$2" http_port="$3"
+    mkdir -p "$(dirname "$CURL_WRAPPER")"
+    cat >"$CURL_WRAPPER" <<CURLEOF
 #!${HOST_SH}
 # Auto-generated by born2root. curl, with ${DOMAIN} resolved for this call only
 # (--resolve is curl's own equivalent of the browser tricks above).
@@ -779,7 +783,7 @@ fi
 # `make all` the VM has no Inception yet, so no CA could be fetched and a
 # restart then would just force a second one after `make inception`.
 if [ "$CA_TRUSTED" = "1" ]; then
-	"${SCRIPT_SH:-bash}" "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/restart_browsers.sh"
+    "${SCRIPT_SH:-bash}" "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/restart_browsers.sh"
 else
     warn_if_firefox_running
 fi
