@@ -28,7 +28,7 @@ vboxdrv_device_exists() { [ -c /dev/vboxdrv ]; }
 # looking for. Reproduced deterministically on this machine: 100% of runs of
 # `lsmod | grep -q '^vboxdrv'` returned 141 while the module was genuinely
 # loaded, so this check reported "not loaded" on a machine where it wasn't.
-vboxdrv_loaded() { grep -q '^vboxdrv ' "$VBOXDRV_PROC_MODULES" 2> /dev/null; }
+vboxdrv_loaded() { grep -q '^vboxdrv ' "$VBOXDRV_PROC_MODULES" 2>/dev/null; }
 
 # Where the VM binaries live. /usr/lib/virtualbox for both Debian's package and
 # Oracle's own Linux installer. Overridable for the same reason as above.
@@ -52,32 +52,32 @@ VBOX_LIB_DIR="${VBOX_LIB_DIR:-/usr/lib/virtualbox}"
 # unusable, silently drops the build to the other hypervisor without asking, and
 # advises joining a group that changes nothing. That was a real regression here.
 vboxdrv_hardened() {
-	[ -u "$VBOX_LIB_DIR/VirtualBoxVM" ] || [ -u "$VBOX_LIB_DIR/VBoxHeadless" ]
+    [ -u "$VBOX_LIB_DIR/VirtualBoxVM" ] || [ -u "$VBOX_LIB_DIR/VBoxHeadless" ]
 }
 
 vboxdrv_accessible() {
-	vboxdrv_hardened && return 0
-	[ -r /dev/vboxdrv ] && [ -w /dev/vboxdrv ]
+    vboxdrv_hardened && return 0
+    [ -r /dev/vboxdrv ] && [ -w /dev/vboxdrv ]
 }
 
 vboxdrv_ok() {
-	vboxdrv_device_exists || return 1
-	vboxdrv_loaded || return 1
-	vboxdrv_accessible
+    vboxdrv_device_exists || return 1
+    vboxdrv_loaded || return 1
+    vboxdrv_accessible
 }
 
 # Why vboxdrv_ok failed (or "ready"), one line, in the order that matters to
 # whoever is reading it. Assumes VBoxManage is already known to be installed.
 vboxdrv_why() {
-	if ! vboxdrv_device_exists; then
-		printf '%s' "installed, but /dev/vboxdrv does not exist -- vboxdrv kernel module not loaded (needs root)"
-	elif ! vboxdrv_loaded; then
-		printf '%s' "installed, but the vboxdrv kernel module is not loaded (needs root)"
-	elif ! vboxdrv_accessible; then
-		# Only reachable on a DEVELOPER build -- a hardened one is accessible
-		# by definition -- so vboxusers really is the fix here.
-		printf '%s' "kernel driver ready, but /dev/vboxdrv is not readable/writable by $(id -un) -- join the vboxusers group"
-	else
-		printf '%s' "ready"
-	fi
+    if ! vboxdrv_device_exists; then
+        printf '%s' "installed, but /dev/vboxdrv does not exist -- vboxdrv kernel module not loaded (needs root)"
+    elif ! vboxdrv_loaded; then
+        printf '%s' "installed, but the vboxdrv kernel module is not loaded (needs root)"
+    elif ! vboxdrv_accessible; then
+        # Only reachable on a DEVELOPER build -- a hardened one is accessible
+        # by definition -- so vboxusers really is the fix here.
+        printf '%s' "kernel driver ready, but /dev/vboxdrv is not readable/writable by $(id -un) -- join the vboxusers group"
+    else
+        printf '%s' "ready"
+    fi
 }

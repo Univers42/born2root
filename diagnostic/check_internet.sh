@@ -6,14 +6,14 @@ echo -e "==============================================================="
 echo -e "	BORN2BEROOT CHECK CONNECTIONS TO NETWORK		"
 echo -e "================================================================"
 echo -e "Create Date and time (UTC): $(date -u + "%Y-%m-%d %H:%M:%S")${NC}"
-echo -e "Current User: ${whoami}"
+echo -e "Current User: $(whoami)"
 # verirfy prerequisites of installation
 
 prerequisites_check
 
 check_internet() {
-	# TODO: implement internet checks
-	return 0
+    # TODO: implement internet checks
+    return 0
 }
 #Checking with ping a website
 # Check if the connection is working

@@ -7,14 +7,14 @@ echo "===================================================="
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo "This script must be run as root. Please use sudo."
-	exit 1
+    echo "This script must be run as root. Please use sudo."
+    exit 1
 fi
 
 # Step 1: Disable AppArmor profiles temporarily
 echo "Step 1: Disabling problematic AppArmor profiles..."
-aa-disable /etc/apparmor.d/usr.sbin.php-fpm8.2 2> /dev/null || true
-aa-disable /etc/apparmor.d/usr.sbin.lighttpd 2> /dev/null || true
+aa-disable /etc/apparmor.d/usr.sbin.php-fpm8.2 2>/dev/null || true
+aa-disable /etc/apparmor.d/usr.sbin.lighttpd 2>/dev/null || true
 
 # Step 2: Fix log permissions
 echo "Step 2: Fixing log permissions..."
@@ -33,7 +33,7 @@ chmod 644 /var/log/lighttpd/*.log
 # Step 3: Create proper AppArmor profiles
 echo "Step 3: Creating fixed AppArmor profiles..."
 
-cat > /etc/apparmor.d/usr.sbin.php-fpm8.2 << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.php-fpm8.2 <<'EOF'
 #include <tunables/global>
 
 profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected, complain) {
@@ -77,7 +77,7 @@ profile php-fpm8.2 /usr/sbin/php-fpm8.2 flags=(attach_disconnected, complain) {
 }
 EOF
 
-cat > /etc/apparmor.d/usr.sbin.lighttpd << 'EOF'
+cat >/etc/apparmor.d/usr.sbin.lighttpd <<'EOF'
 #include <tunables/global>
 
 profile lighttpd /usr/sbin/lighttpd flags=(attach_disconnected, complain) {
@@ -152,10 +152,10 @@ echo "PHP-FPM service status: $php_status"
 echo "Lighttpd service status: $lighttpd_status"
 
 if [ "$php_status" = "active" ] && [ "$lighttpd_status" = "active" ]; then
-	echo -e "\n✅ REPAIR SUCCESSFUL: Both services are running!"
+    echo -e "\n✅ REPAIR SUCCESSFUL: Both services are running!"
 
-	# Create a test file to verify PHP is working
-	cat > /var/www/html/repair-test.php << 'EOF'
+    # Create a test file to verify PHP is working
+    cat >/var/www/html/repair-test.php <<'EOF'
 <?php
 echo "<h1>WordPress AppArmor Repair Test</h1>";
 echo "<p>If you can see this, PHP is working correctly!</p>";
@@ -170,15 +170,15 @@ echo htmlspecialchars($output);
 echo "</pre>";
 ?>
 EOF
-	chown www-data:www-data /var/www/html/repair-test.php
+    chown www-data:www-data /var/www/html/repair-test.php
 
-	echo -e "\nPlease visit http://YOUR_SERVER_IP/repair-test.php to verify PHP is working."
-	echo "You can then complete your WordPress installation."
+    echo -e "\nPlease visit http://YOUR_SERVER_IP/repair-test.php to verify PHP is working."
+    echo "You can then complete your WordPress installation."
 else
-	echo -e "\n❌ REPAIR INCOMPLETE: One or both services are still not running."
-	echo "Please check the logs for more information:"
-	echo "  - sudo journalctl -xeu php8.2-fpm.service"
-	echo "  - sudo journalctl -xeu lighttpd.service"
+    echo -e "\n❌ REPAIR INCOMPLETE: One or both services are still not running."
+    echo "Please check the logs for more information:"
+    echo "  - sudo journalctl -xeu php8.2-fpm.service"
+    echo "  - sudo journalctl -xeu lighttpd.service"
 fi
 
 echo "===================================================="

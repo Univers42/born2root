@@ -36,14 +36,24 @@ SRC="${INCEPTION_SRC:-${SRC:-}}"
 SSH_ALIAS="${SSH_ALIAS:-b2b}"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 
-C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_GREEN=$'\033[32m'
-C_YELLOW=$'\033[33m'; C_BLUE=$'\033[34m'; C_RED=$'\033[31m'; C_DIM=$'\033[2m'
+C_RESET=$'\033[0m'
+C_BOLD=$'\033[1m'
+C_GREEN=$'\033[32m'
+C_YELLOW=$'\033[33m'
+C_BLUE=$'\033[34m'
+C_RED=$'\033[31m'
+# shellcheck disable=SC2034
+C_DIM=$'\033[2m'
 
 step() { printf "\n${C_BLUE}▶${C_RESET} ${C_BOLD}%s${C_RESET}\n" "$*"; }
-ok()   { printf "  ${C_GREEN}✓${C_RESET} %s\n" "$*"; }
+ok() { printf "  ${C_GREEN}✓${C_RESET} %s\n" "$*"; }
 warn() { printf "  ${C_YELLOW}⚠${C_RESET}  %s\n" "$*"; }
-die()  { printf "  ${C_RED}✗${C_RESET} %s\n" "$*" >&2; exit 1; }
+die() {
+    printf "  ${C_RED}✗${C_RESET} %s\n" "$*" >&2
+    exit 1
+}
 
+# shellcheck disable=SC2029
 vm_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$@"; }
 
 # ── The guest sudo password ─────────────────────────────────────────────────
@@ -53,25 +63,31 @@ vm_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$@"; }
 # step if either is ever changed.
 PRESEED_FILE="${PRESEED_FILE:-$REPO_ROOT/preseeds/preseed.cfg}"
 resolve_pass() {
-	local p
-	if [ -n "${GUEST_PASS:-}" ]; then printf '%s' "$GUEST_PASS"; return 0; fi
-	if [ -r "$PRESEED_FILE" ]; then
-		p=$(awk '$1 == "d-i" && $2 == "passwd/user-password" { print $4; exit }' "$PRESEED_FILE")
-		[ -n "$p" ] && { printf '%s' "$p"; return 0; }
-	fi
-	if [ -r "$REPO_ROOT/vm_pass.txt" ]; then
-		head -n1 "$REPO_ROOT/vm_pass.txt" | tr -d '\r\n'
-		return 0
-	fi
-	return 1
+    local p
+    if [ -n "${GUEST_PASS:-}" ]; then
+        printf '%s' "$GUEST_PASS"
+        return 0
+    fi
+    if [ -r "$PRESEED_FILE" ]; then
+        p=$(awk '$1 == "d-i" && $2 == "passwd/user-password" { print $4; exit }' "$PRESEED_FILE")
+        [ -n "$p" ] && {
+            printf '%s' "$p"
+            return 0
+        }
+    fi
+    if [ -r "$REPO_ROOT/vm_pass.txt" ]; then
+        head -n1 "$REPO_ROOT/vm_pass.txt" | tr -d '\r\n'
+        return 0
+    fi
+    return 1
 }
 
 # ── 1. Wait until the guest answers ─────────────────────────────────────────
 step "Waiting for the VM to accept SSH (${SSH_ALIAS})"
-deadline=$(( $(date +%s) + 300 ))
-until vm_ssh true 2> /dev/null; do
-	[ "$(date +%s)" -lt "$deadline" ] || die "VM never became reachable over ssh ${SSH_ALIAS}. Try: make start_vm"
-	sleep 5
+deadline=$(($(date +%s) + 300))
+until vm_ssh true 2>/dev/null; do
+    [ "$(date +%s)" -lt "$deadline" ] || die "VM never became reachable over ssh ${SSH_ALIAS}. Try: make start_vm"
+    sleep 5
 done
 ok "guest reachable: $(vm_ssh 'hostname' 2>/dev/null)"
 
@@ -81,137 +97,147 @@ ok "guest reachable: $(vm_ssh 'hostname' 2>/dev/null)"
 # takes a couple of minutes. Connecting the moment ssh answers and then failing
 # because docker is not there yet is a race, not a real error — so wait for it.
 step "Waiting for guest provisioning (docker, git, openssl, make, rsync)"
-provision_deadline=$(( $(date +%s) + ${PROVISION_TIMEOUT:-900} ))
+provision_deadline=$(($(date +%s) + ${PROVISION_TIMEOUT:-900}))
 reported=""
 while :; do
-	missing=$(vm_ssh 'for c in git docker openssl make rsync; do command -v $c >/dev/null 2>&1 || echo $c; done' 2> /dev/null)
-	if [ -z "$missing" ] && vm_ssh 'docker info >/dev/null 2>&1'; then
-		break
-	fi
-	if [ "$(date +%s)" -ge "$provision_deadline" ]; then
-		die "guest still not provisioned (missing: ${missing:-docker daemon}). Check: ssh ${SSH_ALIAS} sudo tail /var/log/first-boot.log"
-	fi
-	# Report what is still missing, but only when it changes, so the wait reads
-	# as progress instead of a wall of identical lines.
-	state="${missing:-docker daemon not ready}"
-	if [ "$state" != "$reported" ]; then
-		printf "  ${C_YELLOW}…${C_RESET} still waiting on: %s\n" "$(printf '%s' "$state" | tr '\n' ' ')"
-		reported="$state"
-	fi
-	sleep 10
+    # shellcheck disable=SC2016
+    missing=$(vm_ssh 'for c in git docker openssl make rsync; do command -v $c >/dev/null 2>&1 || echo $c; done' 2>/dev/null)
+    if [ -z "$missing" ] && vm_ssh 'docker info >/dev/null 2>&1'; then
+        break
+    fi
+    if [ "$(date +%s)" -ge "$provision_deadline" ]; then
+        die "guest still not provisioned (missing: ${missing:-docker daemon}). Check: ssh ${SSH_ALIAS} sudo tail /var/log/first-boot.log"
+    fi
+    # Report what is still missing, but only when it changes, so the wait reads
+    # as progress instead of a wall of identical lines.
+    state="${missing:-docker daemon not ready}"
+    if [ "$state" != "$reported" ]; then
+        printf "  ${C_YELLOW}…${C_RESET} still waiting on: %s\n" "$(printf '%s' "$state" | tr '\n' ' ')"
+        reported="$state"
+    fi
+    sleep 10
 done
 ok "git, docker, openssl, make, rsync all present and docker is usable"
 
 # ── 3. Get the sources into the guest ───────────────────────────────────────
 if [ -n "$SRC" ]; then
-	[ -d "$SRC" ] || die "SRC='$SRC' is not a directory"
-	step "Uploading local sources from $SRC"
-	vm_ssh "mkdir -p '$GUEST_DIR'" || die "could not create $GUEST_DIR"
-	# A submodule or a linked worktree keeps its repository elsewhere and
-	# leaves a one-line .git FILE pointing at it: a dangling pointer once
-	# copied, after which every `git` in the compliance suite fails. Such a
-	# tree travels without it and the guest gets a repository of its own
-	# below -- the host's origin, one commit holding what was uploaded.
-	synth_repo=0; origin_url=""; rsync_extra=()
-	if [ ! -d "$SRC/.git" ]; then
-		synth_repo=1; rsync_extra=(--exclude=/.git)
-		origin_url=$(git -C "$SRC" remote get-url origin 2> /dev/null || true)
-	fi
-	# --delete so the guest ends up an exact mirror of the sources; but
-	# secrets/ and srcs/.env are RUNTIME state the guest generated (random
-	# passwords, the TLS material), not sources -- deleting and letting
-	# `make setup` mint new ones on every upload rotates the credentials out
-	# from under a MariaDB that is still running on the old ones, and the stack
-	# desyncs. Exclude keeps them, so a redeploy re-uses what is already there;
-	# a first deploy has neither and setup makes them once. An excluded path is
-	# also left alone on the guest, which likewise keeps the repository made
-	# below across uploads. vendor/ is a submodule of dev tooling: a real
-	# `make inception` clones non-recursively, so it is an empty gitlink there
-	# and never scanned -- inlining its files would only feed the compliance
-	# suite's credential scan third-party Python, so it does not travel.
-	rsync -az --delete \
-		--exclude '.git/index.lock' \
-		--exclude '/secrets/' --exclude '/srcs/.env' \
-		--exclude '/vendor/' \
-		${rsync_extra[@]+"${rsync_extra[@]}"} \
-		-e "ssh ${SSH_OPTS[*]}" \
-		"${SRC%/}/" "${SSH_ALIAS}:${GUEST_DIR}/" \
-		|| die "rsync of sources failed"
-	ok "sources uploaded to ${GUEST_DIR}"
-	if [ "$synth_repo" = 1 ]; then
-		if vm_ssh "cd '$GUEST_DIR' && { [ -d .git ] || { rm -f .git && git init -q -b main; }; } \
-			&& { [ -z '$origin_url' ] || git remote get-url origin > /dev/null 2>&1 || git remote add origin '$origin_url'; } \
-			&& git add -A && { git diff --cached --quiet \
-				|| git -c user.name=born2root -c user.email=born2root@localhost commit -q -m 'working tree uploaded from $(hostname)'; }" 2> /dev/null; then
-			ok "the uploaded tree is a repository of its own (origin: ${origin_url:-none})"
-		else
-			warn "could not make a repository of the uploaded tree"
-		fi
-	fi
+    [ -d "$SRC" ] || die "SRC='$SRC' is not a directory"
+    step "Uploading local sources from $SRC"
+    vm_ssh "mkdir -p '$GUEST_DIR'" || die "could not create $GUEST_DIR"
+    # A submodule or a linked worktree keeps its repository elsewhere and
+    # leaves a one-line .git FILE pointing at it: a dangling pointer once
+    # copied, after which every `git` in the compliance suite fails. Such a
+    # tree travels without it and the guest gets a repository of its own
+    # below -- the host's origin, one commit holding what was uploaded.
+    synth_repo=0
+    origin_url=""
+    rsync_extra=()
+    if [ ! -d "$SRC/.git" ]; then
+        synth_repo=1
+        rsync_extra=(--exclude=/.git)
+        origin_url=$(git -C "$SRC" remote get-url origin 2>/dev/null || true)
+    fi
+    # --delete so the guest ends up an exact mirror of the sources; but
+    # secrets/ and srcs/.env are RUNTIME state the guest generated (random
+    # passwords, the TLS material), not sources -- deleting and letting
+    # `make setup` mint new ones on every upload rotates the credentials out
+    # from under a MariaDB that is still running on the old ones, and the stack
+    # desyncs. Exclude keeps them, so a redeploy re-uses what is already there;
+    # a first deploy has neither and setup makes them once. An excluded path is
+    # also left alone on the guest, which likewise keeps the repository made
+    # below across uploads. vendor/ is a submodule of dev tooling: a real
+    # `make inception` clones non-recursively, so it is an empty gitlink there
+    # and never scanned -- inlining its files would only feed the compliance
+    # suite's credential scan third-party Python, so it does not travel.
+    rsync -az --delete \
+        --exclude '.git/index.lock' \
+        --exclude '/secrets/' --exclude '/srcs/.env' \
+        --exclude '/vendor/' \
+        ${rsync_extra[@]+"${rsync_extra[@]}"} \
+        -e "ssh ${SSH_OPTS[*]}" \
+        "${SRC%/}/" "${SSH_ALIAS}:${GUEST_DIR}/" ||
+        die "rsync of sources failed"
+    ok "sources uploaded to ${GUEST_DIR}"
+    if [ "$synth_repo" = 1 ]; then
+        if vm_ssh "cd '$GUEST_DIR' && { [ -d .git ] || { rm -f .git && git init -q -b main; }; } \
+            && { [ -z '$origin_url' ] || git remote get-url origin > /dev/null 2>&1 || git remote add origin '$origin_url'; } \
+            && git add -A && { git diff --cached --quiet \
+                || git -c user.name=born2root -c user.email=born2root@localhost commit -q -m 'working tree uploaded from $(hostname)'; }" 2>/dev/null; then
+            ok "the uploaded tree is a repository of its own (origin: ${origin_url:-none})"
+        else
+            warn "could not make a repository of the uploaded tree"
+        fi
+    fi
 else
-	step "Cloning ${REPO_URL} (branch ${BRANCH}) into the guest"
-	vm_ssh "set -e
-		if [ -d '$GUEST_DIR/.git' ]; then
-			cd '$GUEST_DIR' && git fetch --all -q && git checkout -q '$BRANCH' && git pull -q --ff-only
-		else
-			mkdir -p \"\$(dirname '$GUEST_DIR')\"
-			git clone -q --branch '$BRANCH' '$REPO_URL' '$GUEST_DIR'
-		fi" || die "clone/pull failed"
-	ok "repository present at ${GUEST_DIR}"
+    step "Cloning ${REPO_URL} (branch ${BRANCH}) into the guest"
+    vm_ssh "set -e
+        if [ -d '$GUEST_DIR/.git' ]; then
+            cd '$GUEST_DIR' && git fetch --all -q && git checkout -q '$BRANCH' && git pull -q --ff-only
+        else
+            mkdir -p \"\$(dirname '$GUEST_DIR')\"
+            git clone -q --branch '$BRANCH' '$REPO_URL' '$GUEST_DIR'
+        fi" || die "clone/pull failed"
+    ok "repository present at ${GUEST_DIR}"
 fi
 
 # ── 4. Guest-side domain resolution (the subject's own requirement) ─────────
 step "Ensuring ${DOMAIN} resolves inside the guest"
-if vm_ssh "grep -q '$DOMAIN' /etc/hosts" 2> /dev/null; then
-	ok "/etc/hosts already maps ${DOMAIN}"
+if vm_ssh "grep -q '$DOMAIN' /etc/hosts" 2>/dev/null; then
+    ok "/etc/hosts already maps ${DOMAIN}"
 else
-	pass=$(resolve_pass) || die "no guest password (set GUEST_PASS, or check $PRESEED_FILE)"
-	# The guest's sudoers sets requiretty: without -tt sudo refuses outright with
-	# "you must have a tty to run sudo", whatever is piped at it. -tt allocates
-	# one, and -S then reads the passphrase from that tty.
-	printf '%s\n' "$pass" \
-		| ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" \
-			"sudo -S -p '' \"\$(command -v hellish.real 2>/dev/null || echo sh)\" -c 'grep -q \"$DOMAIN\" /etc/hosts || echo \"127.0.0.1 ${DOMAIN}\" >> /etc/hosts'" \
-			> /dev/null 2>&1
-	if vm_ssh "grep -q '$DOMAIN' /etc/hosts" 2> /dev/null; then
-		ok "added 127.0.0.1 ${DOMAIN} to the guest's /etc/hosts"
-	else
-		warn "could not write /etc/hosts non-interactively — inception's own sudo line will handle it"
-	fi
+    pass=$(resolve_pass) || die "no guest password (set GUEST_PASS, or check $PRESEED_FILE)"
+    # The guest's sudoers sets requiretty: without -tt sudo refuses outright with
+    # "you must have a tty to run sudo", whatever is piped at it. -tt allocates
+    # one, and -S then reads the passphrase from that tty.
+    printf '%s\n' "$pass" |
+        ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" \
+            "sudo -S -p '' \"\$(command -v hellish.real 2>/dev/null || echo sh)\" -c 'grep -q \"$DOMAIN\" /etc/hosts || echo \"127.0.0.1 ${DOMAIN}\" >> /etc/hosts'" \
+            >/dev/null 2>&1
+    if vm_ssh "grep -q '$DOMAIN' /etc/hosts" 2>/dev/null; then
+        ok "added 127.0.0.1 ${DOMAIN} to the guest's /etc/hosts"
+    else
+        warn "could not write /etc/hosts non-interactively — inception's own sudo line will handle it"
+    fi
 fi
 
 # ── 5. Build ────────────────────────────────────────────────────────────────
 if [ "${NO_BUILD:-0}" = "1" ]; then
-	warn "NO_BUILD=1 — skipping the build"
+    warn "NO_BUILD=1 — skipping the build"
 else
-	step "Building the Inception stack (this takes a few minutes)"
-	# The guest's login shell is /usr/bin/hellish, a link to hellish.real
-	# (see preseeds/b2b-setup.sh). Inception's Makefile runs its recipes and
-	# its test suite with the shell make was launched from, and also copies
-	# that shell into the containers as /bin/sh when it is static -- so name
-	# the ELF explicitly rather than trusting the probe behind a pty. A guest
-	# without hellish.real is unchanged.
-	real=$(vm_ssh 'command -v hellish.real 2>/dev/null' 2> /dev/null | tr -d '\r')
-	[ -z "$real" ] || ok "the stack builds under ${real}"
-	# -tt so docker's build output streams live rather than arriving in one lump
-	# at the end; without a tty the whole build looks like a hang.
-	ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" "cd '$GUEST_DIR' && make ${real:+SCRIPT_SH=$real}" 2>&1 \
-		| sed 's/^/    /'
-	# PIPESTATUS[0] is ssh's own status; the pipe through sed would otherwise
-	# always report success.
-	[ "${PIPESTATUS[0]}" -eq 0 ] || die "inception build failed inside the guest"
-	ok "stack built"
+    step "Building the Inception stack (this takes a few minutes)"
+    # The guest's login shell is /usr/bin/hellish, a link to hellish.real
+    # (see preseeds/b2b-setup.sh). Inception's Makefile runs its recipes and
+    # its test suite with the shell make was launched from, and also copies
+    # that shell into the containers as /bin/sh when it is static -- so name
+    # the ELF explicitly rather than trusting the probe behind a pty. A guest
+    # without hellish.real is unchanged.
+    real=$(vm_ssh 'command -v hellish.real 2>/dev/null' 2>/dev/null | tr -d '\r')
+    [ -z "$real" ] || ok "the stack builds under ${real}"
+    # -tt so docker's build output streams live rather than arriving in one lump
+    # at the end; without a tty the whole build looks like a hang.
+    ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" "cd '$GUEST_DIR' && make ${real:+SCRIPT_SH=$real}" 2>&1 |
+        sed 's/^/    /'
+    # PIPESTATUS[0] is ssh's own status; the pipe through sed would otherwise
+    # always report success.
+    [ "${PIPESTATUS[0]}" -eq 0 ] || die "inception build failed inside the guest"
+    ok "stack built"
 fi
 
 # ── 6. Verify from inside the guest ─────────────────────────────────────────
 step "Verifying from inside the guest"
-vm_ssh "docker ps --format '{{.Names}}\t{{.Status}}'" 2> /dev/null | sed 's/^/    /'
-guest_https=$(vm_ssh "curl -ks -o /dev/null -w '%{http_code}' --max-time 10 https://${DOMAIN}/" 2> /dev/null)
-guest_static=$(vm_ssh "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://${DOMAIN}:8090/" 2> /dev/null)
-[ "$guest_https" = "200" ] && ok "guest https://${DOMAIN}/ → 200" \
-	|| warn "guest https://${DOMAIN}/ → ${guest_https:-no response}"
-[ "$guest_static" = "200" ] && ok "guest http://${DOMAIN}:8090/ → 200" \
-	|| warn "guest http://${DOMAIN}:8090/ → ${guest_static:-no response}"
+vm_ssh "docker ps --format '{{.Names}}\t{{.Status}}'" 2>/dev/null | sed 's/^/    /'
+guest_https=$(vm_ssh "curl -ks -o /dev/null -w '%{http_code}' --max-time 10 https://${DOMAIN}/" 2>/dev/null)
+guest_static=$(vm_ssh "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://${DOMAIN}:8090/" 2>/dev/null)
+if [ "$guest_https" = "200" ]; then
+    ok "guest https://${DOMAIN}/ → 200"
+else
+    warn "guest https://${DOMAIN}/ → ${guest_https:-no response}"
+fi
+if [ "$guest_static" = "200" ]; then
+    ok "guest http://${DOMAIN}:8090/ → 200"
+else
+    warn "guest http://${DOMAIN}:8090/ → ${guest_static:-no response}"
+fi
 
 # ── 7. Wire up the host and verify from there too ───────────────────────────
 step "Configuring host access"

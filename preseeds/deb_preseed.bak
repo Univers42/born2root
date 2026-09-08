@@ -74,69 +74,69 @@ d-i partman-crypto/confirm_nooverwrite boolean true
 
 # Set the recipe for custom partitioning
 d-i partman-auto/expert_recipe string \
-    boot-root :: \
-        500 500 500 ext4 \
-            $primary{ } $bootable{ } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ /boot } \
-        . \
-        30300 30300 30300 crypto \
-            $primary{ } \
-            method{ crypto } \
-            $lvmignore{ } \
-        . \
-        10000 10000 10000 ext4 \
-            $lvmok{ } \
-            lv_name{ root } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ / } \
-        . \
-        2300 2300 2300 linux-swap \
-            $lvmok{ } \
-            lv_name{ swap } \
-            method{ swap } format{ } \
-        . \
-        5000 5000 5000 ext4 \
-            $lvmok{ } \
-            lv_name{ home } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ /home } \
-        . \
-        3000 3000 3000 ext4 \
-            $lvmok{ } \
-            lv_name{ var } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ /var } \
-        . \
-        3000 3000 3000 ext4 \
-            $lvmok{ } \
-            lv_name{ srv } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ /srv } \
-        . \
-        3000 3000 3000 ext4 \
-            $lvmok{ } \
-            lv_name{ tmp } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ /tmp } \
-        . \
-        4000 4000 4000 ext4 \
-            $lvmok{ } \
-            lv_name{ var-log } \
-            method{ format } format{ } \
-            use_filesystem{ } filesystem{ ext4 } \
-            mountpoint{ /var/log } \
-        .
+	boot-root :: \
+	500 500 500 ext4 \
+	$primary{ } $bootable{ } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ /boot } \
+	. \
+	30300 30300 30300 crypto \
+	$primary{ } \
+	method{ crypto } \
+	$lvmignore{ } \
+	. \
+	10000 10000 10000 ext4 \
+	$lvmok{ } \
+	lv_name{ root } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ / } \
+	. \
+	2300 2300 2300 linux-swap \
+	$lvmok{ } \
+	lv_name{ swap } \
+	method{ swap } format{ } \
+	. \
+	5000 5000 5000 ext4 \
+	$lvmok{ } \
+	lv_name{ home } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ /home } \
+	. \
+	3000 3000 3000 ext4 \
+	$lvmok{ } \
+	lv_name{ var } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ /var } \
+	. \
+	3000 3000 3000 ext4 \
+	$lvmok{ } \
+	lv_name{ srv } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ /srv } \
+	. \
+	3000 3000 3000 ext4 \
+	$lvmok{ } \
+	lv_name{ tmp } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ /tmp } \
+	. \
+	4000 4000 4000 ext4 \
+	$lvmok{ } \
+	lv_name{ var-log } \
+	method{ format } format{ } \
+	use_filesystem{ } filesystem{ ext4 } \
+	mountpoint{ /var/log } \
+	.
 
 # Force finish and write partitions
 d-i partman/early_command string \
-    debconf-set partman-auto/disk "$(list-devices disk | head -n1)"
+	debconf-set partman-auto/disk "$(list-devices disk | head -n1)"
 
 ### Software Selection
 tasksel tasksel/first multiselect standard
@@ -160,144 +160,139 @@ d-i finish-install/reboot_in_progress note
 
 ### Post-installation commands - FULL Born2beRoot Configuration + WordPress
 d-i preseed/late_command string \
-    in-target apt-get update; \
-    in-target apt-get install -y openssh-server sudo ufw curl wget net-tools libpam-pwquality apparmor apparmor-utils cron lighttpd mariadb-server php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl; \
-    \
-    in-target groupadd user42 || true; \
-    in-target usermod -aG sudo,user42 dlesieur; \
-    \
-    in-target sed -i 's/^#*Port 22/Port 4242/' /etc/ssh/sshd_config; \
-    in-target sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config; \
-    in-target sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config; \
-    in-target systemctl enable ssh; \
-    \
-    in-target ufw default deny incoming; \
-    in-target ufw default allow outgoing; \
-    in-target ufw allow 4242/tcp; \
-    in-target ufw allow 80/tcp; \
-    in-target ufw allow 443/tcp; \
-    in-target sh -c "echo 'y' | ufw enable || true"; \
-    \
-    in-target mkdir -p /var/log/sudo; \
-    in-target sh -c "echo 'Defaults        passwd_tries=3' > /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        badpass_message=\"Wrong password. Access denied!\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        logfile=\"/var/log/sudo/sudo.log\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        log_input,log_output' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        iolog_dir=\"/var/log/sudo\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        requiretty' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        secure_path=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target chmod 440 /etc/sudoers.d/sudo_config; \
-    \
-    in-target sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS\t30/' /etc/login.defs; \
-    in-target sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS\t2/' /etc/login.defs; \
-    in-target sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE\t7/' /etc/login.defs; \
-    in-target sed -i 's/^PASS_MIN_LEN.*/PASS_MIN_LEN\t10/' /etc/login.defs; \
-    \
-    in-target sh -c "sed -i 's/^# minlen = .*/minlen = 10/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# dcredit = .*/dcredit = -1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# ucredit = .*/ucredit = -1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# lcredit = .*/lcredit = -1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# maxrepeat = .*/maxrepeat = 3/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# usercheck = .*/usercheck = 1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# difok = .*/difok = 7/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# enforce_for_root.*/enforce_for_root/' /etc/security/pwquality.conf"; \
-    \
-    in-target sh -c "cat > /usr/local/bin/monitoring.sh << 'MONITORING_EOF'\n#!/bin/bash\nARCH=\$(uname -a)\nPCPU=\$(grep 'physical id' /proc/cpuinfo | sort -u | wc -l)\nVCPU=\$(grep processor /proc/cpuinfo | wc -l)\nRAM_TOTAL=\$(free -m | awk '/Mem:/ {print \$2}')\nRAM_USED=\$(free -m | awk '/Mem:/ {print \$3}')\nRAM_PERC=\$(free | awk '/Mem:/ {printf(\"%.2f\"), \$3/\$2*100}')\nDISK_TOTAL=\$(df -h --total | awk '/total/ {print \$2}')\nDISK_USED=\$(df -h --total | awk '/total/ {print \$3}')\nDISK_PERC=\$(df -k --total | awk '/total/ {print \$5}')\nCPU_LOAD=\$(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - \$1\"%\"}')\nLAST_BOOT=\$(who -b | awk '{print \$3, \$4}')\nLVM_USE=\$(lsblk | grep -q lvm && echo yes || echo no)\nTCP_CONN=\$(ss -t | grep ESTAB | wc -l)\nUSERS=\$(who | wc -l)\nIP=\$(hostname -I | awk '{print \$1}')\nMAC=\$(ip link show | awk '/ether/ {print \$2}')\nSUDO_CMDS=\$(journalctl _COMM=sudo | grep COMMAND | wc -l)\n\nwall \"\n#Architecture: \$ARCH\n#CPU physical: \$PCPU\n#vCPU: \$VCPU\n#Memory Usage: \$RAM_USED/\${RAM_TOTAL}MB (\${RAM_PERC}%)\n#Disk Usage: \$DISK_USED/\$DISK_TOTAL (\$DISK_PERC)\n#CPU load: \$CPU_LOAD\n#Last boot: \$LAST_BOOT\n#LVM use: \$LVM_USE\n#Connections TCP: \$TCP_CONN ESTABLISHED\n#User log: \$USERS\n#Network: IP \$IP (\$MAC)\n#Sudo: \$SUDO_CMDS cmd\n\"\nMONITORING_EOF"; \
-    in-target chmod +x /usr/local/bin/monitoring.sh; \
-    \
-    in-target sh -c "echo '*/10 * * * * root /usr/local/bin/monitoring.sh' >> /etc/crontab"; \
-    \
-    in-target lighty-enable-mod fastcgi; \
-    in-target lighty-enable-mod fastcgi-php; \
-    \
-    in-target systemctl enable lighttpd; \
-    in-target systemctl enable mariadb; \
-    in-target systemctl enable php7.4-fpm || systemctl enable php8.2-fpm; \
-    \
-    in-target sh -c "mysql -u root << 'MYSQL_EOF'\nCREATE DATABASE wordpress;\nCREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'wppass123';\nGRANT ALL PRIVILEGES ON wordpress.* TO 'wpuser'@'localhost';\nFLUSH PRIVILEGES;\nMYSQL_EOF"; \
-    \
-    in-target sh -c "cd /var/www/html && wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && rm latest.tar.gz && chown -R www-data:www-data wordpress"; \
-    \
-    in-target sh -c "cat > /var/www/html/wordpress/wp-config.php << 'WPCONFIG_EOF'\n<?php\ndefine('DB_NAME', 'wordpress');\ndefine('DB_USER', 'wpuser');\ndefine('DB_PASSWORD', 'wppass123');\ndefine('DB_HOST', 'localhost');\ndefine('DB_CHARSET', 'utf8');\ndefine('DB_COLLATE', '');\n\$table_prefix = 'wp_';\n\ndefine('WP_DEBUG', false);\n\nif ( ! defined( 'ABSPATH' ) ) {\n\tdefine( 'ABSPATH', __DIR__ . '/' );\n}\n\nrequire_once ABSPATH . 'wp-settings.php';\nWPCONFIG_EOF"; \
-    \
-    in-target systemctl enable cron; \
-    in-target systemctl restart ssh; \
-    in-target systemctl restart lighttpd; \
-    in-target systemctl restart mariadb
-    
+	in-target apt-get update
+in-target apt-get install -y openssh-server sudo ufw curl wget net-tools libpam-pwquality apparmor apparmor-utils cron lighttpd mariadb-server php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl
 
+in-target groupadd user42 || true
+in-target usermod -aG sudo,user42 dlesieur
 
+in-target sed -i 's/^#*Port 22/Port 4242/' /etc/ssh/sshd_config
+in-target sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+in-target sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+in-target systemctl enable ssh
 
+in-target ufw default deny incoming
+in-target ufw default allow outgoing
+in-target ufw allow 4242/tcp
+in-target ufw allow 80/tcp
+in-target ufw allow 443/tcp
+in-target sh -c "echo 'y' | ufw enable || true"
 
+in-target mkdir -p /var/log/sudo
+in-target sh -c "echo 'Defaults        passwd_tries=3' > /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        badpass_message=\"Wrong password. Access denied!\"' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        logfile=\"/var/log/sudo/sudo.log\"' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        log_input,log_output' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        iolog_dir=\"/var/log/sudo\"' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        requiretty' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        secure_path=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"' >> /etc/sudoers.d/sudo_config"
+in-target chmod 440 /etc/sudoers.d/sudo_config
 
-    ### Post-installation commands - FULL Born2beRoot Configuration + WordPress
+in-target sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS\t30/' /etc/login.defs
+in-target sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS\t2/' /etc/login.defs
+in-target sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE\t7/' /etc/login.defs
+in-target sed -i 's/^PASS_MIN_LEN.*/PASS_MIN_LEN\t10/' /etc/login.defs
+
+in-target sh -c "sed -i 's/^# minlen = .*/minlen = 10/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# dcredit = .*/dcredit = -1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# ucredit = .*/ucredit = -1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# lcredit = .*/lcredit = -1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# maxrepeat = .*/maxrepeat = 3/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# usercheck = .*/usercheck = 1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# difok = .*/difok = 7/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# enforce_for_root.*/enforce_for_root/' /etc/security/pwquality.conf"
+
+in-target sh -c "cat > /usr/local/bin/monitoring.sh << 'MONITORING_EOF'\n#!/bin/bash\nARCH=\$(uname -a)\nPCPU=\$(grep 'physical id' /proc/cpuinfo | sort -u | wc -l)\nVCPU=\$(grep processor /proc/cpuinfo | wc -l)\nRAM_TOTAL=\$(free -m | awk '/Mem:/ {print \$2}')\nRAM_USED=\$(free -m | awk '/Mem:/ {print \$3}')\nRAM_PERC=\$(free | awk '/Mem:/ {printf(\"%.2f\"), \$3/\$2*100}')\nDISK_TOTAL=\$(df -h --total | awk '/total/ {print \$2}')\nDISK_USED=\$(df -h --total | awk '/total/ {print \$3}')\nDISK_PERC=\$(df -k --total | awk '/total/ {print \$5}')\nCPU_LOAD=\$(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - \$1\"%\"}')\nLAST_BOOT=\$(who -b | awk '{print \$3, \$4}')\nLVM_USE=\$(lsblk | grep -q lvm && echo yes || echo no)\nTCP_CONN=\$(ss -t | grep ESTAB | wc -l)\nUSERS=\$(who | wc -l)\nIP=\$(hostname -I | awk '{print \$1}')\nMAC=\$(ip link show | awk '/ether/ {print \$2}')\nSUDO_CMDS=\$(journalctl _COMM=sudo | grep COMMAND | wc -l)\n\nwall \"\n#Architecture: \$ARCH\n#CPU physical: \$PCPU\n#vCPU: \$VCPU\n#Memory Usage: \$RAM_USED/\${RAM_TOTAL}MB (\${RAM_PERC}%)\n#Disk Usage: \$DISK_USED/\$DISK_TOTAL (\$DISK_PERC)\n#CPU load: \$CPU_LOAD\n#Last boot: \$LAST_BOOT\n#LVM use: \$LVM_USE\n#Connections TCP: \$TCP_CONN ESTABLISHED\n#User log: \$USERS\n#Network: IP \$IP (\$MAC)\n#Sudo: \$SUDO_CMDS cmd\n\"\nMONITORING_EOF"
+in-target chmod +x /usr/local/bin/monitoring.sh
+
+in-target sh -c "echo '*/10 * * * * root /usr/local/bin/monitoring.sh' >> /etc/crontab"
+
+in-target lighty-enable-mod fastcgi
+in-target lighty-enable-mod fastcgi-php
+
+in-target systemctl enable lighttpd
+in-target systemctl enable mariadb
+in-target systemctl enable php7.4-fpm || systemctl enable php8.2-fpm
+
+in-target sh -c "mysql -u root << 'MYSQL_EOF'\nCREATE DATABASE wordpress;\nCREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'wppass123';\nGRANT ALL PRIVILEGES ON wordpress.* TO 'wpuser'@'localhost';\nFLUSH PRIVILEGES;\nMYSQL_EOF"
+
+in-target sh -c "cd /var/www/html && wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && rm latest.tar.gz && chown -R www-data:www-data wordpress"
+
+in-target sh -c "cat > /var/www/html/wordpress/wp-config.php << 'WPCONFIG_EOF'\n<?php\ndefine('DB_NAME', 'wordpress');\ndefine('DB_USER', 'wpuser');\ndefine('DB_PASSWORD', 'wppass123');\ndefine('DB_HOST', 'localhost');\ndefine('DB_CHARSET', 'utf8');\ndefine('DB_COLLATE', '');\n\$table_prefix = 'wp_';\n\ndefine('WP_DEBUG', false);\n\nif ( ! defined( 'ABSPATH' ) ) {\n\tdefine( 'ABSPATH', __DIR__ . '/' );\n}\n\nrequire_once ABSPATH . 'wp-settings.php';\nWPCONFIG_EOF"
+
+in-target systemctl enable cron
+in-target systemctl restart ssh
+in-target systemctl restart lighttpd
+in-target systemctl restart mariadb
+
+### Post-installation commands - FULL Born2beRoot Configuration + WordPress
 d-i preseed/late_command string \
-    in-target apt-get update; \
-    in-target apt-get install -y openssh-server sudo ufw curl wget net-tools libpam-pwquality apparmor apparmor-utils cron lighttpd mariadb-server php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl docker.io docker-compose git; \
-    \
-    in-target groupadd user42 || true; \
-    in-target usermod -aG sudo,user42 dlesieur; \
-    in-target usermod -aG docker dlesieur; \
-    \
-    in-target sed -i 's/^#*Port 22/Port 4242/' /etc/ssh/sshd_config; \
-    in-target sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config; \
-    in-target sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config; \
-    in-target systemctl enable ssh; \
-    \
-    in-target ufw default deny incoming; \
-    in-target ufw default allow outgoing; \
-    in-target ufw allow 4242/tcp; \
-    in-target ufw allow 80/tcp; \
-    in-target ufw allow 443/tcp; \
-    in-target sh -c "echo 'y' | ufw enable || true"; \
-    \
-    in-target mkdir -p /var/log/sudo; \
-    in-target sh -c "echo 'Defaults        passwd_tries=3' > /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        badpass_message=\"Wrong password. Access denied!\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        logfile=\"/var/log/sudo/sudo.log\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        log_input,log_output' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        iolog_dir=\"/var/log/sudo\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        requiretty' >> /etc/sudoers.d/sudo_config"; \
-    in-target sh -c "echo 'Defaults        secure_path=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"' >> /etc/sudoers.d/sudo_config"; \
-    in-target chmod 440 /etc/sudoers.d/sudo_config; \
-    \
-    in-target sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS\t30/' /etc/login.defs; \
-    in-target sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS\t2/' /etc/login.defs; \
-    in-target sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE\t7/' /etc/login.defs; \
-    in-target sed -i 's/^PASS_MIN_LEN.*/PASS_MIN_LEN\t10/' /etc/login.defs; \
-    \
-    in-target sh -c "sed -i 's/^# minlen = .*/minlen = 10/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# dcredit = .*/dcredit = -1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# ucredit = .*/ucredit = -1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# lcredit = .*/lcredit = -1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# maxrepeat = .*/maxrepeat = 3/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# usercheck = .*/usercheck = 1/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# difok = .*/difok = 7/' /etc/security/pwquality.conf"; \
-    in-target sh -c "sed -i 's/^# enforce_for_root.*/enforce_for_root/' /etc/security/pwquality.conf"; \
-    \
-    in-target sh -c "cat > /usr/local/bin/monitoring.sh << 'MONITORING_EOF'\n#!/bin/bash\nARCH=\$(uname -a)\nPCPU=\$(grep 'physical id' /proc/cpuinfo | sort -u | wc -l)\nVCPU=\$(grep processor /proc/cpuinfo | wc -l)\nRAM_TOTAL=\$(free -m | awk '/Mem:/ {print \$2}')\nRAM_USED=\$(free -m | awk '/Mem:/ {print \$3}')\nRAM_PERC=\$(free | awk '/Mem:/ {printf(\"%.2f\"), \$3/\$2*100}')\nDISK_TOTAL=\$(df -h --total | awk '/total/ {print \$2}')\nDISK_USED=\$(df -h --total | awk '/total/ {print \$3}')\nDISK_PERC=\$(df -k --total | awk '/total/ {print \$5}')\nCPU_LOAD=\$(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - \$1\"%\"}')\nLAST_BOOT=\$(who -b | awk '{print \$3, \$4}')\nLVM_USE=\$(lsblk | grep -q lvm && echo yes || echo no)\nTCP_CONN=\$(ss -t | grep ESTAB | wc -l)\nUSERS=\$(who | wc -l)\nIP=\$(hostname -I | awk '{print \$1}')\nMAC=\$(ip link show | awk '/ether/ {print \$2}')\nSUDO_CMDS=\$(journalctl _COMM=sudo | grep COMMAND | wc -l)\n\nwall \"\n#Architecture: \$ARCH\n#CPU physical: \$PCPU\n#vCPU: \$VCPU\n#Memory Usage: \$RAM_USED/\${RAM_TOTAL}MB (\${RAM_PERC}%)\n#Disk Usage: \$DISK_USED/\$DISK_TOTAL (\$DISK_PERC)\n#CPU load: \$CPU_LOAD\n#Last boot: \$LAST_BOOT\n#LVM use: \$LVM_USE\n#Connections TCP: \$TCP_CONN ESTABLISHED\n#User log: \$USERS\n#Network: IP \$IP (\$MAC)\n#Sudo: \$SUDO_CMDS cmd\n\"\nMONITORING_EOF"; \
-    in-target chmod +x /usr/local/bin/monitoring.sh; \
-    \
-    in-target sh -c "echo '*/10 * * * * root /usr/local/bin/monitoring.sh' >> /etc/crontab"; \
-    \
-    in-target lighty-enable-mod fastcgi; \
-    in-target lighty-enable-mod fastcgi-php; \
-    \
-    in-target systemctl enable lighttpd; \
-    in-target systemctl enable mariadb; \
-    in-target systemctl enable php7.4-fpm || in-target systemctl enable php8.2-fpm; \
-    in-target systemctl enable docker; \
-    in-target systemctl enable cron; \
-    \
-    in-target sh -c "mysql -u root << 'MYSQL_EOF'\nCREATE DATABASE wordpress;\nCREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'wppass123';\nGRANT ALL PRIVILEGES ON wordpress.* TO 'wpuser'@'localhost';\nFLUSH PRIVILEGES;\nMYSQL_EOF"; \
-    \
-    in-target sh -c "cd /var/www/html && wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && rm latest.tar.gz && chown -R www-data:www-data wordpress"; \
-    \
-    in-target sh -c "cat > /var/www/html/wordpress/wp-config.php << 'WPCONFIG_EOF'\n<?php\ndefine('DB_NAME', 'wordpress');\ndefine('DB_USER', 'wpuser');\ndefine('DB_PASSWORD', 'wppass123');\ndefine('DB_HOST', 'localhost');\ndefine('DB_CHARSET', 'utf8');\ndefine('DB_COLLATE', '');\n\\\$table_prefix = 'wp_';\n\ndefine('WP_DEBUG', false);\n\nif ( ! defined( 'ABSPATH' ) ) {\n\tdefine( 'ABSPATH', __DIR__ . '/' );\n}\n\nrequire_once ABSPATH . 'wp-settings.php';\nWPCONFIG_EOF"; \
-    \
-    in-target mkdir -p /home/dlesieur/inception; \
-    in-target chown -R dlesieur:dlesieur /home/dlesieur/inception; \
-    \
-    in-target systemctl restart ssh; \
-    in-target systemctl restart lighttpd; \
-    in-target systemctl restart mariadb
+	in-target apt-get update
+in-target apt-get install -y openssh-server sudo ufw curl wget net-tools libpam-pwquality apparmor apparmor-utils cron lighttpd mariadb-server php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl docker.io docker-compose git
+
+in-target groupadd user42 || true
+in-target usermod -aG sudo,user42 dlesieur
+in-target usermod -aG docker dlesieur
+
+in-target sed -i 's/^#*Port 22/Port 4242/' /etc/ssh/sshd_config
+in-target sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+in-target sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+in-target systemctl enable ssh
+
+in-target ufw default deny incoming
+in-target ufw default allow outgoing
+in-target ufw allow 4242/tcp
+in-target ufw allow 80/tcp
+in-target ufw allow 443/tcp
+in-target sh -c "echo 'y' | ufw enable || true"
+
+in-target mkdir -p /var/log/sudo
+in-target sh -c "echo 'Defaults        passwd_tries=3' > /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        badpass_message=\"Wrong password. Access denied!\"' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        logfile=\"/var/log/sudo/sudo.log\"' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        log_input,log_output' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        iolog_dir=\"/var/log/sudo\"' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        requiretty' >> /etc/sudoers.d/sudo_config"
+in-target sh -c "echo 'Defaults        secure_path=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"' >> /etc/sudoers.d/sudo_config"
+in-target chmod 440 /etc/sudoers.d/sudo_config
+
+in-target sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS\t30/' /etc/login.defs
+in-target sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS\t2/' /etc/login.defs
+in-target sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE\t7/' /etc/login.defs
+in-target sed -i 's/^PASS_MIN_LEN.*/PASS_MIN_LEN\t10/' /etc/login.defs
+
+in-target sh -c "sed -i 's/^# minlen = .*/minlen = 10/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# dcredit = .*/dcredit = -1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# ucredit = .*/ucredit = -1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# lcredit = .*/lcredit = -1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# maxrepeat = .*/maxrepeat = 3/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# usercheck = .*/usercheck = 1/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# difok = .*/difok = 7/' /etc/security/pwquality.conf"
+in-target sh -c "sed -i 's/^# enforce_for_root.*/enforce_for_root/' /etc/security/pwquality.conf"
+
+in-target sh -c "cat > /usr/local/bin/monitoring.sh << 'MONITORING_EOF'\n#!/bin/bash\nARCH=\$(uname -a)\nPCPU=\$(grep 'physical id' /proc/cpuinfo | sort -u | wc -l)\nVCPU=\$(grep processor /proc/cpuinfo | wc -l)\nRAM_TOTAL=\$(free -m | awk '/Mem:/ {print \$2}')\nRAM_USED=\$(free -m | awk '/Mem:/ {print \$3}')\nRAM_PERC=\$(free | awk '/Mem:/ {printf(\"%.2f\"), \$3/\$2*100}')\nDISK_TOTAL=\$(df -h --total | awk '/total/ {print \$2}')\nDISK_USED=\$(df -h --total | awk '/total/ {print \$3}')\nDISK_PERC=\$(df -k --total | awk '/total/ {print \$5}')\nCPU_LOAD=\$(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - \$1\"%\"}')\nLAST_BOOT=\$(who -b | awk '{print \$3, \$4}')\nLVM_USE=\$(lsblk | grep -q lvm && echo yes || echo no)\nTCP_CONN=\$(ss -t | grep ESTAB | wc -l)\nUSERS=\$(who | wc -l)\nIP=\$(hostname -I | awk '{print \$1}')\nMAC=\$(ip link show | awk '/ether/ {print \$2}')\nSUDO_CMDS=\$(journalctl _COMM=sudo | grep COMMAND | wc -l)\n\nwall \"\n#Architecture: \$ARCH\n#CPU physical: \$PCPU\n#vCPU: \$VCPU\n#Memory Usage: \$RAM_USED/\${RAM_TOTAL}MB (\${RAM_PERC}%)\n#Disk Usage: \$DISK_USED/\$DISK_TOTAL (\$DISK_PERC)\n#CPU load: \$CPU_LOAD\n#Last boot: \$LAST_BOOT\n#LVM use: \$LVM_USE\n#Connections TCP: \$TCP_CONN ESTABLISHED\n#User log: \$USERS\n#Network: IP \$IP (\$MAC)\n#Sudo: \$SUDO_CMDS cmd\n\"\nMONITORING_EOF"
+in-target chmod +x /usr/local/bin/monitoring.sh
+
+in-target sh -c "echo '*/10 * * * * root /usr/local/bin/monitoring.sh' >> /etc/crontab"
+
+in-target lighty-enable-mod fastcgi
+in-target lighty-enable-mod fastcgi-php
+
+in-target systemctl enable lighttpd
+in-target systemctl enable mariadb
+in-target systemctl enable php7.4-fpm || in-target systemctl enable php8.2-fpm
+in-target systemctl enable docker
+in-target systemctl enable cron
+
+in-target sh -c "mysql -u root << 'MYSQL_EOF'\nCREATE DATABASE wordpress;\nCREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'wppass123';\nGRANT ALL PRIVILEGES ON wordpress.* TO 'wpuser'@'localhost';\nFLUSH PRIVILEGES;\nMYSQL_EOF"
+
+in-target sh -c "cd /var/www/html && wget https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && rm latest.tar.gz && chown -R www-data:www-data wordpress"
+
+in-target sh -c "cat > /var/www/html/wordpress/wp-config.php << 'WPCONFIG_EOF'\n<?php\ndefine('DB_NAME', 'wordpress');\ndefine('DB_USER', 'wpuser');\ndefine('DB_PASSWORD', 'wppass123');\ndefine('DB_HOST', 'localhost');\ndefine('DB_CHARSET', 'utf8');\ndefine('DB_COLLATE', '');\n\\\$table_prefix = 'wp_';\n\ndefine('WP_DEBUG', false);\n\nif ( ! defined( 'ABSPATH' ) ) {\n\tdefine( 'ABSPATH', __DIR__ . '/' );\n}\n\nrequire_once ABSPATH . 'wp-settings.php';\nWPCONFIG_EOF"
+
+in-target mkdir -p /home/dlesieur/inception
+in-target chown -R dlesieur:dlesieur /home/dlesieur/inception
+
+in-target systemctl restart ssh
+in-target systemctl restart lighttpd
+in-target systemctl restart mariadb

@@ -2,15 +2,15 @@
 # Run on your Debian guest VM
 
 # Get host port from user
-read -p "Enter the port number WordPress should be accessible at on the host (e.g. 8080): " HOST_PORT
+read -r -p "Enter the port number WordPress should be accessible at on the host (e.g. 8080): " HOST_PORT
 
 # Get host IP (optional)
-read -p "Enter host machine IP address (leave blank for auto-detect): " HOST_IP
+read -r -p "Enter host machine IP address (leave blank for auto-detect): " HOST_IP
 
 # Auto-detect host IP if not provided
 if [ -z "$HOST_IP" ]; then
-	HOST_IP=$(ip route | grep default | awk '{print $3}')
-	echo "Using detected host IP: $HOST_IP"
+    HOST_IP=$(ip route | grep default | awk '{print $3}')
+    echo "Using detected host IP: $HOST_IP"
 fi
 
 # Construct URL

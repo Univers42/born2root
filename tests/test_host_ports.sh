@@ -12,41 +12,41 @@ cd "$(dirname "$0")/.."
 
 # Stub the host probe so the test does not depend on this machine's listeners.
 is_host_port_free() {
-	case "$1" in
-		3001 | 3002 | 3003 | 8000 | 8787) return 1 ;;
-		*) return 0 ;;
-	esac
+    case "$1" in
+    3001 | 3002 | 3003 | 8000 | 8787) return 1 ;;
+    *) return 0 ;;
+    esac
 }
 
 fail=0
 check() {
-	if [ "$2" = "$3" ]; then
-		printf 'ok   %-22s = %s\n' "$1" "$3"
-	else
-		printf 'FAIL %-22s = %s (expected %s)\n' "$1" "$2" "$3"
-		fail=1
-	fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-22s = %s\n' "$1" "$3"
+    else
+        printf 'FAIL %-22s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
 }
 
-resolve_host_port APP      3001
-resolve_host_port MAIL     3002
+resolve_host_port APP 3001
+resolve_host_port MAIL 3002
 resolve_host_port CALENDAR 3003
-resolve_host_port GATEWAY  8000
-resolve_host_port ADMIN    8001
+resolve_host_port GATEWAY 8000
+resolve_host_port ADMIN 8001
 
-check osionos-app      "$APP"      3004
-check osionos-mail     "$MAIL"     3005
+check osionos-app "$APP" 3004
+check osionos-mail "$MAIL" 3005
 check osionos-calendar "$CALENDAR" 3006
-check baas-gateway     "$GATEWAY"  8001
-check baas-admin       "$ADMIN"    8002
+check baas-gateway "$GATEWAY" 8001
+check baas-admin "$ADMIN" 8002
 
 # The invariant that actually matters to VirtualBox.
 dupes=$(printf '%s\n' "$APP" "$MAIL" "$CALENDAR" "$GATEWAY" "$ADMIN" | sort | uniq -d)
 if [ -n "$dupes" ]; then
-	printf 'FAIL duplicate host ports: %s\n' "$dupes"
-	fail=1
+    printf 'FAIL duplicate host ports: %s\n' "$dupes"
+    fail=1
 else
-	printf 'ok   %-22s\n' "no duplicate host ports"
+    printf 'ok   %-22s\n' "no duplicate host ports"
 fi
 
 exit "$fail"

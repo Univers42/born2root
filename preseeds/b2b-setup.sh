@@ -26,16 +26,17 @@ echo "=== Born2beRoot setup starting ($(date)) ==="
 # Returns 0 (OK) if the given mount point has at least $2 MB free.
 # Usage: check_disk_space / 500  → true if / has >= 500 MB free
 check_disk_space() {
-	local mount="$1" min_mb="${2:-200}"
-	local avail_kb
-	avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
-	[ -z "$avail_kb" ] && return 0  # can't check → assume OK
-	local avail_mb=$((avail_kb / 1024))
-	if [ "$avail_mb" -lt "$min_mb" ]; then
-		echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping further installs"
-		return 1
-	fi
-	return 0
+    local mount="$1" min_mb="${2:-200}"
+    local avail_kb
+    avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
+    [ -z "$avail_kb" ] && return 0 # can't check → assume OK
+    local avail_mb
+    avail_mb=$((avail_kb / 1024))
+    if [ "$avail_mb" -lt "$min_mb" ]; then
+        echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping further installs"
+        return 1
+    fi
+    return 0
 }
 
 ### ─── 1. APT sources ────────────────────────────────────────────────────────
@@ -44,13 +45,13 @@ check_disk_space() {
 # dependency conflicts that break dpkg and prevent GRUB from configuring.
 RELEASE=$(. /etc/os-release 2>/dev/null && echo "$VERSION_CODENAME" || echo "")
 if [ -z "$RELEASE" ]; then
-	# Fallback: try lsb_release
-	RELEASE=$(lsb_release -cs 2>/dev/null || echo "bookworm")
+    # Fallback: try lsb_release
+    RELEASE=$(lsb_release -cs 2>/dev/null || echo "bookworm")
 fi
 echo "[INFO] Detected release: $RELEASE"
 
 # Use the detected release for all repos — consistent with base install
-cat > /etc/apt/sources.list << SRCEOF
+cat >/etc/apt/sources.list <<SRCEOF
 deb http://deb.debian.org/debian ${RELEASE} main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian ${RELEASE}-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security ${RELEASE}-security main contrib non-free non-free-firmware
@@ -65,17 +66,17 @@ APT="apt-get install -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options:
 
 # Core Born2beRoot mandatory requirements (MUST succeed — small footprint)
 $APT sudo ufw openssh-server \
-	libpam-pwquality apparmor apparmor-utils \
-	cron haveged || true
+    libpam-pwquality apparmor apparmor-utils \
+    cron haveged || true
 echo "[OK] Core packages"
 
 # Bonus: Web stack (lighttpd + MariaDB + PHP)
 if check_disk_space / 800; then
-	$APT lighttpd mariadb-server \
-		php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl || true
-	echo "[OK] Web stack packages"
+    $APT lighttpd mariadb-server \
+        php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl || true
+    echo "[OK] Web stack packages"
 else
-	echo "[SKIP] Web stack packages — insufficient disk space"
+    echo "[SKIP] Web stack packages — insufficient disk space"
 fi
 
 # Developer essentials (all in base Debian repos)
@@ -87,19 +88,19 @@ fi
 # Installing npm in d-i chroot hangs on dpkg triggers → blocks entire script
 # → SSH, sudo, UFW, password policy etc. never get configured.
 if check_disk_space / 500; then
-	$APT git build-essential gcc g++ make \
-		libreadline-dev \
-		python3 python3-venv \
-		curl wget net-tools vim nano \
-		htop tree tmux bash-completion \
-		zip unzip tar gzip bzip2 xz-utils \
-		ca-certificates gnupg lsb-release apt-transport-https \
-		rsync less file patch diffutils \
-		dnsutils iputils-ping \
-		jq bc || true
-	echo "[OK] Developer tools"
+    $APT git build-essential gcc g++ make \
+        libreadline-dev \
+        python3 python3-venv \
+        curl wget net-tools vim nano \
+        htop tree tmux bash-completion \
+        zip unzip tar gzip bzip2 xz-utils \
+        ca-certificates gnupg lsb-release apt-transport-https \
+        rsync less file patch diffutils \
+        dnsutils iputils-ping \
+        jq bc || true
+    echo "[OK] Developer tools"
 else
-	echo "[SKIP] Developer tools — insufficient disk space"
+    echo "[SKIP] Developer tools — insufficient disk space"
 fi
 
 # Clean apt cache after package install to reclaim space on /var
@@ -114,75 +115,75 @@ CUSTOM_SHELL_BIN="/tmp/custom_shell.bin"
 CUSTOM_SHELL_DEST_FILE="/tmp/custom_shell.dest"
 
 if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
-	CUSTOM_SHELL_DEST=$(head -n1 "$CUSTOM_SHELL_DEST_FILE" 2>/dev/null | tr -d '\r\n')
-	if [ -z "$CUSTOM_SHELL_DEST" ]; then
-		echo "[WARN] custom_shell.dest is empty — skipping custom shell"
-	elif echo "$CUSTOM_SHELL_DEST" | grep -Eq '^/usr/(local/)?bin/[A-Za-z0-9._+-]+$'; then
-		install -m 755 "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST" 2>/dev/null || cp "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST"
-		chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
+    CUSTOM_SHELL_DEST=$(head -n1 "$CUSTOM_SHELL_DEST_FILE" 2>/dev/null | tr -d '\r\n')
+    if [ -z "$CUSTOM_SHELL_DEST" ]; then
+        echo "[WARN] custom_shell.dest is empty — skipping custom shell"
+    elif echo "$CUSTOM_SHELL_DEST" | grep -Eq '^/usr/(local/)?bin/[A-Za-z0-9._+-]+$'; then
+        install -m 755 "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST" 2>/dev/null || cp "$CUSTOM_SHELL_BIN" "$CUSTOM_SHELL_DEST"
+        chmod 755 "$CUSTOM_SHELL_DEST" 2>/dev/null || true
 
-		# The login shell is the binary itself. /usr/bin/hellish is a symlink to
-		# /usr/bin/hellish.real: the binary can be refreshed (first boot installs
-		# the published release over it) without the passwd entry ever naming a
-		# file that is mid-replacement, and `command -v hellish.real` keeps
-		# naming the ELF for the tools that need one (Inception's Makefile copies
-		# it into the containers). Earlier builds put a bash script here that
-		# sent every non-interactive ssh command to bash; that made
-		# `ssh b2b '<cmd>'`, scp's server side and the whole host-driven pipeline
-		# run under bash in a VM whose point is hellish. hellish takes those
-		# itself: `hellish -c 'scp -t …'`, and `hellish -c bash` for VS Code's
-		# Remote-SSH bootstrap, which names bash explicitly.
-		if [ "$(basename "$CUSTOM_SHELL_DEST")" = "hellish" ]; then
-			CUSTOM_SHELL_REAL="${CUSTOM_SHELL_DEST}.real"
-			if [ ! -L "$CUSTOM_SHELL_DEST" ]; then
-				mv -f "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
-			fi
-			chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
-			ln -sfn "$CUSTOM_SHELL_REAL" "$CUSTOM_SHELL_DEST"
+        # The login shell is the binary itself. /usr/bin/hellish is a symlink to
+        # /usr/bin/hellish.real: the binary can be refreshed (first boot installs
+        # the published release over it) without the passwd entry ever naming a
+        # file that is mid-replacement, and `command -v hellish.real` keeps
+        # naming the ELF for the tools that need one (Inception's Makefile copies
+        # it into the containers). Earlier builds put a bash script here that
+        # sent every non-interactive ssh command to bash; that made
+        # `ssh b2b '<cmd>'`, scp's server side and the whole host-driven pipeline
+        # run under bash in a VM whose point is hellish. hellish takes those
+        # itself: `hellish -c 'scp -t …'`, and `hellish -c bash` for VS Code's
+        # Remote-SSH bootstrap, which names bash explicitly.
+        if [ "$(basename "$CUSTOM_SHELL_DEST")" = "hellish" ]; then
+            CUSTOM_SHELL_REAL="${CUSTOM_SHELL_DEST}.real"
+            if [ ! -L "$CUSTOM_SHELL_DEST" ]; then
+                mv -f "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL" 2>/dev/null || cp "$CUSTOM_SHELL_DEST" "$CUSTOM_SHELL_REAL"
+            fi
+            chmod 755 "$CUSTOM_SHELL_REAL" 2>/dev/null || true
+            ln -sfn "$CUSTOM_SHELL_REAL" "$CUSTOM_SHELL_DEST"
 
-			# Keep a pristine copy outside /usr/bin so the shell guard in
-			# sshd-watchdog can put the binary back. sshd refuses any account
-			# whose login shell does not exist — it reports the user as an
-			# "invalid user", which rejects key AND password auth AND the
-			# console at the same time. A single `rm /usr/bin/hellish.real`
-			# therefore locks every door on the machine at once, and the error it
-			# produces ("Permission denied") points at credentials rather than
-			# the shell.
-			mkdir -p /usr/local/lib/b2b
-			cp "$CUSTOM_SHELL_REAL" /usr/local/lib/b2b/hellish.real 2>/dev/null || true
-			chmod 755 /usr/local/lib/b2b/hellish.real 2>/dev/null || true
-			rm -f /usr/local/lib/b2b/shell-wrapper
+            # Keep a pristine copy outside /usr/bin so the shell guard in
+            # sshd-watchdog can put the binary back. sshd refuses any account
+            # whose login shell does not exist — it reports the user as an
+            # "invalid user", which rejects key AND password auth AND the
+            # console at the same time. A single `rm /usr/bin/hellish.real`
+            # therefore locks every door on the machine at once, and the error it
+            # produces ("Permission denied") points at credentials rather than
+            # the shell.
+            mkdir -p /usr/local/lib/b2b
+            cp "$CUSTOM_SHELL_REAL" /usr/local/lib/b2b/hellish.real 2>/dev/null || true
+            chmod 755 /usr/local/lib/b2b/hellish.real 2>/dev/null || true
+            rm -f /usr/local/lib/b2b/shell-wrapper
 
-			echo "[OK] $CUSTOM_SHELL_DEST -> $CUSTOM_SHELL_REAL: interactive logins and ssh commands alike run hellish"
-		fi
+            echo "[OK] $CUSTOM_SHELL_DEST -> $CUSTOM_SHELL_REAL: interactive logins and ssh commands alike run hellish"
+        fi
 
-		# Register the shell so chsh/usermod accepts it
-		if [ -f /etc/shells ]; then
-			grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells || echo "$CUSTOM_SHELL_DEST" >> /etc/shells
-		else
-			echo "$CUSTOM_SHELL_DEST" > /etc/shells
-		fi
+        # Register the shell so chsh/usermod accepts it
+        if [ -f /etc/shells ]; then
+            grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells || echo "$CUSTOM_SHELL_DEST" >>/etc/shells
+        else
+            echo "$CUSTOM_SHELL_DEST" >/etc/shells
+        fi
 
-		# Set default shell for the main user created by preseed
-		if id dlesieur > /dev/null 2>&1; then
-			usermod -s "$CUSTOM_SHELL_DEST" dlesieur 2>/dev/null || chsh -s "$CUSTOM_SHELL_DEST" dlesieur 2>/dev/null || true
-			echo "[OK] Custom shell installed and set as default for dlesieur: $CUSTOM_SHELL_DEST"
-		else
-			echo "[WARN] User dlesieur not found — custom shell installed but not set as default"
-		fi
+        # Set default shell for the main user created by preseed
+        if id dlesieur >/dev/null 2>&1; then
+            usermod -s "$CUSTOM_SHELL_DEST" dlesieur 2>/dev/null || chsh -s "$CUSTOM_SHELL_DEST" dlesieur 2>/dev/null || true
+            echo "[OK] Custom shell installed and set as default for dlesieur: $CUSTOM_SHELL_DEST"
+        else
+            echo "[WARN] User dlesieur not found — custom shell installed but not set as default"
+        fi
 
-		# Persist desired shell so first-boot can re-apply (if needed)
-		printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\n' "dlesieur" "$CUSTOM_SHELL_DEST" > /etc/b2b_custom_shell.conf 2>/dev/null || true
-		chmod 644 /etc/b2b_custom_shell.conf 2>/dev/null || true
+        # Persist desired shell so first-boot can re-apply (if needed)
+        printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\n' "dlesieur" "$CUSTOM_SHELL_DEST" >/etc/b2b_custom_shell.conf 2>/dev/null || true
+        chmod 644 /etc/b2b_custom_shell.conf 2>/dev/null || true
 
-		# Verify and log the result for debugging
-		echo "[INFO] /etc/shells contains custom shell? $(grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells 2>/dev/null && echo yes || echo no)"
-		echo "[INFO] passwd entry: $(getent passwd dlesieur 2>/dev/null || echo '(missing)')"
-	else
-		echo "[WARN] custom shell dest looks unsafe ($CUSTOM_SHELL_DEST) — skipping"
-	fi
+        # Verify and log the result for debugging
+        echo "[INFO] /etc/shells contains custom shell? $(grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells 2>/dev/null && echo yes || echo no)"
+        echo "[INFO] passwd entry: $(getent passwd dlesieur 2>/dev/null || echo '(missing)')"
+    else
+        echo "[WARN] custom shell dest looks unsafe ($CUSTOM_SHELL_DEST) — skipping"
+    fi
 else
-	echo "[OK] No custom shell payload provided — keeping default shell (bash)"
+    echo "[OK] No custom shell payload provided — keeping default shell (bash)"
 fi
 
 # ── The interpreter of everything this guest runs on its own ────────────────
@@ -194,18 +195,18 @@ fi
 # B2B_GUEST_SH from /etc/b2b_custom_shell.conf for the provisioners.
 B2B_GUEST_SH=/bin/bash
 if [ -n "${CUSTOM_SHELL_REAL:-}" ] && [ -x "$CUSTOM_SHELL_REAL" ]; then
-	B2B_GUEST_SH="$CUSTOM_SHELL_REAL"
+    B2B_GUEST_SH="$CUSTOM_SHELL_REAL"
 fi
 if [ -f /etc/b2b_custom_shell.conf ]; then
-	echo "B2B_GUEST_SH=$B2B_GUEST_SH" >> /etc/b2b_custom_shell.conf
+    echo "B2B_GUEST_SH=$B2B_GUEST_SH" >>/etc/b2b_custom_shell.conf
 fi
 # pin_shebang <script>: make the script's first line name the guest interpreter.
 pin_shebang() {
-	[ -f "$1" ] || return 0
-	sed -i "1s|^#!.*|#!$B2B_GUEST_SH|" "$1" 2>/dev/null || true
+    [ -f "$1" ] || return 0
+    sed -i "1s|^#!.*|#!$B2B_GUEST_SH|" "$1" 2>/dev/null || true
 }
 for f in /root/first-boot-setup.sh /root/install_*.sh; do
-	pin_shebang "$f"
+    pin_shebang "$f"
 done
 echo "[OK] Guest-side scripts run under $B2B_GUEST_SH"
 
@@ -215,33 +216,34 @@ echo "[OK] Guest-side scripts run under $B2B_GUEST_SH"
 # ═══════════════════════════════════════════════════════════════════════════
 
 ### ─── 3. Hostname — Born2beRoot requires login+42 ───────────────────────────
-echo "dlesieur42" > /etc/hostname
-hostname dlesieur42 2> /dev/null || true
+echo "dlesieur42" >/etc/hostname
+hostname dlesieur42 2>/dev/null || true
 
 # Fix /etc/hosts — replace any old hostname or add the correct one
-if grep -q "127\.0\.1\.1" /etc/hosts 2> /dev/null; then
-	sed -i 's/127\.0\.1\.1.*/127.0.1.1\tdlesieur42/' /etc/hosts
+if grep -q "127\.0\.1\.1" /etc/hosts 2>/dev/null; then
+    sed -i 's/127\.0\.1\.1.*/127.0.1.1\tdlesieur42/' /etc/hosts
 else
-	echo "127.0.1.1	dlesieur42" >> /etc/hosts
+    echo "127.0.1.1	dlesieur42" >>/etc/hosts
 fi
 # Also ensure localhost line exists
-grep -q "127\.0\.0\.1.*localhost" /etc/hosts \
-	|| sed -i '1i 127.0.0.1\tlocalhost' /etc/hosts
+grep -q "127\.0\.0\.1.*localhost" /etc/hosts ||
+    sed -i '1i 127.0.0.1\tlocalhost' /etc/hosts
 echo "[OK] Hostname set to dlesieur42"
 
 ### ─── 4. Groups & user ─────────────────────────────────────────────────────
-groupadd user42 2> /dev/null || true
+groupadd user42 2>/dev/null || true
 # Pre-create docker group NOW so dlesieur has it from the very first login.
 # Docker is installed later by first-boot-setup.sh (needs systemd + network),
 # but the GROUP must exist before the first SSH/VS Code session or the VS Code
 # server process inherits a stale group list without docker → "permission denied"
 # on /var/run/docker.sock. Docker's postinst will reuse this group.
-groupadd -f docker 2> /dev/null || true
+groupadd -f docker 2>/dev/null || true
 usermod -aG sudo,user42,docker dlesieur
 echo "[OK] User dlesieur in groups: sudo, user42, docker"
 
 ### ─── 5. SSH — port 4242, no root login ─────────────────────────────────────
 sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
+grep -q "^Port 4242" /etc/ssh/sshd_config || echo "Port 4242" >>/etc/ssh/sshd_config
 sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
@@ -254,20 +256,20 @@ sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/ssh
 # tunnels, extension host). MaxStartups must be high or VS Code fails to reconnect.
 # MaxStartups 50:30:100 = accept 50 unauthenticated, 30% drop until 100.
 for setting in \
-	"ClientAliveInterval 30" \
-	"ClientAliveCountMax 5" \
-	"TCPKeepAlive yes" \
-	"MaxStartups 50:30:100" \
-	"MaxSessions 20" \
-	"LoginGraceTime 300"; do
-	key=$(echo "$setting" | awk '{print $1}')
-	sed -i "/^#*${key} /d" /etc/ssh/sshd_config
-	echo "$setting" >> /etc/ssh/sshd_config
+    "ClientAliveInterval 30" \
+    "ClientAliveCountMax 5" \
+    "TCPKeepAlive yes" \
+    "MaxStartups 50:30:100" \
+    "MaxSessions 20" \
+    "LoginGraceTime 300"; do
+    key=$(echo "$setting" | awk '{print $1}')
+    sed -i "/^#*${key} /d" /etc/ssh/sshd_config
+    echo "$setting" >>/etc/ssh/sshd_config
 done
 
 # Systemd: ensure sshd restarts automatically on failure + watchdog
 mkdir -p /etc/systemd/system/ssh.service.d
-cat > /etc/systemd/system/ssh.service.d/override.conf << 'EOF'
+cat >/etc/systemd/system/ssh.service.d/override.conf <<'EOF'
 [Service]
 Restart=always
 RestartSec=3
@@ -279,17 +281,17 @@ EOF
 # tcp_keepalive_time=60 → first probe after 60s idle (not default 7200!)
 # tcp_keepalive_intvl=15 → re-probe every 15s
 # tcp_keepalive_probes=5 → 5 failed probes = dead
-cat > /etc/sysctl.d/99-ssh-keepalive.conf << 'EOF'
+cat >/etc/sysctl.d/99-ssh-keepalive.conf <<'EOF'
 net.ipv4.tcp_keepalive_time=60
 net.ipv4.tcp_keepalive_intvl=15
 net.ipv4.tcp_keepalive_probes=5
 EOF
-sysctl --system > /dev/null 2>&1 || true
+sysctl --system >/dev/null 2>&1 || true
 
 # ── NAT keepalive service ──────────────────────────────────────────────────
 # Periodically ping the gateway to keep VirtualBox NAT engine's connection
 # tracking table active. This prevents NAT from silently dropping SSH mappings.
-cat > /usr/local/bin/nat-keepalive.sh << 'NKEOF'
+cat >/usr/local/bin/nat-keepalive.sh <<'NKEOF'
 #!/bin/bash
 # Keep VirtualBox NAT alive by pinging gateway every 30 seconds
 GW=$(ip route | awk '/default/ {print $3}' | head -1)
@@ -302,7 +304,7 @@ NKEOF
 chmod +x /usr/local/bin/nat-keepalive.sh
 pin_shebang /usr/local/bin/nat-keepalive.sh
 
-cat > /etc/systemd/system/nat-keepalive.service << 'NKSEOF'
+cat >/etc/systemd/system/nat-keepalive.service <<'NKSEOF'
 [Unit]
 Description=Keep VirtualBox NAT connection tracking alive
 After=network-online.target
@@ -317,12 +319,12 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 NKSEOF
-systemctl enable nat-keepalive 2> /dev/null || true
+systemctl enable nat-keepalive 2>/dev/null || true
 
 # ── SSHD Watchdog — monitors and auto-restarts sshd if it dies ──────────────
 # VS Code Remote SSH can cause sshd to become unresponsive. This watchdog
 # checks every 15 seconds and auto-restarts if sshd stops listening.
-cat > /usr/local/bin/sshd-watchdog.sh << 'WDEOF'
+cat >/usr/local/bin/sshd-watchdog.sh <<'WDEOF'
 #!/bin/bash
 LOG=/var/log/sshd-watchdog.log
 echo "$(date): watchdog started (pid=$$)" >> "$LOG"
@@ -369,7 +371,7 @@ WDEOF
 chmod +x /usr/local/bin/sshd-watchdog.sh
 pin_shebang /usr/local/bin/sshd-watchdog.sh
 
-cat > /etc/systemd/system/sshd-watchdog.service << 'SWEOF'
+cat >/etc/systemd/system/sshd-watchdog.service <<'SWEOF'
 [Unit]
 Description=SSHD health watchdog with auto-restart
 After=ssh.service
@@ -384,7 +386,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SWEOF
-systemctl enable sshd-watchdog 2> /dev/null || true
+systemctl enable sshd-watchdog 2>/dev/null || true
 
 # ── Silence systemd-ssh-generator AF_VSOCK warning ─────────────────────────
 # Debian 13 (systemd >= 256) ships systemd-ssh-generator, which on every boot
@@ -413,17 +415,17 @@ chown dlesieur:dlesieur "$HOST_PUBKEY_DIR"
 # late_command copies it from /cdrom/host_ssh_pubkey to /target/tmp/host_ssh_pubkey
 # Since b2b-setup.sh runs inside in-target (chroot), the file is at /tmp/
 if [ -f /tmp/host_ssh_pubkey ]; then
-	cat /tmp/host_ssh_pubkey >> "$HOST_PUBKEY_DIR/authorized_keys"
-	chmod 600 "$HOST_PUBKEY_DIR/authorized_keys"
-	chown dlesieur:dlesieur "$HOST_PUBKEY_DIR/authorized_keys"
-	echo "[OK] Host SSH public key installed for dlesieur"
+    cat /tmp/host_ssh_pubkey >>"$HOST_PUBKEY_DIR/authorized_keys"
+    chmod 600 "$HOST_PUBKEY_DIR/authorized_keys"
+    chown dlesieur:dlesieur "$HOST_PUBKEY_DIR/authorized_keys"
+    echo "[OK] Host SSH public key installed for dlesieur"
 else
-	echo "[WARN] No host SSH public key found at /tmp/host_ssh_pubkey — password auth only"
+    echo "[WARN] No host SSH public key found at /tmp/host_ssh_pubkey — password auth only"
 fi
 
 # Ensure PubkeyAuthentication is enabled in sshd_config
 sed -i 's/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-grep -q '^PubkeyAuthentication' /etc/ssh/sshd_config || echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
+grep -q '^PubkeyAuthentication' /etc/ssh/sshd_config || echo 'PubkeyAuthentication yes' >>/etc/ssh/sshd_config
 
 ### ─── 6. UFW — only port 4242 + web ports + dev ports ───────────────────────
 ufw default deny incoming
@@ -452,7 +454,7 @@ echo "[OK] UFW firewall active"
 mkdir -p /var/log/sudo
 chmod 700 /var/log/sudo
 
-cat > /etc/sudoers.d/sudo_config << 'SUDOEOF'
+cat >/etc/sudoers.d/sudo_config <<'SUDOEOF'
 Defaults	passwd_tries=3
 Defaults	badpass_message="Wrong password. Access denied!"
 Defaults	logfile="/var/log/sudo/sudo.log"
@@ -472,32 +474,32 @@ sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE\t7/' /etc/login.defs
 
 # pwquality.conf — complexity (use robust sed + fallback append)
 for setting in \
-	"minlen = 10" \
-	"dcredit = -1" \
-	"ucredit = -1" \
-	"lcredit = -1" \
-	"maxrepeat = 3" \
-	"usercheck = 1" \
-	"difok = 7" \
-	"enforce_for_root"; do
-	key=$(echo "$setting" | cut -d= -f1 | xargs)
-	if grep -q "^#* *${key}" /etc/security/pwquality.conf 2> /dev/null; then
-		sed -i "s/^#* *${key}.*/${setting}/" /etc/security/pwquality.conf
-	else
-		echo "$setting" >> /etc/security/pwquality.conf
-	fi
+    "minlen = 10" \
+    "dcredit = -1" \
+    "ucredit = -1" \
+    "lcredit = -1" \
+    "maxrepeat = 3" \
+    "usercheck = 1" \
+    "difok = 7" \
+    "enforce_for_root"; do
+    key=$(echo "$setting" | cut -d= -f1 | xargs)
+    if grep -q "^#* *${key}" /etc/security/pwquality.conf 2>/dev/null; then
+        sed -i "s/^#* *${key}.*/${setting}/" /etc/security/pwquality.conf
+    else
+        echo "$setting" >>/etc/security/pwquality.conf
+    fi
 done
 echo "[OK] Password policy set"
 
 ### ─── 9. tmux — persistent sessions (survive SSH drops) ────────────────────
 # Already installed in developer tools above; this is a safety net
-if ! command -v tmux > /dev/null 2>&1; then
-	$APT tmux || true
+if ! command -v tmux >/dev/null 2>&1; then
+    $APT tmux || true
 fi
 
 # tmux config for user dlesieur — sane defaults for dev work
 TMUX_CONF="/home/dlesieur/.tmux.conf"
-cat > "$TMUX_CONF" << 'TMUXEOF'
+cat >"$TMUX_CONF" <<'TMUXEOF'
 # ── Born2beRoot tmux config ──────────────────────────────────
 # Reload: tmux source ~/.tmux.conf
 
@@ -562,8 +564,8 @@ chown dlesieur:dlesieur "$TMUX_CONF"
 # Auto-attach to tmux on interactive SSH login (for user dlesieur)
 # This goes in .bashrc — only activates on interactive login, NOT in scripts
 BASHRC="/home/dlesieur/.bashrc"
-if ! grep -q 'TMUX_AUTO_ATTACH' "$BASHRC" 2> /dev/null; then
-	cat >> "$BASHRC" << 'BASHEOF'
+if ! grep -q 'TMUX_AUTO_ATTACH' "$BASHRC" 2>/dev/null; then
+    cat >>"$BASHRC" <<'BASHEOF'
 
 # ── tmux auto-attach (SSH sessions survive disconnects) ──────
 # Only in interactive SSH sessions, not in scripts or VS Code integrated terminal
@@ -587,7 +589,7 @@ echo "[OK] Git configured"
 
 ### ─── 11. Monitoring script ────────────────────────────────────────────────
 # Already copied to /usr/local/bin/monitoring.sh by late_command
-chmod +x /usr/local/bin/monitoring.sh 2> /dev/null || true
+chmod +x /usr/local/bin/monitoring.sh 2>/dev/null || true
 pin_shebang /usr/local/bin/monitoring.sh
 
 # Crontab: every 10 minutes, broadcast to all terminals. cron runs every
@@ -597,20 +599,20 @@ pin_shebang /usr/local/bin/monitoring.sh
 # through another shell -- first boot's @reboot line included.
 sed -i "s|^SHELL=.*|SHELL=$B2B_GUEST_SH|" /etc/crontab
 grep -q '^SHELL=' /etc/crontab || sed -i "1i SHELL=$B2B_GUEST_SH" /etc/crontab
-echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >> /etc/crontab
+echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >>/etc/crontab
 echo "[OK] Monitoring cron set (SHELL=$B2B_GUEST_SH)"
 
 ### ─── 12. Lighttpd + PHP-FPM + WordPress routing ────────────────────────────
 # Detect installed PHP-FPM version and socket path
-PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2> /dev/null || echo "8.2")
+PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.2")
 PHP_SOCK="/run/php/php${PHP_VER}-fpm.sock"
 
 # Enable mod_fastcgi (base module)
-lighty-enable-mod fastcgi < /dev/null 2> /dev/null || true
+lighty-enable-mod fastcgi </dev/null 2>/dev/null || true
 
 # DISABLE the stock fastcgi-php config — it uses php-cgi, NOT php-fpm,
 # and creates a conflicting fastcgi.server entry for ".php".
-lighty-disable-mod fastcgi-php < /dev/null 2> /dev/null || true
+lighty-disable-mod fastcgi-php </dev/null 2>/dev/null || true
 rm -f /etc/lighttpd/conf-enabled/15-fastcgi-php.conf
 
 # Also remove the default "unconfigured" placeholder page
@@ -618,7 +620,7 @@ rm -f /etc/lighttpd/conf-enabled/99-unconfigured.conf
 
 # Create a single, clean WordPress + PHP-FPM config
 # This is the ONLY file that defines how PHP is served.
-cat > /etc/lighttpd/conf-available/99-wordpress.conf << WPLIGHT
+cat >/etc/lighttpd/conf-available/99-wordpress.conf <<WPLIGHT
 # ── WordPress + PHP-FPM on Lighttpd ──────────────────────────
 # Load required modules (mod_fastcgi is loaded by 10-fastcgi.conf)
 server.modules += ( "mod_rewrite" )
@@ -653,11 +655,11 @@ WPLIGHT
 
 # Enable the config (create symlink)
 ln -sf /etc/lighttpd/conf-available/99-wordpress.conf \
-	/etc/lighttpd/conf-enabled/99-wordpress.conf 2> /dev/null || true
+    /etc/lighttpd/conf-enabled/99-wordpress.conf 2>/dev/null || true
 
 # Ensure lighttpd listens on port 80
-if ! grep -q 'server.port' /etc/lighttpd/lighttpd.conf 2> /dev/null; then
-	echo 'server.port = 80' >> /etc/lighttpd/lighttpd.conf
+if ! grep -q 'server.port' /etc/lighttpd/lighttpd.conf 2>/dev/null; then
+    echo 'server.port = 80' >>/etc/lighttpd/lighttpd.conf
 fi
 echo "[OK] Lighttpd + PHP-FPM + WordPress routing configured"
 
@@ -666,7 +668,7 @@ systemctl enable apparmor || true
 
 # Create enforcement-ready AppArmor profile for PHP-FPM
 mkdir -p /etc/apparmor.d
-cat > /etc/apparmor.d/local/usr.sbin.php-fpm 2> /dev/null << 'AAEOF' || true
+cat >/etc/apparmor.d/local/usr.sbin.php-fpm 2>/dev/null <<'AAEOF' || true
 # Allow PHP-FPM to serve WordPress
 /var/www/html/wordpress/** r,
 /var/www/html/wordpress/wp-content/uploads/** rw,
@@ -677,32 +679,34 @@ AAEOF
 
 # Enforce AppArmor profiles if they exist
 for profile in usr.sbin.php-fpm${PHP_VER} usr.sbin.lighttpd; do
-	if [ -f "/etc/apparmor.d/${profile}" ]; then
-		aa-enforce "/etc/apparmor.d/${profile}" 2> /dev/null || true
-	fi
+    if [ -f "/etc/apparmor.d/${profile}" ]; then
+        aa-enforce "/etc/apparmor.d/${profile}" 2>/dev/null || true
+    fi
 done
 echo "[OK] AppArmor enabled + WordPress profiles configured"
 
 ### ─── 14. Enable all services (NO restart — no systemd in chroot) ──────────
 for svc in lighttpd mariadb haveged cron ssh nat-keepalive sshd-watchdog; do
-	systemctl enable "$svc" 2> /dev/null || true
+    systemctl enable "$svc" 2>/dev/null || true
 done
 for f in /lib/systemd/system/php*-fpm.service; do
-	[ -f "$f" ] && systemctl enable "$(basename "$f")" 2> /dev/null || true
+    if [ -f "$f" ]; then
+        systemctl enable "$(basename "$f")" 2>/dev/null || true
+    fi
 done
 # Disable conflict docker services
-systemctl disable postgresql 2> /dev/null || true
-systemctl disable redis-server 2> /dev/null || true
+systemctl disable postgresql 2>/dev/null || true
+systemctl disable redis-server 2>/dev/null || true
 echo "[OK] Services enabled"
 
 ### ─── 15. First-boot script (Docker + WordPress) ───────────────────────────
 # Already copied to /root/first-boot-setup.sh by late_command
-chmod +x /root/first-boot-setup.sh 2> /dev/null || true
-echo "@reboot root $B2B_GUEST_SH /root/first-boot-setup.sh" >> /etc/crontab
+chmod +x /root/first-boot-setup.sh 2>/dev/null || true
+echo "@reboot root $B2B_GUEST_SH /root/first-boot-setup.sh" >>/etc/crontab
 echo "[OK] First-boot hook registered"
 
 ### ─── 16. MOTD ─────────────────────────────────────────────────────────────
-cat > /etc/motd << 'MOTDEOF'
+cat >/etc/motd <<'MOTDEOF'
 
   ╔═══════════════════════════════════════════════════════╗
   ║            BORN2BEROOT SECURE SYSTEM                  ║
@@ -757,52 +761,52 @@ echo "=== Born2beRoot MANDATORY configuration complete ($(date)) ==="
 # Guarded rather than assumed: only remove a volume that exists, is not mounted,
 # and is not in fstab. A wrong lvremove here would destroy a real filesystem.
 echo "[INFO] Releasing the 'spare' volume back to the volume group"
-if command -v lvremove > /dev/null 2>&1; then
-	# Ask LVM whether the volume exists rather than looking for a device node:
-	# this runs under in-target, where /dev is the installer's and the node for
-	# a never-activated LV may simply not be there.
-	SPARE_FOUND=""
-	if lvs --noheadings -o lv_name LVMGroup 2> /dev/null | tr -d ' ' | grep -qx spare; then
-		SPARE_FOUND=yes
-	fi
+if command -v lvremove >/dev/null 2>&1; then
+    # Ask LVM whether the volume exists rather than looking for a device node:
+    # this runs under in-target, where /dev is the installer's and the node for
+    # a never-activated LV may simply not be there.
+    SPARE_FOUND=""
+    if lvs --noheadings -o lv_name LVMGroup 2>/dev/null | tr -d ' ' | grep -qx spare; then
+        SPARE_FOUND=yes
+    fi
 
-	if [ -z "$SPARE_FOUND" ]; then
-		echo "[INFO] No 'spare' volume found — nothing to release"
-	else
-		# It arrives formatted and mounted at /mnt/spare (see preseed.cfg for
-		# why it cannot simply be left unformatted). Undo that in order:
-		# fstab first, so a failure part-way cannot leave the machine trying to
-		# mount a volume that no longer exists — which would drop the next boot
-		# into an emergency shell.
-		if grep -q '[[:space:]]/mnt/spare[[:space:]]' /etc/fstab 2> /dev/null; then
-			sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab
-			echo "[OK] removed /mnt/spare from /etc/fstab"
-		fi
+    if [ -z "$SPARE_FOUND" ]; then
+        echo "[INFO] No 'spare' volume found — nothing to release"
+    else
+        # It arrives formatted and mounted at /mnt/spare (see preseed.cfg for
+        # why it cannot simply be left unformatted). Undo that in order:
+        # fstab first, so a failure part-way cannot leave the machine trying to
+        # mount a volume that no longer exists — which would drop the next boot
+        # into an emergency shell.
+        if grep -q '[[:space:]]/mnt/spare[[:space:]]' /etc/fstab 2>/dev/null; then
+            sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab
+            echo "[OK] removed /mnt/spare from /etc/fstab"
+        fi
 
-		umount /mnt/spare > /dev/null 2>&1 || true
-		rmdir /mnt/spare > /dev/null 2>&1 || true
+        umount /mnt/spare >/dev/null 2>&1 || true
+        rmdir /mnt/spare >/dev/null 2>&1 || true
 
-		# --noudevsync is not optional here. This runs inside the installer's
-		# chroot, where lvremove posts a udev "cookie" and then waits on a
-		# System V semaphore for udev to acknowledge the device removal. The
-		# udev that sees the event is the installer's, outside the chroot,
-		# and it has no LVM rules to answer with -- so the wait never ends.
-		# Measured on a real run: lvremove sat in __do_semtimedop for 25
-		# minutes with the install frozen at "Finishing the installation".
-		# The flag exists for exactly this ("only use this if udev is not
-		# running or has rules that ignore the devices LVM creates").
-		if mount | grep -q "LVMGroup-spare"; then
-			echo "[WARN] 'spare' is still mounted — leaving it alone"
-		elif lvremove -f --noudevsync LVMGroup/spare > /dev/null 2>&1; then
-			FREE=$(vgs --noheadings -o vg_free --units g LVMGroup 2> /dev/null | tr -d ' ')
-			echo "[OK] 'spare' removed — ${FREE:-?} now free in LVMGroup for lvextend"
-		else
-			echo "[WARN] lvremove of 'spare' failed — the space stays allocated to it"
-			echo "[WARN] Remove it later with: sudo lvremove -f LVMGroup/spare"
-		fi
-	fi
+        # --noudevsync is not optional here. This runs inside the installer's
+        # chroot, where lvremove posts a udev "cookie" and then waits on a
+        # System V semaphore for udev to acknowledge the device removal. The
+        # udev that sees the event is the installer's, outside the chroot,
+        # and it has no LVM rules to answer with -- so the wait never ends.
+        # Measured on a real run: lvremove sat in __do_semtimedop for 25
+        # minutes with the install frozen at "Finishing the installation".
+        # The flag exists for exactly this ("only use this if udev is not
+        # running or has rules that ignore the devices LVM creates").
+        if mount | grep -q "LVMGroup-spare"; then
+            echo "[WARN] 'spare' is still mounted — leaving it alone"
+        elif lvremove -f --noudevsync LVMGroup/spare >/dev/null 2>&1; then
+            FREE=$(vgs --noheadings -o vg_free --units g LVMGroup 2>/dev/null | tr -d ' ')
+            echo "[OK] 'spare' removed — ${FREE:-?} now free in LVMGroup for lvextend"
+        else
+            echo "[WARN] lvremove of 'spare' failed — the space stays allocated to it"
+            echo "[WARN] Remove it later with: sudo lvremove -f LVMGroup/spare"
+        fi
+    fi
 else
-	echo "[WARN] lvremove unavailable — 'spare' left in place"
+    echo "[WARN] lvremove unavailable — 'spare' left in place"
 fi
 
 ### ─── GRUB SAFETY NET ────────────────────────────────────────────────────────
@@ -818,7 +822,7 @@ apt-get install -y -f 2>/dev/null || true
 # Detect the boot disk
 BOOT_DISK=$(mount | grep ' /boot ' | awk '{print $1}' | sed 's/[0-9]*$//' 2>/dev/null)
 if [ -z "$BOOT_DISK" ]; then
-	BOOT_DISK="/dev/sda"
+    BOOT_DISK="/dev/sda"
 fi
 echo "[INFO] Reinstalling GRUB to $BOOT_DISK"
 
@@ -840,24 +844,24 @@ grub-install "$BOOT_DISK" 2>&1 || echo "[WARN] grub-install failed (may be OK in
 # the VM would sit locked forever.
 echo "--- Enabling serial console mirror (tty0 stays primary) ---"
 if [ -f /etc/default/grub ]; then
-	SERIAL_ARGS="console=ttyS0,115200n8 console=tty0"
-	if ! grep -q 'console=ttyS0' /etc/default/grub; then
-		# Only the kernel command line is touched. GRUB_TERMINAL="console serial"
-		# would also put GRUB's own menu on the serial port, but if GRUB's serial
-		# init does not come up the bootloader can end up drawing to nothing at
-		# all — a black screen and an unbootable VM, diagnosable only by a
-		# 40-minute rebuild. The kernel's console= is what produces the boot log
-		# `make console` reads, so the menu buys nothing for the risk.
-		#
-		# Strip "quiet" too: on a headless box the boot messages are the only
-		# way to see how far the boot got.
-		sed -i \
-			-e "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"${SERIAL_ARGS}\"|" \
-			/etc/default/grub
-		echo "[OK] serial console mirror configured"
-	else
-		echo "[OK] serial console already configured"
-	fi
+    SERIAL_ARGS="console=ttyS0,115200n8 console=tty0"
+    if ! grep -q 'console=ttyS0' /etc/default/grub; then
+        # Only the kernel command line is touched. GRUB_TERMINAL="console serial"
+        # would also put GRUB's own menu on the serial port, but if GRUB's serial
+        # init does not come up the bootloader can end up drawing to nothing at
+        # all — a black screen and an unbootable VM, diagnosable only by a
+        # 40-minute rebuild. The kernel's console= is what produces the boot log
+        # `make console` reads, so the menu buys nothing for the risk.
+        #
+        # Strip "quiet" too: on a headless box the boot messages are the only
+        # way to see how far the boot got.
+        sed -i \
+            -e "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"${SERIAL_ARGS}\"|" \
+            /etc/default/grub
+        echo "[OK] serial console mirror configured"
+    else
+        echo "[OK] serial console already configured"
+    fi
 fi
 
 # Regenerate grub.cfg — critical to pick up any kernel changes
@@ -865,10 +869,10 @@ update-grub 2>&1 || echo "[WARN] update-grub failed (may be OK in chroot)"
 
 # Verify grub.cfg exists and has menu entries
 if [ -f /boot/grub/grub.cfg ]; then
-	MENU_COUNT=$(grep -c 'menuentry ' /boot/grub/grub.cfg 2>/dev/null || echo 0)
-	echo "[OK] grub.cfg exists with $MENU_COUNT menu entries"
+    MENU_COUNT=$(grep -c 'menuentry ' /boot/grub/grub.cfg 2>/dev/null || echo 0)
+    echo "[OK] grub.cfg exists with $MENU_COUNT menu entries"
 else
-	echo "[WARN] /boot/grub/grub.cfg NOT found — GRUB may fail on boot!"
+    echo "[WARN] /boot/grub/grub.cfg NOT found — GRUB may fail on boot!"
 fi
 
 echo "=== Born2beRoot setup FULLY complete ($(date)) ==="

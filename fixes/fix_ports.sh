@@ -14,9 +14,9 @@ echo -e "${BLUE}${BOLD}=== BORN2BEROOT PORT CONNECTIVITY FIX ===${NC}"
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo -e "${RED}This script must be run as root!${NC}"
-	echo -e "Please run with: sudo $0"
-	exit 1
+    echo -e "${RED}This script must be run as root!${NC}"
+    echo -e "Please run with: sudo $0"
+    exit 1
 fi
 
 # 1. Check and fix services
@@ -25,50 +25,50 @@ echo -e "\n${YELLOW}${BOLD}CHECKING SERVICE STATUS${NC}"
 # Check SSH
 echo -e "\n${YELLOW}SSH Service Status:${NC}"
 if systemctl is-active --quiet ssh; then
-	echo -e "${GREEN}✓ SSH service is running${NC}"
+    echo -e "${GREEN}✓ SSH service is running${NC}"
 else
-	echo -e "${RED}✗ SSH service is not running${NC}"
-	echo -e "  Attempting to start SSH service..."
-	systemctl start ssh
-	if systemctl is-active --quiet ssh; then
-		echo -e "${GREEN}✓ SSH service started successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to start SSH service${NC}"
-		echo -e "  Check logs: systemctl status ssh"
-	fi
+    echo -e "${RED}✗ SSH service is not running${NC}"
+    echo -e "  Attempting to start SSH service..."
+    systemctl start ssh
+    if systemctl is-active --quiet ssh; then
+        echo -e "${GREEN}✓ SSH service started successfully${NC}"
+    else
+        echo -e "${RED}✗ Failed to start SSH service${NC}"
+        echo -e "  Check logs: systemctl status ssh"
+    fi
 fi
 
 # Check Web Server (if installed)
 echo -e "\n${YELLOW}Web Server Status:${NC}"
-if command -v lighttpd &> /dev/null; then
-	if systemctl is-active --quiet lighttpd; then
-		echo -e "${GREEN}✓ Lighttpd service is running${NC}"
-	else
-		echo -e "${RED}✗ Lighttpd service is not running${NC}"
-		echo -e "  Attempting to start Lighttpd service..."
-		systemctl start lighttpd
-		if systemctl is-active --quiet lighttpd; then
-			echo -e "${GREEN}✓ Lighttpd service started successfully${NC}"
-		else
-			echo -e "${RED}✗ Failed to start Lighttpd service${NC}"
-			echo -e "  Check logs: systemctl status lighttpd"
-		fi
-	fi
+if command -v lighttpd &>/dev/null; then
+    if systemctl is-active --quiet lighttpd; then
+        echo -e "${GREEN}✓ Lighttpd service is running${NC}"
+    else
+        echo -e "${RED}✗ Lighttpd service is not running${NC}"
+        echo -e "  Attempting to start Lighttpd service..."
+        systemctl start lighttpd
+        if systemctl is-active --quiet lighttpd; then
+            echo -e "${GREEN}✓ Lighttpd service started successfully${NC}"
+        else
+            echo -e "${RED}✗ Failed to start Lighttpd service${NC}"
+            echo -e "  Check logs: systemctl status lighttpd"
+        fi
+    fi
 else
-	echo -e "${YELLOW}i Lighttpd is not installed (skipping web server checks)${NC}"
+    echo -e "${YELLOW}i Lighttpd is not installed (skipping web server checks)${NC}"
 fi
 
 # 2. Check and fix SSH configuration
 echo -e "\n${YELLOW}${BOLD}CHECKING SSH CONFIGURATION${NC}"
 if grep -q "^Port 4242" /etc/ssh/sshd_config; then
-	echo -e "${GREEN}✓ SSH configured for port 4242${NC}"
+    echo -e "${GREEN}✓ SSH configured for port 4242${NC}"
 else
-	echo -e "${RED}✗ SSH not configured for port 4242${NC}"
-	echo -e "  Fixing SSH configuration..."
-	sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
-	echo -e "${GREEN}✓ SSH configuration fixed${NC}"
-	echo -e "  Restarting SSH service..."
-	systemctl restart ssh
+    echo -e "${RED}✗ SSH not configured for port 4242${NC}"
+    echo -e "  Fixing SSH configuration..."
+    sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
+    echo -e "${GREEN}✓ SSH configuration fixed${NC}"
+    echo -e "  Restarting SSH service..."
+    systemctl restart ssh
 fi
 
 # 3. Check and fix firewall rules
@@ -77,34 +77,34 @@ echo -e "\n${YELLOW}Current UFW status:${NC}"
 ufw status
 
 if ! ufw status | grep -q "4242/tcp.*ALLOW"; then
-	echo -e "${RED}✗ SSH port 4242 not allowed in firewall${NC}"
-	echo -e "  Adding SSH port to firewall..."
-	ufw allow 4242/tcp
-	echo -e "${GREEN}✓ SSH port 4242 allowed in firewall${NC}"
+    echo -e "${RED}✗ SSH port 4242 not allowed in firewall${NC}"
+    echo -e "  Adding SSH port to firewall..."
+    ufw allow 4242/tcp
+    echo -e "${GREEN}✓ SSH port 4242 allowed in firewall${NC}"
 else
-	echo -e "${GREEN}✓ SSH port 4242 allowed in firewall${NC}"
+    echo -e "${GREEN}✓ SSH port 4242 allowed in firewall${NC}"
 fi
 
 # Check for web server port in firewall
-if command -v lighttpd &> /dev/null; then
-	if ! ufw status | grep -q "80/tcp.*ALLOW"; then
-		echo -e "${RED}✗ Web server port 80 not allowed in firewall${NC}"
-		echo -e "  Adding web server port to firewall..."
-		ufw allow 80/tcp
-		echo -e "${GREEN}✓ Web server port 80 allowed in firewall${NC}"
-	else
-		echo -e "${GREEN}✓ Web server port 80 allowed in firewall${NC}"
-	fi
+if command -v lighttpd &>/dev/null; then
+    if ! ufw status | grep -q "80/tcp.*ALLOW"; then
+        echo -e "${RED}✗ Web server port 80 not allowed in firewall${NC}"
+        echo -e "  Adding web server port to firewall..."
+        ufw allow 80/tcp
+        echo -e "${GREEN}✓ Web server port 80 allowed in firewall${NC}"
+    else
+        echo -e "${GREEN}✓ Web server port 80 allowed in firewall${NC}"
+    fi
 fi
 
 # Ensure UFW is enabled
 if ! ufw status | grep -q "Status: active"; then
-	echo -e "${RED}✗ UFW firewall is not active${NC}"
-	echo -e "  Enabling UFW firewall..."
-	echo "y" | ufw enable
-	echo -e "${GREEN}✓ UFW firewall enabled${NC}"
+    echo -e "${RED}✗ UFW firewall is not active${NC}"
+    echo -e "  Enabling UFW firewall..."
+    echo "y" | ufw enable
+    echo -e "${GREEN}✓ UFW firewall enabled${NC}"
 else
-	echo -e "${GREEN}✓ UFW firewall is active${NC}"
+    echo -e "${GREEN}✓ UFW firewall is active${NC}"
 fi
 
 # 4. Check listening ports
@@ -116,20 +116,20 @@ ss -tulpn | grep "LISTEN"
 echo -e "\n${YELLOW}${BOLD}TESTING LOCAL CONNECTIVITY${NC}"
 echo -e "${YELLOW}Testing SSH port 4242:${NC}"
 if nc -z -v -w3 localhost 4242 2>&1 | grep -q "succeeded"; then
-	echo -e "${GREEN}✓ SSH port 4242 is reachable locally${NC}"
+    echo -e "${GREEN}✓ SSH port 4242 is reachable locally${NC}"
 else
-	echo -e "${RED}✗ SSH port 4242 is not reachable locally${NC}"
-	echo -e "  This may indicate a service or configuration issue"
+    echo -e "${RED}✗ SSH port 4242 is not reachable locally${NC}"
+    echo -e "  This may indicate a service or configuration issue"
 fi
 
-if command -v lighttpd &> /dev/null; then
-	echo -e "${YELLOW}Testing web server port 80:${NC}"
-	if nc -z -v -w3 localhost 80 2>&1 | grep -q "succeeded"; then
-		echo -e "${GREEN}✓ Web server port 80 is reachable locally${NC}"
-	else
-		echo -e "${RED}✗ Web server port 80 is not reachable locally${NC}"
-		echo -e "  This may indicate a service or configuration issue"
-	fi
+if command -v lighttpd &>/dev/null; then
+    echo -e "${YELLOW}Testing web server port 80:${NC}"
+    if nc -z -v -w3 localhost 80 2>&1 | grep -q "succeeded"; then
+        echo -e "${GREEN}✓ Web server port 80 is reachable locally${NC}"
+    else
+        echo -e "${RED}✗ Web server port 80 is not reachable locally${NC}"
+        echo -e "  This may indicate a service or configuration issue"
+    fi
 fi
 
 # 5. VirtualBox port forwarding reminder
@@ -145,9 +145,9 @@ echo -e "   - Name: HTTP, Protocol: TCP, Host Port: 80, Guest Port: 80"
 echo -e "\n${YELLOW}${BOLD}RESTARTING SERVICES${NC}"
 echo -e "${YELLOW}Restarting SSH...${NC}"
 systemctl restart ssh
-if command -v lighttpd &> /dev/null; then
-	echo -e "${YELLOW}Restarting web server...${NC}"
-	systemctl restart lighttpd
+if command -v lighttpd &>/dev/null; then
+    echo -e "${YELLOW}Restarting web server...${NC}"
+    systemctl restart lighttpd
 fi
 
 echo -e "\n${BLUE}${BOLD}=== PORT CONNECTIVITY FIX COMPLETE ===${NC}"

@@ -9,9 +9,9 @@ echo "=== 6. JS SERVING ===" && curl -sI http://127.0.0.1:8082/wordpress/wp-incl
 echo "=== 7. WP-JSON API ===" && curl -sI http://127.0.0.1:8082/wordpress/wp-json/ | head -3
 echo "=== 8. TUTORIALS ===" && curl -sI http://127.0.0.1:8082/wordpress/?post_type=tutorial | head -3
 echo "=== 9. DASHBOARD LOGIN TEST ===" && curl -sL -c /tmp/wp_test.txt -b /tmp/wp_test.txt \
-	-d 'log=admin&pwd=admin123wp!&wp-submit=Log+In&redirect_to=%2Fwordpress%2Fwp-admin%2F&testcookie=1' \
-	-H 'Cookie: wordpress_test_cookie=WP%20Cookie%20check' \
-	'http://127.0.0.1:8082/wordpress/wp-login.php' 2>&1 | grep -o '<title>[^<]*</title>'
+    -d 'log=admin&pwd=admin123wp!&wp-submit=Log+In&redirect_to=%2Fwordpress%2Fwp-admin%2F&testcookie=1' \
+    -H 'Cookie: wordpress_test_cookie=WP%20Cookie%20check' \
+    'http://127.0.0.1:8082/wordpress/wp-login.php' 2>&1 | grep -o '<title>[^<]*</title>'
 echo "=== 10. PLUGIN ACTIVE ===" && curl -sL -b /tmp/wp_test.txt 'http://127.0.0.1:8082/wordpress/wp-admin/plugins.php' | grep -o 'Tech Blog Toolkit' | head -1
 echo "=== 11. DASHBOARD WIDGET ===" && curl -sL -b /tmp/wp_test.txt 'http://127.0.0.1:8082/wordpress/wp-admin/' | grep -oE '(Tech Blog Toolkit|Tutorials Published|Born2beRoot)' | sort -u
 

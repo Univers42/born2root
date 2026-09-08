@@ -5,62 +5,85 @@ set -e
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-	RST='\033[0m'; BLD='\033[1m'; DIM='\033[2m'
-	GRN='\033[32m'; YLW='\033[33m'; RED='\033[31m'; CYN='\033[36m'; WHT='\033[97m'
+    RST='\033[0m'
+    BLD='\033[1m'
+    DIM='\033[2m'
+    GRN='\033[32m'
+    YLW='\033[33m'
+    RED='\033[31m'
+    CYN='\033[36m'
+    WHT='\033[97m'
 else
-	RST=''; BLD=''; DIM=''; GRN=''; YLW=''; RED=''; CYN=''; WHT=''
+    RST=''
+    BLD=''
+    DIM=''
+    GRN=''
+    YLW=''
+    RED=''
+    CYN=''
+    WHT=''
 fi
 
 # ── Box drawing (single-line, rounded corners) ───────────────────────────────
 # Adaptive width: the descriptions here are full sentences, and at a hard 60
 # columns several of them used to run straight through the right border.
-W=$(( $(tput cols 2> /dev/null || echo 100) - 6 ))
+W=$(($(tput cols 2>/dev/null || echo 100) - 6))
 [ "$W" -lt 64 ] && W=64
 [ "$W" -gt 78 ] && W=78
 
 top() {
-	printf "  ${CYN}╭"
-	printf '─%.0s' $(seq 1 $W)
-	printf "╮${RST}\n"
+    # shellcheck disable=SC2059
+    printf "  ${CYN}╭"
+    printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
+    printf "╮${RST}\n"
 }
 mid() {
-	printf "  ${CYN}├"
-	printf '─%.0s' $(seq 1 $W)
-	printf "┤${RST}\n"
+    # shellcheck disable=SC2059
+    printf "  ${CYN}├"
+    printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
+    printf "┤${RST}\n"
 }
 bot() {
-	printf "  ${CYN}╰"
-	printf '─%.0s' $(seq 1 $W)
-	printf "╯${RST}\n"
+    # shellcheck disable=SC2059
+    printf "  ${CYN}╰"
+    printf '─%.0s' $(seq 1 $W)
+    # shellcheck disable=SC2059
+    printf "╯${RST}\n"
 }
 
 # Visible length, ignoring colour escapes. Everything drawn here is width-1,
 # so counting characters is the right measure.
 _vlen() {
-	printf '%b' "$1" | sed 's/\x1b\[[0-9;]*m//g' | wc -m
+    printf '%b' "$1" | sed 's/\x1b\[[0-9;]*m//g' | wc -m
 }
 
 row() {
-	local content="$1" pad
-	pad=$((W - $(_vlen "$content")))
-	[ "$pad" -lt 0 ] && pad=0
-	printf "  ${CYN}│${RST}"
-	printf '%b' "$content"
-	printf '%*s' "$pad" ""
-	printf "${CYN}│${RST}\n"
+    local content="$1" pad
+    pad=$((W - $(_vlen "$content")))
+    [ "$pad" -lt 0 ] && pad=0
+    # shellcheck disable=SC2059
+    printf "  ${CYN}│${RST}"
+    printf '%b' "$content"
+    printf '%*s' "$pad" ""
+    # shellcheck disable=SC2059
+    printf "${CYN}│${RST}\n"
 }
 
 crow() {
-	local content="$1" total lpad rpad
-	total=$((W - $(_vlen "$content")))
-	[ "$total" -lt 0 ] && total=0
-	lpad=$((total / 2))
-	rpad=$((total - lpad))
-	printf "  ${CYN}│${RST}"
-	printf '%*s' "$lpad" ""
-	printf '%b' "$content"
-	printf '%*s' "$rpad" ""
-	printf "${CYN}│${RST}\n"
+    local content="$1" total lpad rpad
+    total=$((W - $(_vlen "$content")))
+    [ "$total" -lt 0 ] && total=0
+    lpad=$((total / 2))
+    rpad=$((total - lpad))
+    # shellcheck disable=SC2059
+    printf "  ${CYN}│${RST}"
+    printf '%*s' "$lpad" ""
+    printf '%b' "$content"
+    printf '%*s' "$rpad" ""
+    # shellcheck disable=SC2059
+    printf "${CYN}│${RST}\n"
 }
 
 blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
@@ -70,11 +93,11 @@ blank() { printf "  ${CYN}│${RST}%${W}s${CYN}│${RST}\n" ""; }
 # the description column went ragged.
 NAMEW=22
 _pad() {
-	local s="$1" n
-	n=$(printf '%s' "$s" | wc -m)
-	printf '%s' "$s"
-	[ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
-	return 0
+    local s="$1" n
+    n=$(printf '%s' "$s" | wc -m)
+    printf '%s' "$s"
+    [ "$n" -lt "$NAMEW" ] && printf '%*s' $((NAMEW - n)) ""
+    return 0
 }
 
 # Width left for the description, and a word-wrapper that fills it. fold -s
@@ -91,35 +114,40 @@ contline() { row "  $(_pad '') ${2:-$DIM}$1${RST}"; }
 # Section heading. Closes the previous section with a blank line first, so the
 # last command of a group never sits flush against the divider.
 sec() {
-	blank
-	mid
-	blank
-	row "  ${BLD}${WHT}▸ $1${RST}"
-	blank
+    blank
+    mid
+    blank
+    row "  ${BLD}${WHT}▸ $1${RST}"
+    blank
 }
 
 # One command + what it does. The description gets whatever the name column
 # leaves, and is trimmed rather than allowed to break the border.
 cmd() {
-	local name="$1" desc="$2" color="${3:-${BLD}}" first=1 line
-	if [ "$(printf '%s' "$name" | wc -m)" -gt "$NAMEW" ]; then
-		row "  ${color}${name}${RST}"
-		while IFS= read -r line; do contline "$line" ""; done <<< "$(_wrap "$desc" "$DESCW")"
-		return 0
-	fi
-	while IFS= read -r line; do
-		if [ "$first" = 1 ]; then
-			row "  ${color}$(_pad "$name")${RST} ${line}"; first=0
-		else
-			contline "$line" ""
-		fi
-	done <<< "$(_wrap "$desc" "$DESCW")"
+    local name="$1" desc="$2" color="${3:-${BLD}}" first=1 line
+    if [ "$(printf '%s' "$name" | wc -m)" -gt "$NAMEW" ]; then
+        row "  ${color}${name}${RST}"
+        while IFS= read -r line; do
+            contline "$line" ""
+        done <<<"$(_wrap "$desc" "$DESCW")"
+        return 0
+    fi
+    while IFS= read -r line; do
+        if [ "$first" = 1 ]; then
+            row "  ${color}$(_pad "$name")${RST} ${line}"
+            first=0
+        else
+            contline "$line" ""
+        fi
+    done <<<"$(_wrap "$desc" "$DESCW")"
 }
 
 # An indented, wrapped continuation line under a command.
 note() {
-	local line
-	while IFS= read -r line; do contline "$line"; done <<< "$(_wrap "$1" "$DESCW")"
+    local line
+    while IFS= read -r line; do
+        contline "$line"
+    done <<<"$(_wrap "$1" "$DESCW")"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

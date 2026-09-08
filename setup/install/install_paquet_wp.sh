@@ -9,19 +9,19 @@ echo "===================================================="
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
-	echo "This script must be run as root. Please use sudo."
-	exit 1
+    echo "This script must be run as root. Please use sudo."
+    exit 1
 fi
 
 # Identify PHP version
-PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2> /dev/null || echo "")
+PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "")
 
 if [ -z "$PHP_VERSION" ]; then
-	echo "Could not determine PHP version. Installing default PHP packages..."
-	PHP_PKG_PREFIX="php"
+    echo "Could not determine PHP version. Installing default PHP packages..."
+    PHP_PKG_PREFIX="php"
 else
-	echo "Detected PHP version: $PHP_VERSION"
-	PHP_PKG_PREFIX="php$PHP_VERSION"
+    echo "Detected PHP version: $PHP_VERSION"
+    PHP_PKG_PREFIX="php$PHP_VERSION"
 fi
 
 echo "Using package prefix: $PHP_PKG_PREFIX"
@@ -29,26 +29,24 @@ echo "Using package prefix: $PHP_PKG_PREFIX"
 # Install essential PHP extensions for WordPress
 echo "Installing required PHP extensions for WordPress..."
 apt-get update
-apt-get install -y ${PHP_PKG_PREFIX}-mysql ${PHP_PKG_PREFIX}-mysqli ${PHP_PKG_PREFIX}-gd ${PHP_PKG_PREFIX}-curl ${PHP_PKG_PREFIX}-mbstring ${PHP_PKG_PREFIX}-xml ${PHP_PKG_PREFIX}-intl ${PHP_PKG_PREFIX}-zip
+apt-get install -y "${PHP_PKG_PREFIX}-mysql" "${PHP_PKG_PREFIX}-mysqli" "${PHP_PKG_PREFIX}-gd" "${PHP_PKG_PREFIX}-curl" "${PHP_PKG_PREFIX}-mbstring" "${PHP_PKG_PREFIX}-xml" "${PHP_PKG_PREFIX}-intl" "${PHP_PKG_PREFIX}-zip"
 
 # Install php-mysql (alternative naming in some distributions)
-apt-get install -y ${PHP_PKG_PREFIX}-mysql || true
+apt-get install -y "${PHP_PKG_PREFIX}-mysql" || true
 
 # Verify mysqli extension is installed
 echo "Verifying mysqli extension..."
-php -m | grep -i mysqli
-if [ $? -eq 0 ]; then
-	echo "mysqli extension is now installed!"
+if php -m | grep -i mysqli; then
+    echo "mysqli extension is now installed!"
 else
-	echo "Warning: mysqli extension installation may have failed. Checking alternatives..."
-	# Try to install with legacy naming pattern
-	apt-get install -y php-mysqli
-	php -m | grep -i mysqli
-	if [ $? -eq 0 ]; then
-		echo "mysqli extension is now installed (using alternate package)!"
-	else
-		echo "Error: Could not install mysqli extension. Please check your PHP configuration."
-	fi
+    echo "Warning: mysqli extension installation may have failed. Checking alternatives..."
+    # Try to install with legacy naming pattern
+    apt-get install -y php-mysqli
+    if php -m | grep -i mysqli; then
+        echo "mysqli extension is now installed (using alternate package)!"
+    else
+        echo "Error: Could not install mysqli extension. Please check your PHP configuration."
+    fi
 fi
 
 # Restart web server

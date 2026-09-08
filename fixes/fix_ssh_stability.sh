@@ -3,7 +3,7 @@
 set -x
 
 # ── 1. SSHD Watchdog service ────────────────────────────────────────────────
-cat > /usr/local/bin/sshd-watchdog.sh << 'WDEOF'
+cat >/usr/local/bin/sshd-watchdog.sh <<'WDEOF'
 #!/bin/bash
 # Monitors sshd health every 15 seconds. Auto-restarts if dead.
 LOG=/var/log/sshd-watchdog.log
@@ -33,7 +33,7 @@ done
 WDEOF
 chmod +x /usr/local/bin/sshd-watchdog.sh
 
-cat > /etc/systemd/system/sshd-watchdog.service << 'SWEOF'
+cat >/etc/systemd/system/sshd-watchdog.service <<'SWEOF'
 [Unit]
 Description=SSHD health watchdog with auto-restart
 After=ssh.service
@@ -67,7 +67,7 @@ sed -i '/^# VS Code/d' /etc/ssh/sshd_config
 # - port forwarding tunnels
 # - extension host connections
 # MaxStartups 50:30:100 = accept 50 unauthenticated, then 30% random drop until 100
-cat >> /etc/ssh/sshd_config << 'SSHEOF'
+cat >>/etc/ssh/sshd_config <<'SSHEOF'
 
 # VS Code Remote SSH compatibility
 MaxStartups 50:30:100

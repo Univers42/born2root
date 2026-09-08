@@ -18,7 +18,7 @@ echo -e "• ${BOLD}Hostname:${RESET}      $(hostname)"
 echo -e "• ${BOLD}OS:${RESET}            Debian GNU/Linux 12 (bookworm)"
 echo -e "• ${BOLD}Kernel:${RESET}        $(uname -r)"
 echo -e "• ${BOLD}Uptime:${RESET}        $(uptime -p)"
-echo -e "• ${BOLD}Load Average:${RESET}  $(cat /proc/loadavg | awk '{print $1, $2, $3}')"
+echo -e "• ${BOLD}Load Average:${RESET}  $(awk '{print $1, $2, $3}' </proc/loadavg)"
 
 # Security Notice Section
 echo -e "\n${RED}${BOLD}SECURITY NOTICE:${RESET}"
@@ -54,7 +54,7 @@ echo -e "• User Group Management: ✓"
 
 # Final Information
 last_boot=$(who -b | awk '{print $3, $4}')
-failed_logins=$(grep "Failed password" /var/log/auth.log | wc -l)
+failed_logins=$(grep -c "Failed password" /var/log/auth.log)
 
 echo -e "\n${BOLD}Last Boot:${RESET} $last_boot"
 echo -e "${BOLD}Failed Login Attempts:${RESET} $failed_logins"

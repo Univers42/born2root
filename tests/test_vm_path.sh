@@ -17,15 +17,15 @@ cd "$(dirname "$0")/.."
 
 fail=0
 check() {
-	if [ "$2" = "$3" ]; then
-		printf 'ok   %-46s = %s\n' "$1" "$2"
-	else
-		printf 'FAIL %-46s = %s (expected %s)\n' "$1" "$2" "$3"
-		fail=1
-	fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-46s = %s\n' "$1" "$2"
+    else
+        printf 'FAIL %-46s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
 }
 yesno() { if "$@"; then echo yes; else echo no; fi; }
-has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac }
 
 TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2> /dev/null; rm -rf "$TMP"' EXIT
@@ -41,42 +41,43 @@ vm_path_can_ask() { return 1; }
 # ── Directories the user can write: no sudo, no noise ───────────────────────
 mkdir -p "$TMP/own"
 out=$(ensure_vm_dir "$TMP/own" debian 2>&1) && rc=0 || rc=$?
-check "writable VM_PATH: ok"                      "$rc" 0
-check "writable VM_PATH: VM dir created"          "$(yesno test -d "$TMP/own/debian")" yes
-check "writable VM_PATH: silent"                  "$out" ""
-check "writable VM_PATH: location remembered"     "$(cat "$TMP/registry/.vm_path.debian")" "$TMP/own"
+check "writable VM_PATH: ok" "$rc" 0
+check "writable VM_PATH: VM dir created" "$(yesno test -d "$TMP/own/debian")" yes
+check "writable VM_PATH: silent" "$out" ""
+check "writable VM_PATH: location remembered" "$(cat "$TMP/registry/.vm_path.debian")" "$TMP/own"
 
 out=$(ensure_vm_dir "$TMP/new/deeper" debian 2>&1) && rc=0 || rc=$?
-check "absent but creatable: ok"                  "$rc" 0
-check "absent but creatable: created"             "$(yesno test -d "$TMP/new/deeper/debian")" yes
+check "absent but creatable: ok" "$rc" 0
+check "absent but creatable: created" "$(yesno test -d "$TMP/new/deeper/debian")" yes
 
 if [ "$(id -u)" = 0 ]; then
-	echo "skip: running as root, no directory is unwritable"
-	exit "$fail"
+    echo "skip: running as root, no directory is unwritable"
+    exit "$fail"
 fi
 
 # ── Root-owned parent, no terminal: explain, print the recipe, change nothing
-mkdir -p "$TMP/locked"; chmod 555 "$TMP/locked"
+mkdir -p "$TMP/locked"
+chmod 555 "$TMP/locked"
 out=$(ensure_vm_dir "$TMP/locked/qemu" debian 2>&1) && rc=0 || rc=$?
-check "locked parent, no tty: fails"              "$rc" 1
-check "names the directory in the way"            "$(has "$out" "$TMP/locked belongs to")" yes
-check "says it is a permission problem"           "$(has "$out" "permission problem")" yes
-check "exact sudo mkdir"                          "$(has "$out" "sudo mkdir -p \"$TMP/locked/qemu/debian\"")" yes
-check "exact sudo chown -R of the VM dir"         "$(has "$out" "sudo chown -R \"$who\" \"$TMP/locked/qemu/debian\"")" yes
-check "hands over the VM_PATH it would create"    "$(has "$out" "sudo chown \"$who\" \"$TMP/locked/qemu\"")" yes
-check "nothing was created"                       "$(yesno test -e "$TMP/locked/qemu")" no
+check "locked parent, no tty: fails" "$rc" 1
+check "names the directory in the way" "$(has "$out" "$TMP/locked belongs to")" yes
+check "says it is a permission problem" "$(has "$out" "permission problem")" yes
+check "exact sudo mkdir" "$(has "$out" "sudo mkdir -p \"$TMP/locked/qemu/debian\"")" yes
+check "exact sudo chown -R of the VM dir" "$(has "$out" "sudo chown -R \"$who\" \"$TMP/locked/qemu/debian\"")" yes
+check "hands over the VM_PATH it would create" "$(has "$out" "sudo chown \"$who\" \"$TMP/locked/qemu\"")" yes
+check "nothing was created" "$(yesno test -e "$TMP/locked/qemu")" no
 
 # ── No sudo on this machine: say so, never try ──────────────────────────────
 vm_path_can_ask() { return 0; }
 VM_PATH_SUDO=/nonexistent/sudo
 out=$(ensure_vm_dir "$TMP/locked/qemu" debian 2>&1) && rc=0 || rc=$?
-check "no sudo: fails"                            "$rc" 1
-check "no sudo: says ask an administrator"        "$(has "$out" "administrator")" yes
-check "no sudo: recipe has no sudo prefix"        "$(has "$out" "sudo mkdir")" no
+check "no sudo: fails" "$rc" 1
+check "no sudo: says ask an administrator" "$(has "$out" "administrator")" yes
+check "no sudo: recipe has no sudo prefix" "$(has "$out" "sudo mkdir")" no
 
 # ── sudo and a terminal, user declines: nothing runs ───────────────────────
 VM_PATH_SUDO="$TMP/fakesudo"
-cat > "$VM_PATH_SUDO" <<'FAKE'
+cat >"$VM_PATH_SUDO" <<'FAKE'
 #!/bin/bash
 printf '%s\n' "$*" >> "${FAKESUDO_LOG:?}"
 chmod 755 "${FAKESUDO_UNLOCK:?}"
@@ -86,40 +87,42 @@ chmod +x "$VM_PATH_SUDO"
 export FAKESUDO_LOG="$TMP/sudo.log" FAKESUDO_UNLOCK="$TMP/locked"
 vm_path_ask() { return 1; }
 out=$(ensure_vm_dir "$TMP/locked/qemu" debian 2>&1) && rc=0 || rc=$?
-check "declined: fails"                           "$rc" 1
-check "declined: sudo never ran"                  "$(yesno test -e "$FAKESUDO_LOG")" no
-check "declined: nothing created"                 "$(yesno test -e "$TMP/locked/qemu")" no
+check "declined: fails" "$rc" 1
+check "declined: sudo never ran" "$(yesno test -e "$FAKESUDO_LOG")" no
+check "declined: nothing created" "$(yesno test -e "$TMP/locked/qemu")" no
 
 # ── User accepts: what was printed is exactly what runs ────────────────────
 vm_path_ask() { return 0; }
 out=$(ensure_vm_dir "$TMP/locked/qemu" debian 2>&1) && rc=0 || rc=$?
-check "accepted: ok"                              "$rc" 0
-check "accepted: VM dir usable"                   "$(yesno _vm_path_writable "$TMP/locked/qemu/debian")" yes
-check "accepted: sudo ran mkdir"                  "$(has "$(cat "$FAKESUDO_LOG")" "mkdir -p \"$TMP/locked/qemu/debian\"")" yes
-check "accepted: sudo ran chown -R"               "$(has "$(cat "$FAKESUDO_LOG")" "chown -R \"$who\"")" yes
-check "accepted: exactly the 3 printed commands"  "$(wc -l < "$FAKESUDO_LOG")" 3
-check "accepted: reports success"                 "$(has "$out" "now belongs to")" yes
-check "accepted: location remembered"             "$(cat "$TMP/registry/.vm_path.debian")" "$TMP/locked/qemu"
+check "accepted: ok" "$rc" 0
+check "accepted: VM dir usable" "$(yesno _vm_path_writable "$TMP/locked/qemu/debian")" yes
+check "accepted: sudo ran mkdir" "$(has "$(cat "$FAKESUDO_LOG")" "mkdir -p \"$TMP/locked/qemu/debian\"")" yes
+check "accepted: sudo ran chown -R" "$(has "$(cat "$FAKESUDO_LOG")" "chown -R \"$who\"")" yes
+check "accepted: exactly the 3 printed commands" "$(wc -l <"$FAKESUDO_LOG")" 3
+check "accepted: reports success" "$(has "$out" "now belongs to")" yes
+check "accepted: location remembered" "$(cat "$TMP/registry/.vm_path.debian")" "$TMP/locked/qemu"
 
 # ── The `sudo make all` leftover: VM dir exists but belongs to someone else
-mkdir -p "$TMP/own/foreign"; chmod 555 "$TMP/own/foreign"
+mkdir -p "$TMP/own/foreign"
+chmod 555 "$TMP/own/foreign"
 vm_path_can_ask() { return 1; }
 out=$(ensure_vm_dir "$TMP/own" foreign 2>&1) && rc=0 || rc=$?
-check "foreign VM dir: fails"                     "$rc" 1
+check "foreign VM dir: fails" "$rc" 1
 check "foreign VM dir: says exists but belongs to" "$(has "$out" "exists but belongs to")" yes
-check "foreign VM dir: chown -R offered"          "$(has "$out" "sudo chown -R \"$who\" \"$TMP/own/foreign\"")" yes
+check "foreign VM dir: chown -R offered" "$(has "$out" "sudo chown -R \"$who\" \"$TMP/own/foreign\"")" yes
 check "foreign VM dir: existing VM_PATH untouched" "$(has "$out" "chown \"$who\" \"$TMP/own\"")" no
 
 # ── refuse_sudo_build: only root reached through sudo is refused ───────────
 unset SUDO_USER
-check "not root: allowed"                         "$(yesno refuse_sudo_build 'make all')" yes
-id() { case "$1" in -u) echo 0 ;; *) command id "$@" ;; esac; }
+check "not root: allowed" "$(yesno refuse_sudo_build 'make all')" yes
+id() { case "$1" in -u) echo 0 ;; *) command id "$@" ;; esac }
 export SUDO_USER=alice
 out=$(refuse_sudo_build "make all VM_PATH=/x" 2>&1) && rc=0 || rc=$?
-check "root via sudo: refused"                    "$rc" 1
-check "root via sudo: names user and command"     "$(has "$out" "Run it as alice:   make all VM_PATH=/x")" yes
+check "root via sudo: refused" "$rc" 1
+check "root via sudo: names user and command" "$(has "$out" "Run it as alice:   make all VM_PATH=/x")" yes
 SUDO_USER=root
-check "real root (SUDO_USER=root): allowed"       "$(yesno refuse_sudo_build 'make all')" yes
-unset -f id; unset SUDO_USER
+check "real root (SUDO_USER=root): allowed" "$(yesno refuse_sudo_build 'make all')" yes
+unset -f id
+unset SUDO_USER
 
 exit "$fail"

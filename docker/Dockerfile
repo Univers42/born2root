@@ -19,17 +19,17 @@ ENV HELLISH_BIN_SRC=/work/dist/hellish
 # from source; nothing is compiled any more. libreadline8t64 is the trixie
 # package that provides libreadline.so.8, which the release binary links
 # against (alongside libtinfo.so.6, pulled in as a dependency).
-RUN apt-get update \
-	&& apt-get install -y --no-install-recommends \
+RUN apt-get update &&
+	apt-get install -y --no-install-recommends \
 		bash \
 		ca-certificates \
 		libreadline8t64 \
 		passwd \
 		procps \
-		util-linux \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& useradd -m -s /bin/bash dev \
-	&& cat > /usr/local/bin/container-init.sh <<'INITEOF'
+		util-linux &&
+	rm -rf /var/lib/apt/lists/* &&
+	useradd -m -s /bin/bash dev &&
+	cat >/usr/local/bin/container-init.sh <<'INITEOF'
 #!/usr/bin/env bash
 set -e
 

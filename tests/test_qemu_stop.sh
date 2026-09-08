@@ -18,12 +18,12 @@ cd "$(dirname "$0")/.."
 
 fail=0
 check() {
-	if [ "$2" = "$3" ]; then
-		printf 'ok   %-40s = %s\n' "$1" "$2"
-	else
-		printf 'FAIL %-40s = %s (expected %s)\n' "$1" "$2" "$3"
-		fail=1
-	fi
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-40s = %s\n' "$1" "$2"
+    else
+        printf 'FAIL %-40s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
 }
 
 TMP=$(mktemp -d)
@@ -39,94 +39,111 @@ export VM_NAME VM_PATH
 # from another VM_PATH (the reproduced case), and an unrelated VM that must be
 # left alone. Trailing space is what `tr '\0' ' '` leaves on a real cmdline.
 qemu_cmdlines() {
-	printf '%s\n' \
-		"1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
-		"1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile /mnt/storage/virtualbox/other_machine/debian/qemu.pid " \
-		"1003 /usr/bin/qemu-system-x86_64 -name debian-lab -machine pc -pidfile /srv/vms/debian-lab/qemu.pid "
+    printf '%s\n' \
+        "1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
+        "1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile /mnt/storage/virtualbox/other_machine/debian/qemu.pid " \
+        "1003 /usr/bin/qemu-system-x86_64 -name debian-lab -machine pc -pidfile /srv/vms/debian-lab/qemu.pid "
 }
 
-check "our own guest is not 'other'"      "$(other_guests | grep -c '^1001 ' || true)" 0
+check "our own guest is not 'other'" "$(other_guests | grep -c '^1001 ' || true)" 0
 check "same VM from another VM_PATH found" "$(other_guests | grep '^1002 ' | cut -d' ' -f2)" /mnt/storage/virtualbox/other_machine
-check "differently named VM ignored"       "$(other_guests | grep -c '^1003 ' || true)" 0
-check "exactly one other guest"            "$(other_guests | wc -l)" 1
+check "differently named VM ignored" "$(other_guests | grep -c '^1003 ' || true)" 0
+check "exactly one other guest" "$(other_guests | wc -l)" 1
 
 out=$(report_other_guests 2>&1) && rc=0 || rc=$?
 check "report returns 0 when others exist" "$rc" 0
 case "$out" in
-	*"VM_PATH=/mnt/storage/virtualbox/other_machine make qemu_stop"*)
-		printf 'ok   %-40s\n' "report names the exact stop command" ;;
-	*)
-		printf 'FAIL %-40s = %s\n' "report names the exact stop command" "$out"; fail=1 ;;
+*"VM_PATH=/mnt/storage/virtualbox/other_machine make qemu_stop"*)
+    printf 'ok   %-40s\n' "report names the exact stop command"
+    ;;
+*)
+    printf 'FAIL %-40s = %s\n' "report names the exact stop command" "$out"
+    fail=1
+    ;;
 esac
 
 # Nothing running anywhere: stop/kill may say "not running" and mean it.
 qemu_cmdlines() { :; }
-check "no guests: none listed"             "$(other_guests | wc -l)" 0
-if report_other_guests > /dev/null 2>&1; then
-	printf 'FAIL %-40s\n' "report returns 1 when none"; fail=1
+check "no guests: none listed" "$(other_guests | wc -l)" 0
+if report_other_guests >/dev/null 2>&1; then
+    printf 'FAIL %-40s\n' "report returns 1 when none"
+    fail=1
 else
-	printf 'ok   %-40s\n' "report returns 1 when none"
+    printf 'ok   %-40s\n' "report returns 1 when none"
 fi
 
-# ── qemu_pid: a pidfile that exists but cannot be read is not "not running" ──
+# ── qemu_pid: a pidfile that exists but cannot be read -r is not "not running" ──
 # (root-owned, from `sudo make all`). Fixture pids are not processes, so
 # liveness is the seam.
-pid_alive() { case "$1" in 1001 | 1002) return 0 ;; esac; return 1; }
+pid_alive() {
+    case "$1" in 1001 | 1002) return 0 ;; esac
+    return 1
+}
 qemu_cmdlines() {
-	printf '%s\n' \
-		"1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
-		"1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
+    printf '%s\n' \
+        "1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
+        "1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
 }
 mkdir -p "$TMP/here/debian" "$TMP/elsewhere/debian"
-printf '1002\n' > "$TMP/elsewhere/debian/qemu.pid"
-: > "$PIDFILE"; chmod 000 "$PIDFILE"
-check "unreadable pidfile: pid recovered"   "$(qemu_pid)" 1001
-check "unreadable pidfile: is_running"      "$(if is_running; then echo yes; else echo no; fi)" yes
-chmod 600 "$PIDFILE"; rm -f "$PIDFILE"
-check "no pidfile at all: not running"      "$(if is_running; then echo yes; else echo no; fi)" no
+printf '1002\n' >"$TMP/elsewhere/debian/qemu.pid"
+: >"$PIDFILE"
+chmod 000 "$PIDFILE"
+check "unreadable pidfile: pid recovered" "$(qemu_pid)" 1001
+check "unreadable pidfile: is_running" "$(if is_running; then echo yes; else echo no; fi)" yes
+chmod 600 "$PIDFILE"
+rm -f "$PIDFILE"
+check "no pidfile at all: not running" "$(if is_running; then echo yes; else echo no; fi)" no
 
 # ── adopt_other_guest: one candidate is taken, two are ambiguous ────────────
-VM_PATH="$TMP/nowhere"; vm_paths
+VM_PATH="$TMP/nowhere"
+vm_paths
 out=$(adopt_other_guest 2>&1) && rc=0 || rc=$?
-check "two candidates: ambiguous (2)"       "$rc" 2
+check "two candidates: ambiguous (2)" "$rc" 2
 case "$out" in
-	*"VM_PATH=$TMP/elsewhere make qemu_stop"*) printf 'ok   %-40s\n' "ambiguous: candidates listed" ;;
-	*) printf 'FAIL %-40s = %s\n' "ambiguous: candidates listed" "$out"; fail=1 ;;
+*"VM_PATH=$TMP/elsewhere make qemu_stop"*) printf 'ok   %-40s\n' "ambiguous: candidates listed" ;;
+*)
+    printf 'FAIL %-40s = %s\n' "ambiguous: candidates listed" "$out"
+    fail=1
+    ;;
 esac
-check "ambiguous: VM_PATH unchanged"        "$VM_PATH" "$TMP/nowhere"
+check "ambiguous: VM_PATH unchanged" "$VM_PATH" "$TMP/nowhere"
 
 qemu_cmdlines() {
-	printf '%s\n' \
-		"1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
+    printf '%s\n' \
+        "1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
 }
-adopt_other_guest > /dev/null 2>&1 && rc=0 || rc=$?
-check "one candidate: adopted (0)"          "$rc" 0
-check "adopted: VM_PATH re-keyed"           "$VM_PATH" "$TMP/elsewhere"
-check "adopted: PIDFILE follows"            "$PIDFILE" "$TMP/elsewhere/debian/qemu.pid"
-check "adopted: now running"                "$(if is_running; then echo yes; else echo no; fi)" yes
+adopt_other_guest >/dev/null 2>&1 && rc=0 || rc=$?
+check "one candidate: adopted (0)" "$rc" 0
+check "adopted: VM_PATH re-keyed" "$VM_PATH" "$TMP/elsewhere"
+check "adopted: PIDFILE follows" "$PIDFILE" "$TMP/elsewhere/debian/qemu.pid"
+check "adopted: now running" "$(if is_running; then echo yes; else echo no; fi)" yes
 
 qemu_cmdlines() { :; }
-VM_PATH="$TMP/nowhere"; vm_paths
-adopt_other_guest > /dev/null 2>&1 && rc=0 || rc=$?
-check "no candidate: none (1)"              "$rc" 1
+VM_PATH="$TMP/nowhere"
+vm_paths
+adopt_other_guest >/dev/null 2>&1 && rc=0 || rc=$?
+check "no candidate: none (1)" "$rc" 1
 
 # ── await_shutdown: returns when the guest is gone, times out otherwise ─────
 # is_running is the seam; sleep is stubbed so the test is instant. No progress
 # line (STOP_PROGRESS=0) so stdout stays clean.
 export STOP_PROGRESS=0
-sleep() { :; }              # never actually wait in the test
-SERIAL=$(mktemp)            # await_shutdown tails it on a TTY; empty is fine
+sleep() { :; }   # never actually wait in the test
+SERIAL=$(mktemp) # await_shutdown tails it on a TTY; empty is fine
 
 # Goes down on the 3rd poll: await_shutdown must return 0.
 _polls=0
-is_running() { _polls=$((_polls + 1)); [ "$_polls" -lt 3 ]; }
+is_running() {
+    _polls=$((_polls + 1))
+    [ "$_polls" -lt 3 ]
+}
 await_shutdown 100 && rc=0 || rc=$?
 check "await_shutdown: 0 once the guest is gone" "$rc" 0
 
 # Never goes down within the grace: must time out with 1, not spin forever.
 is_running() { return 0; }
 await_shutdown 2 && rc=0 || rc=$?
-check "await_shutdown: times out with 1"         "$rc" 1
+check "await_shutdown: times out with 1" "$rc" 1
 
 unset -f sleep is_running
 rm -f "$SERIAL"

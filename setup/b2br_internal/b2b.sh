@@ -12,7 +12,7 @@ date_time=$(date -u +"%Y-%m-%d %H:%M:%S")
 # System information gathering
 architecture=$(uname -a)
 cpu_physical=$(grep "physical id" /proc/cpuinfo | sort -u | wc -l)
-vcpu=$(grep "processor" /proc/cpuinfo | wc -l)
+vcpu=$(grep -c "processor" /proc/cpuinfo)
 
 # Memory information
 mem_used=$(free -m | awk '$1 == "Mem:" {print $3}')
@@ -27,40 +27,41 @@ disk_percent=$(df -Bm | grep '^/dev/' | grep -v '/boot$' | awk '{ut += $3} {ft+=
 # CPU load and other system info
 cpu_load=$(top -bn1 | grep "Cpu" | awk '{printf "%.1f", $2 + $4}')
 last_boot=$(who -b | awk '$1 == "system" {print $3 " " $4}')
-lvm_use=$(if [ $(lsblk | grep "lvm" | wc -l) -gt 0 ]; then echo yes; else echo no; fi)
-tcp_count=$(ss -ta | grep ESTAB | wc -l)
+lvm_use=$(if [ "$(lsblk | grep -c "lvm")" -gt 0 ]; then echo yes; else echo no; fi)
+tcp_count=$(ss -ta | grep -c ESTAB)
 user_count=$(who | wc -l)
 ip=$(hostname -I | awk '{print $1}')
 mac=$(ip link show | grep "link/ether" | awk '{print $2}' | head -1)
-sudo_count=$(grep "COMMAND" /var/log/sudo/sudo.log 2> /dev/null | wc -l)
+sudo_count=$(grep -c "COMMAND" /var/log/sudo/sudo.log 2>/dev/null)
 
 # Get terminal width for centered text
 TERM_WIDTH=$(tput cols)
 
 # Function to print centered text with color
 print_centered() {
-	local text="$1"
-	local color="${2:-$WHITE}"
-	local padding=$(((TERM_WIDTH - ${#text}) / 2))
-	printf "%${padding}s" ""
-	echo -e "${color}${text}${NC}"
+    local text="$1"
+    local color="${2:-$WHITE}"
+    local padding
+    padding=$(((TERM_WIDTH - ${#text}) / 2))
+    printf "%${padding}s" ""
+    echo -e "${color}${text}${NC}"
 }
 
 # Function to print a divider
 print_divider() {
-	local char="${1:-─}"
-	local color="${2:-$BLUE}"
-	echo -e "${color}$(printf '%*s' "$TERM_WIDTH" '' | tr ' ' "$char")${NC}"
+    local char="${1:-─}"
+    local color="${2:-$BLUE}"
+    echo -e "${color}$(printf '%*s' "$TERM_WIDTH" '' | tr ' ' "$char")${NC}"
 }
 
 # Function to print labeled data
 print_info() {
-	local label="$1"
-	local value="$2"
-	local label_color="${3:-$BOLD_CYAN}"
-	local value_color="${4:-$WHITE}"
+    local label="$1"
+    local value="$2"
+    local label_color="${3:-$BOLD_CYAN}"
+    local value_color="${4:-$WHITE}"
 
-	printf "${label_color}%-20s${NC} : ${value_color}%s${NC}\n" "$label" "$value"
+    printf "${label_color}%-20s${NC} : ${value_color}%s${NC}\n" "$label" "$value"
 }
 
 # --- START OUTPUT ---
@@ -104,11 +105,11 @@ mem_bar_length=40
 mem_filled=$((mem_bar_length * mem_used / mem_total))
 mem_bar="["
 for ((i = 0; i < mem_bar_length; i++)); do
-	if [ $i -lt $mem_filled ]; then
-		mem_bar+="█"
-	else
-		mem_bar+="░"
-	fi
+    if [ $i -lt $mem_filled ]; then
+        mem_bar+="█"
+    else
+        mem_bar+="░"
+    fi
 done
 mem_bar+="]"
 print_info "Memory" "$mem_used/$mem_total MB ($mem_percent%)" "$BOLD_BLUE" "$GREEN"
@@ -122,11 +123,11 @@ disk_bar_length=40
 disk_filled=$((disk_bar_length * disk_percent / 100))
 disk_bar="["
 for ((i = 0; i < disk_bar_length; i++)); do
-	if [ $i -lt $disk_filled ]; then
-		disk_bar+="█"
-	else
-		disk_bar+="░"
-	fi
+    if [ $i -lt $disk_filled ]; then
+        disk_bar+="█"
+    else
+        disk_bar+="░"
+    fi
 done
 disk_bar+="]"
 print_info "Disk" "$disk_used/$disk_total GB ($disk_percent%)" "$BOLD_BLUE" "$GREEN"
