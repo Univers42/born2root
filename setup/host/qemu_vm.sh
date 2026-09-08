@@ -715,7 +715,7 @@ watch_install() {
 # The 1s tick is a seam the test overrides.
 STOP_TICK="${STOP_TICK:-1}"
 STOP_PROGRESS="${STOP_PROGRESS:-auto}"
-_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac }
+_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac; }
 await_shutdown() {
     local grace="$1" waited=0 last
     while is_running && [ "$waited" -lt "$grace" ]; do
@@ -1048,7 +1048,7 @@ path, marker, port, user = sys.argv[1:5]
 lines = open(path).read().split("\n")
 out, skip = [], False
 for ln in lines:
-    if ln.strip() == marker:
+    if ln.strip().startswith("# Born2beRoot VM"):
         skip = True; continue
     if skip:
         if ln.startswith("#") or (ln and not ln[0].isspace() and not ln.startswith("Host")):

@@ -1108,16 +1108,16 @@ setup_host_ssh_config() {
     chmod 600 "$ssh_config"
 
     # Remove any previous Born2beRoot block
-    if grep -qxF "$marker" "$ssh_config" 2>/dev/null; then
-        # Two escaping concerns here:
-        #  - the scoped marker contains [ ] and . , which sed would read -r as a
-        #    bracket expression / any-char instead of literals;
-        #  - the plain "debian" marker is a PREFIX of every scoped marker, so an
-        #    unanchored address would make a rebuild of "debian" also delete the
-        #    block belonging to "debian-nvim". Hence the ^...$ anchors.
+    # We clean both VirtualBox and QEMU blocks by anchoring to the start of the marker.
+    if grep -q "^# Born2beRoot VM (auto-generated" "$ssh_config" 2>/dev/null; then
         local marker_re
         marker_re=$(printf '%s' "$marker" | sed 's/[][\.*^$\/]/\\&/g')
-        sed -i "/^${marker_re}$/,/^$/d" "$ssh_config"
+        # If it's the canonical 'debian' VM, aggressively clean both backends.
+        if [ "${VM_NAME}" = "debian" ]; then
+            sed -i '/^# Born2beRoot VM (auto-generated\(, qemu\)\?)$/,/^$/d' "$ssh_config"
+        else
+            sed -i "/^${marker_re}$/,/^$/d" "$ssh_config"
+        fi
     fi
 
     # Ensure global keepalive defaults exist at the top
