@@ -243,7 +243,7 @@ echo "[OK] User dlesieur in groups: sudo, user42, docker"
 
 ### ─── 5. SSH — port 4242, no root login ─────────────────────────────────────
 sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
-grep -q "^Port 4242" /etc/ssh/sshd_config || echo "Port 4242" >> /etc/ssh/sshd_config
+grep -q "^Port 4242" /etc/ssh/sshd_config || echo "Port 4242" >>/etc/ssh/sshd_config
 sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
