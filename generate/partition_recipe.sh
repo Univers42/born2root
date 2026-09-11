@@ -50,14 +50,17 @@ OVERHEAD_MB=20 # LUKS2 header (16 MB) plus LVM physical-extent rounding
 # tree-sitter parsers (~300 MB) did not fit a 256 MB /home, and at 15 GB the
 # IDE layer was within 100 MB of full. tmp gave up 128 MB so the 8 GB minimum
 # still holds.
+# Calibrated on the first real build (2026-09-11): / held 2.7 GB before nvim
+# on a 3.3 GB root, so root's floor and share went up and home/opt/tmp gave
+# some back. See generate/feature_profile.sh for the per-feature numbers.
 LAYOUT='
-root    2560  16   30720
+root    2816  25   30720
 swap       0   0    4096
-home     512  12  102400
-opt      256   8   20480
-srv      256   3   10240
-tmp      384   4   10240
-var-log  384   4   20480
+home     512   9  102400
+opt      256   5   20480
+srv      256   2   10240
+tmp      256   3   10240
+var-log  384   3   20480
 var     2048   0       0
 '
 SWAP_MIN_MB=1024

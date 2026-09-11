@@ -40,7 +40,7 @@ fi
 # feature_on <name>: is this feature in the build? Base features are on even
 # without the file, so a mandatory install never depends on it.
 feature_on() {
-    case "$1" in b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
     grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
 }
 # feature_fail <name> <reason>: a BASE feature could not be installed. The

@@ -11,8 +11,8 @@
 #
 # This script makes the choice once, on the host, from SIZE_B2B:
 #
-#   minimal   8-13 GB   everything Born2beRoot mandates + hellish + nvim
-#   standard 14-29 GB   + the bonus web stack, Docker, node, python tools,
+#   minimal   8-14 GB   everything Born2beRoot mandates + hellish + nvim
+#   standard 15-29 GB   + the bonus web stack, Docker, node, python tools,
 #                         the nvim IDE layer, Herdr + Claude Code
 #   full      30+ GB    every non-explicit feature (today: same as standard;
 #                         the name is stable so it can grow)
@@ -47,17 +47,25 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 RECIPE="$HERE/partition_recipe.sh"
 
 # name              tier      /     /opt  /var  /home  requires
+#
+# The / column was calibrated on the first real build (SIZE_B2B=15, standard,
+# 2026-09-11): / held 2.7 GB before nvim ran, which is debian-base +
+# b2b-mandatory + devtools-apt + webstack packages + docker packages + node,
+# to the MB. The first table had no debian-base row at all, and nvim's space
+# guard tripped on a disk the check had passed. /etc/b2b/features.status on a
+# built guest is where the next correction comes from.
 MANIFEST='
-b2b-mandatory      base      300   0     0     0      -
-devtools-apt       base      600   0     0     0      -
+debian-base        base      1100  0     0     0      -
+b2b-mandatory      base      100   0     0     0      -
+devtools-apt       base      450   0     0     0      -
 nvim               base      350   120   0     300    devtools-apt
 hellish-upstream   base      0     0     0     40     -
-webstack           standard  600   0     200   0      -
-nodejs             standard  200   60    0     0      -
+webstack           standard  400   0     200   0      -
+nodejs             standard  250   60    0     0      -
 pytools            standard  0     80    0     0      -
 nvim-extras        standard  0     0     0     400    nvim
 devtools-extra     standard  0     110   0     0      nodejs
-docker             standard  450   0     3300  0      -
+docker             standard  400   0     3300  0      -
 ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -
 '
@@ -73,7 +81,9 @@ ai_model_mb() {
     else echo 9000; fi # qwen3:14b
 }
 
-STANDARD_FROM_GB=14
+# 14 GB cannot hold the standard set with the base OS counted (/ and /home
+# both come up short); 15 can, with margin. Measured, not chosen.
+STANDARD_FROM_GB=15
 FULL_FROM_GB=30
 # Usable fraction of a volume: ext4 shows ~93% of the partman figure, and 20%
 # of that is kept free so apt lists, logs and a busy Docker do not wedge it.

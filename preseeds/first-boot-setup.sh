@@ -63,7 +63,7 @@ else
     echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
 fi
 feature_on() {
-    case "$1" in b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
     grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
 }
 # Every feature records what it actually cost, so the estimates in
@@ -71,16 +71,22 @@ feature_on() {
 #   /etc/b2b/features.status:  <name> <ok|failed|off|no-space> <mount> <delta MB>
 _FEAT_MOUNT=""
 _FEAT_BEFORE=0
+_FEAT_STATUS=ok
 feature_begin() {
     _FEAT_MOUNT="$2"
+    _FEAT_STATUS=ok
     _FEAT_BEFORE=$(df -km "$2" 2>/dev/null | awk 'NR==2 {print $3}')
     echo "--- [$1] ---"
 }
+# The recorded status is the worse of what the caller says and what
+# feature_fail said in between: a section that tripped its space guard must
+# not be filed as "ok 0 MB", which is what the first build wrote for nvim.
 feature_end() {
-    local after
+    local after status="$2"
+    [ "$_FEAT_STATUS" = ok ] || status="$_FEAT_STATUS"
     after=$(df -km "$_FEAT_MOUNT" 2>/dev/null | awk 'NR==2 {print $3}')
-    printf '%s %s %s %s\n' "$1" "$2" "$_FEAT_MOUNT" "$((${after:-0} - ${_FEAT_BEFORE:-0}))" >>/etc/b2b/features.status
-    echo "--- [$1] $2 (${_FEAT_MOUNT}: +$((${after:-0} - ${_FEAT_BEFORE:-0})) MB) ---"
+    printf '%s %s %s %s\n' "$1" "$status" "$_FEAT_MOUNT" "$((${after:-0} - ${_FEAT_BEFORE:-0}))" >>/etc/b2b/features.status
+    echo "--- [$1] $status (${_FEAT_MOUNT}: +$((${after:-0} - ${_FEAT_BEFORE:-0})) MB) ---"
 }
 feature_off() {
     printf '%s off - 0\n' "$1" >>/etc/b2b/features.status
@@ -88,6 +94,7 @@ feature_off() {
 }
 # A BASE feature that failed: the build is wrong, say so where it is seen.
 feature_fail() {
+    _FEAT_STATUS=failed
     echo "[FAIL] $1: $2"
     printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
     echo "B2B-FEATURE-FAILED $1: $2" >/dev/console 2>/dev/null || true
@@ -274,7 +281,7 @@ feature_end hellish-upstream ok
 if ! feature_on webstack; then
     feature_off webstack
 else
-    feature_begin webstack /
+    feature_begin webstack /var
     ### ─── 2. WordPress setup ───────────────────────────────────────────────────
     echo "--- Setting up WordPress ---"
 

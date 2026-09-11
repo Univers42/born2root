@@ -42,7 +42,7 @@ for gb in 8 10 15 50 500; do
 done
 
 # ── Floors and caps ─────────────────────────────────────────────────────────
-check "8 GB: root at its floor" "$(awk -F= '$1=="root"{print $2}' "$TMP/s8")" 2560
+check "8 GB: root at its floor" "$(awk -F= '$1=="root"{print $2}' "$TMP/s8")" "$(sed -n "/^LAYOUT='/,/^'/p" generate/partition_recipe.sh | awk '$1=="root"{print $2}')"
 check "8 GB: every volume at floor (surplus is 0)" "$(SIZE_B2B=8 $GEN --table | grep -c 'smallest layout that works')" 1
 check "500 GB: root capped at 30 GB" "$(awk -F= '$1=="root"{print $2}' "$TMP/s500")" 30720
 check "500 GB: tmp capped at 10 GB" "$(awk -F= '$1=="tmp"{print $2}' "$TMP/s500")" 10240
