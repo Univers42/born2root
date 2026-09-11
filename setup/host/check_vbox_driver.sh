@@ -23,7 +23,7 @@
 # THE TWO-MACHINE EDGE CASE (measured on 42 Madrid, 2026-09-03)
 #   Two different filesystems, and only one of them follows you:
 #
-#     /sgoinfre   NFS, shared   the repo -- so the ISO and disk_images/*.vdi
+#     $VM_PATH    wherever the VM disk was put -- the ISO and disk_images/*
 #                               ARE the same files on every workstation
 #     $HOME       local xfs     VirtualBox's registry (~/.config/VirtualBox),
 #                               your browser profiles and their CA trust,
@@ -244,7 +244,7 @@ else
     note "group — so it cannot be fixed from here. Two ways forward:"
     # shellcheck disable=SC2059
     printf "      ${C_BOLD}1.${C_RESET} Build on a machine whose VirtualBox driver works.\n"
-    note "   The repo is on /sgoinfre (shared), so the ISO and the VM's disk are"
+    note "   The ISO and the VM's disk live wherever VM_PATH points, which are"
     note "   already there. \$HOME is LOCAL to each machine, so the VM"
     note "   registration and your browser trust are not -- on that machine run:"
     note "     make all      (registers the VM and installs)"

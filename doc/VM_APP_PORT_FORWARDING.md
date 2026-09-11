@@ -21,7 +21,7 @@ osionos / ft_transcendence ports:
 Run this from the machine that owns VirtualBox:
 
 ```bash
-cd /sgoinfre/students/dlesieur/born2root
+cd ~/goinfre/born2root      # wherever your checkout lives
 make fix_app_ports
 ```
 

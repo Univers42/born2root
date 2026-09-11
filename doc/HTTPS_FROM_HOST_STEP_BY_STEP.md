@@ -551,8 +551,14 @@ filesystems are in play and **only one of them follows you**:
 
 | Path                                   | Filesystem                  | Follows you? | What lives there                                                                                                                    |
 | -------------------------------------- | --------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `/sgoinfre/students/<login>/born2root` | NFS, shared                 | **yes**      | the repo, the ISOs, `disk_images/<vm>.vdi` — the VM's actual disk                                                                   |
+| `/sgoinfre/students/<login>`           | NFS, shared                 | **yes**      | whatever you keep there — but it is capped at **15 GB**, which a VM disk will blow through                                          |
+| `/goinfre/<login>`                     | local disk (ext4, ~70 GB)   | **no**       | the repo, the ISOs and `disk_images/<vm>.qcow2` — roomy and fast, but **per machine and wipeable**                                  |
 | `$HOME`                                | local disk (`xfs`, ~4.7 GB) | **no**       | `~/.config/VirtualBox` (which VMs are registered), your Firefox/Chrome profiles **and their CA trust**, `~/.ssh/config`, `~/.cache` |
+
+Since the quota forced the VM onto `/goinfre`, **nothing about the build follows
+you between workstations any more.** Sitting at a different machine means no VM
+at all, not a shared one — so push your work, and expect to rebuild. That is a
+~40 minute `make all`, which is the price of a disk that fits the quota.
 
 Three consequences, in the order they bite:
 
@@ -570,13 +576,16 @@ Three consequences, in the order they bite:
    this first, so a driverless machine stops in under a second instead of
    downloading an ISO and failing at the VM start.
 
-2. **The VM is registered per machine, but its disk is shared.** On a new
-   machine `make all` re-registers the VM around the _same_ `.vdi` on
-   `/sgoinfre`. That also means **deleting the disk here destroys the VM the
-   other machine boots**. `make rm_disk_image`, and therefore `fclean`, `re` and
-   `fresh`, now refuse when `disk_images/<vm>/.built-on` names a different
-   machine _and_ the disk holds a real system (over 100 MB). A freshly created
-   ~2 MB disk is not protected, since it holds nothing. Override with
+2. **The VM is registered per machine, and so is its disk now.** This used to
+   read the other way: the disk lived on shared NFS, so `make all` on a new
+   machine re-registered the VM around the _same_ disk, and deleting it here
+   destroyed the VM the other machine booted. With the disk on `/goinfre` that
+   sharing is gone — but the guard that came from it is still worth having, for
+   the case where you point `VM_PATH` back at a shared filesystem.
+   `make rm_disk_image`, and therefore `fclean`, `re` and `fresh`, refuse when
+   `disk_images/<vm>/.built-on` names a different machine _and_ the disk holds a
+   real system (over 100 MB — checked on both `.vdi` and `.qcow2`). A freshly
+   created ~2 MB disk is not protected, since it holds nothing. Override with
    `FORCE_HOST=1` when you mean it.
 
 3. **Browser trust does not follow you.** `cert9.db` lives in the browser

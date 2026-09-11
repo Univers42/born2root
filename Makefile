@@ -528,8 +528,12 @@ check_driver:
 # creating the disk and then failed does not leave a guard behind to trip over.
 guard_host:
 	@stamp="$(VM_PATH)/$(VM_NAME)/.built-on"; \
-	vdi="$(VM_PATH)/$(VM_NAME)/$(VM_NAME).vdi"; \
-	sz=0; [ -f "$$vdi" ] && sz=$$(stat -c %s "$$vdi" 2>/dev/null || echo 0); \
+	sz=0; \
+	for d in "$(VM_PATH)/$(VM_NAME)/$(VM_NAME).vdi" "$(VM_PATH)/$(VM_NAME)/$(VM_NAME).qcow2"; do \
+		[ -f "$$d" ] || continue; \
+		n=$$(stat -c %s "$$d" 2>/dev/null || echo 0); \
+		[ "$$n" -gt "$$sz" ] && sz=$$n; \
+	done; \
 	if [ -r "$$stamp" ] && [ "$$sz" -gt 104857600 ]; then \
 		owner=$$(head -n1 "$$stamp" | awk '{print $$1}'); \
 		me=$$(hostname -f 2>/dev/null || hostname); \
@@ -693,9 +697,15 @@ slim:
 # so removing the directory leaves a path only root can recreate -- and the next
 # `make all` dies on "mkdir: cannot create directory: Permission denied" with
 # nothing saying that a previous fclean is what caused it.
+# The .vm_path.<vm> registry is deliberately spared. It is how a relocated
+# setup remembers where it lives (Makefile's VM_PATH default reads it), so
+# deleting it here made `make fclean` silently forget a VM_PATH= given once and
+# send the next `make all` back to the repo -- which, on a quota'd filesystem,
+# is the whole problem this project just spent a day fixing.
 fclean: clean rm_disk_image
 	@[ -n "$(VM_PATH)" ] && [ -d "$(VM_PATH)" ] \
-		&& rm -rf -- "$(VM_PATH)"/* "$(VM_PATH)"/.[!.]* 2>/dev/null; true
+		&& find "$(VM_PATH)" -mindepth 1 -maxdepth 1 \
+			! -name '.vm_path.*' -exec rm -rf -- {} + 2>/dev/null; true
 
 re: fclean all
 

@@ -10,7 +10,10 @@ VM_MEMORY="2048"     # 2GB RAM as requested
 VM_CPUS="1"          # Single CPU is sufficient for the project
 VM_DISK_SIZE="32768" # 32GB as requested
 VM_NETWORK_TYPE="nat"
-VM_BASE_PATH="/sgoinfre/students/dlesieur/dlesieur42/m_virtual_machine"
+# Standalone template, not part of `make all`. VM_PATH is the project-wide
+# variable; this honours it so the template cannot strand a disk on a quota'd
+# filesystem the way the old hardcoded path did.
+VM_BASE_PATH="${VM_PATH:-$HOME/goinfre/vms}"
 ISO_PATH="$VM_BASE_PATH/debian-12.10.0-amd64-netinst.iso"
 VM_DISK_PATH="$VM_BASE_PATH/$VM_NAME/$VM_NAME.vdi"
 SSH_PORT="4242" # 42 project requires SSH on port 4242
