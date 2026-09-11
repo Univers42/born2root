@@ -60,7 +60,7 @@
 #   command that reaches it, instead of being reported stopped.
 #
 # Env
-#   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (14336)
+#   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (15360 = SIZE_B2B*1024)
 #   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (read from vm_pass.txt)
 #   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
 # ============================================================================ #
@@ -96,7 +96,7 @@ vm_paths() {
 }
 vm_paths
 
-DISK_SIZE_MB="${DISK_SIZE_MB:-14336}"
+DISK_SIZE_MB="${DISK_SIZE_MB:-15360}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 VM_CPUS="${VM_CPUS:-3}"
 
@@ -648,6 +648,15 @@ watch_install() {
         if failed=$(di_failed_step "$SERIAL"); then
             finish fail "the installer failed: $failed" \
                 "d-i is waiting on an error dialog nobody can answer. Look: $0 screenshot  |  $0 console"
+            return 1
+        fi
+        # A required feature that did not install is a failed build, not a VM
+        # with a footnote: the whole point of deciding the profile on the host
+        # (generate/feature_profile.sh) is that this cannot end as a stamped
+        # "installed" system missing nvim or sudo.
+        if failed=$(di_feature_failed "$SERIAL"); then
+            finish fail "a required feature failed to install: $failed" \
+                "the profile was checked against the layout, so this is a wrong cost estimate or a network failure. Look: $0 console  |  guest: /etc/b2b/PROVISION_FAILED"
             return 1
         fi
 

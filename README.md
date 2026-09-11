@@ -866,21 +866,38 @@ The warnings that remain are all expected on a headless server:
 
 ## Disk Layout & Growing a Partition
 
-The VM is a **14 GB** dynamically-allocated disk, sized against a 15 GB school
-quota for the whole project. `make space` reports the footprint and fails a
-build that would exceed it.
+One number sizes the whole VM: **`SIZE_B2B`, in GB, default 15** (the school
+quota). The disk, the partition layout, what gets installed and the cap
+`make space` enforces are all derived from it. Preview any size without
+building:
+
+```bash
+make partitions SIZE_B2B=50     # the layout
+make features   SIZE_B2B=50     # what gets installed, and whether it fits
+```
+
+The layout is not scaled proportionally — that gives a 100 GB `/tmp` on a
+500 GB disk and floors that don't fit on 10 GB. Every volume has a **floor**
+(a working Debian fits on 8 GB), a **weighted share** of what is left, and a
+**cap** (nothing is gained past 30 GB of `/`); `/var` takes the remainder,
+because Docker is the thing that actually grows. Below 8 GB the build is
+refused with the size that would work. The default, 15 GB:
 
 | Mount      | Size    | Holds                                      |
 | ---------- | ------- | ------------------------------------------ |
 | `/boot`    | 500 MB  | kernel, unencrypted (required)             |
-| `/`        | 4 GB    | base system, apt packages, Docker binaries |
-| swap       | 1 GB    | mounted with `discard`                     |
-| `/home`    | 768 MB  | user data (project sources live on the host) |
-| `/opt`     | 512 MB  | **machine-wide scope** — see below         |
-| `/srv`     | 512 MB  | service data (lighttpd)                    |
-| `/tmp`     | 1 GB    | build artefacts                            |
-| `/var/log` | 1 GB    | system + Docker logs                       |
-| `/var`     | ~4.5 GB | Docker images, containers, build cache     |
+| `/`        | 3.5 GB  | base system, apt packages, Docker binaries |
+| swap       | 2 GB    | follows RAM (1–4 GB), mounted with `discard` |
+| `/home`    | 1.2 GB  | user data (project sources live on the host) |
+| `/opt`     | 750 MB  | **machine-wide scope** — see below         |
+| `/srv`     | 450 MB  | service data (lighttpd)                    |
+| `/tmp`     | 640 MB  | build artefacts                            |
+| `/var/log` | 640 MB  | system + Docker logs                       |
+| `/var`     | ~5.3 GB | Docker images, containers, build cache     |
+
+`generate/partition_recipe.sh` computes it; the copy in `preseeds/preseed.cfg`
+is its output for the default and `tests/test_partition_recipe.sh` fails if the
+two drift.
 
 ### Why it is this small, and why that took a fix
 
@@ -937,10 +954,43 @@ make re LUKS=OFF                # unencrypted — FAILS the evaluation, dev only
 ### Reclaiming space
 
 ```bash
-make space              # what the project costs, against the 15 GB budget
+make space              # what the project costs, against the SIZE_B2B+1 GB budget
 make slim               # drop used ISOs, apt-clean + fstrim inside the guest
 make slim COMPACT=1     # also rewrite the qcow2 without unreferenced clusters
 ```
+
+### Installation profiles
+
+What the provisioners install is decided **on the host, from `SIZE_B2B`**, and
+checked against the layout above before the ISO is built. It used to be
+decided at runtime, inside the guest, by free-space guards that printed
+`[SKIP]` and carried on — so a small disk produced no error, just a VM quietly
+missing things, and Docker could run before nvim and starve it.
+
+| Profile      | `SIZE_B2B` | Installs                                                                 |
+| ------------ | ---------- | ------------------------------------------------------------------------ |
+| **minimal**  | 8–13       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish** |
+| **standard** | 14–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer, Herdr + Claude Code |
+| **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow) |
+
+AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
+be turned off. Everything else can be, per feature:
+
+```bash
+make all SIZE_B2B=10                        # minimal
+make all SIZE_B2B=10 FEATURES=+docker       # minimal plus Docker — fits, so it builds
+make all SIZE_B2B=13 PROFILE=standard       # refused: "fits from SIZE_B2B=14"
+make all FEATURES="-pytools -devtools-extra"
+```
+
+A set that does not fit **fails the ISO build** naming the mount and the
+smallest `SIZE_B2B` that works. The resolved set ships in the ISO as
+`/etc/b2b/features.conf`; the guest scripts install exactly that, required
+features first. First boot records what each feature *actually* cost to
+`/etc/b2b/features.status` — the estimates in `generate/feature_profile.sh`
+are meant to be corrected from it. A required feature that fails to install
+prints `B2B-FEATURE-FAILED` on the serial console and **fails `make all`**;
+inside the guest, `/etc/b2b/PROVISION_FAILED` says why and the MOTD flags it.
 
 ### Machine-wide scope: `/opt`, not `/` or `/home`
 

@@ -134,13 +134,29 @@ NVIM_USERS ?=
 # file track real usage instead of high-water mark.
 #
 # With that fixed the virtual size means what it says: a hard ceiling on what
-# this VM can cost. 14336MB (14GB) is chosen against a 15GB school quota for
-# the whole project — see `make space`, which fails a build that exceeds it.
-# The recipe in preseeds/preseed.cfg fully allocates the group, with /var last
-# and unpinned so the remainder lands where Docker needs it. Raising this
-# number therefore grows /var; to move space between volumes afterwards use
-# `lvreduce -r` on one and `lvextend -r` on another.
-DISK_SIZE_MB ?= 14336
+# this VM can cost.
+#
+# ONE NUMBER DRIVES EVERYTHING: SIZE_B2B, in GB. From it are derived
+#   - the disk (DISK_SIZE_MB),
+#   - the partition layout (generate/partition_recipe.sh: floors, weighted
+#     shares, caps, /var takes the rest — preview with `make partitions`),
+#   - what gets installed (generate/feature_profile.sh: minimal 8-13,
+#     standard 14-29, full 30+ — preview with `make features`), and
+#   - the footprint cap `make space` enforces.
+# `make all` with nothing set builds a 15GB VM, the school quota. Anything
+# below 8 is refused with the reason; a feature set that would not fit the
+# layout is refused before a single byte is downloaded.
+#   make all SIZE_B2B=50                     bigger disk, more features on
+#   make all SIZE_B2B=10 FEATURES=+docker    refused: names the size that fits
+SIZE_B2B ?= 15
+DISK_SIZE_MB ?= $(shell echo $$(( $(SIZE_B2B) * 1024 )))
+
+# Which installs go into the guest. auto = from SIZE_B2B (see above);
+# FEATURES adds/removes single ones on top, e.g. FEATURES="+docker -pytools".
+# Base features (everything Born2beRoot mandates, hellish, nvim) cannot be
+# turned off. `make features` shows the resolved set and whether it fits.
+PROFILE ?= auto
+FEATURES ?=
 
 # Encrypt the guest's LVM with LUKS. ON is the default and is the only mode
 # that satisfies the born2root mandatory requirement — the VM you hand in must
@@ -158,10 +174,11 @@ DISK_SIZE_MB ?= 14336
 LUKS ?= ON
 
 # The whole project — source, ISOs and the VM disk — must fit in this many GB.
-# 15 is the school's shared-storage cap. `make space` reports the breakdown and
-# fails when it is exceeded; `make all` checks it before building anything.
-# Raise it for one run with SPACE_BUDGET_GB=25 make ...
-SPACE_BUDGET_GB ?= 15
+# Derived: the disk plus ~350MB of source, rounded up. With the default
+# SIZE_B2B=15 that is 16; SIZE_B2B=14 gives a hard 15GB project cap if the
+# quota is on the whole tree. `make space` reports the breakdown and fails
+# when it is exceeded; `make all` checks it before building anything.
+SPACE_BUDGET_GB ?= $(shell expr $(SIZE_B2B) + 1)
 
 # `make slim COMPACT=1` also rewrites the qcow2 without its unreferenced
 # clusters. Off by default because it requires the VM to be stopped.
@@ -206,7 +223,7 @@ C_CYAN   := \033[36m
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
-        space slim
+        space slim partitions features
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -244,11 +261,13 @@ all: no_root prepare
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \
 		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" \
+		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
 	else \
 		$(MAKE_BIN) --no-print-directory check_driver && \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)" \
+		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
@@ -261,7 +280,8 @@ backend:
 # The same VM, run by QEMU instead of VirtualBox. Useful on its own when you
 # want to drive the phases by hand rather than through `make all`.
 QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
-	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)"
+	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)" \
+	SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)"
 
 # Boots the ISO and runs the unattended install, which REFORMATS the disk.
 # A qcow2 that has grown past ~1GB already holds an installed system, so
@@ -561,7 +581,9 @@ fix_app_ports:
 # =========@@ Build preseeded ISO @@============================================
 gen_iso: shell
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
-		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" $(SCRIPT_SH) $(ISO_BUILDER)
+		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" \
+		SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" $(SCRIPT_SH) $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
@@ -682,6 +704,18 @@ clean:
 space:
 	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 		$(SCRIPT_SH) utils/space_budget.sh
+
+# What the guest's disk will look like for this SIZE_B2B, without building.
+partitions:
+	@SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		$(SCRIPT_SH) generate/partition_recipe.sh --table
+
+# What will be installed for this SIZE_B2B/PROFILE/FEATURES, and whether it
+# fits that layout. Exits 1 when it does not, naming the size that would.
+features:
+	@SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
+		$(SCRIPT_SH) generate/feature_profile.sh --table
 
 # Hand back what is no longer used: the ISOs once the VM is installed, the
 # guest's apt cache and orphaned packages, and the blocks the guest has freed

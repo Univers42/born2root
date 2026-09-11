@@ -42,11 +42,11 @@ VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
 # because nothing in the guest ever handed freed blocks back. See the comment
 # in preseeds/preseed.cfg for the full measurement.
 #
-# 14336 MB is sized against the 15 GB school quota for the whole project;
+# The Makefile derives this from SIZE_B2B (default 15 GB, the school quota);
 # `make space` reports the footprint and fails a build that would exceed it.
 # The recipe fully allocates the group, with /var last and unpinned, so raising
 # this number grows /var.
-VM_DISK_SIZE="${DISK_SIZE_MB:-14336}" # 14GB in MB
+VM_DISK_SIZE="${DISK_SIZE_MB:-15360}" # 15GB in MB (SIZE_B2B*1024)
 
 # ── Smart VM sizing algorithm ────────────────────────────────────────────────
 # Detects host hardware and allocates resources proportionally.

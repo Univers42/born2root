@@ -246,6 +246,69 @@ else
 	echo "  ✓ preseed.cfg (LUKS=OFF — plain LVM, evaluation-failing by design)"
 fi
 
+# ── Partition recipe: generated for THIS build's SIZE_B2B ────────────────────
+# The checked-in RECIPE region is the generator's output for the default size,
+# so a build for any other size has to regenerate it. Same single staging point
+# as the LUKS swap above, same reason: the initrd copies what is written here.
+echo "Sizing the partition recipe..."
+RECIPE_TMP=$(mktemp)
+if ! SIZE_B2B="${SIZE_B2B:-15}" DISK_SIZE_MB="${DISK_SIZE_MB:-}" VM_RAM_MB="${VM_RAM_MB:-2048}" \
+	"${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/partition_recipe.sh" --recipe > "$RECIPE_TMP"; then
+	# The generator has already said exactly why (too small, non-numeric).
+	rm -f "$RECIPE_TMP"
+	echo "Error: could not derive a partition layout — see above. Nothing was built." >&2
+	exit 1
+fi
+awk -v recipe="$RECIPE_TMP" '
+	/^# ── RECIPE-BEGIN/ {
+		skipping = 1
+		while ((getline line < recipe) > 0) print line
+		close(recipe)
+		next
+	}
+	/^# ── RECIPE-END/ { skipping = 0; next }
+	!skipping { print }
+' "$ISO_DIR/preseed.cfg" > "$ISO_DIR/preseed.cfg.sized" && mv "$ISO_DIR/preseed.cfg.sized" "$ISO_DIR/preseed.cfg"
+rm -f "$RECIPE_TMP"
+
+# Same contract as the LUKS markers: if RECIPE-BEGIN/END were reworded, awk
+# above would leave the checked-in default in place and a SIZE_B2B=50 build
+# would silently install a 15 GB layout onto a 50 GB disk. Check the result,
+# not the intent.
+recipe_lvs=$(grep -c '^\s*lv_name{' "$ISO_DIR/preseed.cfg")
+recipe_last=$(grep '^\s*lv_name{' "$ISO_DIR/preseed.cfg" | tail -1 | sed 's/.*lv_name{ *\([^ }]*\).*/\1/')
+recipe_marks=$(grep -c '^# ── RECIPE-BEGIN' "$ISO_DIR/preseed.cfg")
+if [ "$recipe_marks" != 1 ] || [ "$recipe_lvs" != 8 ] || [ "$recipe_last" != var ]; then
+	echo "Error: the sized partition recipe did not land in the staged preseed." >&2
+	echo "       markers=$recipe_marks (want 1)  volumes=$recipe_lvs (want 8)  last=$recipe_last (want var)" >&2
+	echo "       The RECIPE-BEGIN/RECIPE-END markers in $PRESEED_FILE no longer match" >&2
+	echo "       what create_custom_iso.sh looks for. Fix them; shipping the checked-in" >&2
+	echo "       default under SIZE_B2B=${SIZE_B2B:-15} would be the wrong disk layout." >&2
+	exit 1
+fi
+if ! grep -q "^#   SIZE_B2B=$(( ${DISK_SIZE_MB:-$(( ${SIZE_B2B:-15} * 1024 ))} / 1024 )) " "$ISO_DIR/preseed.cfg"; then
+	echo "Error: staged recipe header does not name the requested size." >&2
+	exit 1
+fi
+echo "  ✓ partition recipe sized for SIZE_B2B=$(( ${DISK_SIZE_MB:-$(( ${SIZE_B2B:-15} * 1024 ))} / 1024 )) GB (VM_RAM_MB=${VM_RAM_MB:-2048})"
+
+# ── Install profile: decided here, proven to fit, shipped inside the ISO ─────
+# What the provisioners install used to be decided at runtime in the guest by
+# free-space guards that printed [SKIP] and carried on. Now it is decided once,
+# from the same SIZE_B2B the recipe was sized for, and checked against that
+# recipe mount by mount. A set that does not fit stops the build here with the
+# size that would work. See generate/feature_profile.sh.
+echo "Resolving the install profile..."
+FEATURE_ENV="SIZE_B2B=${SIZE_B2B:-15} DISK_SIZE_MB=${DISK_SIZE_MB:-} VM_RAM_MB=${VM_RAM_MB:-2048} PROFILE=${PROFILE:-auto} FEATURES=${FEATURES:-} AI_MODE=${AI_MODE:-off}"
+if ! env $FEATURE_ENV "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" --check; then
+	echo "Error: the requested features do not fit this disk — see above. Nothing was built." >&2
+	exit 1
+fi
+env $FEATURE_ENV "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" --conf > "$ISO_DIR/features.conf" \
+	|| { echo "Error: could not write features.conf" >&2; exit 1; }
+env $FEATURE_ENV "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" --resolve | sed 's/^/    /'
+echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") feature(s) on"
+
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)
 echo "Copying setup scripts to ISO root..."
 for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do
@@ -258,23 +321,11 @@ for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do
     fi
 done
 
-# AI_MODE has to travel INSIDE the ISO: first-boot-setup.sh runs from @reboot
-# cron, which inherits nothing from this build. So the chosen mode is stamped
-# into the copy of the script that ships, rather than passed as an environment
-# variable that would silently be empty at boot.
-AI_MODE="${AI_MODE:-off}"
-case "$AI_MODE" in
-off | client | local) ;;
-*)
-    echo "Error: AI_MODE must be off, client or local (got '$AI_MODE')" >&2
-    exit 1
-    ;;
-esac
-if [ -f "$ISO_DIR/first-boot-setup.sh" ]; then
-    sed -i "s|^B2B_AI_MODE=\"\${B2B_AI_MODE:-off}\"|B2B_AI_MODE=\"\${B2B_AI_MODE:-${AI_MODE}}\"|" \
-        "$ISO_DIR/first-boot-setup.sh"
-    echo "  ✓ AI_MODE=${AI_MODE} baked into first-boot-setup.sh"
-fi
+# AI_MODE travels INSIDE the ISO as B2B_AI_MODE in features.conf (staged
+# above, validated by feature_profile.sh): first-boot-setup.sh runs from
+# @reboot cron, which inherits nothing from this build, so it reads the file.
+# It used to be sed'd into the script itself; one mechanism now carries every
+# build-time decision.
 
 # Post-install provisioners. These are NOT run from the d-i chroot: both need a
 # real network and working dpkg triggers (npm, pip, git clone), which is exactly

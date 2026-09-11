@@ -109,6 +109,19 @@ di_install_complete() {
     [ -n "$1" ] && [ -r "$1" ] && grep -q '^B2B-INSTALL-COMPLETE' "$1" 2>/dev/null
 }
 
+# A BASE feature (something Born2beRoot mandates, hellish, nvim) that could not
+# be installed. b2b-setup.sh prints "B2B-FEATURE-FAILED <name>: <reason>" and
+# d-i's syslog feed carries it to the serial port. Not anchored: the feed
+# prefixes every line with syslog's timestamp and program name. Prints the
+# name and reason.
+di_feature_failed() {
+    local log="$1" line
+    [ -n "$log" ] && [ -r "$log" ] || return 1
+    line=$(tr -d '\r' <"$log" | grep -oE 'B2B-FEATURE-FAILED [^:]+:.*' | head -n 1)
+    [ -n "$line" ] || return 1
+    printf '%s' "${line#B2B-FEATURE-FAILED }"
+}
+
 # 95umount is the last hook d-i runs, and it unmounts /dev -- which is why
 # nothing after it can log or write to the serial port (see preseeds/preseed.cfg).
 # Reaching it means every step that installs anything has already finished.

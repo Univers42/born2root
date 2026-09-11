@@ -22,6 +22,38 @@ exec > >(tee -a "$LOG") 2>&1
 
 echo "=== Born2beRoot setup starting ($(date)) ==="
 
+### ─── 0. Which features this build asked for ───────────────────────────────
+# Decided on the host by generate/feature_profile.sh from SIZE_B2B, checked
+# there against the partition layout, and shipped as /etc/b2b/features.conf
+# (late_command copies it in). An ISO without the file gets the base set only,
+# which is what every profile contains: the install still works, it is just
+# the smallest one.
+mkdir -p /etc/b2b
+B2B_PROFILE=minimal
+B2B_AI_MODE=off
+if [ -f /etc/b2b/features.conf ]; then
+    # shellcheck disable=SC1091
+    . /etc/b2b/features.conf
+    echo "[OK] features.conf: profile=$B2B_PROFILE size=${B2B_SIZE_GB:-?}GB"
+else
+    echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
+fi
+# feature_on <name>: is this feature in the build? Base features are on even
+# without the file, so a mandatory install never depends on it.
+feature_on() {
+    case "$1" in b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
+}
+# feature_fail <name> <reason>: a BASE feature could not be installed. The
+# host is watching the serial port for exactly this line (setup/host/
+# di_progress.sh) and fails `make all` on it, so a missing sudo or nvim ends
+# the build instead of being a surprise at first login.
+feature_fail() {
+    echo "[FAIL] $1: $2"
+    printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
+    echo "B2B-FEATURE-FAILED $1: $2"
+}
+
 # ── Disk space safety check ──────────────────────────────────────────────────
 # Returns 0 (OK) if the given mount point has at least $2 MB free.
 # Usage: check_disk_space / 500  → true if / has >= 500 MB free
@@ -70,13 +102,18 @@ $APT sudo ufw openssh-server \
     cron haveged || true
 echo "[OK] Core packages"
 
-# Bonus: Web stack (lighttpd + MariaDB + PHP)
-if check_disk_space / 800; then
+# Bonus: Web stack (lighttpd + MariaDB + PHP) — the `webstack` feature,
+# standard profile and up. Its fit was checked at ISO-build time; the space
+# guard here is a last line against a wrong estimate, not the decision.
+if ! feature_on webstack; then
+    echo "[OFF] Web stack packages — not in the '$B2B_PROFILE' profile"
+elif check_disk_space / 800; then
     $APT lighttpd mariadb-server \
         php-fpm php-mysql php-cgi php-mbstring php-xml php-gd php-curl || true
     echo "[OK] Web stack packages"
 else
-    echo "[SKIP] Web stack packages — insufficient disk space"
+    echo "[WARN] webstack: insufficient space on / — the build-time estimate was wrong, see generate/feature_profile.sh"
+    printf 'webstack no-space\n' >>/etc/b2b/features.status
 fi
 
 # Developer essentials (all in base Debian repos)
@@ -87,6 +124,8 @@ fi
 # NOTE: nodejs/npm are installed by first-boot-setup.sh (full systemd + network).
 # Installing npm in d-i chroot hangs on dpkg triggers → blocks entire script
 # → SSH, sudo, UFW, password policy etc. never get configured.
+# `devtools-apt` is a BASE feature: gcc and python3 are what nvim's parsers
+# and providers are built with, so running out of room here is a failed build.
 if check_disk_space / 500; then
     $APT git build-essential gcc g++ make \
         libreadline-dev \
@@ -100,7 +139,7 @@ if check_disk_space / 500; then
         jq bc || true
     echo "[OK] Developer tools"
 else
-    echo "[SKIP] Developer tools — insufficient disk space"
+    feature_fail devtools-apt "less than 500 MB free on / before the developer packages"
 fi
 
 # Clean apt cache after package install to reclaim space on /var
@@ -733,6 +772,19 @@ cat >/etc/motd <<'MOTDEOF'
   ╚═══════════════════════════════════════════════════════╝
 
 MOTDEOF
+# Below the box: the layout this guest was built with, so the numbers are one
+# login away. Written after the layout file exists (see the block further
+# down), which is why this is a hook rather than static text.
+cat >/etc/update-motd.d/90-b2b-layout <<'MOTDLAYOUT'
+#!/bin/sh
+[ -r /etc/b2b/layout ] || exit 0
+echo "  Disk layout (from /etc/b2b/layout):"
+sed -n '2,$p' /etc/b2b/layout | sed 's/^/    /'
+[ -r /etc/b2b/features.conf ] && echo "  Profile: $(sed -n 's/^B2B_PROFILE=//p' /etc/b2b/features.conf)  (features: /etc/b2b/features.conf)"
+[ -r /etc/b2b/PROVISION_FAILED ] && echo "  !! PROVISIONING FAILED: see /etc/b2b/PROVISION_FAILED"
+echo
+MOTDLAYOUT
+chmod +x /etc/update-motd.d/90-b2b-layout
 echo "[OK] MOTD set"
 
 echo "=== Born2beRoot MANDATORY configuration complete ($(date)) ==="
@@ -888,6 +940,20 @@ for LV in home var srv opt tmp var-log; do
         echo "[OK] $LV: root reserve 5% → 1%"
     fi
 done
+
+### ─── RECORD THE LAYOUT THE GUEST WAS BUILT WITH ─────────────────────────────
+# From what LVM actually created, not from the recipe: partman rounds to
+# physical extents, and the honest number is the one on the disk. Read it in
+# the guest with `cat /etc/b2b/layout`, or see it on the MOTD.
+{
+    echo "# /etc/b2b/layout — what this VM was built with (profile: $B2B_PROFILE, SIZE_B2B=${B2B_SIZE_GB:-?})"
+    echo "# volume  size  mount    — move space with: lvreduce -r / lvextend -r"
+    vgs --noheadings --units m -o vg_name,vg_size,vg_free LVMGroup 2>/dev/null | awk '{ printf "vg      %-6s total, %s free\n", $2, $3 }'
+    lvs --noheadings --units m -o lv_name,lv_size LVMGroup 2>/dev/null | while read -r lv sz; do
+        mp=$(awk -v d="/dev/mapper/LVMGroup-$(printf '%s' "$lv" | sed 's/-/--/g')" '$1 == d { print $2 }' /etc/fstab 2>/dev/null)
+        printf '%-8s %-7s %s\n' "$lv" "$sz" "${mp:-[SWAP]}"
+    done
+} >/etc/b2b/layout 2>/dev/null && echo "[OK] layout recorded in /etc/b2b/layout" || echo "[WARN] could not record the layout"
 
 ### ─── GRUB SAFETY NET ────────────────────────────────────────────────────────
 # After all package installs (which may have upgraded kernel/initramfs/grub),

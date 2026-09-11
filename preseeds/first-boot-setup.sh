@@ -46,48 +46,235 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-### ─── 1. Docker installation (official method) ─────────────────────────────
-echo "--- Installing Docker ---"
+### ─── 0. Which features this build asked for ───────────────────────────────
+# Decided on the host by generate/feature_profile.sh from SIZE_B2B, checked
+# there against the partition layout, shipped as /etc/b2b/features.conf.
+# Sections below run in this order on purpose: everything Born2beRoot
+# mandates and the required tools (nvim, hellish) FIRST, optional features
+# after, so an optional install can never eat the space a required one needs.
+mkdir -p /etc/b2b
+B2B_PROFILE=minimal
+B2B_AI_MODE="${B2B_AI_MODE:-off}"
+if [ -f /etc/b2b/features.conf ]; then
+    # shellcheck disable=SC1091
+    . /etc/b2b/features.conf
+    echo "features.conf: profile=$B2B_PROFILE size=${B2B_SIZE_GB:-?}GB ai=$B2B_AI_MODE"
+else
+    echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
+fi
+feature_on() {
+    case "$1" in b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
+}
+# Every feature records what it actually cost, so the estimates in
+# generate/feature_profile.sh can be corrected from a real machine:
+#   /etc/b2b/features.status:  <name> <ok|failed|off|no-space> <mount> <delta MB>
+_FEAT_MOUNT=""
+_FEAT_BEFORE=0
+feature_begin() {
+    _FEAT_MOUNT="$2"
+    _FEAT_BEFORE=$(df -km "$2" 2>/dev/null | awk 'NR==2 {print $3}')
+    echo "--- [$1] ---"
+}
+feature_end() {
+    local after
+    after=$(df -km "$_FEAT_MOUNT" 2>/dev/null | awk 'NR==2 {print $3}')
+    printf '%s %s %s %s\n' "$1" "$2" "$_FEAT_MOUNT" "$((${after:-0} - ${_FEAT_BEFORE:-0}))" >>/etc/b2b/features.status
+    echo "--- [$1] $2 (${_FEAT_MOUNT}: +$((${after:-0} - ${_FEAT_BEFORE:-0})) MB) ---"
+}
+feature_off() {
+    printf '%s off - 0\n' "$1" >>/etc/b2b/features.status
+    echo "[OFF] $1 — not in the '$B2B_PROFILE' profile"
+}
+# A BASE feature that failed: the build is wrong, say so where it is seen.
+feature_fail() {
+    echo "[FAIL] $1: $2"
+    printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
+    echo "B2B-FEATURE-FAILED $1: $2" >/dev/console 2>/dev/null || true
+}
 
-# Add Docker official GPG key
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
+### ─── 3b. Ensure NAT keepalive + SSH stability services are running ─────────
+# b2b-setup.sh creates these in chroot but systemctl enable may not stick.
+# Belt-and-suspenders: re-enable and start them now with real systemd.
+systemctl daemon-reload
+systemctl enable nat-keepalive 2>/dev/null || true
+systemctl start nat-keepalive 2>/dev/null || true
+systemctl enable sshd-watchdog 2>/dev/null || true
+systemctl start sshd-watchdog 2>/dev/null || true
+systemctl enable ssh 2>/dev/null || true
+systemctl restart ssh 2>/dev/null || true
+# Apply kernel TCP keepalive values (may not have been applied from chroot)
+sysctl --system >/dev/null 2>&1 || true
+echo "[OK] NAT keepalive + sshd-watchdog + SSH stability ensured"
 
-# Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
-CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
-    # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
-    apt-get update -qq 2>/dev/null
-    if ! apt-cache show docker-ce >/dev/null 2>&1; then
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
-        apt-get update -qq
+### ─── 3c. UFW — configure and enable it for real ────────────────────────────
+# b2b-setup.sh already runs the `ufw allow` rules, but it runs them in the d-i
+# CHROOT, and they do not survive: measured on a fresh build, /etc/ufw/user.rules
+# contained no rule for 4242 and /etc/ufw/ufw.conf still said ENABLED=no, while
+# `systemctl is-active ufw` cheerfully reported "active". The service was up and
+# the firewall was doing nothing -- the worst of both worlds, because every
+# obvious check says it is fine.
+#
+# The cause is the usual one for this project: ufw needs a running kernel with
+# netfilter to load a ruleset, and the installer chroot has neither. So the
+# rules are applied HERE, on the first real boot, where they take effect and
+# persist. Born2beRoot requires the firewall to be on with only 4242 open, so
+# this is mandatory-part correctness, not a nicety.
+echo "--- Configuring UFW ---"
+if command -v ufw >/dev/null 2>&1; then
+    ufw --force reset >/dev/null 2>&1 || true
+    ufw default deny incoming >/dev/null 2>&1 || true
+    ufw default allow outgoing >/dev/null 2>&1 || true
+
+    # 4242 is the subject's requirement; the rest are the bonus web stack and
+    # the app ports the NAT forwards already expose.
+    ufw allow 4242/tcp comment 'SSH' >/dev/null 2>&1 || true
+    for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
+        ufw allow "${p}/tcp" >/dev/null 2>&1 || true
+    done
+
+    ufw --force enable >/dev/null 2>&1 || true
+    systemctl enable ufw >/dev/null 2>&1 || true
+
+    # Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
+    # what actually decides whether packets are filtered, unlike systemd's view.
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+        echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
+    else
+        echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
     fi
 else
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
-    apt-get update -qq
+    echo "[SKIP] ufw not installed"
 fi
 
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
+# First TRIM of the new system. b2b-setup.sh wires discard through crypttab,
+# lvm.conf, fstab and fstrim.timer, but that all runs under in-target, before
+# the crypt mapping has ever been opened with allow-discards. This is the first
+# moment the whole chain is actually live, and the install has just written and
+# deleted a lot: apt archives, the ISO's copies of these scripts, dpkg scratch.
+# Trimming once here hands those blocks back immediately rather than leaving
+# them allocated in the image until the weekly timer first fires.
+if command -v fstrim >/dev/null 2>&1; then
+    echo "--- Releasing freed blocks back to the disk image ---"
+    # -a walks every mounted filesystem; unsupported ones are skipped, so a
+    # build where the discard chain did not come up simply trims nothing here
+    # rather than failing first boot over it.
+    fstrim -av 2>&1 | sed 's/^/[TRIM] /' || echo "[WARN] fstrim found nothing to trim — check: lsblk -D"
+fi
 
-# Add dlesieur to docker group
-usermod -aG docker dlesieur 2>/dev/null || true
+### ─── 4b. Neovim + kickstart.nvim, and the hellishrc plugin framework ───────
+# Both are staged in /root by the preseed late_command. They run HERE, not in
+# the d-i chroot, because both need a real network and working dpkg triggers:
+# npm, pip and git clone are precisely the operations that hang in-target and
+# take the rest of the configuration down with them.
+#
+# Neither is allowed to fail the boot. They are re-runnable by hand, and the
+# Makefile exposes them as `make nvim` / `make hellish_plugins` over SSH.
+feature_begin nvim /
+# Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
+# `npm install -g`: the prefix has to point at /opt before anything is
+# installed, or the packages land in /usr/lib/node_modules and are stranded
+# off PATH when the prefix moves afterwards.
+echo "--- Pointing machine-wide tooling at /opt ---"
+if [ -f /root/install_global_scope.sh ]; then
+    chmod +x /root/install_global_scope.sh 2>/dev/null || true
+    "$B2B_SH" /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+        echo "[WARN] global scope setup reported errors"
+else
+    echo "[SKIP] /root/install_global_scope.sh not present"
+fi
 
-# Kill any running VS Code server so it restarts with the docker group loaded.
-# Without this, the VS Code server inherits the old group list (no docker GID)
-# and every Docker command from the VS Code terminal fails with "permission denied".
-# The user's next VS Code reconnect will spawn a fresh server with correct groups.
-pkill -u dlesieur -f "vscode-server" 2>/dev/null || true
+echo "--- Installing Neovim + kickstart.nvim ---"
+if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
+    # kickstart clones ~30 plugins, Mason pulls language servers and treesitter
+    # compiles parsers — call it 2 GB of headroom to be safe.
+    # nvim is a BASE feature: the profile check on the host already proved it
+    # fits, so running out of room here is a wrong estimate, not a reason to
+    # skip. 1 GB is the real headroom the install needs on /.
+    if check_disk_space / 1000; then
+        chmod +x /root/install_nvim.sh 2>/dev/null || true
+        # Bootstrap is skipped HERE and done once by the extras script below:
+        # downloading kickstart's plugins and then immediately downloading the
+        # extras on top would pay the cold-cache cost twice.
+        if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 "$B2B_SH" /root/install_nvim.sh 2>&1 |
+            tee -a /var/log/b2b-nvim-install.log; then
+            echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
+        else
+            echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
+        fi
 
-# Enable and start Docker
-systemctl enable docker
-systemctl start docker
-echo "[OK] Docker installed and running"
+        if ! feature_on nvim-extras; then
+            feature_off nvim-extras
+        elif [ -f /root/install_nvim_extras.sh ]; then
+            echo "--- Installing the Neovim extras layer ---"
+            chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
+            if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh 2>&1 |
+                tee -a /var/log/b2b-nvim-install.log; then
+                echo "[OK] Neovim extras installed"
+            else
+                echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+            fi
+        fi
+    else
+        feature_fail nvim "less than 1000 MB free on / before install_nvim.sh"
+    fi
+else
+    echo "[SKIP] Neovim — /root/install_nvim.sh not present"
+fi
 
+feature_end nvim ok
+feature_begin hellish-upstream /home
+### ─── The login shell, from upstream ────────────────────────────────────────
+# b2b-setup.sh already installed the ISO-baked binary in the installer chroot,
+# which is what guarantees a usable shell even with no network. This step runs
+# upstream's own installer now that there IS a network, so the VM gets the
+# current release plus the whole plugin framework in one go:
+#
+#   curl -fsSL .../hellish/main/install.sh | sh   -- driven with --yes here, so
+#   every question takes its default instead of needing keystrokes piped in.
+#
+# It also re-links /usr/bin/hellish to the refreshed hellish.real, so `ssh b2b
+# '<command>'` from the host keeps running inside hellish, and pins the
+# guest-side scripts' interpreter again (see normalize_guest_interpreters).
+echo "--- Installing hellish from upstream (binary + plugin framework) ---"
+HELLISH_OK=0
+if [ -f /root/install_hellish_upstream.sh ]; then
+    chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
+    if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
+        "$B2B_SH" /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+        echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
+        HELLISH_OK=1
+    else
+        echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
+    fi
+else
+    echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
+fi
+
+# Fallback only. The upstream installer brings the plugin framework itself, so
+# this runs when that failed (no network, upstream down) and the framework is
+# therefore absent -- never on top of a good install.
+if [ "$HELLISH_OK" != "1" ] && [ ! -f /home/dlesieur/.hellishrc ]; then
+    echo "--- Installing hellishrc plugin framework (fallback) ---"
+    if [ -f /root/install_hellish_plugins.sh ]; then
+        chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+        if HELLISH_USERS="dlesieur" "$B2B_SH" /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+            echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
+        else
+            echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
+        fi
+    else
+        echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+    fi
+else
+    echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
+fi
+
+feature_end hellish-upstream ok
+if ! feature_on webstack; then
+    feature_off webstack
+else
+feature_begin webstack /
 ### ─── 2. WordPress setup ───────────────────────────────────────────────────
 echo "--- Setting up WordPress ---"
 
@@ -459,23 +646,9 @@ if ! systemctl is-active --quiet lighttpd 2>/dev/null; then
 fi
 echo "[OK] WordPress fully installed — dashboard ready at /wordpress/wp-admin/"
 
-### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
-ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
-
-### ─── 3b. Ensure NAT keepalive + SSH stability services are running ─────────
-# b2b-setup.sh creates these in chroot but systemctl enable may not stick.
-# Belt-and-suspenders: re-enable and start them now with real systemd.
-systemctl daemon-reload
-systemctl enable nat-keepalive 2>/dev/null || true
-systemctl start nat-keepalive 2>/dev/null || true
-systemctl enable sshd-watchdog 2>/dev/null || true
-systemctl start sshd-watchdog 2>/dev/null || true
-systemctl enable ssh 2>/dev/null || true
-systemctl restart ssh 2>/dev/null || true
-# Apply kernel TCP keepalive values (may not have been applied from chroot)
-sysctl --system >/dev/null 2>&1 || true
-echo "[OK] NAT keepalive + sshd-watchdog + SSH stability ensured"
-
+feature_end webstack ok
+fi
+feature_begin nodejs /
 ### ─── 4. Third-party tools (with disk space guards) ─────────────────────────
 # b2b-setup.sh installs base dev tools in chroot but skips nodejs/npm
 # (npm's dpkg triggers hang in chroot and block all subsequent configuration).
@@ -501,7 +674,7 @@ check_disk_space() {
 }
 
 # Node.js + npm (not installed in chroot — triggers hang)
-if ! command -v node >/dev/null 2>&1 && check_disk_space / 300; then
+if feature_on nodejs && ! command -v node >/dev/null 2>&1 && check_disk_space / 300; then
     apt-get install -y -qq nodejs npm 2>/dev/null || true
     echo "[OK] nodejs + npm installed"
 else
@@ -509,7 +682,7 @@ else
 fi
 
 # NPM globals (skip if already installed)
-if command -v npm >/dev/null 2>&1 && ! command -v eslint >/dev/null 2>&1 && check_disk_space / 200; then
+if feature_on nodejs && command -v npm >/dev/null 2>&1 && ! command -v eslint >/dev/null 2>&1 && check_disk_space / 200; then
     npm install -g eslint prettier 2>/dev/null || true
     echo "[OK] NPM globals installed"
 else
@@ -517,7 +690,7 @@ else
 fi
 
 # Python tools via pipx — only if 500+ MB free (checkov alone is ~400 MB)
-if ! command -v ruff >/dev/null 2>&1 && check_disk_space / 500; then
+if feature_on pytools && ! command -v ruff >/dev/null 2>&1 && check_disk_space / 500; then
     apt-get install -y -qq pipx 2>/dev/null || true
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install ruff 2>/dev/null || true
     echo "[OK] Python tools installed"
@@ -530,167 +703,16 @@ apt-get clean 2>/dev/null || true
 
 echo "[OK] Third-party tools check complete"
 
-### ─── 4b. Neovim + kickstart.nvim, and the hellishrc plugin framework ───────
-# Both are staged in /root by the preseed late_command. They run HERE, not in
-# the d-i chroot, because both need a real network and working dpkg triggers:
-# npm, pip and git clone are precisely the operations that hang in-target and
-# take the rest of the configuration down with them.
-#
-# Neither is allowed to fail the boot. They are re-runnable by hand, and the
-# Makefile exposes them as `make nvim` / `make hellish_plugins` over SSH.
-### ─── 3c. UFW — configure and enable it for real ────────────────────────────
-# b2b-setup.sh already runs the `ufw allow` rules, but it runs them in the d-i
-# CHROOT, and they do not survive: measured on a fresh build, /etc/ufw/user.rules
-# contained no rule for 4242 and /etc/ufw/ufw.conf still said ENABLED=no, while
-# `systemctl is-active ufw` cheerfully reported "active". The service was up and
-# the firewall was doing nothing -- the worst of both worlds, because every
-# obvious check says it is fine.
-#
-# The cause is the usual one for this project: ufw needs a running kernel with
-# netfilter to load a ruleset, and the installer chroot has neither. So the
-# rules are applied HERE, on the first real boot, where they take effect and
-# persist. Born2beRoot requires the firewall to be on with only 4242 open, so
-# this is mandatory-part correctness, not a nicety.
-echo "--- Configuring UFW ---"
-if command -v ufw >/dev/null 2>&1; then
-    ufw --force reset >/dev/null 2>&1 || true
-    ufw default deny incoming >/dev/null 2>&1 || true
-    ufw default allow outgoing >/dev/null 2>&1 || true
-
-    # 4242 is the subject's requirement; the rest are the bonus web stack and
-    # the app ports the NAT forwards already expose.
-    ufw allow 4242/tcp comment 'SSH' >/dev/null 2>&1 || true
-    for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
-        ufw allow "${p}/tcp" >/dev/null 2>&1 || true
-    done
-
-    ufw --force enable >/dev/null 2>&1 || true
-    systemctl enable ufw >/dev/null 2>&1 || true
-
-    # Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
-    # what actually decides whether packets are filtered, unlike systemd's view.
-    if ufw status 2>/dev/null | grep -q "Status: active"; then
-        echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
-    else
-        echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
-    fi
-else
-    echo "[SKIP] ufw not installed"
-fi
-
-# First TRIM of the new system. b2b-setup.sh wires discard through crypttab,
-# lvm.conf, fstab and fstrim.timer, but that all runs under in-target, before
-# the crypt mapping has ever been opened with allow-discards. This is the first
-# moment the whole chain is actually live, and the install has just written and
-# deleted a lot: apt archives, the ISO's copies of these scripts, dpkg scratch.
-# Trimming once here hands those blocks back immediately rather than leaving
-# them allocated in the image until the weekly timer first fires.
-if command -v fstrim >/dev/null 2>&1; then
-    echo "--- Releasing freed blocks back to the disk image ---"
-    # -a walks every mounted filesystem; unsupported ones are skipped, so a
-    # build where the discard chain did not come up simply trims nothing here
-    # rather than failing first boot over it.
-    fstrim -av 2>&1 | sed 's/^/[TRIM] /' || echo "[WARN] fstrim found nothing to trim — check: lsblk -D"
-fi
-
-# Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
-# `npm install -g`: the prefix has to point at /opt before anything is
-# installed, or the packages land in /usr/lib/node_modules and are stranded
-# off PATH when the prefix moves afterwards.
-echo "--- Pointing machine-wide tooling at /opt ---"
-if [ -f /root/install_global_scope.sh ]; then
-    chmod +x /root/install_global_scope.sh 2>/dev/null || true
-    "$B2B_SH" /root/install_global_scope.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
-        echo "[WARN] global scope setup reported errors"
-else
-    echo "[SKIP] /root/install_global_scope.sh not present"
-fi
-
-echo "--- Installing Neovim + kickstart.nvim ---"
-if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
-    # kickstart clones ~30 plugins, Mason pulls language servers and treesitter
-    # compiles parsers — call it 2 GB of headroom to be safe.
-    if check_disk_space / 2000; then
-        chmod +x /root/install_nvim.sh 2>/dev/null || true
-        # Bootstrap is skipped HERE and done once by the extras script below:
-        # downloading kickstart's plugins and then immediately downloading the
-        # extras on top would pay the cold-cache cost twice.
-        if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 "$B2B_SH" /root/install_nvim.sh 2>&1 |
-            tee -a /var/log/b2b-nvim-install.log; then
-            echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
-        else
-            echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
-        fi
-
-        if [ -f /root/install_nvim_extras.sh ]; then
-            echo "--- Installing the Neovim extras layer ---"
-            chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
-            if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh 2>&1 |
-                tee -a /var/log/b2b-nvim-install.log; then
-                echo "[OK] Neovim extras installed"
-            else
-                echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
-            fi
-        fi
-    else
-        echo "[SKIP] Neovim — insufficient disk space"
-    fi
-else
-    echo "[SKIP] Neovim — /root/install_nvim.sh not present"
-fi
-
-### ─── The login shell, from upstream ────────────────────────────────────────
-# b2b-setup.sh already installed the ISO-baked binary in the installer chroot,
-# which is what guarantees a usable shell even with no network. This step runs
-# upstream's own installer now that there IS a network, so the VM gets the
-# current release plus the whole plugin framework in one go:
-#
-#   curl -fsSL .../hellish/main/install.sh | sh   -- driven with --yes here, so
-#   every question takes its default instead of needing keystrokes piped in.
-#
-# It also re-links /usr/bin/hellish to the refreshed hellish.real, so `ssh b2b
-# '<command>'` from the host keeps running inside hellish, and pins the
-# guest-side scripts' interpreter again (see normalize_guest_interpreters).
-echo "--- Installing hellish from upstream (binary + plugin framework) ---"
-HELLISH_OK=0
-if [ -f /root/install_hellish_upstream.sh ]; then
-    chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
-    if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
-        "$B2B_SH" /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-        echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
-        HELLISH_OK=1
-    else
-        echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
-    fi
-else
-    echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
-fi
-
-# Fallback only. The upstream installer brings the plugin framework itself, so
-# this runs when that failed (no network, upstream down) and the framework is
-# therefore absent -- never on top of a good install.
-if [ "$HELLISH_OK" != "1" ] && [ ! -f /home/dlesieur/.hellishrc ]; then
-    echo "--- Installing hellishrc plugin framework (fallback) ---"
-    if [ -f /root/install_hellish_plugins.sh ]; then
-        chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
-        if HELLISH_USERS="dlesieur" "$B2B_SH" /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-            echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
-        else
-            echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
-        fi
-    else
-        echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
-    fi
-else
-    echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
-fi
-
+feature_end nodejs ok
+if feature_on pytools; then printf "pytools ok /opt -\n" >>/etc/b2b/features.status; else feature_off pytools; fi
 ### ─── 4c. Herdr, Claude Code, and the optional local AI ────────────────────
 # Both are additive and neither may fail the boot. AI_MODE is baked into this
 # script by the ISO builder; it defaults to "off", so a stock build installs
 # and downloads nothing here.
 echo "--- Installing Herdr + Claude Code ---"
-if [ -f /root/install_devtools.sh ]; then
+if ! feature_on devtools-extra; then
+    feature_off devtools-extra
+elif [ -f /root/install_devtools.sh ]; then
     chmod +x /root/install_devtools.sh 2>/dev/null || true
     if check_disk_space / 500; then
         "$B2B_SH" /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
@@ -719,6 +741,57 @@ else
     echo "[SKIP] AI — /root/install_ai.sh not present"
 fi
 
+if ! feature_on docker; then
+    feature_off docker
+else
+feature_begin docker /var
+### ─── 1. Docker installation (official method) ─────────────────────────────
+echo "--- Installing Docker ---"
+
+# Add Docker official GPG key
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
+CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
+    # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
+    apt-get update -qq 2>/dev/null
+    if ! apt-cache show docker-ce >/dev/null 2>&1; then
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+    fi
+else
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
+    apt-get update -qq
+fi
+
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
+
+# Add dlesieur to docker group
+usermod -aG docker dlesieur 2>/dev/null || true
+
+# Kill any running VS Code server so it restarts with the docker group loaded.
+# Without this, the VS Code server inherits the old group list (no docker GID)
+# and every Docker command from the VS Code terminal fails with "permission denied".
+# The user's next VS Code reconnect will spawn a fresh server with correct groups.
+pkill -u dlesieur -f "vscode-server" 2>/dev/null || true
+
+# Enable and start Docker
+systemctl enable docker
+systemctl start docker
+echo "[OK] Docker installed and running"
+
+### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
+ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
+
+feature_end docker ok
+fi
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────
 sed -i '/first-boot-setup/d' /etc/crontab
 rm -f /root/first-boot-setup.sh
