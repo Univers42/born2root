@@ -35,16 +35,18 @@ ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 
 ISO_PATH="$(pwd)/$PRESEED_ISO"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
-# Disk size in MB. The VDI is DYNAMICALLY allocated, so this is a ceiling, not
-# an allocation: an untouched disk is ~2 MB on the host and only grows as the
-# guest writes. A bigger number therefore costs nothing until it is used, which
-# is why 120 GB is a safe default even on a shared filesystem.
+# Disk size in MB. The VDI is dynamically allocated, but treat this as a hard
+# ceiling on what the VM can cost rather than a free upper bound: this used to
+# default to 122880 (120 GB) on the theory that an unused disk costs nothing,
+# and the QEMU image built from the same recipe reached 42.7 GB on the host
+# because nothing in the guest ever handed freed blocks back. See the comment
+# in preseeds/preseed.cfg for the full measurement.
 #
-# The partition recipe in preseeds/preseed.cfg pins every logical volume and
-# deliberately leaves ~12 GB unallocated in the volume group, so raising this
-# number adds to that free pool rather than to any one filesystem. Grow the
-# volume that actually needs it afterwards with lvextend + resize2fs.
-VM_DISK_SIZE="${DISK_SIZE_MB:-122880}" # 120GB in MB
+# 14336 MB is sized against the 15 GB school quota for the whole project;
+# `make space` reports the footprint and fails a build that would exceed it.
+# The recipe fully allocates the group, with /var last and unpinned, so raising
+# this number grows /var.
+VM_DISK_SIZE="${DISK_SIZE_MB:-14336}" # 14GB in MB
 
 # ── Smart VM sizing algorithm ────────────────────────────────────────────────
 # Detects host hardware and allocates resources proportionally.

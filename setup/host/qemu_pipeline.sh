@@ -26,6 +26,9 @@ QEMU_VM="$HERE/qemu_vm.sh"
 
 VM_NAME="${VM_NAME:-debian}"
 MAKE_BIN="${MAKE_BIN:-make}"
+# Encrypted or not, and which ISO name that implies.
+. "$REPO_ROOT/utils/luks_mode.sh"
+LUKS="${LUKS:-ON}"
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -55,11 +58,13 @@ printf "\n${C_BOLD}Born2beRoot — QEMU/KVM build${C_RESET} ${C_DIM}(guest ident
 
 # ── 1. ISO ──────────────────────────────────────────────────────────────────
 phase "Preseeded ISO"
-newest_iso=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2- | sed 's|^\./||')
+# Mode-specific, so a LUKS=OFF run cannot "reuse" the encrypted ISO sitting
+# next to it, or the reverse. See utils/luks_mode.sh.
+newest_iso=$(find . -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2- | sed 's|^\./||')
 if [ -n "$newest_iso" ] && [ "${FORCE_ISO:-0}" != "1" ]; then
     ok "reusing $newest_iso"
 else
-    CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}" AI_MODE="${AI_MODE:-off}" FORCE_ISO=1 \
+    CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}" AI_MODE="${AI_MODE:-off}" FORCE_ISO=1 LUKS="$LUKS" \
         $MAKE_BIN --no-print-directory gen_iso || die "ISO build failed"
     ok "ISO built"
 fi

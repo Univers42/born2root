@@ -25,7 +25,7 @@ check() {
     fi
 }
 yesno() { if "$@"; then echo yes; else echo no; fi; }
-has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac }
+has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2> /dev/null; rm -rf "$TMP"' EXIT
@@ -115,7 +115,7 @@ check "foreign VM dir: existing VM_PATH untouched" "$(has "$out" "chown \"$who\"
 # ── refuse_sudo_build: only root reached through sudo is refused ───────────
 unset SUDO_USER
 check "not root: allowed" "$(yesno refuse_sudo_build 'make all')" yes
-id() { case "$1" in -u) echo 0 ;; *) command id "$@" ;; esac }
+id() { case "$1" in -u) echo 0 ;; *) command id "$@" ;; esac; }
 export SUDO_USER=alice
 out=$(refuse_sudo_build "make all VM_PATH=/x" 2>&1) && rc=0 || rc=$?
 check "root via sudo: refused" "$rc" 1

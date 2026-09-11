@@ -66,7 +66,9 @@ Everything is scripted. `make re` destroys everything and rebuilds from scratch.
 
 - **VirtualBox** installed (or run `make deps` to install it)
 - **xorriso** and **curl** (also installed by `make deps`)
-- ~4GB free disk space
+- ~18 GB free disk space during a build; ~15 GB once installed
+  (the VM disk is capped at 14 GB, plus ~1.7 GB of ISOs that
+  `make slim` removes afterwards — see **Disk Layout** below)
 
 ### Build the VM
 
@@ -864,47 +866,80 @@ The warnings that remain are all expected on a headless server:
 
 ## Disk Layout & Growing a Partition
 
-The VM is a **120 GB** dynamically-allocated disk. That number is a ceiling, not
-an allocation: an untouched disk is ~2 MB on the host and only grows as the
-guest writes, so the size costs nothing until it is used.
+The VM is a **14 GB** dynamically-allocated disk, sized against a 15 GB school
+quota for the whole project. `make space` reports the footprint and fails a
+build that would exceed it.
 
-| Mount         | Size       | Holds                                      |
-| ------------- | ---------- | ------------------------------------------ |
-| `/boot`       | 500 MB     | kernel, unencrypted (required)             |
-| `/`           | 20 GB      | base system, apt packages                  |
-| swap          | 4 GB       | —                                          |
-| `/home`       | 40 GB      | user data, projects, per-user editor state |
-| `/opt`        | 15 GB      | **machine-wide scope** — see below         |
-| `/var`        | 20 GB      | Docker images, containers, build cache     |
-| `/srv`        | 2 GB       | service data (lighttpd)                    |
-| `/tmp`        | 3 GB       | build artefacts                            |
-| `/var/log`    | 3 GB       | system + Docker logs                       |
-| _unallocated_ | **~12 GB** | **deliberately free, for `lvextend`**      |
+| Mount      | Size    | Holds                                      |
+| ---------- | ------- | ------------------------------------------ |
+| `/boot`    | 500 MB  | kernel, unencrypted (required)             |
+| `/`        | 4 GB    | base system, apt packages, Docker binaries |
+| swap       | 1 GB    | mounted with `discard`                     |
+| `/home`    | 768 MB  | user data (project sources live on the host) |
+| `/opt`     | 512 MB  | **machine-wide scope** — see below         |
+| `/srv`     | 512 MB  | service data (lighttpd)                    |
+| `/tmp`     | 1 GB    | build artefacts                            |
+| `/var/log` | 1 GB    | system + Docker logs                       |
+| `/var`     | ~4.5 GB | Docker images, containers, build cache     |
 
-### The unallocated space is the point
+### Why it is this small, and why that took a fix
 
-Every logical volume is **pinned**. Nothing uses partman's `-1` ("grow to fill
-the disk"), which is what `/var/log` used to do — and which left the volume
-group with **zero free extents**. On that layout, "give `/home` more space"
-meant rebuilding the VM.
+This used to be a 120 GB disk, on the reasoning that a thin-provisioned image is
+a ceiling rather than an allocation — it costs nothing until it is used. That
+reasoning was wrong here, and the cost was measured: the qcow2 reached **42.7 GB
+on the host** for a guest holding a small fraction of it.
 
-With ~12 GB free in the group, any volume can be grown **in place, while
-mounted**:
+A thin disk is only thin while something tells it which blocks are free, and
+nothing did. The guest is LUKS-encrypted, and dm-crypt drops discard requests
+unless the mapping is opened with `allow-discards`. With no `discard` in
+`/etc/crypttab`, no `issue_discards` in `lvm.conf` and no `fstrim.timer`, no
+TRIM ever reached the image — so it only ever grew. And because a freed block
+under LUKS is ciphertext rather than zeroes, `qemu-img convert` could not
+reclaim it either.
+
+`preseeds/b2b-setup.sh` now wires that chain end to end, so the host file tracks
+real usage instead of high-water mark. Check it inside the guest with:
 
 ```bash
-sudo lvextend -L +5G /dev/LVMGroup/home
-sudo resize2fs /dev/LVMGroup/home     # ext4 grows online, no reboot
-df -h /home                            # bigger already
-sudo vgs                               # what is left in the pool
+sudo dmsetup table sda5_crypt | grep -o allow_discards   # must print
+lsblk -D                                                 # DISC-MAX non-zero
 ```
 
-A fixed bigger number helps once; free extents help every time.
+### `/var` absorbs the remainder, on purpose
 
-Both are tunable at build time (a new VM only — an existing disk is kept):
+partman insists on putting all the leftover space somewhere: with every volume
+pinned and none using `-1`, it still inflates the **last** volume in the recipe
+(`/var/log` once asked for 3072 MB and got 20.34 GB). The old recipe absorbed
+that with a decoy volume, `spare`, which was formatted and mounted and then
+`lvremove`d — and every cluster `mkfs` touched stayed allocated in the image
+forever.
+
+So `spare` is gone. `/var` is declared last with an explicit `-1`, which turns
+that behaviour into the mechanism: the remainder lands where Docker needs it.
+
+The group is fully allocated by design, so growing one volume means shrinking
+another (or enlarging the disk). `-r` resizes the filesystem in the same step:
 
 ```bash
-make re DISK_SIZE_MB=250000     # bigger disk
+sudo lvreduce -r -L -1G /dev/LVMGroup/home
+sudo lvextend -r -L +1G /dev/LVMGroup/var
+df -h /var
+```
+
+Tunable at build time (a new VM only — an existing disk is kept):
+
+```bash
+make re DISK_SIZE_MB=20480      # bigger disk; `make space` must still pass
 make re VM_RAM_MB=6144          # more RAM than the 25%-of-host default
+make re LUKS=OFF                # unencrypted — FAILS the evaluation, dev only
+```
+
+### Reclaiming space
+
+```bash
+make space              # what the project costs, against the 15 GB budget
+make slim               # drop used ISOs, apt-clean + fstrim inside the guest
+make slim COMPACT=1     # also rewrite the qcow2 without unreferenced clusters
 ```
 
 ### Machine-wide scope: `/opt`, not `/` or `/home`

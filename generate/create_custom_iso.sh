@@ -57,8 +57,17 @@ URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
 # the extraction tree or overwriting the ISO a running VM booted from.
 ISO_DIR="${ISO_DIR:-debian_iso_extract}"
 PRESEED_FILE="preseeds/preseed.cfg"
-# Derive the output name from the discovered filename
-OUTPUT_ISO="${OUTPUT_ISO:-${ISO_FILENAME%.iso}-preseed.iso}"
+# Encrypted unless explicitly told otherwise; see utils/luks_mode.sh for why
+# the default leans that way and why the mode lands in the ISO's name.
+. "$REPO_ROOT/utils/luks_mode.sh"
+LUKS="${LUKS:-ON}"
+LUKS_SUFFIX=$(luks_iso_suffix "$LUKS")
+# Derive the output name from the discovered filename. The LUKS suffix is part
+# of it because the "already built, skipping" check below compares filenames:
+# without it, `make gen_iso LUKS=OFF` would find the encrypted ISO sitting in
+# the repo root, decide there was nothing to do, and hand back an image that is
+# the opposite of what was asked for.
+OUTPUT_ISO="${OUTPUT_ISO:-${ISO_FILENAME%.iso}-preseed${LUKS_SUFFIX}.iso}"
 # xorriso runs from inside $ISO_DIR, so it needs the output as an absolute path.
 case "$OUTPUT_ISO" in
 /*) OUTPUT_ABS="$OUTPUT_ISO" ;;
@@ -191,8 +200,51 @@ fi
 chmod -R u+w "$ISO_DIR"
 
 # Copy preseed file to ISO root (fallback)
+#
+# This is the ONLY place the preseed is staged: the initrd injection further
+# down copies $ISO_DIR/preseed.cfg rather than the source file, so whatever is
+# written here is what the installer actually reads. Applying the LUKS switch
+# at this single point keeps the ISO root and the initrd copy in agreement by
+# construction, instead of by two edits that have to be remembered together.
 echo "Copying preseed file to ISO root..."
-cp "$PRESEED_FILE" "$ISO_DIR/preseed.cfg"
+if luks_enabled "$LUKS"; then
+	cp "$PRESEED_FILE" "$ISO_DIR/preseed.cfg"
+	echo "  ✓ preseed.cfg (LUKS=ON — encrypted LVM)"
+else
+	# Replace everything between the markers with the plain-LVM equivalent.
+	# The crypto-specific debconf keys are all inside that region by design
+	# (see preseeds/preseed.cfg), so nothing outside it needs touching and the
+	# partition recipe is identical in both modes.
+	awk '
+		/^# ── LUKS-BEGIN/ {
+			skipping = 1
+			print "# ── LUKS-BEGIN (replaced: built with LUKS=OFF, NOT submittable) ──"
+			print "d-i partman-auto/init_automatically_partition select Guided - use entire disk and set up LVM"
+			print "d-i partman-auto/method string lvm"
+			next
+		}
+		/^# ── LUKS-END/ { skipping = 0; print "# ── LUKS-END ──"; next }
+		!skipping { print }
+	' "$PRESEED_FILE" > "$ISO_DIR/preseed.cfg"
+
+	# The markers are a contract between two files. If someone reworded them in
+	# preseed.cfg, awk above would have copied the crypto keys through silently
+	# and produced an encrypted ISO named -nocrypt — the exact confusion the
+	# suffix exists to prevent. Cheaper to catch it here than in the installer.
+	if grep -q '^d-i partman-auto/method string crypto' "$ISO_DIR/preseed.cfg"; then
+		echo "Error: LUKS=OFF was requested but the crypto block survived the rewrite." >&2
+		echo "       The LUKS-BEGIN/LUKS-END markers in $PRESEED_FILE no longer match" >&2
+		echo "       what create_custom_iso.sh looks for. Fix the markers, or this" >&2
+		echo "       build would ship an encrypted ISO under a -nocrypt name." >&2
+		exit 1
+	fi
+	if ! grep -q '^d-i partman-auto/method string lvm' "$ISO_DIR/preseed.cfg"; then
+		echo "Error: LUKS=OFF rewrite produced no partitioning method at all." >&2
+		echo "       Check the LUKS-BEGIN/LUKS-END markers in $PRESEED_FILE." >&2
+		exit 1
+	fi
+	echo "  ✓ preseed.cfg (LUKS=OFF — plain LVM, evaluation-failing by design)"
+fi
 
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)
 echo "Copying setup scripts to ISO root..."

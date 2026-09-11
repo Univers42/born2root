@@ -407,6 +407,10 @@ get_host_ip() {
 # / mark_install_finished). Sourced up here so Step 4 below cannot call them
 # before they exist — which is exactly what used to happen.
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/vm_disk.sh"
+# Encrypted or not: picks the ISO glob, and decides whether the summary below
+# may claim a disk-encryption passphrase.
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/luks_mode.sh"
+LUKS="${LUKS:-ON}"
 
 # Answer the guest's LUKS prompt without printing: draw_dashboard owns the
 # terminal here, so progress goes through STEP_DETAIL instead of stdout.
@@ -588,10 +592,10 @@ draw_dashboard
 
 # Step 2 — Preseeded ISO
 FORCE_ISO="${FORCE_ISO:-0}"
-PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
+PRESEED_ISO=$(find . -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" | head -n1 | sed 's|^\./||')
 if [ "$FORCE_ISO" = "1" ]; then
     run_step 1 "${MAKE_CMD}" --no-print-directory gen_iso
-    PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
+    PRESEED_ISO=$(find . -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" | head -n1 | sed 's|^\./||')
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
 elif [ -n "$PRESEED_ISO" ]; then
@@ -600,7 +604,7 @@ elif [ -n "$PRESEED_ISO" ]; then
     draw_dashboard
 else
     run_step 1 "${MAKE_CMD}" --no-print-directory gen_iso
-    PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
+    PRESEED_ISO=$(find . -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" | head -n1 | sed 's|^\./||')
     STEP_DETAIL[1]="$PRESEED_ISO"
     draw_dashboard
 fi
@@ -1328,9 +1332,12 @@ if [ "$B2B_FAILED" = 1 ] || [ "$B2B_WARNED" = 1 ]; then
     row "    ${YLW}The run did not finish cleanly — see the step marked above.${RST}"
     row "    The details below are reference, not a report of what happened."
     row "    ${DIM}Look at the VM with${RST}  ${BLD}make console${RST}${DIM}  ·  state:${RST} ${BLD}make status${RST}"
-else
+elif luks_enabled "$LUKS"; then
     row "    Debian is installed and the VM is booted from disk with"
     row "    the encrypted volume already unlocked — no window needed."
+    row "    ${DIM}Watch it any time with${RST}  ${BLD}make console${RST}"
+else
+    row "    Debian is installed and the VM is booted from disk."
     row "    ${DIM}Watch it any time with${RST}  ${BLD}make console${RST}"
 fi
 blank
@@ -1338,11 +1345,23 @@ mid
 row "  ${BLD}${WHT}▸ Credentials${RST}"
 row "    ${DIM}root password${RST}      ${GRN}temproot123${RST}"
 row "    ${DIM}user (dlesieur)${RST}    ${GRN}tempuser123${RST}"
-row "    ${DIM}disk encryption${RST}    ${GRN}tempencrypt123${RST}"
+# Only claim a passphrase when there is a volume to unlock. Printing one for
+# an unencrypted build would be the friendliest possible way to hand in a VM
+# that fails the mandatory requirement.
+if luks_enabled "$LUKS"; then
+    row "    ${DIM}disk encryption${RST}    ${GRN}tempencrypt123${RST}"
+else
+    row "    ${DIM}disk encryption${RST}    ${YLW}none — built with LUKS=OFF${RST}"
+    row "    ${YLW}This VM is NOT encrypted and FAILS the born2root evaluation.${RST}"
+fi
 blank
 mid
 row "  ${BLD}${WHT}▸ After a reboot${RST}"
-row "    ${YLW}1.${RST} ${BLD}make start_vm${RST}  ${DIM}— headless, types the passphrase for you${RST}"
+if luks_enabled "$LUKS"; then
+    row "    ${YLW}1.${RST} ${BLD}make start_vm${RST}  ${DIM}— headless, types the passphrase for you${RST}"
+else
+    row "    ${YLW}1.${RST} ${BLD}make start_vm${RST}  ${DIM}— headless; no passphrase to type${RST}"
+fi
 row "    ${YLW}2.${RST} Log in:  ${GRN}dlesieur${RST} / ${GRN}tempuser123${RST}"
 blank
 mid

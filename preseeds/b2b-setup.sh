@@ -744,70 +744,150 @@ echo "=== Born2beRoot MANDATORY configuration complete ($(date)) ==="
 # They are now installed by first-boot-setup.sh with disk space guards.
 # ═══════════════════════════════════════════════════════════════════════════
 
-### ─── FREE THE SPARE EXTENTS ─────────────────────────────────────────────────
-# The partition recipe declares a decoy volume, `spare`, purely to stop partman
-# handing the disk's leftover space to /var/log. See preseeds/preseed.cfg for
-# the measurement that made this necessary: with every volume pinned and no -1
-# anywhere, partman still inflated the last volume to fill the group and left
-# VFree = 0.
+### ─── MAKE DISCARD REACH THE IMAGE ──────────────────────────────────────────
+# A qcow2 only stays small while something tells it which blocks are free.
+# Nothing did, and the bill was measured: disk_images/debian/debian.qcow2 grew
+# to 42.7 GB on the host for a guest holding a small fraction of that, and it
+# could never shrink again.
 #
-# `spare` is method{ keep }: never formatted, never mounted, never referenced in
-# fstab. Removing it here returns its extents to the volume group as FREE
-# space, which is the whole point -- it is what makes this possible later:
+# The break was at the encryption layer. QEMU already attaches the disk with
+# discard=unmap (see setup/host/qemu_vm.sh), so a TRIM from the guest would be
+# honoured -- but dm-crypt DISCARDS the discard unless the mapping was opened
+# with allow-discards, and nothing asked for it. Every layer above was equally
+# silent: no `discard` in /etc/crypttab, no issue_discards in lvm.conf, no
+# fstrim.timer. So the image only ever grew, and because a freed block under
+# LUKS is ciphertext rather than zeroes, `qemu-img convert` could not reclaim
+# it afterwards either. There was no way back short of rebuilding the VM.
 #
-#     sudo lvextend -L +5G /dev/LVMGroup/home
-#     sudo resize2fs /dev/LVMGroup/home
+# All four links are wired up here. Miss any one and the whole chain is inert
+# while looking perfectly configured, which is exactly how this went unnoticed.
 #
-# Guarded rather than assumed: only remove a volume that exists, is not mounted,
-# and is not in fstab. A wrong lvremove here would destroy a real filesystem.
-echo "[INFO] Releasing the 'spare' volume back to the volume group"
-if command -v lvremove >/dev/null 2>&1; then
-    # Ask LVM whether the volume exists rather than looking for a device node:
-    # this runs under in-target, where /dev is the installer's and the node for
-    # a never-activated LV may simply not be there.
-    SPARE_FOUND=""
-    if lvs --noheadings -o lv_name LVMGroup 2>/dev/null | tr -d ' ' | grep -qx spare; then
-        SPARE_FOUND=yes
-    fi
+# The tradeoff is real and worth stating: allow-discards lets someone with raw
+# access to the disk image see which blocks are in use, and so infer roughly
+# how full the volume is and where the data sits. It does not reveal file
+# contents. For a VM on a quota'd school filesystem that is the right trade.
+#
+# This block detects encryption rather than being told about it, so it is
+# correct for both LUKS=ON and LUKS=OFF builds (see utils/luks_mode.sh).
+echo "[INFO] Wiring discard through the storage stack"
 
-    if [ -z "$SPARE_FOUND" ]; then
-        echo "[INFO] No 'spare' volume found — nothing to release"
-    else
-        # It arrives formatted and mounted at /mnt/spare (see preseed.cfg for
-        # why it cannot simply be left unformatted). Undo that in order:
-        # fstab first, so a failure part-way cannot leave the machine trying to
-        # mount a volume that no longer exists — which would drop the next boot
-        # into an emergency shell.
-        if grep -q '[[:space:]]/mnt/spare[[:space:]]' /etc/fstab 2>/dev/null; then
-            sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab
-            echo "[OK] removed /mnt/spare from /etc/fstab"
-        fi
-
-        umount /mnt/spare >/dev/null 2>&1 || true
-        rmdir /mnt/spare >/dev/null 2>&1 || true
-
-        # --noudevsync is not optional here. This runs inside the installer's
-        # chroot, where lvremove posts a udev "cookie" and then waits on a
-        # System V semaphore for udev to acknowledge the device removal. The
-        # udev that sees the event is the installer's, outside the chroot,
-        # and it has no LVM rules to answer with -- so the wait never ends.
-        # Measured on a real run: lvremove sat in __do_semtimedop for 25
-        # minutes with the install frozen at "Finishing the installation".
-        # The flag exists for exactly this ("only use this if udev is not
-        # running or has rules that ignore the devices LVM creates").
-        if mount | grep -q "LVMGroup-spare"; then
-            echo "[WARN] 'spare' is still mounted — leaving it alone"
-        elif lvremove -f --noudevsync LVMGroup/spare >/dev/null 2>&1; then
-            FREE=$(vgs --noheadings -o vg_free --units g LVMGroup 2>/dev/null | tr -d ' ')
-            echo "[OK] 'spare' removed — ${FREE:-?} now free in LVMGroup for lvextend"
-        else
-            echo "[WARN] lvremove of 'spare' failed — the space stays allocated to it"
-            echo "[WARN] Remove it later with: sudo lvremove -f LVMGroup/spare"
-        fi
-    fi
-else
-    echo "[WARN] lvremove unavailable — 'spare' left in place"
+# ── 1. LUKS: allow-discards on the mapping ──────────────────────────────────
+# Only meaningful when there IS a crypt device. On a LUKS=OFF build the file
+# is absent or has no device line, and the rest of the chain still applies.
+CRYPT_DEV=""
+if [ -f /etc/crypttab ]; then
+    CRYPT_DEV=$(awk '!/^[[:space:]]*#/ && NF >= 2 { print $1; exit }' /etc/crypttab)
 fi
+
+if [ -z "$CRYPT_DEV" ]; then
+    echo "[INFO] No LUKS mapping — unencrypted build, skipping crypttab"
+else
+    if awk -v d="$CRYPT_DEV" '!/^[[:space:]]*#/ && $1 == d && $4 ~ /discard/' /etc/crypttab | grep -q .; then
+        echo "[OK] crypttab already passes discard for $CRYPT_DEV"
+    else
+        cp /etc/crypttab /etc/crypttab.b2b-backup 2>/dev/null || true
+        # Field 4 is the options list and may be empty, "none", or a real list.
+        # "none" is a placeholder meaning no options, so appending to it would
+        # produce the literal "none,discard" — replace it instead of extending.
+        awk -v d="$CRYPT_DEV" '
+            !/^[[:space:]]*#/ && $1 == d {
+                if (NF < 4 || $4 == "" || $4 == "none") { $4 = "discard" }
+                else if ($4 !~ /(^|,)discard(,|$)/) { $4 = $4 ",discard" }
+                print; next
+            }
+            { print }
+        ' /etc/crypttab.b2b-backup >/etc/crypttab
+        echo "[OK] crypttab: discard enabled for $CRYPT_DEV"
+    fi
+
+    # ── 2. The initrd is what actually opens the root mapping ───────────────
+    # Editing crypttab alone changes nothing for the root device: the initrd
+    # carries its own copy and unlocks the volume long before the on-disk file
+    # is readable. This is the step that makes the change real -- and the one
+    # that can leave the VM unbootable if it half-succeeds, so its result is
+    # checked rather than assumed, the same way the GRUB block below checks
+    # that grub.cfg came out with menu entries in it.
+    INITRD_BEFORE=$(find /boot -maxdepth 1 -name 'initrd.img-*' 2>/dev/null | wc -l)
+    if update-initramfs -u -k all 2>&1; then
+        INITRD_AFTER=$(find /boot -maxdepth 1 -name 'initrd.img-*' 2>/dev/null | wc -l)
+        if [ "$INITRD_AFTER" -ge 1 ] && [ "$INITRD_AFTER" -ge "$INITRD_BEFORE" ]; then
+            echo "[OK] initramfs rebuilt ($INITRD_AFTER image(s)) — discard reaches the crypt layer"
+        else
+            echo "[WARN] initramfs count went $INITRD_BEFORE → $INITRD_AFTER — check /boot before rebooting"
+        fi
+    else
+        # Not fatal on its own: the system still boots from the existing initrd,
+        # it just will not pass discards. Say so precisely rather than failing
+        # the whole install over a space optimisation.
+        echo "[WARN] update-initramfs failed — the VM still boots, but TRIM will not"
+        echo "[WARN] reach the image. Re-run: sudo update-initramfs -u -k all"
+    fi
+fi
+
+# ── 3. LVM: hand freed extents back on lvremove/lvreduce ────────────────────
+if [ -f /etc/lvm/lvm.conf ]; then
+    if grep -qE '^[[:space:]]*issue_discards[[:space:]]*=[[:space:]]*1' /etc/lvm/lvm.conf; then
+        echo "[OK] lvm.conf already sets issue_discards = 1"
+    elif grep -qE '^[[:space:]]*issue_discards[[:space:]]*=' /etc/lvm/lvm.conf; then
+        sed -i -E 's|^([[:space:]]*)issue_discards[[:space:]]*=.*|\1issue_discards = 1|' /etc/lvm/lvm.conf
+        echo "[OK] lvm.conf: issue_discards = 1"
+    else
+        echo "[WARN] no issue_discards key in lvm.conf — leaving the file alone"
+    fi
+fi
+
+# ── 4. ext4: periodic TRIM ──────────────────────────────────────────────────
+# fstrim.timer (weekly, batched) rather than the `discard` mount option: the
+# mount option trims synchronously on every delete, which costs latency on
+# every unlink for a benefit that only matters in aggregate.
+if systemctl enable fstrim.timer 2>/dev/null; then
+    echo "[OK] fstrim.timer enabled — weekly TRIM of every mounted filesystem"
+else
+    # systemd is not running in the installer chroot, so `enable` can fail here
+    # and still be wanted. Link the unit by hand so first boot picks it up.
+    for UNITDIR in /lib/systemd/system /usr/lib/systemd/system; do
+        if [ -f "$UNITDIR/fstrim.timer" ]; then
+            mkdir -p /etc/systemd/system/timers.target.wants
+            ln -sf "$UNITDIR/fstrim.timer" \
+                /etc/systemd/system/timers.target.wants/fstrim.timer 2>/dev/null || true
+            echo "[OK] fstrim.timer linked for first boot (no systemd in chroot)"
+            break
+        fi
+    done
+fi
+
+# ── 5. swap: release freed pages ────────────────────────────────────────────
+# Swap is written early and never freed back on its own, so without this the
+# whole swap volume stays allocated in the image for the life of the VM.
+if grep -qE '^[^#].*[[:space:]]swap[[:space:]]' /etc/fstab 2>/dev/null; then
+    if grep -qE '^[^#].*[[:space:]]swap[[:space:]]+.*discard' /etc/fstab; then
+        echo "[OK] fstab swap already mounts with discard"
+    else
+        cp /etc/fstab /etc/fstab.b2b-swap-backup 2>/dev/null || true
+        awk '
+            !/^[[:space:]]*#/ && $3 == "swap" {
+                if ($4 == "" || $4 == "defaults") { $4 = "discard" }
+                else if ($4 !~ /(^|,)discard(,|$)/) { $4 = $4 ",discard" }
+                print; next
+            }
+            { print }
+        ' /etc/fstab.b2b-swap-backup >/etc/fstab
+        echo "[OK] fstab: swap mounts with discard"
+    fi
+fi
+
+# ── 6. Give back the 5% root reserve on the data filesystems ────────────────
+# ext4 reserves 5% for root so a full disk cannot lock out the administrator.
+# That is worth keeping on / — it is what stops a runaway log wedging the
+# system — but on /home, /var, /srv, /opt and /tmp it is several hundred MB
+# held back for nothing on a disk this size. 1% keeps the safety margin.
+for LV in home var srv opt tmp var-log; do
+    DEV="/dev/LVMGroup/$LV"
+    [ -b "$DEV" ] || continue
+    if tune2fs -m 1 "$DEV" >/dev/null 2>&1; then
+        echo "[OK] $LV: root reserve 5% → 1%"
+    fi
+done
 
 ### ─── GRUB SAFETY NET ────────────────────────────────────────────────────────
 # After all package installs (which may have upgraded kernel/initramfs/grub),

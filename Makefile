@@ -120,13 +120,52 @@ NVIM_VERSION ?=
 # Which users inside the VM get a kickstart config (space separated).
 NVIM_USERS ?=
 
-# Disk size for a NEW VM, in MB. The VDI is dynamically allocated, so this is a
-# ceiling and not an allocation — an untouched 120GB disk is ~2MB on the host.
-# The partition recipe pins every volume and leaves ~12GB unallocated in the
-# volume group, so raising this grows that free pool; give it to a specific
-# filesystem afterwards with lvextend + resize2fs.
-# Only affects a VM being created: an existing disk is kept.
-DISK_SIZE_MB ?= 122880
+# Disk size for a NEW VM, in MB. Only affects a VM being created: an existing
+# disk is kept.
+#
+# This used to be 122880 (120GB), on the theory that a dynamically-allocated
+# disk is a ceiling rather than an allocation and so costs nothing until used.
+# That theory was wrong here and the bill came to 42.7GB for a guest holding a
+# small fraction of it. A thin disk only stays thin while something tells it
+# which blocks are free, and on a LUKS guest nothing did: dm-crypt discards
+# unless the mapping is opened with allow-discards, so every block the guest
+# ever touched stayed allocated forever. preseeds/b2b-setup.sh now wires TRIM
+# through crypttab, lvm.conf and fstrim.timer, which is what makes the host
+# file track real usage instead of high-water mark.
+#
+# With that fixed the virtual size means what it says: a hard ceiling on what
+# this VM can cost. 14336MB (14GB) is chosen against a 15GB school quota for
+# the whole project — see `make space`, which fails a build that exceeds it.
+# The recipe in preseeds/preseed.cfg fully allocates the group, with /var last
+# and unpinned so the remainder lands where Docker needs it. Raising this
+# number therefore grows /var; to move space between volumes afterwards use
+# `lvreduce -r` on one and `lvextend -r` on another.
+DISK_SIZE_MB ?= 14336
+
+# Encrypt the guest's LVM with LUKS. ON is the default and is the only mode
+# that satisfies the born2root mandatory requirement — the VM you hand in must
+# be built this way.
+#
+# LUKS=OFF builds an unencrypted guest. It exists to measure disk behaviour
+# with encryption out of the way: without dm-crypt in the path, freed blocks
+# are zeroes rather than ciphertext, so discard needs no crypttab/initramfs
+# step and `qemu-img convert` can compact the image offline. Handy for space
+# experiments, never for a submission — `make all LUKS=OFF` says so loudly.
+#
+# This is baked into the ISO at build time (the preseed lives inside the
+# initrd), so changing it requires a new ISO. The two modes write different
+# ISO filenames so a cached one is never silently reused across modes.
+LUKS ?= ON
+
+# The whole project — source, ISOs and the VM disk — must fit in this many GB.
+# 15 is the school's shared-storage cap. `make space` reports the breakdown and
+# fails when it is exceeded; `make all` checks it before building anything.
+# Raise it for one run with SPACE_BUDGET_GB=25 make ...
+SPACE_BUDGET_GB ?= 15
+
+# `make slim COMPACT=1` also rewrites the qcow2 without its unreferenced
+# clusters. Off by default because it requires the VM to be stopped.
+COMPACT ?= 0
 
 # Override the VM's RAM (MB). Default is 25% of host RAM clamped to [2048,8192],
 # which is sized to keep the HOST responsive. Raise it for a local model — the
@@ -166,7 +205,8 @@ C_CYAN   := \033[36m
         nvim hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
-        qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root
+        qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
+        space slim
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -195,17 +235,20 @@ no_root:
 	@$(SCRIPT_SH) utils/vm_path.sh --no-root "make all VM_PATH=$(VM_PATH)"
 
 all: no_root prepare
+	@$(SCRIPT_SH) utils/luks_mode.sh --banner "$(LUKS)" || exit 1
+	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
+		$(SCRIPT_SH) utils/space_budget.sh --preflight "$(DISK_SIZE_MB)" || exit 1
 	@backend=$$(BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
 	$(SCRIPT_SH) utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \
-		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" \
+		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" \
 			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
 	else \
 		$(MAKE_BIN) --no-print-directory check_driver && \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
-		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)" \
 			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
@@ -218,7 +261,7 @@ backend:
 # The same VM, run by QEMU instead of VirtualBox. Useful on its own when you
 # want to drive the phases by hand rather than through `make all`.
 QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
-	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)"
+	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)"
 
 # Boots the ISO and runs the unattended install, which REFORMATS the disk.
 # A qcow2 that has grown past ~1GB already holds an installed system, so
@@ -514,7 +557,7 @@ fix_app_ports:
 # =========@@ Build preseeded ISO @@============================================
 gen_iso: shell
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
-		AI_MODE="$(AI_MODE)" $(SCRIPT_SH) $(ISO_BUILDER)
+		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" $(SCRIPT_SH) $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
@@ -625,7 +668,25 @@ prune_vms:
 
 clean:
 	@chmod -R u+w debian_iso_extract 2>/dev/null || true
-	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed.iso debian_iso_extract
+	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed*.iso debian_iso_extract
+
+# =========@@ Space @@=========================================================
+# What this project costs, and whether that is still allowed. Fails (exit 1)
+# when the total exceeds SPACE_BUDGET_GB rather than warning about it -- a
+# warning mid-build scrolls past unread, and the point is to stop before
+# writing the thing that blows the quota. See utils/space_budget.sh.
+space:
+	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
+		$(SCRIPT_SH) utils/space_budget.sh
+
+# Hand back what is no longer used: the ISOs once the VM is installed, the
+# guest's apt cache and orphaned packages, and the blocks the guest has freed
+# but never trimmed. `make slim COMPACT=1` also rewrites the image without its
+# unreferenced clusters, which needs the VM stopped.
+slim:
+	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
+		SCRIPT_SH="$(SCRIPT_SH)" \
+		$(SCRIPT_SH) utils/slim.sh $(if $(filter 1,$(COMPACT)),--compact,)
 
 # Empty VM_PATH, but do NOT delete the directory itself. When VM_PATH points at
 # an external disk (VM_PATH=/mnt/storage/virtualbox) its parent is root-owned,

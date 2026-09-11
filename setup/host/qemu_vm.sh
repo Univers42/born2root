@@ -60,9 +60,9 @@
 #   command that reaches it, instead of being reported stopped.
 #
 # Env
-#   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (122880)
+#   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (14336)
 #   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (read from vm_pass.txt)
-#   ISO (newest debian-*preseed.iso in the repo root)
+#   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
 # ============================================================================ #
 
 set -uo pipefail
@@ -73,6 +73,9 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$HERE/di_progress.sh"
 # Is $VM_PATH/$VM_NAME usable by this user -- and if not, why, and what fixes it.
 . "$REPO_ROOT/utils/vm_path.sh"
+# Encrypted or not, and which ISO name that implies.
+. "$REPO_ROOT/utils/luks_mode.sh"
+LUKS="${LUKS:-ON}"
 
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
@@ -93,7 +96,7 @@ vm_paths() {
 }
 vm_paths
 
-DISK_SIZE_MB="${DISK_SIZE_MB:-122880}"
+DISK_SIZE_MB="${DISK_SIZE_MB:-14336}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 VM_CPUS="${VM_CPUS:-3}"
 
@@ -153,7 +156,9 @@ find_iso() {
         printf '%s' "$ISO"
         return 0
     }
-    find "$REPO_ROOT" -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
+    # The glob is mode-specific (utils/luks_mode.sh): booting the other mode's
+    # ISO would install the opposite of what was asked for, and say nothing.
+    find "$REPO_ROOT" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
 vm_pass() {
@@ -515,7 +520,7 @@ launch() {
         -smp "$VM_CPUS" \
         -m "$VM_RAM_MB" \
         -device ich9-ahci,id=ahci \
-        -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap" \
+        -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap" \
         -device "ide-hd,drive=hd0,bus=ahci.0,bootindex=${hd_index}" \
         "${cd_args[@]}" \
         -netdev "user,id=net0$(build_hostfwd)" \
@@ -715,7 +720,7 @@ watch_install() {
 # The 1s tick is a seam the test overrides.
 STOP_TICK="${STOP_TICK:-1}"
 STOP_PROGRESS="${STOP_PROGRESS:-auto}"
-_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac }
+_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac; }
 await_shutdown() {
     local grace="$1" waited=0 last
     while is_running && [ "$waited" -lt "$grace" ]; do

@@ -578,24 +578,19 @@ else
     echo "[SKIP] ufw not installed"
 fi
 
-# Fallback for the 'spare' volume. b2b-setup.sh normally removes it during the
-# install, but that runs under in-target where LVM tooling is the installer's.
-# Here the real system is up, so if it is still around, release it now --
-# otherwise the free extents the partition layout is designed around never
-# materialise and `lvextend` has nothing to take.
-if command -v lvremove >/dev/null 2>&1 &&
-    lvs --noheadings -o lv_name LVMGroup 2>/dev/null | tr -d ' ' | grep -qx spare; then
-    echo "--- Releasing the leftover 'spare' volume ---"
-    sed -i '\|[[:space:]]/mnt/spare[[:space:]]|d' /etc/fstab 2>/dev/null || true
-    umount /mnt/spare >/dev/null 2>&1 || true
-    rmdir /mnt/spare >/dev/null 2>&1 || true
-    if ! mount | grep -q LVMGroup-spare; then
-        if lvremove -f LVMGroup/spare >/dev/null 2>&1; then
-            echo "[OK] spare removed — $(vgs --noheadings -o vg_free --units g LVMGroup 2>/dev/null | tr -d ' ') free for lvextend"
-        else
-            echo "[WARN] could not remove 'spare'; run: sudo lvremove -f LVMGroup/spare"
-        fi
-    fi
+# First TRIM of the new system. b2b-setup.sh wires discard through crypttab,
+# lvm.conf, fstab and fstrim.timer, but that all runs under in-target, before
+# the crypt mapping has ever been opened with allow-discards. This is the first
+# moment the whole chain is actually live, and the install has just written and
+# deleted a lot: apt archives, the ISO's copies of these scripts, dpkg scratch.
+# Trimming once here hands those blocks back immediately rather than leaving
+# them allocated in the image until the weekly timer first fires.
+if command -v fstrim >/dev/null 2>&1; then
+    echo "--- Releasing freed blocks back to the disk image ---"
+    # -a walks every mounted filesystem; unsupported ones are skipped, so a
+    # build where the discard chain did not come up simply trims nothing here
+    # rather than failing first boot over it.
+    fstrim -av 2>&1 | sed 's/^/[TRIM] /' || echo "[WARN] fstrim found nothing to trim — check: lsblk -D"
 fi
 
 # Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
