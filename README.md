@@ -886,14 +886,20 @@ refused with the size that would work. The default, 15 GB:
 | Mount      | Size    | Holds                                      |
 | ---------- | ------- | ------------------------------------------ |
 | `/boot`    | 500 MB  | kernel, unencrypted (required)             |
-| `/`        | 3.5 GB  | base system, apt packages, Docker binaries |
+| `/`        | 4.3 GB  | Debian (~1.1 GB), apt packages, Docker + node binaries |
 | swap       | 2 GB    | follows RAM (1–4 GB), mounted with `discard` |
-| `/home`    | 1.2 GB  | user data (project sources live on the host) |
-| `/opt`     | 750 MB  | **machine-wide scope** — see below         |
-| `/srv`     | 450 MB  | service data (lighttpd)                    |
-| `/tmp`     | 640 MB  | build artefacts                            |
-| `/var/log` | 640 MB  | system + Docker logs                       |
-| `/var`     | ~5.3 GB | Docker images, containers, build cache     |
+| `/home`    | 1.1 GB  | nvim plugins/parsers, hellish (sources stay on the host) |
+| `/opt`     | 570 MB  | **machine-wide scope** — see below         |
+| `/srv`     | 380 MB  | service data (lighttpd)                    |
+| `/tmp`     | 440 MB  | build artefacts                            |
+| `/var/log` | 570 MB  | system + Docker logs                       |
+| `/var`     | ~5.2 GB | Docker images, containers, build cache, WordPress |
+
+These were **calibrated on a real build**: the first cut gave `/` 3.3 GB and
+left no room for nvim, because the Debian base system (~1.1 GB) was not in
+the cost table at all. `/etc/b2b/features.status` on a built guest records
+what each feature actually took; that is where the next correction comes
+from.
 
 `generate/partition_recipe.sh` computes it; the copy in `preseeds/preseed.cfg`
 is its output for the default and `tests/test_partition_recipe.sh` fails if the
@@ -969,8 +975,8 @@ missing things, and Docker could run before nvim and starve it.
 
 | Profile      | `SIZE_B2B` | Installs                                                                 |
 | ------------ | ---------- | ------------------------------------------------------------------------ |
-| **minimal**  | 8–13       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish** |
-| **standard** | 14–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer, Herdr + Claude Code |
+| **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish** |
+| **standard** | 15–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer, Herdr + Claude Code |
 | **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow) |
 
 AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
@@ -979,12 +985,16 @@ be turned off. Everything else can be, per feature:
 ```bash
 make all SIZE_B2B=10                        # minimal
 make all SIZE_B2B=10 FEATURES=+docker       # minimal plus Docker — fits, so it builds
-make all SIZE_B2B=13 PROFILE=standard       # refused: "fits from SIZE_B2B=14"
+make all SIZE_B2B=14 PROFILE=standard       # refused: "fits from SIZE_B2B=15"
 make all FEATURES="-pytools -devtools-extra"
 ```
 
 A set that does not fit **fails the ISO build** naming the mount and the
-smallest `SIZE_B2B` that works. The resolved set ships in the ISO as
+smallest `SIZE_B2B` that works. Docker's `/var` figure (3.3 GB) is measured:
+Inception with bonus — nine alpine images plus a Rust build stage — left
+2.35 GB of build cache alone on the host that built it. `make inception`
+checks `/var` has that much free before building and prunes the build cache
+after a successful build, so the steady state stays inside the estimate. The resolved set ships in the ISO as
 `/etc/b2b/features.conf`; the guest scripts install exactly that, required
 features first. First boot records what each feature _actually_ cost to
 `/etc/b2b/features.status` — the estimates in `generate/feature_profile.sh`
