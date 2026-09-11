@@ -30,11 +30,18 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-REPO_ROOT="$(cd "$HERE/.." && pwd)"
+REPO_ROOT="$(readlink -f "$HERE/..")"
 
 SPACE_BUDGET_GB="${SPACE_BUDGET_GB:-15}"
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
+# Compare physical paths: REPO_ROOT is resolved through `pwd`, while VM_PATH
+# arrives however the user typed it. ~/goinfre is a symlink to /goinfre/<login>
+# on this campus, and the two spellings of the same directory made the VM
+# count once as itself and once as "another disk in the repo".
+# readlink -f rather than a subshell `cd && pwd -P`: under hellish the latter
+# came back logical, and the check silently disagreed with itself.
+VM_PATH_REAL=$(readlink -f "$VM_PATH" 2>/dev/null || printf '%s' "$VM_PATH")
 REPORT_ONLY=0
 PREFLIGHT_MB=0
 case "${1:-}" in
@@ -80,14 +87,14 @@ done
 # made a 43 GB leftover look like source code, so they get their own line.
 OTHER_VM_KB=0
 REPO_DISKS="$REPO_ROOT/disk_images"
-case "$VM_PATH" in
+case "$VM_PATH_REAL" in
 "$REPO_DISKS") ;;
 *) OTHER_VM_KB=$(kb_of "$REPO_DISKS") ;;
 esac
 
 # The repo minus everything already counted, so nothing is double-billed.
 REPO_KB=$(kb_of "$REPO_ROOT")
-case "$VM_PATH/" in
+case "$VM_PATH_REAL/" in
 "$REPO_ROOT"/*) REPO_KB=$((REPO_KB - VM_KB)) ;;
 esac
 REPO_KB=$((REPO_KB - ISO_KB - OTHER_VM_KB))
@@ -104,16 +111,21 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
     # only while it stays thin is a quota overrun waiting for a busy week.
     # An existing disk is replaced, not added to, so take the larger of the two.
     [ "$VM_KB" -gt "$WANT_KB" ] && WANT_KB="$VM_KB"
-    PROJECTED_KB=$((REPO_KB + ISO_KB + OTHER_VM_KB + WANT_KB))
+    # The ISOs are build INPUTS, not part of the finished project: `make slim`
+    # removes them once the VM is installed. Counting them here made every
+    # rebuild fail its own budget (source + 1.7 GB of ISOs + the disk), while
+    # the steady state it is meant to protect was fine. They still count in
+    # the free-space check below, because the build does need room for them.
+    PROJECTED_KB=$((REPO_KB + OTHER_VM_KB + WANT_KB))
 
     printf '\n  %sPre-flight%s  %s(budget: %s GB · new disk: %s)%s\n\n' \
         "$BLD" "$OFF" "$DIM" "$SPACE_BUDGET_GB" "$(human $((PREFLIGHT_MB * 1024)))" "$OFF"
     printf '    %-34s %10s\n' "source, git, nested repos" "$(human "$REPO_KB")"
-    printf '    %-34s %10s\n' "ISOs" "$(human "$ISO_KB")"
+    printf '    %-34s %10s   %s\n' "ISOs" "$(human "$ISO_KB")" "(build input; not counted — make slim removes them)"
     [ "$OTHER_VM_KB" -gt 0 ] &&
         printf '    %-34s %10s\n' "other VM disks still in the repo" "$(human "$OTHER_VM_KB")"
     printf '    %-34s %10s\n' "VM disk, at its maximum" "$(human "$WANT_KB")"
-    printf '    %-34s %10s\n\n' "projected total" "$(human "$PROJECTED_KB")"
+    printf '    %-34s %10s\n\n' "projected total, once slimmed" "$(human "$PROJECTED_KB")"
 
     FAIL=0
     if [ "$PROJECTED_KB" -gt "$BUDGET_KB" ]; then
@@ -124,7 +136,7 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
         # When the fixed costs already exceed the budget on their own, no disk
         # size fits and suggesting one (a negative number, at that) sends
         # someone off tuning the wrong knob.
-        ROOM_MB=$(((BUDGET_KB - REPO_KB - ISO_KB - OTHER_VM_KB) / 1024))
+        ROOM_MB=$(((BUDGET_KB - REPO_KB - OTHER_VM_KB) / 1024))
         if [ "$ROOM_MB" -gt 1024 ]; then
             printf '    %sDISK_SIZE_MB=%s%s   the largest disk that still fits\n' \
                 "$BLD" "$ROOM_MB" "$OFF"
@@ -166,10 +178,8 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
         # first build. They are ~1.7 GB once built and stay until something
         # removes them, so say where that lands rather than letting the next
         # `make space` be a surprise.
-        if [ "$ISO_KB" -eq 0 ]; then
-            printf '    %sthe build will add ~1.7 GB of ISOs; %smake slim%s%s drops them once installed%s\n' \
-                "$DIM" "$BLD" "$OFF" "$DIM" "$OFF"
-        fi
+        printf '    %sthe ISOs (~1.7 GB) are not counted; %smake slim%s%s drops them once installed%s\n' \
+            "$DIM" "$BLD" "$OFF" "$DIM" "$OFF"
         printf '\n'
     fi
     exit "$FAIL"
@@ -182,7 +192,7 @@ printf '    %-34s %10s' "ISOs" "$(human "$ISO_KB")"
 [ "$ISO_KB" -gt 0 ] && printf '  %sdeletable once installed: make slim%s' "$DIM" "$OFF"
 printf '\n'
 printf '    %-34s %10s' "VM disk ($VM_NAME)" "$(human "$VM_KB")"
-case "$VM_PATH/" in
+case "$VM_PATH_REAL/" in
 "$REPO_ROOT"/*) ;;
 *) printf '  %sat %s%s' "$DIM" "$VM_PATH" "$OFF" ;;
 esac
@@ -207,7 +217,7 @@ if [ "$ISO_KB" -gt 0 ] && [ "$ISO_KB" -ge "$OVER_KB" ]; then
     printf '    %smake slim%s            deletes the ISOs (%s) — they are rebuildable\n' \
         "$BLD" "$OFF" "$(human "$ISO_KB")"
 fi
-case "$VM_PATH/" in
+case "$VM_PATH_REAL/" in
 "$REPO_ROOT"/*)
     printf '    %sVM_PATH=...%s          move the %s VM disk off this filesystem:\n' \
         "$BLD" "$OFF" "$(human "$VM_KB")"
