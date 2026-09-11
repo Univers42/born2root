@@ -994,7 +994,8 @@ smallest `SIZE_B2B` that works. Docker's `/var` figure (3.3 GB) is measured:
 Inception with bonus — nine alpine images plus a Rust build stage — left
 2.35 GB of build cache alone on the host that built it. `make inception`
 checks `/var` has that much free before building and prunes the build cache
-after a successful build, so the steady state stays inside the estimate. The resolved set ships in the ISO as
+after a successful build, so the steady state stays inside the estimate.
+The resolved set ships in the ISO as
 `/etc/b2b/features.conf`; the guest scripts install exactly that, required
 features first. First boot records what each feature _actually_ cost to
 `/etc/b2b/features.status` — the estimates in `generate/feature_profile.sh`
