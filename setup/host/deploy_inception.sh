@@ -119,6 +119,34 @@ while :; do
 done
 ok "git, docker, openssl, make, rsync all present and docker is usable"
 
+# ── 2b. Is there room for the stack? ────────────────────────────────────────
+# Inception with bonus is nine alpine images, a Rust build stage, three volumes
+# and docker's build cache, all on /var. Measured on the host that built it:
+# 2.35 GB of build cache alone. The VM's /var was sized for this at ISO-build
+# time (generate/feature_profile.sh, feature `docker`), but a VM built before
+# that, or one that has been used for a while, may not have it -- and docker
+# does not fail cleanly when /var fills mid-build, it corrupts layers and the
+# error arrives from a different container minutes later. So: check first,
+# and refuse with the numbers rather than let the build discover it.
+INCEPTION_VAR_NEED_MB="${INCEPTION_VAR_NEED_MB:-3300}"
+step "Checking /var has room for the stack (${INCEPTION_VAR_NEED_MB} MB)"
+var_free_mb=$(vm_ssh "df -Pm /var 2>/dev/null | awk 'NR==2 {print \$4}'" 2>/dev/null | tr -d '\r')
+var_size_mb=$(vm_ssh "df -Pm /var 2>/dev/null | awk 'NR==2 {print \$2}'" 2>/dev/null | tr -d '\r')
+docker_used=$(vm_ssh "docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | tr '\n' ' '" 2>/dev/null | tr -d '\r')
+case "$var_free_mb" in
+'' | *[!0-9]*) warn "could not read /var free space in the guest — continuing without the check" ;;
+*)
+    if [ "$var_free_mb" -lt "$INCEPTION_VAR_NEED_MB" ]; then
+        printf "    /var: %s MB free of %s MB   docker: %s\n" "$var_free_mb" "$var_size_mb" "${docker_used:-nothing yet}"
+        printf "\n    Free some:  ssh %s 'docker system prune -af && docker builder prune -af'\n" "$SSH_ALIAS"
+        printf "    Or trim:    make slim      Or rebuild bigger:  make all SIZE_B2B=20\n"
+        printf "    Or, if you know better:  INCEPTION_VAR_NEED_MB=%s make inception\n\n" "$var_free_mb"
+        die "/var has ${var_free_mb} MB free; the stack needs about ${INCEPTION_VAR_NEED_MB} MB"
+    fi
+    ok "/var: ${var_free_mb} MB free of ${var_size_mb} MB${docker_used:+  (docker now: $docker_used)}"
+    ;;
+esac
+
 # ── 3. Get the sources into the guest ───────────────────────────────────────
 if [ -n "$SRC" ]; then
     [ -d "$SRC" ] || die "SRC='$SRC' is not a directory"
@@ -221,6 +249,17 @@ else
     # always report success.
     [ "${PIPESTATUS[0]}" -eq 0 ] || die "inception build failed inside the guest"
     ok "stack built"
+
+    # The build cache is the single biggest thing on /var after a build (2.35
+    # GB measured) and it is only useful for the NEXT build. On a disk sized
+    # to the quota it is what tips a full /var, so it goes now that the images
+    # exist; a rebuild simply pays the cache back. Then say what is left, in
+    # the same units feature_profile.sh estimates in, so a wrong estimate is
+    # visible here rather than in a failed deploy later.
+    vm_ssh "docker builder prune -af >/dev/null 2>&1 || true"
+    printf "    after the build:\n"
+    vm_ssh "docker system df 2>/dev/null" | sed 's/^/      /'
+    vm_ssh "df -h /var | tail -1 | awk '{print \"      /var: \" \$3 \" used, \" \$4 \" free (\" \$5 \")\"}'" 2>/dev/null
 fi
 
 # ── 6. Verify from inside the guest ─────────────────────────────────────────

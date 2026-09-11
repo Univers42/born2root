@@ -729,7 +729,15 @@ watch_install() {
 # The 1s tick is a seam the test overrides.
 STOP_TICK="${STOP_TICK:-1}"
 STOP_PROGRESS="${STOP_PROGRESS:-auto}"
-_progress_on() { case "$STOP_PROGRESS" in auto) [ -t 1 ] ;; 1 | yes | on) : ;; *) return 1 ;; esac; }
+# Multi-line on purpose: shfmt rewrites a one-line `esac; }` to `esac }`,
+# which hellish cannot parse. This form is stable under both.
+_progress_on() {
+    case "$STOP_PROGRESS" in
+    auto) [ -t 1 ] ;;
+    1 | yes | on) : ;;
+    *) return 1 ;;
+    esac
+}
 await_shutdown() {
     local grace="$1" waited=0 last
     while is_running && [ "$waited" -lt "$grace" ]; do

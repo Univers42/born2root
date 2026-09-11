@@ -986,7 +986,7 @@ make all FEATURES="-pytools -devtools-extra"
 A set that does not fit **fails the ISO build** naming the mount and the
 smallest `SIZE_B2B` that works. The resolved set ships in the ISO as
 `/etc/b2b/features.conf`; the guest scripts install exactly that, required
-features first. First boot records what each feature *actually* cost to
+features first. First boot records what each feature _actually_ cost to
 `/etc/b2b/features.status` — the estimates in `generate/feature_profile.sh`
 are meant to be corrected from it. A required feature that fails to install
 prints `B2B-FEATURE-FAILED` on the serial console and **fails `make all`**;

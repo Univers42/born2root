@@ -208,42 +208,42 @@ chmod -R u+w "$ISO_DIR"
 # construction, instead of by two edits that have to be remembered together.
 echo "Copying preseed file to ISO root..."
 if luks_enabled "$LUKS"; then
-	cp "$PRESEED_FILE" "$ISO_DIR/preseed.cfg"
-	echo "  ✓ preseed.cfg (LUKS=ON — encrypted LVM)"
+    cp "$PRESEED_FILE" "$ISO_DIR/preseed.cfg"
+    echo "  ✓ preseed.cfg (LUKS=ON — encrypted LVM)"
 else
-	# Replace everything between the markers with the plain-LVM equivalent.
-	# The crypto-specific debconf keys are all inside that region by design
-	# (see preseeds/preseed.cfg), so nothing outside it needs touching and the
-	# partition recipe is identical in both modes.
-	awk '
-		/^# ── LUKS-BEGIN/ {
-			skipping = 1
-			print "# ── LUKS-BEGIN (replaced: built with LUKS=OFF, NOT submittable) ──"
-			print "d-i partman-auto/init_automatically_partition select Guided - use entire disk and set up LVM"
-			print "d-i partman-auto/method string lvm"
-			next
-		}
-		/^# ── LUKS-END/ { skipping = 0; print "# ── LUKS-END ──"; next }
-		!skipping { print }
-	' "$PRESEED_FILE" > "$ISO_DIR/preseed.cfg"
+    # Replace everything between the markers with the plain-LVM equivalent.
+    # The crypto-specific debconf keys are all inside that region by design
+    # (see preseeds/preseed.cfg), so nothing outside it needs touching and the
+    # partition recipe is identical in both modes.
+    awk '
+        /^# ── LUKS-BEGIN/ {
+            skipping = 1
+            print "# ── LUKS-BEGIN (replaced: built with LUKS=OFF, NOT submittable) ──"
+            print "d-i partman-auto/init_automatically_partition select Guided - use entire disk and set up LVM"
+            print "d-i partman-auto/method string lvm"
+            next
+        }
+        /^# ── LUKS-END/ { skipping = 0; print "# ── LUKS-END ──"; next }
+        !skipping { print }
+    ' "$PRESEED_FILE" >"$ISO_DIR/preseed.cfg"
 
-	# The markers are a contract between two files. If someone reworded them in
-	# preseed.cfg, awk above would have copied the crypto keys through silently
-	# and produced an encrypted ISO named -nocrypt — the exact confusion the
-	# suffix exists to prevent. Cheaper to catch it here than in the installer.
-	if grep -q '^d-i partman-auto/method string crypto' "$ISO_DIR/preseed.cfg"; then
-		echo "Error: LUKS=OFF was requested but the crypto block survived the rewrite." >&2
-		echo "       The LUKS-BEGIN/LUKS-END markers in $PRESEED_FILE no longer match" >&2
-		echo "       what create_custom_iso.sh looks for. Fix the markers, or this" >&2
-		echo "       build would ship an encrypted ISO under a -nocrypt name." >&2
-		exit 1
-	fi
-	if ! grep -q '^d-i partman-auto/method string lvm' "$ISO_DIR/preseed.cfg"; then
-		echo "Error: LUKS=OFF rewrite produced no partitioning method at all." >&2
-		echo "       Check the LUKS-BEGIN/LUKS-END markers in $PRESEED_FILE." >&2
-		exit 1
-	fi
-	echo "  ✓ preseed.cfg (LUKS=OFF — plain LVM, evaluation-failing by design)"
+    # The markers are a contract between two files. If someone reworded them in
+    # preseed.cfg, awk above would have copied the crypto keys through silently
+    # and produced an encrypted ISO named -nocrypt — the exact confusion the
+    # suffix exists to prevent. Cheaper to catch it here than in the installer.
+    if grep -q '^d-i partman-auto/method string crypto' "$ISO_DIR/preseed.cfg"; then
+        echo "Error: LUKS=OFF was requested but the crypto block survived the rewrite." >&2
+        echo "       The LUKS-BEGIN/LUKS-END markers in $PRESEED_FILE no longer match" >&2
+        echo "       what create_custom_iso.sh looks for. Fix the markers, or this" >&2
+        echo "       build would ship an encrypted ISO under a -nocrypt name." >&2
+        exit 1
+    fi
+    if ! grep -q '^d-i partman-auto/method string lvm' "$ISO_DIR/preseed.cfg"; then
+        echo "Error: LUKS=OFF rewrite produced no partitioning method at all." >&2
+        echo "       Check the LUKS-BEGIN/LUKS-END markers in $PRESEED_FILE." >&2
+        exit 1
+    fi
+    echo "  ✓ preseed.cfg (LUKS=OFF — plain LVM, evaluation-failing by design)"
 fi
 
 # ── Partition recipe: generated for THIS build's SIZE_B2B ────────────────────
@@ -253,22 +253,19 @@ fi
 echo "Sizing the partition recipe..."
 RECIPE_TMP=$(mktemp)
 if ! SIZE_B2B="${SIZE_B2B:-15}" DISK_SIZE_MB="${DISK_SIZE_MB:-}" VM_RAM_MB="${VM_RAM_MB:-2048}" \
-	"${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/partition_recipe.sh" --recipe > "$RECIPE_TMP"; then
-	# The generator has already said exactly why (too small, non-numeric).
-	rm -f "$RECIPE_TMP"
-	echo "Error: could not derive a partition layout — see above. Nothing was built." >&2
-	exit 1
+    "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/partition_recipe.sh" --recipe >"$RECIPE_TMP"; then
+    # The generator has already said exactly why (too small, non-numeric).
+    rm -f "$RECIPE_TMP"
+    echo "Error: could not derive a partition layout — see above. Nothing was built." >&2
+    exit 1
 fi
-awk -v recipe="$RECIPE_TMP" '
-	/^# ── RECIPE-BEGIN/ {
-		skipping = 1
-		while ((getline line < recipe) > 0) print line
-		close(recipe)
-		next
-	}
-	/^# ── RECIPE-END/ { skipping = 0; next }
-	!skipping { print }
-' "$ISO_DIR/preseed.cfg" > "$ISO_DIR/preseed.cfg.sized" && mv "$ISO_DIR/preseed.cfg.sized" "$ISO_DIR/preseed.cfg"
+# Everything before the BEGIN marker, the generated block, everything after
+# the END marker. The two markers themselves come from the generated block.
+{
+    sed -n '1,/^# ── RECIPE-BEGIN/p' "$ISO_DIR/preseed.cfg" | sed '$d'
+    cat "$RECIPE_TMP"
+    sed -n '/^# ── RECIPE-END/,$p' "$ISO_DIR/preseed.cfg" | sed '1d'
+} >"$ISO_DIR/preseed.cfg.sized" && mv "$ISO_DIR/preseed.cfg.sized" "$ISO_DIR/preseed.cfg"
 rm -f "$RECIPE_TMP"
 
 # Same contract as the LUKS markers: if RECIPE-BEGIN/END were reworded, awk
@@ -279,18 +276,18 @@ recipe_lvs=$(grep -c '^\s*lv_name{' "$ISO_DIR/preseed.cfg")
 recipe_last=$(grep '^\s*lv_name{' "$ISO_DIR/preseed.cfg" | tail -1 | sed 's/.*lv_name{ *\([^ }]*\).*/\1/')
 recipe_marks=$(grep -c '^# ── RECIPE-BEGIN' "$ISO_DIR/preseed.cfg")
 if [ "$recipe_marks" != 1 ] || [ "$recipe_lvs" != 8 ] || [ "$recipe_last" != var ]; then
-	echo "Error: the sized partition recipe did not land in the staged preseed." >&2
-	echo "       markers=$recipe_marks (want 1)  volumes=$recipe_lvs (want 8)  last=$recipe_last (want var)" >&2
-	echo "       The RECIPE-BEGIN/RECIPE-END markers in $PRESEED_FILE no longer match" >&2
-	echo "       what create_custom_iso.sh looks for. Fix them; shipping the checked-in" >&2
-	echo "       default under SIZE_B2B=${SIZE_B2B:-15} would be the wrong disk layout." >&2
-	exit 1
+    echo "Error: the sized partition recipe did not land in the staged preseed." >&2
+    echo "       markers=$recipe_marks (want 1)  volumes=$recipe_lvs (want 8)  last=$recipe_last (want var)" >&2
+    echo "       The RECIPE-BEGIN/RECIPE-END markers in $PRESEED_FILE no longer match" >&2
+    echo "       what create_custom_iso.sh looks for. Fix them; shipping the checked-in" >&2
+    echo "       default under SIZE_B2B=${SIZE_B2B:-15} would be the wrong disk layout." >&2
+    exit 1
 fi
-if ! grep -q "^#   SIZE_B2B=$(( ${DISK_SIZE_MB:-$(( ${SIZE_B2B:-15} * 1024 ))} / 1024 )) " "$ISO_DIR/preseed.cfg"; then
-	echo "Error: staged recipe header does not name the requested size." >&2
-	exit 1
+if ! grep -q "^#   SIZE_B2B=$((${DISK_SIZE_MB:-$((${SIZE_B2B:-15} * 1024))} / 1024)) " "$ISO_DIR/preseed.cfg"; then
+    echo "Error: staged recipe header does not name the requested size." >&2
+    exit 1
 fi
-echo "  ✓ partition recipe sized for SIZE_B2B=$(( ${DISK_SIZE_MB:-$(( ${SIZE_B2B:-15} * 1024 ))} / 1024 )) GB (VM_RAM_MB=${VM_RAM_MB:-2048})"
+echo "  ✓ partition recipe sized for SIZE_B2B=$((${DISK_SIZE_MB:-$((${SIZE_B2B:-15} * 1024))} / 1024)) GB (VM_RAM_MB=${VM_RAM_MB:-2048})"
 
 # ── Install profile: decided here, proven to fit, shipped inside the ISO ─────
 # What the provisioners install used to be decided at runtime in the guest by
@@ -299,14 +296,21 @@ echo "  ✓ partition recipe sized for SIZE_B2B=$(( ${DISK_SIZE_MB:-$(( ${SIZE_B
 # recipe mount by mount. A set that does not fit stops the build here with the
 # size that would work. See generate/feature_profile.sh.
 echo "Resolving the install profile..."
-FEATURE_ENV="SIZE_B2B=${SIZE_B2B:-15} DISK_SIZE_MB=${DISK_SIZE_MB:-} VM_RAM_MB=${VM_RAM_MB:-2048} PROFILE=${PROFILE:-auto} FEATURES=${FEATURES:-} AI_MODE=${AI_MODE:-off}"
-if ! env $FEATURE_ENV "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" --check; then
-	echo "Error: the requested features do not fit this disk — see above. Nothing was built." >&2
-	exit 1
+feature_env() {
+    env SIZE_B2B="${SIZE_B2B:-15}" DISK_SIZE_MB="${DISK_SIZE_MB:-}" VM_RAM_MB="${VM_RAM_MB:-2048}" \
+        PROFILE="${PROFILE:-auto}" FEATURES="${FEATURES:-}" AI_MODE="${AI_MODE:-off}" \
+        "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" "$@"
+}
+if ! feature_env --check; then
+    echo "Error: the requested features do not fit this disk — see above. Nothing was built." >&2
+    exit 1
 fi
-env $FEATURE_ENV "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" --conf > "$ISO_DIR/features.conf" \
-	|| { echo "Error: could not write features.conf" >&2; exit 1; }
-env $FEATURE_ENV "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" --resolve | sed 's/^/    /'
+feature_env --conf >"$ISO_DIR/features.conf" ||
+    {
+        echo "Error: could not write features.conf" >&2
+        exit 1
+    }
+feature_env --resolve | sed 's/^/    /'
 echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") feature(s) on"
 
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)

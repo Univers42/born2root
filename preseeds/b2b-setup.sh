@@ -30,7 +30,6 @@ echo "=== Born2beRoot setup starting ($(date)) ==="
 # the smallest one.
 mkdir -p /etc/b2b
 B2B_PROFILE=minimal
-B2B_AI_MODE=off
 if [ -f /etc/b2b/features.conf ]; then
     # shellcheck disable=SC1091
     . /etc/b2b/features.conf
