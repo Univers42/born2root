@@ -174,11 +174,21 @@ FEATURES ?=
 LUKS ?= ON
 
 # The whole project — source, ISOs and the VM disk — must fit in this many GB.
-# Derived: the disk plus ~350MB of source, rounded up. With the default
-# SIZE_B2B=15 that is 16; SIZE_B2B=14 gives a hard 15GB project cap if the
-# quota is on the whole tree. `make space` reports the breakdown and fails
-# when it is exceeded; `make all` checks it before building anything.
-SPACE_BUDGET_GB ?= $(shell expr $(SIZE_B2B) + 1)
+# `make space` reports the breakdown and fails when it is exceeded; `make all`
+# checks it before building anything.
+#
+# auto (the default) measures the source tree and adds the disk you asked for,
+# so the cap moves with SIZE_B2B and with anything the picker grows the disk
+# to. It replaced `SIZE_B2B + 1`, which budgeted ~350MB for everything that is
+# not the disk: because a bigger disk raised the cap and the cost by the same
+# 1GB, a project heavier than that was over by a fixed amount at EVERY size —
+# measured 3.3GB over at SIZE_B2B=15, 30 and 50 alike — so no size the picker
+# could offer would have built. Leftover VM disks stay outside the auto cap on
+# purpose; they are the one reclaimable line, and a cap that absorbed them
+# would stop naming them.
+#
+# Set a number for a hard cap, which is what a real quota is.
+SPACE_BUDGET_GB ?= auto
 
 # `make slim COMPACT=1` also rewrites the qcow2 without its unreferenced
 # clusters. Off by default because it requires the VM to be stopped.
@@ -263,6 +273,7 @@ all: no_root prepare
 	@$(SCRIPT_SH) utils/luks_mode.sh --banner "$(LUKS)" || exit 1
 	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" SCRIPT_SH="$(SCRIPT_SH)" \
+		VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" \
 		$(SCRIPT_SH) generate/feature_select.sh || exit 1
 	@sel=$$(sed -n 's/^B2B_SELECT_SIZE_GB=//p' .b2b-features 2>/dev/null | head -n1); \
 	if [ -n "$$sel" ] && [ "$$sel" != "$(SIZE_B2B)" ]; then \
@@ -762,6 +773,7 @@ features:
 # mind without rebuilding. --show prints the saved choice, --clear forgets it.
 features_select:
 	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
+		VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" \
 		SCRIPT_SH="$(SCRIPT_SH)" $(SCRIPT_SH) generate/feature_select.sh $(ARGS)
 
 # Hand back what is no longer used: the ISOs once the VM is installed, the

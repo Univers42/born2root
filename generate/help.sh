@@ -261,7 +261,7 @@ cmd "PROFILE=…" "auto | minimal | standard | full (from SIZE_B2B)" "${DIM}"
 cmd "FEATURES=…" "Per-feature overrides, e.g. \"+docker -pytools\"" "${DIM}"
 cmd "DISK_SIZE_MB=…" "Disk in MB; overrides SIZE_B2B*1024" "${DIM}"
 cmd "LUKS=OFF" "Unencrypted guest — dev only, fails eval" "${DIM}"
-cmd "SPACE_BUDGET_GB=…" "Footprint cap for make space (SIZE_B2B+1)" "${DIM}"
+cmd "SPACE_BUDGET_GB=…" "Footprint cap; auto = source + the disk asked for" "${DIM}"
 cmd "VM_RAM_MB=…" "Override VM RAM (default 25% of host)" "${DIM}"
 cmd "AI_MODE=…" "off (default) | client | local" "${DIM}"
 blank

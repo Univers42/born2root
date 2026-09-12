@@ -99,7 +99,7 @@ SIZE_B2B (15) ─┬─> DISK_SIZE_MB = SIZE_B2B*1024          (Makefile)
                ├─> generate/partition_recipe.sh --recipe  (layout)
                ├─> generate/feature_profile.sh --check    (fits? else exit 1)
                │                             --conf     (features.conf)
-               └─> SPACE_BUDGET_GB = SIZE_B2B + 1        (make space)
+               └─> SPACE_BUDGET_GB = auto: source + disk (make space)
 create_custom_iso.sh: LUKS swap -> RECIPE swap -> features check -> conf
    -> preseed.cfg (ISO root AND initrd) -> late_command copies conf to
    /target/etc/b2b/features.conf

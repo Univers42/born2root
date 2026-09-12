@@ -154,7 +154,11 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
 
 `SIZE_B2B` (GB, default 15 = the school quota) derives everything:
 
-- `DISK_SIZE_MB` and `SPACE_BUDGET_GB` (`SIZE_B2B + 1`) in the Makefile.
+- `DISK_SIZE_MB` in the Makefile. `SPACE_BUDGET_GB` defaults to `auto`, which
+  measures the source tree and adds the disk asked for, so the cap follows
+  whatever the picker grows the disk to. Leftover VM disks stay outside it on
+  purpose: they are the one reclaimable line, and `utils/space_budget.sh`
+  names them with the exact `rm -rf` rather than absorbing them into the cap.
 - The partition layout, from `generate/partition_recipe.sh`: every volume has a
   floor, a weighted share and a cap, `/var` is declared last with `-1` so
   partman's remainder lands where Docker grows. Below 8 GB it refuses.

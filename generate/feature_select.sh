@@ -72,6 +72,37 @@ AUTOGROW=1
 MAX_GROW_GB="${MAX_GROW_GB:-120}"
 MIN_FLOOR_GB=8
 
+# ── What the host can actually give, measured once ──────────────────────────
+# Growing the guest's volumes is only half the question: the disk they are
+# carved from is a file on the host, and a picker that offers 120 GB on a
+# filesystem with 40 free is offering a failed build. So the host's free space
+# is read here and shown on every frame beside the guest's bars -- the number
+# that moves when you tick something, next to the ceiling it is moving toward.
+#
+# df, not du: this runs on every keystroke's worth of arithmetic budget, and
+# the free-space figure is the one that matters. The precise accounting of
+# what the project already costs is space_budget.sh's job, and it runs on the
+# way into the build with the size this picker chose.
+#
+# ~4 GB is reserved for the ISOs and the extraction tree, which exist at the
+# same time as the disk during a build -- the same allowance space_budget.sh
+# makes, so the picker cannot green-light a size the pre-flight then refuses.
+HOST_DIR="${VM_PATH:-$ROOT/disk_images}"
+[ -d "$HOST_DIR" ] || HOST_DIR="$ROOT"
+HOST_FREE_GB=$(df -Pk "$HOST_DIR" 2>/dev/null |
+    awk 'NR == 2 { printf "%d", ($4 / 1048576) - 4; exit }')
+case "$HOST_FREE_GB" in
+'' | -*) HOST_FREE_GB=0 ;;
+esac
+# An existing disk for this VM is space the build reuses rather than needs.
+HOST_HAVE_GB=$(du -sk "$HOST_DIR/${VM_NAME:-debian}" 2>/dev/null |
+    awk '{ printf "%d", $1 / 1048576; exit }')
+[ -n "$HOST_HAVE_GB" ] || HOST_HAVE_GB=0
+HOST_CAP_GB=$((HOST_FREE_GB + HOST_HAVE_GB))
+if [ "$HOST_CAP_GB" -gt 0 ] && [ "$MAX_GROW_GB" -gt "$HOST_CAP_GB" ]; then
+    MAX_GROW_GB="$HOST_CAP_GB"
+fi
+
 C_R=$(printf '\033[0m')
 C_B=$(printf '\033[1m')
 C_DIM=$(printf '\033[2m')
@@ -429,6 +460,20 @@ draw() {
     else
         printf '    %s* does not fit at %s GB (pinned) - untick something, or press g%s\n' \
             "$C_RED" "$SIZE_GB" "$C_R"
+    fi
+    # The guest's volumes above, the host's disk below, on the same screen.
+    # Growing to hold a ticked feature spends host space, and finding that out
+    # from the pre-flight after the picker said "fits" is the confusing order
+    # to learn it in.
+    if [ "$HOST_CAP_GB" -gt 0 ]; then
+        if [ "$SIZE_GB" -gt "$HOST_CAP_GB" ]; then
+            printf '    %s* %s has room for %s GB, and this asks for %s%s\n' \
+                "$C_RED" "$HOST_DIR" "$HOST_CAP_GB" "$SIZE_GB" "$C_R"
+        else
+            printf '    %shost%s   %b %2s / %-3s GB %sfree on %s%s\n' \
+                "$C_DIM" "$C_R" "$(bar "$SIZE_GB" "$HOST_CAP_GB")" \
+                "$SIZE_GB" "$HOST_CAP_GB" "$C_DIM" "$HOST_DIR" "$C_R"
+        fi
     fi
     printf '\n    %sarrows%s move  %sspace%s tick  %sa%s all  %sd%s default  %sn%s none  %sg%s grow=%s  %s+/-%s floor  %sEnter%s build  %sq%s quit\n' \
         "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" \

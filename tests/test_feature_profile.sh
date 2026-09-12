@@ -22,6 +22,15 @@ check() {
     fi
 }
 FP=("${SCRIPT_SH:-bash}" generate/feature_profile.sh)
+
+# Isolate from the developer's own saved selection. feature_profile.sh reads
+# ../.b2b-features when FEATURES is unset, so a real one in the checkout is
+# read by every test that does not set B2B_SELECT_FILE itself -- and it is a
+# file `make all` writes as a side effect of ticking boxes. Measured: after a
+# run of the picker that chose the strict minimum, "standard has docker and
+# webstack" failed with 0, because the checkout said docker was off. The tests
+# below that DO exercise the file override this per invocation.
+export B2B_SELECT_FILE=/nonexistent
 rc_of() { "$@" >/dev/null 2>&1 && echo 0 || echo $?; }
 fits_from() { "$@" 2>&1 | grep -o 'fits from SIZE_B2B=[0-9]*' | head -1; }
 

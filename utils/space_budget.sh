@@ -25,14 +25,26 @@
 # either out afterwards costs a 40-minute install and leaves the mess behind.
 #
 # Env
-#   SPACE_BUDGET_GB (15)  VM_PATH  VM_NAME (debian)
+#   SPACE_BUDGET_GB (auto)  VM_PATH  VM_NAME (debian)
+#
+# SPACE_BUDGET_GB=auto means the cap FOLLOWS the disk: it is the disk you asked
+# for plus what the project costs besides the disk, measured, not assumed. The
+# old default was `SIZE_B2B + 1`, which budgeted ~350MB for everything that is
+# not the disk -- and since asking for a bigger disk raised the cap and the
+# cost by the same 1GB, any project heavier than that was over by a constant
+# amount at every size. Measured here: 4.3GB of leftovers put it 3.3GB over at
+# SIZE_B2B=15, 30 and 50 alike, so no size the picker could grow to would ever
+# have passed. A cap that cannot be satisfied by any input is not a budget.
+#
+# Set it to a number to get a hard cap back, which is what a real quota is.
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(readlink -f "$HERE/..")"
 
-SPACE_BUDGET_GB="${SPACE_BUDGET_GB:-15}"
+SPACE_BUDGET_GB="${SPACE_BUDGET_GB:-auto}"
+[ -n "$SPACE_BUDGET_GB" ] || SPACE_BUDGET_GB=auto
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
 # Compare physical paths: REPO_ROOT is resolved through `pwd`, while VM_PATH
@@ -86,10 +98,29 @@ done
 # the single biggest thing anyone forgets. Counting them silently into "source"
 # made a 43 GB leftover look like source code, so they get their own line.
 OTHER_VM_KB=0
+OTHER_VM_LIST=""
 REPO_DISKS="$REPO_ROOT/disk_images"
 case "$VM_PATH_REAL" in
-"$REPO_DISKS") ;;
-*) OTHER_VM_KB=$(kb_of "$REPO_DISKS") ;;
+"$REPO_DISKS")
+    # VM_PATH is the default, so the other VMs are siblings of this one rather
+    # than a separate directory, and skipping the walk here meant they landed
+    # in REPO_KB and were reported as source. Measured: a 4.3GB b2r.qcow2 left
+    # behind by a failed build was printed as 4.3GB of "source, git, nested
+    # repos" -- against a 14MB source tree -- and the advice that followed was
+    # to shrink the disk being built, which is the one thing that would not
+    # have helped. Name them, so the fix on screen is `rm -rf` and not a
+    # smaller VM.
+    for d in "$REPO_DISKS"/*; do
+        [ -d "$d" ] || continue
+        [ "${d##*/}" = "$VM_NAME" ] && continue
+        OTHER_VM_KB=$((OTHER_VM_KB + $(kb_of "$d")))
+        OTHER_VM_LIST="$OTHER_VM_LIST $d"
+    done
+    ;;
+*)
+    OTHER_VM_KB=$(kb_of "$REPO_DISKS")
+    [ "$OTHER_VM_KB" -gt 0 ] && OTHER_VM_LIST=" $REPO_DISKS"
+    ;;
 esac
 
 # The repo minus everything already counted, so nothing is double-billed.
@@ -101,7 +132,32 @@ REPO_KB=$((REPO_KB - ISO_KB - OTHER_VM_KB))
 [ "$REPO_KB" -lt 0 ] && REPO_KB=0
 
 TOTAL_KB=$((REPO_KB + ISO_KB + OTHER_VM_KB + VM_KB))
-BUDGET_KB=$((SPACE_BUDGET_GB * 1048576))
+
+# What the cap is, for a given disk. In auto mode it is what THIS build
+# legitimately costs -- the source tree plus the disk asked for -- rounded up
+# to the next GB, so growing the disk grows the cap with it and the picker can
+# hand this script any size it likes.
+#
+# Leftover VM disks are deliberately left out of that sum. They are the only
+# line in the report anyone can act on, and a cap that grew to swallow them
+# would be a cap that never mentions them again. So in auto mode being over
+# budget means exactly one thing -- there is an old VM in the way -- and the
+# advice printed below can say so instead of listing four possible knobs.
+budget_kb() {
+    if [ "$SPACE_BUDGET_GB" = auto ]; then
+        printf '%s' $(((REPO_KB + $1 + 1048575) / 1048576 * 1048576))
+    else
+        printf '%s' $((SPACE_BUDGET_GB * 1048576))
+    fi
+}
+
+budget_label() {
+    if [ "$SPACE_BUDGET_GB" = auto ]; then
+        printf '%s GB, auto' $(($1 / 1048576))
+    else
+        printf '%s GB' "$SPACE_BUDGET_GB"
+    fi
+}
 
 # ── Pre-flight: would the VM about to be built still fit, and is there room ──
 if [ "$PREFLIGHT_MB" -gt 0 ]; then
@@ -125,9 +181,11 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
     # the steady state it is meant to protect was fine. They still count in
     # the free-space check below, because the build does need room for them.
     PROJECTED_KB=$((REPO_KB + OTHER_VM_KB + WANT_KB))
+    BUDGET_KB=$(budget_kb "$WANT_KB")
 
-    printf '\n  %sPre-flight%s  %s(budget: %s GB · new disk: %s)%s\n\n' \
-        "$BLD" "$OFF" "$DIM" "$SPACE_BUDGET_GB" "$(human $((PREFLIGHT_MB * 1024)))" "$OFF"
+    printf '\n  %sPre-flight%s  %s(budget: %s · new disk: %s)%s\n\n' \
+        "$BLD" "$OFF" "$DIM" "$(budget_label "$BUDGET_KB")" \
+        "$(human $((PREFLIGHT_MB * 1024)))" "$OFF"
     printf '    %-34s %10s\n' "source, git, nested repos" "$(human "$REPO_KB")"
     printf '    %-34s %10s   %s\n' "ISOs" "$(human "$ISO_KB")" "(build input; not counted — make slim removes them)"
     [ "$OTHER_VM_KB" -gt 0 ] &&
@@ -141,34 +199,52 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
 
     FAIL=0
     if [ "$PROJECTED_KB" -gt "$BUDGET_KB" ]; then
-        printf '  %s✗%s A %s VM would put this project %s over the %s GB budget.\n\n' \
+        printf '  %s✗%s A %s VM would put this project %s over the %s budget.\n\n' \
             "$RED" "$OFF" "$(human "$WANT_KB")" \
-            "$(human $((PROJECTED_KB - BUDGET_KB)))" "$SPACE_BUDGET_GB"
-        if [ "$EXISTING_KB" -gt 0 ]; then
-            printf '    %sThere is already a VM here and make all would keep its disk.%s\n' "$BLD" "$OFF"
-            printf '    To build a right-sized one, build it under another name or path:\n'
-            printf '      %scd ~/goinfre/born2root && make all VM_NAME=b2r%s\n' "$BLD" "$OFF"
-            printf '    Or remove this one (destroys it): %smake rm_disk_image VM_NAME=%s%s\n\n' "$BLD" "$VM_NAME" "$OFF"
+            "$(human $((PROJECTED_KB - BUDGET_KB)))" "$(budget_label "$BUDGET_KB")"
+        # In auto mode the cap already contains the source and the disk, so
+        # the only way to be over it is a leftover VM. Say that one thing.
+        # Never `rm -rf disk_images` here: with the default VM_PATH that is
+        # also where the VM being built lives.
+        if [ "$SPACE_BUDGET_GB" = auto ] && [ -n "$OTHER_VM_LIST" ]; then
+            printf '    %sOld VM disks are the whole overrun.%s Nothing here uses them:\n' \
+                "$BLD" "$OFF"
+            for d in $OTHER_VM_LIST; do
+                printf '      %srm -rf %s%s  %s(%s)%s\n' \
+                    "$BLD" "$d" "$OFF" "$DIM" "$(human "$(kb_of "$d")")" "$OFF"
+            done
+            printf '\n'
+            FAIL=1
+        else
+            if [ "$EXISTING_KB" -gt 0 ]; then
+                printf '    %sThere is already a VM here and make all would keep its disk.%s\n' "$BLD" "$OFF"
+                printf '    To build a right-sized one, build it under another name or path:\n'
+                printf '      %scd ~/goinfre/born2root && make all VM_NAME=b2r%s\n' "$BLD" "$OFF"
+                printf '    Or remove this one (destroys it): %smake rm_disk_image VM_NAME=%s%s\n\n' "$BLD" "$VM_NAME" "$OFF"
+            fi
+            # Only offer a smaller disk when a smaller disk is actually the
+            # answer. When the fixed costs already exceed the budget on their
+            # own, no disk size fits and suggesting one (a negative number, at
+            # that) sends someone off tuning the wrong knob.
+            ROOM_MB=$(((BUDGET_KB - REPO_KB - OTHER_VM_KB) / 1024))
+            if [ "$EXISTING_KB" -eq 0 ] && [ "$ROOM_MB" -gt 1024 ]; then
+                printf '    %sDISK_SIZE_MB=%s%s   the largest disk that still fits\n' \
+                    "$BLD" "$ROOM_MB" "$OFF"
+            fi
+            # The leftovers by path, never the parent: with the default
+            # VM_PATH, disk_images/ also holds the VM being built.
+            for d in $OTHER_VM_LIST; do
+                printf '    %srm -rf %s%s  %s(%s, and nothing here uses it)%s\n' \
+                    "$BLD" "$d" "$OFF" "$DIM" "$(human "$(kb_of "$d")")" "$OFF"
+            done
+            printf '    %sVM_PATH=...%s          build somewhere that is not quota%sd\n' \
+                "$BLD" "$OFF" "'"
+            printf '    %sSPACE_BUDGET_GB=%s%s  raise the cap, if you are allowed to\n' \
+                "$BLD" "$(((PROJECTED_KB + 1048575) / 1048576))" "$OFF"
+            printf '    %sSPACE_BUDGET_GB=auto%s  let the cap follow the disk you ask for\n\n' \
+                "$BLD" "$OFF"
+            FAIL=1
         fi
-        # Only offer a smaller disk when a smaller disk is actually the answer.
-        # When the fixed costs already exceed the budget on their own, no disk
-        # size fits and suggesting one (a negative number, at that) sends
-        # someone off tuning the wrong knob.
-        ROOM_MB=$(((BUDGET_KB - REPO_KB - OTHER_VM_KB) / 1024))
-        if [ "$EXISTING_KB" -eq 0 ] && [ "$ROOM_MB" -gt 1024 ]; then
-            printf '    %sDISK_SIZE_MB=%s%s   the largest disk that still fits\n' \
-                "$BLD" "$ROOM_MB" "$OFF"
-        fi
-        if [ "$OTHER_VM_KB" -gt 0 ]; then
-            printf '    %srm -rf %s%s\n' "$BLD" "$REPO_DISKS" "$OFF"
-            printf '                          %s— %s of old VM disks, and nothing here uses them%s\n' \
-                "$DIM" "$(human "$OTHER_VM_KB")" "$OFF"
-        fi
-        printf '    %sVM_PATH=...%s          build somewhere that is not quota%sd\n' \
-            "$BLD" "$OFF" "'"
-        printf '    %sSPACE_BUDGET_GB=%s%s  raise the cap, if you are allowed to\n\n' \
-            "$BLD" "$(((PROJECTED_KB + 1048575) / 1048576))" "$OFF"
-        FAIL=1
     fi
 
     # Fitting the budget and fitting the disk are different questions: goinfre
@@ -204,7 +280,9 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
 fi
 
 # ── Report ──────────────────────────────────────────────────────────────────
-printf '\n  %sProject footprint%s  %s(budget: %s GB)%s\n\n' "$BLD" "$OFF" "$DIM" "$SPACE_BUDGET_GB" "$OFF"
+BUDGET_KB=$(budget_kb "$VM_KB")
+printf '\n  %sProject footprint%s  %s(budget: %s)%s\n\n' "$BLD" "$OFF" "$DIM" \
+    "$(budget_label "$BUDGET_KB")" "$OFF"
 printf '    %-34s %10s\n' "source, git, nested repos" "$(human "$REPO_KB")"
 printf '    %-34s %10s' "ISOs" "$(human "$ISO_KB")"
 [ "$ISO_KB" -gt 0 ] && printf '  %sdeletable once installed: make slim%s' "$DIM" "$OFF"
