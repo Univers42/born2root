@@ -2052,6 +2052,35 @@ setup_user() {
     return 0
 }
 
+# The download a headless Neovim leaves behind when `+qa` exits it mid-install,
+# waited out before the next run -- see install_nvim.sh, where the ENOTEMPTY it
+# caused at first boot is measured.
+nvim_jobs_left() {
+    local user="$1" home="$2" pid args cwd
+    ps -u "$user" -o pid=,args= 2>/dev/null | while read -r pid args; do
+        cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null) || cwd=""
+        case "${cwd}/ ${args}" in
+        *"${home}/.cache/nvim/"* | *"${home}/.local/share/nvim/"*)
+            printf '%s %s\n' "$pid" "$args"
+            break
+            ;;
+        esac
+    done
+}
+wait_nvim_jobs() {
+    local user="$1" home="$2" limit="${NVIM_JOBS_WAIT:-300}" waited=0 left
+    while :; do
+        left=$(nvim_jobs_left "$user" "$home")
+        [ -n "$left" ] || return 0
+        if [ "$waited" -ge "$limit" ]; then
+            warn "${user}: still running after ${limit} s, starting the next run anyway: ${left}"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
 # Run a command as <user>, with a terminal type Neovim can work with.
 #
 # TERM matters more than it looks. A non-interactive SSH session -- which is
@@ -2071,7 +2100,7 @@ setup_user() {
 # whose parser tree-sitter's default -Wall compile cannot fit in a 2 GB guest
 # (the measurement is in install_nvim.sh).
 run_as_user() {
-    local user="$1" home
+    local user="$1" home rc
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
@@ -2079,6 +2108,9 @@ run_as_user() {
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
+    rc=$?
+    wait_nvim_jobs "$user" "${home:-/nonexistent}" || true
+    return "$rc"
 }
 
 # Same two pieces as install_nvim.sh, for the same reasons (see there):

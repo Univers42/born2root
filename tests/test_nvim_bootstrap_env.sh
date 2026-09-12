@@ -17,6 +17,8 @@
 #    `make all` on those alone. "nvim" must not touch "nvim-extras".
 #
 # 3. clear_provision_failed, the other half of that verdict (see below).
+#
+# 4. wait_nvim_jobs, which run_as_user calls after every run (see below).
 set -e
 
 cd "$(dirname "$0")/.."
@@ -55,8 +57,15 @@ export PATH
 NVIM_BOOTSTRAP_TIMEOUT=20
 unset NVIM_TERM NVIM_CFLAGS
 
+# shellcheck disable=SC2317 # called by the function bodies eval'd below
+log() { :; }
+# shellcheck disable=SC2317 # called by the function bodies eval'd below
+warn() { :; }
+
 for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim_extras.sh; do
     name=$(basename "$script")
+    eval "$(awk '/^nvim_jobs_left\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^wait_nvim_jobs\(\) \{/,/^}/' "$REPO/$script")"
     body=$(awk '/^run_as_user\(\) \{/,/^}/' "$REPO/$script")
     if [ -z "$body" ]; then
         check "$name: run_as_user found" "missing" "present"
@@ -80,8 +89,6 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     cd "$REPO"
 done
 
-# shellcheck disable=SC2317 # called by the mark_feature_ok bodies eval'd below
-log() { :; }
 B2B_FEATURES_STATUS="$TMP/features.status"
 for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim_extras.sh \
     setup/install/ai/install_claude_code.sh; do
@@ -151,6 +158,50 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     check "$name: a feature with no line changes nothing" \
         "$(tr '\n' '|' <"$B2B_PROVISION_FAILED")" "nvim-extras why|docker why|"
     rm -f "$B2B_PROVISION_FAILED"
+done
+
+# 4. wait_nvim_jobs outlasts what an exited Neovim left running. The bug: a
+#    headless start exits under kickstart's async parser install, its curl
+#    keeps fetching into ~/.cache/nvim with PPID 1, and the next process's
+#    install of the same parser failed with ENOTEMPTY at first boot. Real
+#    processes here, found the two ways the guest's are: by cwd (tar, tree-sitter
+#    build) and by an argument (curl's --output).
+me=$(id -un)
+mkdir -p "$TMP/home/alice/.cache/nvim/tree-sitter-c" "$TMP/home/alice/.local/share/nvim"
+for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim_extras.sh; do
+    name=$(basename "$script")
+    eval "$(awk '/^nvim_jobs_left\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^wait_nvim_jobs\(\) \{/,/^}/' "$REPO/$script")"
+
+    check "$name: nothing left is reported as nothing" "$(nvim_jobs_left "$me" "$TMP/home/alice")" ""
+    t0=$(date +%s)
+    rc=0
+    wait_nvim_jobs "$me" "$TMP/home/alice" || rc=$?
+    check "$name: nothing left, no wait" "$rc $([ $(($(date +%s) - t0)) -le 1 ] && echo prompt)" "0 prompt"
+
+    (cd "$TMP/home/alice/.cache/nvim/tree-sitter-c" && exec sleep 3) &
+    sleep 0.3
+    t0=$(date +%s)
+    wait_nvim_jobs "$me" "$TMP/home/alice"
+    check "$name: waits out a job by its cwd" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
+
+    sh -c 'sleep 3' "$TMP/home/alice/.local/share/nvim/mason/staging" &
+    sleep 0.3
+    t0=$(date +%s)
+    wait_nvim_jobs "$me" "$TMP/home/alice"
+    check "$name: waits out a job by its argument" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
+
+    (cd "$TMP/home/alice/.cache/nvim" && exec sleep 6) &
+    job=$!
+    sleep 0.3
+    # shellcheck disable=SC2034 # read by the wait_nvim_jobs body eval'd above
+    NVIM_JOBS_WAIT=1
+    rc=0
+    wait_nvim_jobs "$me" "$TMP/home/alice" || rc=$?
+    unset NVIM_JOBS_WAIT
+    check "$name: gives up after NVIM_JOBS_WAIT, non-zero" "$rc" "1"
+    kill "$job" 2>/dev/null || true
+    wait "$job" 2>/dev/null || true
 done
 
 exit "$fail"

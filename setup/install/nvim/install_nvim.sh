@@ -414,6 +414,51 @@ setup_user_config() {
     return 0
 }
 
+# ── Work an exited Neovim left running ──────────────────────────────────────
+# A headless start that loads the config runs kickstart's
+#     require('nvim-treesitter').install(parsers)
+# which is asynchronous, and `+qa` a moment later exits Neovim under it. What
+# it had spawned is not killed: reparented to init, it keeps writing into
+# ~/.cache/nvim. Measured in the 2026-09-13 guest, 13 ms after
+# `nvim +sleep 200m +qa` returned: curl, PPID 1, still fetching tree-sitter-c.
+# On that build's first boot the next process's own install of the same
+# parser died on
+#     Could not rename temp: ENOTEMPTY ... tree-sitter-c-tmp/... -> tree-sitter-c
+# and nvim was filed as failed over one parser, which nvim-extras then
+# installed minutes later without trouble. `make nvim` never showed it: there
+# the parsers were already installed, so nothing was left to race.
+#
+# So every run waits for that work to end. It is found by where it points:
+# nvim-treesitter runs tar and `tree-sitter build` FROM ~/.cache/nvim/..., and
+# curl (no cwd of its own) with an --output path in there; Mason stages under
+# ~/.local/share/nvim. A process of this user whose cwd or arguments lead into
+# either is still working for a Neovim that has gone.
+nvim_jobs_left() {
+    local user="$1" home="$2" pid args cwd
+    ps -u "$user" -o pid=,args= 2>/dev/null | while read -r pid args; do
+        cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null) || cwd=""
+        case "${cwd}/ ${args}" in
+        *"${home}/.cache/nvim/"* | *"${home}/.local/share/nvim/"*)
+            printf '%s %s\n' "$pid" "$args"
+            break
+            ;;
+        esac
+    done
+}
+wait_nvim_jobs() {
+    local user="$1" home="$2" limit="${NVIM_JOBS_WAIT:-300}" waited=0 left
+    while :; do
+        left=$(nvim_jobs_left "$user" "$home")
+        [ -n "$left" ] || return 0
+        if [ "$waited" -ge "$limit" ]; then
+            warn "${user}: still running after ${limit} s, starting the next run anyway: ${left}"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
 # ── 5. Headless bootstrap + health report ───────────────────────────────────
 # Without this, the user's first `nvim` sits for several minutes cloning
 # plugins and compiling parsers behind a blank screen. Doing it at build time
@@ -457,7 +502,7 @@ setup_user_config() {
 # set, tree-sitter uses it IN PLACE of -Wall, and with -Wno-uninitialized the
 # same build peaked at 460 MB. It only mutes warnings nobody reads here.
 run_as_user() {
-    local user="$1" home
+    local user="$1" home rc
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
@@ -468,6 +513,9 @@ run_as_user() {
         # runuser keeps a clean environment and does not need PAM's auth stack.
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"
     fi
+    rc=$?
+    wait_nvim_jobs "$user" "${home:-/nonexistent}" || true
+    return "$rc"
 }
 
 # `vim.pack.add` asks "These plugins will be installed: ... Proceed?" before
