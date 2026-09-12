@@ -15,9 +15,10 @@
 #   standard 15-29 GB   + the bonus web stack, Docker, node, python tools,
 #                         the nvim IDE layer with the Excalidraw editor,
 #                         Herdr + opencode
-#   full      30+ GB    + what only a big disk can hold: Claude Code, whose
-#                         one binary is 319 MB on / and does not fit beside
-#                         everything else in the 15 GB school quota
+#   full      30+ GB    + Claude Code, whose one binary is 319 MB on /. It fits
+#                         the 15 GB school quota beside everything else, with
+#                         the / margin nearly spent, so below 30 GB it is
+#                         asked for (FEATURES="+claude-code"), never assumed
 #
 # PROFILE=... overrides the size-based pick, FEATURES="+docker -pytools" adds
 # or removes single features, and AI_MODE=client|local turns on the two AI
@@ -142,21 +143,40 @@ RECIPE="$HERE/partition_recipe.sh"
 #                             2.1.236 release manifest, in /usr/local/bin. Not
 #                             the 414 MB the npm package cost on the
 #                             2026-09-12 build, and no node under it.
-# This is the first feature in the `full` tier, and it is there because of
-# arithmetic, not taste: at SIZE_B2B=15 the standard set leaves 289 MB on /,
-# and 320 does not go into 289. Putting it in `standard` would make the
-# default build -- the school quota -- fail the fit check. From 16 GB up it
-# fits, and `FEATURES="+claude-code"` is how you ask for it there; the check
-# below names the smallest size when it does not.
+# It went into the `full` tier because at SIZE_B2B=15 the standard set left
+# 289 MB on / by these costs, and 320 does not go into 289. The sixth pass
+# below showed two of those costs were 220 MB too high: it fits at 15 now, by
+# 189 MB. It stays in `full` anyway, since those 189 MB are all the margin the
+# model has left on /, and a default build should keep them.
+#
+# 2026-09-13, sixth pass -- the / column against a guest with EVERY standard
+# feature plus claude-code installed and verified (debian, SIZE_B2B=16). df
+# said / held 2670 MB; the table said 3290, and refused that same set at
+# 15 GB for want of 31 MB. Rows first boot does not measure on / were summed
+# from /var/log/apt/history.log, each transaction's packages priced at their
+# dpkg Installed-Size. (history.log writes `name:amd64` even for
+# Architecture: all packages; strip the suffix or npm's 350-package
+# transaction prices at 19 MB instead of 111.) The method reproduces
+# devtools-apt's 279 exactly. Rows off by more than a third:
+#   b2b-mandatory  /  100 -> 8     sudo ufw openssh-server libpam-pwquality
+#                                  apparmor cron haveged: 16 packages, most
+#                                  already pulled in by d-i's pkgsel.
+#   webstack       /  400 -> 272   lighttpd + MariaDB + PHP, 70 packages,
+#                                  266 MB; plus wp-cli, 6 MB in /usr/local/bin.
+# Within a third, left alone: docker / 400 (339 measured), nvim / 382 (352),
+# debian-base 1100 (~870: 676 MB of packages from d-i, 483 of them in
+# history.log and ~190 from debootstrap, which history.log never sees, plus
+# ~190 of generated files). The table now says 3070 for that set against the
+# 2670 measured, and 3259 usable at 15 GB.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
-b2b-mandatory      base      100   0     0     0      -
+b2b-mandatory      base      8     0     0     0      -
 devtools-apt       base      279   0     0     0      -
 nvim               base      382   120   0     200    devtools-apt
 npm-cache          base      0     0     0     55     nvim
 vscode-remote      standard  0     0     0     500    -
 hellish-upstream   base      0     0     0     1      -
-webstack           standard  400   0     118   0      -
+webstack           standard  272   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
 nvim-extras        standard  92    135   0     150    nvim

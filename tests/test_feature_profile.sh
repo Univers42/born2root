@@ -72,16 +72,23 @@ check "8 GB full: refused" "$(rc_of env SIZE_B2B=8 PROFILE=full "${FP[@]}" --che
 # Until Claude Code came back beside opencode, `full` was a profile name with
 # no feature behind it, and the tier `case` in the state loop had no arm for
 # it -- a manifest row saying `full` would have inherited whatever $on the
-# PREVIOUS row left behind. These pin the arm and the arithmetic that put
-# claude-code there: 320 MB on / against the 289 MB the standard set leaves at
-# SIZE_B2B=15, so the default build must NOT have it, 30 GB must, and asking
-# for it at 15 must refuse and name 16 rather than overfill /.
+# PREVIOUS row left behind. These pin the arm, and that the default build does
+# NOT have claude-code while 30 GB does.
+#
+# Asking for it at 15 GB used to refuse and name 16: 320 MB on / against the
+# 289 MB the standard set left there. The 2026-09-13 sixth pass measured a
+# guest with every standard feature plus claude-code at 2670 MB on /, where
+# the table said 3290 -- webstack's / cost was 400 for 272 measured, and
+# b2b-mandatory's 100 for 8 -- so the school quota was refusing a set it
+# holds. What is pinned now: it fits at 15, with a margin under 10% of the
+# usable /, which is why it is still asked for and not given.
 check "15 GB (default): no claude-code" "$(SIZE_B2B=15 "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 0
 check "29 GB: still no claude-code" "$(SIZE_B2B=29 "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 0
 check "30 GB (full): claude-code on" "$(SIZE_B2B=30 "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 1
-check "15 GB +claude-code: refused" "$(rc_of env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check)" 1
-check "15 GB +claude-code: names 16" "$(fits_from env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check)" "fits from SIZE_B2B=16"
-check "15 GB +claude-code: overflows / and only /" "$(env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check 2>&1 | grep -c '^      / ')" 1
+check "15 GB +claude-code: fits the quota" "$(rc_of env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check)" 0
+root_left=$(env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --table 2>&1 |
+    awk '/^ *needed/ { n = $3 } /^ *usable/ { u = $5 } END { print u - n }')
+check "15 GB +claude-code: / margin under 10%" "$([ "${root_left:-0}" -gt 0 ] && [ "$root_left" -lt 326 ] && echo yes)" "yes"
 check "16 GB +claude-code: fits" "$(rc_of env SIZE_B2B=16 FEATURES=+claude-code "${FP[@]}" --check)" 0
 check "30 GB full: -claude-code drops it" "$(SIZE_B2B=30 FEATURES=-claude-code "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 0
 check "8 GB full: names a size" "$(fits_from env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check | grep -c .)" 1

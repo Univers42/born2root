@@ -321,10 +321,11 @@ all)
     run_provisioner setup/install/tools/install_devtools.sh \
         install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_" "Herdr + opencode"
     # Claude Code only when this guest's build budgeted for it. It is a
-    # full-tier feature (320 MB on /, and the standard set leaves 289 MB at
-    # SIZE_B2B=15), so running it unconditionally here would push a 15 GB
-    # machine's / to the wall. features.conf inside the guest is the record of
-    # what the fit check allowed, so ask it instead of guessing from the host.
+    # full-tier feature: 320 MB on /, which a 15 GB standard guest holds with
+    # 189 MB to spare only when the build planned for it, so running it
+    # unconditionally here could take / past its headroom. features.conf inside
+    # the guest is the record of what the fit check allowed, so ask it instead
+    # of guessing from the host.
     want_claude=0
     [ "${INSTALL_CLAUDE_CODE:-}" = "1" ] && want_claude=1
     vm_ssh 'grep -qx B2B_FEATURE_claude_code=on /etc/b2b/features.conf' 2>/dev/null && want_claude=1

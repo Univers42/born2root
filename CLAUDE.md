@@ -167,8 +167,9 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
   `FEATURES="+docker -pytools"`, checked mount by mount against that layout
   with 20% headroom. A set that does not fit fails the ISO build and names the
   smallest size that would. `full` is not a synonym for `standard`: today it
-  is what claude-code lives in, because its 320 MB does not fit the 289 MB the
-  standard set leaves on `/` at the default 15 GB.
+  is what claude-code lives in. Its 320 MB fits beside the standard set at
+  15 GB with only 189 MB to spare on `/`, so below 30 GB it is opt-in
+  (`FEATURES="+claude-code"`).
 
 Two marker contracts in `preseeds/preseed.cfg` matter when editing it. The
 `RECIPE-BEGIN`/`RECIPE-END` block is the generator's output for the default size

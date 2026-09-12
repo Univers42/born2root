@@ -1310,14 +1310,14 @@ the guest (the flow is copy-paste, so the VM needs no browser) or export
 user shell can only watch the update fail; `make claude_code` is how the
 version moves.
 
-**It is off in the default build, and that is arithmetic, not taste.** At
-`SIZE_B2B=15` the standard set leaves 289 MB on `/` and this needs 320, so it
-is a `full`-tier feature — automatic from 30 GB, and asked for by name below
-that:
+**It is off in the default build, but it fits the quota.** At `SIZE_B2B=15` the
+standard set plus this 320 MB binary leaves 189 MB on `/` above the 20%
+headroom (measured on a built guest: 2670 MB used on `/` with everything
+installed). That is too thin a margin to spend by default, so it is a
+`full`-tier feature — automatic from 30 GB, and asked for by name below that:
 
 ```bash
-make all SIZE_B2B=16 FEATURES="+claude-code"   # fits from 16 GB up
-make all SIZE_B2B=15 FEATURES="+claude-code"   # refused: "fits from SIZE_B2B=16"
+make all SIZE_B2B=15 FEATURES="+claude-code"   # fits the 15 GB school quota
 make claude_code                               # add it to a VM already built
 ```
 
