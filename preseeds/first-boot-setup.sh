@@ -69,24 +69,43 @@ feature_on() {
 # Every feature records what it actually cost, so the estimates in
 # generate/feature_profile.sh can be corrected from a real machine:
 #   /etc/b2b/features.status:  <name> <ok|failed|off|no-space> <mount> <delta MB>
-_FEAT_MOUNT=""
-_FEAT_BEFORE=0
+# feature_begin <name> <mount>...  A feature that lands on several volumes
+# (nvim: packages on /, plugins on /home) names them all and gets one
+# features.status line per mount, so each column of the manifest can be
+# corrected from the same build. Mounts and their "used before" figures are
+# kept as "<mount> <MB>" lines in one string and read back with `read`: no
+# arrays, and no reliance on word-splitting an unquoted variable, which the
+# guest's shell (hellish) does not do the way bash does.
+_FEAT_BEFORE=""
 _FEAT_STATUS=ok
+_used_mb() { df -km "$1" 2>/dev/null | awk 'NR==2 {print $3}'; }
 feature_begin() {
-    _FEAT_MOUNT="$2"
+    local name="$1" m
+    shift
     _FEAT_STATUS=ok
-    _FEAT_BEFORE=$(df -km "$2" 2>/dev/null | awk 'NR==2 {print $3}')
-    echo "--- [$1] ---"
+    _FEAT_BEFORE=""
+    for m in "$@"; do
+        _FEAT_BEFORE="${_FEAT_BEFORE}${m} $(_used_mb "$m")
+"
+    done
+    echo "--- [$name] ---"
 }
 # The recorded status is the worse of what the caller says and what
 # feature_fail said in between: a section that tripped its space guard must
 # not be filed as "ok 0 MB", which is what the first build wrote for nvim.
 feature_end() {
-    local after status="$2"
+    local name="$1" status="$2" m before after delta summary=""
     [ "$_FEAT_STATUS" = ok ] || status="$_FEAT_STATUS"
-    after=$(df -km "$_FEAT_MOUNT" 2>/dev/null | awk 'NR==2 {print $3}')
-    printf '%s %s %s %s\n' "$1" "$status" "$_FEAT_MOUNT" "$((${after:-0} - ${_FEAT_BEFORE:-0}))" >>/etc/b2b/features.status
-    echo "--- [$1] $status (${_FEAT_MOUNT}: +$((${after:-0} - ${_FEAT_BEFORE:-0})) MB) ---"
+    while read -r m before; do
+        [ -n "$m" ] || continue
+        after=$(_used_mb "$m")
+        delta=$((${after:-0} - ${before:-0}))
+        printf '%s %s %s %s\n' "$name" "$status" "$m" "$delta" >>/etc/b2b/features.status
+        summary="${summary}${summary:+, }${m}: +${delta} MB"
+    done <<FEATEOF
+$_FEAT_BEFORE
+FEATEOF
+    echo "--- [$name] $status ($summary) ---"
 }
 feature_off() {
     printf '%s off - 0\n' "$1" >>/etc/b2b/features.status
@@ -119,6 +138,24 @@ check_disk_space() {
         return 1
     fi
     return 0
+}
+# run_logged <logfile> <command...>: run a provisioner, copy its output both
+# to <logfile> and to this script's own output, and return the PROVISIONER's
+# exit status. The sections used to do `if provisioner | tee -a log; then`,
+# and without pipefail a pipeline's status is its LAST command's -- tee's,
+# which is 0. Every provisioner therefore reported success whatever it did:
+# the 2026-09-12 build filed the Neovim extras as installed with all 38 of
+# their plugins missing. The output goes through a file rather than a pipe so
+# there is no pipeline whose status could lie.
+run_logged() {
+    local log="$1" out rc
+    shift
+    out=$(mktemp /var/tmp/b2b-run.XXXXXX 2>/dev/null) || out="/var/tmp/b2b-run.$$"
+    "$@" >"$out" 2>&1
+    rc=$?
+    tee -a "$log" <"$out"
+    rm -f "$out"
+    return "$rc"
 }
 
 ### ─── 3b. Ensure NAT keepalive + SSH stability services are running ─────────
@@ -196,9 +233,11 @@ fi
 # npm, pip and git clone are precisely the operations that hang in-target and
 # take the rest of the configuration down with them.
 #
-# Neither is allowed to fail the boot. They are re-runnable by hand, and the
-# Makefile exposes them as `make nvim` / `make hellish_plugins` over SSH.
-feature_begin nvim /
+# Both are re-runnable by hand: the Makefile exposes them as `make nvim` /
+# `make hellish_plugins` over SSH. nvim is a BASE feature, so what fails here
+# fails the build (PROVISION_FAILED; `make all` stops on it) instead of
+# leaving an editor that installs itself on your first start.
+feature_begin nvim / /home
 # Machine-wide scope FIRST. This must precede install_nvim.sh, which runs
 # `npm install -g`: the prefix has to point at /opt before anything is
 # installed, or the packages land in /usr/lib/node_modules and are stranded
@@ -213,44 +252,72 @@ else
 fi
 
 echo "--- Installing Neovim + kickstart.nvim ---"
-if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
-    # kickstart clones ~30 plugins, Mason pulls language servers and treesitter
-    # compiles parsers — call it 2 GB of headroom to be safe.
-    # nvim is a BASE feature: the profile check on the host already proved it
-    # fits, so running out of room here is a wrong estimate, not a reason to
-    # skip. 1 GB is the real headroom the install needs on /.
+if [ -f /root/install_nvim.sh ]; then
+    # The profile check on the host already proved nvim fits, so a guard
+    # tripping here means the check was wrong -- a failed build, not a [SKIP].
     if check_disk_space / 1000; then
         chmod +x /root/install_nvim.sh 2>/dev/null || true
-        # Bootstrap is skipped HERE and done once by the extras script below:
-        # downloading kickstart's plugins and then immediately downloading the
-        # extras on top would pay the cold-cache cost twice.
-        if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=0 "$B2B_SH" /root/install_nvim.sh 2>&1 |
-            tee -a /var/log/b2b-nvim-install.log; then
-            echo "[OK] Neovim + kickstart installed (log: /var/log/b2b-nvim-install.log)"
+        # NVIM_BOOTSTRAP=1: kickstart's plugins, tree-sitter parsers and
+        # language servers are installed NOW, at build time, and the script
+        # exits non-zero when any of them is missing afterwards. The
+        # 2026-09-12 build ran this with NVIM_BOOTSTRAP=0 and left every plugin
+        # to the user's first interactive start: minutes of cloning behind a
+        # blank editor, on a VM whose point is to arrive finished.
+        if run_logged /var/log/b2b-nvim-install.log \
+            env NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
+            echo "[OK] Neovim + kickstart installed, plugins included (log: /var/log/b2b-nvim-install.log)"
         else
-            echo "[WARN] Neovim install reported errors — see /var/log/b2b-nvim-install.log"
-        fi
-
-        if ! feature_on nvim-extras; then
-            feature_off nvim-extras
-        elif [ -f /root/install_nvim_extras.sh ]; then
-            echo "--- Installing the Neovim extras layer ---"
-            chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
-            if NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh 2>&1 |
-                tee -a /var/log/b2b-nvim-install.log; then
-                echo "[OK] Neovim extras installed"
-            else
-                echo "[WARN] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
-            fi
+            feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
         fi
     else
         feature_fail nvim "only $(avail_mb /) MB free on / before install_nvim.sh (needs 1000)"
     fi
 else
-    echo "[SKIP] Neovim — /root/install_nvim.sh not present"
+    feature_fail nvim "/root/install_nvim.sh is not in the ISO"
 fi
-
 feature_end nvim ok
+
+# The IDE layer on top is the STANDARD feature nvim-extras, with its own
+# manifest row, so it is measured apart from nvim: on / (apt: fzf, lazygit,
+# gdb, ...), on /home (its plugins) and on /opt (the Excalidraw editor).
+# Everything is installed at build time and verified; a missing plugin or a
+# failed Excalidraw build records the feature as failed, which `make all`
+# reports and stops on.
+if ! feature_on nvim-extras; then
+    feature_off nvim-extras
+elif [ ! -f /root/install_nvim_extras.sh ]; then
+    echo "[FAIL] Neovim extras — /root/install_nvim_extras.sh is not in the ISO"
+    printf 'nvim-extras failed - 0\n' >>/etc/b2b/features.status
+else
+    feature_begin nvim-extras / /home /opt
+    NVIM_EXTRAS_STATUS=ok
+    echo "--- Installing the Neovim extras layer ---"
+    chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
+    if run_logged /var/log/b2b-nvim-install.log \
+        env NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
+        echo "[OK] Neovim extras installed (log: /var/log/b2b-nvim-install.log)"
+    else
+        echo "[FAIL] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+        NVIM_EXTRAS_STATUS=failed
+    fi
+    # The Excalidraw editor Neovim opens in the host's browser (:Excalidraw),
+    # bundled here once from npm; see setup/install/nvim/install_excalidraw.sh.
+    echo "--- Building the Excalidraw editor ---"
+    if [ -f /root/install_excalidraw.sh ]; then
+        chmod +x /root/install_excalidraw.sh 2>/dev/null || true
+        if run_logged /var/log/b2b-nvim-install.log \
+            env EXCALIDRAW_USERS="dlesieur" "$B2B_SH" /root/install_excalidraw.sh; then
+            echo "[OK] Excalidraw editor built (log: /var/log/b2b-nvim-install.log)"
+        else
+            echo "[FAIL] Excalidraw build reported errors — see /var/log/b2b-nvim-install.log"
+            NVIM_EXTRAS_STATUS=failed
+        fi
+    else
+        echo "[FAIL] Excalidraw — /root/install_excalidraw.sh is not in the ISO"
+        NVIM_EXTRAS_STATUS=failed
+    fi
+    feature_end nvim-extras "$NVIM_EXTRAS_STATUS"
+fi
 feature_begin hellish-upstream /home
 ### ─── The login shell, from upstream ────────────────────────────────────────
 # b2b-setup.sh already installed the ISO-baked binary in the installer chroot,
@@ -718,23 +785,30 @@ echo "[OK] Third-party tools check complete"
 
 feature_end nodejs ok
 if feature_on pytools; then printf "pytools ok /opt -\n" >>/etc/b2b/features.status; else feature_off pytools; fi
-### ─── 4c. Herdr, Claude Code, and the optional local AI ────────────────────
-# Both are additive and neither may fail the boot. AI_MODE is baked into this
-# script by the ISO builder; it defaults to "off", so a stock build installs
-# and downloads nothing here.
-echo "--- Installing Herdr + Claude Code ---"
+### ─── 4c. Herdr, opencode, and the optional local AI ───────────────────────
+# Herdr and opencode are the STANDARD feature devtools-extra, measured on /
+# where both binaries live (see install_devtools.sh for why not /opt). The
+# installer exits non-zero when a tool it was asked for is not on PATH
+# afterwards, and that records the feature as failed. AI_MODE travels in
+# features.conf; it defaults to "off", so a stock build downloads nothing here.
+echo "--- Installing Herdr + opencode ---"
 if ! feature_on devtools-extra; then
     feature_off devtools-extra
-elif [ -f /root/install_devtools.sh ]; then
-    chmod +x /root/install_devtools.sh 2>/dev/null || true
-    if check_disk_space / 500; then
-        "$B2B_SH" /root/install_devtools.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
-            echo "[WARN] devtools install reported errors"
-    else
-        echo "[SKIP] devtools — insufficient disk space"
-    fi
+elif [ ! -f /root/install_devtools.sh ]; then
+    echo "[FAIL] devtools — /root/install_devtools.sh is not in the ISO"
+    printf 'devtools-extra failed - 0\n' >>/etc/b2b/features.status
 else
-    echo "[SKIP] /root/install_devtools.sh not present"
+    feature_begin devtools-extra /
+    chmod +x /root/install_devtools.sh 2>/dev/null || true
+    if ! check_disk_space / 500; then
+        echo "[SKIP] devtools — insufficient disk space"
+        feature_end devtools-extra no-space
+    elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_devtools.sh; then
+        feature_end devtools-extra ok
+    else
+        echo "[FAIL] devtools install reported errors — see /var/log/b2b-provision.log"
+        feature_end devtools-extra failed
+    fi
 fi
 
 B2B_AI_MODE="${B2B_AI_MODE:-off}"
@@ -745,7 +819,7 @@ elif [ -f /root/install_ai.sh ]; then
     chmod +x /root/install_ai.sh 2>/dev/null || true
     # A model is gigabytes; refuse rather than filling the volume it lands on.
     if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
-        AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh 2>&1 | tee -a /var/log/b2b-provision.log ||
+        run_logged /var/log/b2b-provision.log env AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh ||
             echo "[WARN] AI install reported errors"
     else
         echo "[SKIP] AI — not enough free space on /opt for a model"

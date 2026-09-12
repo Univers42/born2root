@@ -30,8 +30,11 @@
 #                         checkboxes drawn in the buffer you are still editing
 #   markdown, in browser  markdown-preview.nvim — the live rendered page, with
 #                         mermaid diagrams and maths. Headless-aware: this VM has
-#                         no browser, so it PRINTS the URL and you open it from
-#                         the host over an SSH tunnel (see :B2BMarkdown).
+#                         no browser, so it PRINTS the URL and you open it on the
+#                         host, where `ssh b2b` already forwards the port (see
+#                         :B2BMarkdown). Excalidraw drawings come along as the
+#                         .excalidraw.svg files install_excalidraw.sh's editor
+#                         writes beside every .excalidraw it saves.
 #   linting               nvim-lint, driven by shellcheck / markdownlint
 #   debugger              nvim-dap + dap-ui, on gdb's own DAP interpreter for
 #                         C/C++ and debugpy for Python — no Mason download
@@ -72,6 +75,12 @@
 # the same mechanism kickstart itself uses, so there is no second plugin manager
 # in the config and `:checkhealth vim.pack` covers everything.
 #
+# Everything is installed at BUILD time and then verified: the script exits 1
+# when a plugin, parser, language server or prebuilt binary the layer declares
+# is not on disk afterwards, so first boot records the feature as failed and
+# `make all` stops on it instead of handing over an editor that installs
+# itself, slowly, on your first start.
+#
 # USAGE
 #   sudo ./install_nvim_extras.sh                     # default: user dlesieur
 #   sudo NVIM_USERS="dlesieur root" ./install_nvim_extras.sh
@@ -87,7 +96,7 @@ set -u
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # The npm prefix is moved to /opt by install_global_scope.sh, and npm's own
 # bin directory is NOT on the default PATH. Without this line a package this
-# script installs itself (tree-sitter, claude) is invisible to the very next
+# script installs itself (tree-sitter, the neovim provider) is invisible to the very next
 # `command -v` that checks for it -- installed, working, and reported missing.
 # Ask npm where it actually is rather than hardcoding the location.
 if command -v npm >/dev/null 2>&1; then
@@ -117,6 +126,9 @@ NVIM_PYTHON_VENV="${NVIM_PYTHON_VENV:-/opt/nvim-venv}"
 # dies with "EADDRINUSE" only on the machines where the other stack is running —
 # which is the worst kind of bug to find later. Override with NVIM_MKDP_PORT.
 NVIM_MKDP_PORT="${NVIM_MKDP_PORT:-8420}"
+# install_nvim.sh writes the two Lua helpers the bootstrap runs (parsers,
+# verification) here; this script runs them after its own layer.
+B2B_LIB_DIR="${B2B_LIB_DIR:-/usr/local/lib/b2b}"
 
 log() { printf '[nvim-extras] %s\n' "$*"; }
 warn() { printf '[nvim-extras] WARN: %s\n' "$*" >&2; }
@@ -259,6 +271,20 @@ _G.B2B = B2B
 B2B.pack_root = vim.fn.stdpath 'data' .. '/site/pack/core/opt/'
 
 function B2B.gh(repo) return 'https://github.com/' .. repo end
+
+-- Tree-sitter parsers the layer wants on top of kickstart's own list, for the
+-- languages this VM actually edits: 42 projects (C, C++, Makefiles), the web
+-- stack and Inception (PHP, JS/TS, CSS, HTML, Dockerfile, SQL, YAML), the
+-- shell and its configs, and the git/markdown files around all of it. The
+-- build installs them (nvim-parsers.lua) and refuses to finish without them
+-- (nvim-verify.lua); a new language added here lands on the next build.
+B2B.parsers = {
+  'bash', 'c', 'cpp', 'make', 'cmake', 'python', 'php',
+  'javascript', 'typescript', 'css', 'html', 'json', 'yaml', 'toml', 'ini',
+  'dockerfile', 'sql', 'markdown', 'markdown_inline', 'regex',
+  'gitcommit', 'git_rebase', 'gitignore', 'diff',
+  'lua', 'luadoc', 'vim', 'vimdoc', 'query',
+}
 
 local function spec_name(spec) return spec.name or spec.src:match '[^/]+$' end
 B2B.spec_name = spec_name
@@ -1229,14 +1255,18 @@ LUAEOF
 # markdown-preview starts a web server and then launches a browser at it. This
 # VM has neither a browser nor an X display, so the launch fails and the URL
 # scrolls past in an error. The config below turns that around: the server binds
-# to 127.0.0.1 only, on a FIXED port so one SSH tunnel keeps working, the browser
-# launch is replaced by /bin/true when there is no display, and the URL is
-# echoed instead. `:B2BMarkdown` prints the tunnel command to run on the host.
+# to 127.0.0.1 only, on a FIXED port, the browser launch is replaced by
+# /bin/true when there is no display, and the URL is echoed instead. The build
+# writes `LocalForward 8420 127.0.0.1:8420` into the host's `Host b2b` block
+# (setup/host/qemu_vm.sh ssh-config, generate/orchestrate.sh), so the echoed
+# URL works in the host's browser for as long as `ssh b2b` is connected. No
+# separate tunnel to remember; `:B2BMarkdown` still prints one for a host
+# whose ssh config was not written by the build.
 #
 # Binding to localhost rather than setting mkdp_open_to_the_world is deliberate:
 # this VM runs UFW with a deliberately short allow-list, and the alternative is
 # either punching a hole in it or being confused about why the port is refused.
-# An SSH tunnel needs neither.
+# The forward over the SSH session needs neither.
 write_markdown_lua() {
     local cfg="$1" port="$2"
     # A tiny interpolated head, then a literal body: the Lua below contains
@@ -1413,12 +1443,16 @@ vim.api.nvim_create_user_command('B2BMarkdown', function()
     '  <leader>mr   toggle in-buffer rendering',
     '  <leader>mp   start/stop the browser preview',
     '',
-    'The preview server listens on 127.0.0.1:' .. PORT .. ' INSIDE the VM, so open a',
-    'tunnel from your host once per session:',
+    'The preview server listens on 127.0.0.1:' .. PORT .. ' INSIDE the VM. The `ssh b2b`',
+    'entry the build wrote on your host forwards that port, so as long as you are',
+    'connected with `ssh b2b`, the URL <leader>mp echoes opens in your host browser',
+    'as it is. From any other ssh session, tunnel it yourself first:',
     '',
     '  ssh -p ' .. SSH_PORT .. ' -L ' .. PORT .. ':127.0.0.1:' .. PORT .. ' ' .. (vim.env.USER or 'dlesieur') .. '@127.0.0.1',
     '',
-    'Then press <leader>mp and open the URL it echoes in your host browser.',
+    'Mermaid: a ```mermaid fenced block renders as a diagram in the preview.',
+    'Excalidraw: :Excalidraw (<leader>me) edits a .excalidraw file in the browser and',
+    'saves a .excalidraw.svg beside it; embed that with ![](name.excalidraw.svg).',
     '',
     bin_ok and '' or ('If the binary is missing, install it from inside Neovim with\n'
       .. '  :call mkdp#util#install()\n'
@@ -2011,92 +2045,30 @@ run_as_user() {
     else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
 }
 
-# blink.cmp (kickstart's completion engine) does its matching in a small Rust
-# library, shipped as a prebuilt binary per release. Without it blink silently
-# falls back to a slower Lua matcher and :checkhealth warns
-#     blink_cmp_fuzzy lib is not downloaded/built
-#
-# blink can fetch this itself, but only asynchronously: its download returns a
-# task driven by the event loop, and a headless Neovim exits before the task
-# resolves -- verified, the callback never fires and no file appears. Rather
-# than try to pump the loop from a script, the same two files are fetched here
-# with curl, into the exact paths blink's own health check looks at
-# (<plugin>/target/release/). Deterministic, and it fails loudly.
-install_blink_fuzzy() {
-    local user="$1" home plugin tag triple lib_dir base
+# Same two pieces as install_nvim.sh, for the same reasons (see there):
+# vim.pack.add's confirmation prompt is switched off for these runs, and every
+# run's output is kept in ~/.local/state/nvim/bootstrap.log instead of going
+# to /dev/null, which is how the 2026-09-12 build lost the reason 38 plugins
+# were missing. Returns Neovim's own exit status.
+NVIM_NO_CONFIRM='lua local add = vim.pack.add; vim.pack.add = function(specs, opts) opts = opts or {}; if opts.confirm == nil then opts.confirm = false end; return add(specs, opts) end'
+nvim_headless() {
+    local user="$1" home out rc
+    shift
     home=$(getent passwd "$user" | cut -d: -f6)
-    plugin="${home}/.local/share/nvim/site/pack/core/opt/blink.cmp"
-    [ -d "$plugin" ] || {
-        log "${user}: blink.cmp not installed — skipping its fuzzy lib"
-        return 0
-    }
-
-    lib_dir="${plugin}/target/release"
-    if [ -f "${lib_dir}/libblink_cmp_fuzzy.so" ]; then
-        log "${user}: blink.cmp fuzzy lib already present"
-        return 0
-    fi
-
-    # The binary must match the checked-out tag, so read -r it from the checkout
-    # rather than assuming the newest release.
-    #
-    # Read it AS THE OWNING USER. This function runs as root while the plugin
-    # tree belongs to $user, and git >= 2.35 refuses to operate on a repository
-    # owned by somebody else ("detected dubious ownership") -- it exits non-zero
-    # and prints nothing, so as root every one of these commands came back empty
-    # and the lib was silently skipped with "cannot determine the tag". Verified:
-    # the identical command run as the user returns v1.10.2.
-    local git_as="runuser -u ${user} --"
-    [ "$user" = "root" ] && git_as=""
-    tag=$($git_as git -C "$plugin" describe --tags --exact-match 2>/dev/null) ||
-        tag=$($git_as git -C "$plugin" tag --points-at HEAD 2>/dev/null | head -n1)
-    [ -n "$tag" ] || tag=$($git_as git -C "$plugin" describe --tags 2>/dev/null |
-        sed 's/-[0-9]*-g[0-9a-f]*$//')
-    if [ -z "$tag" ]; then
-        warn "${user}: cannot determine the blink.cmp tag — skipping its fuzzy lib"
-        return 0
-    fi
-
-    case "$(uname -m)" in
-    x86_64 | amd64) triple="x86_64-unknown-linux-gnu" ;;
-    aarch64 | arm64) triple="aarch64-unknown-linux-gnu" ;;
-    *)
-        log "${user}: no prebuilt blink.cmp lib for $(uname -m) — Lua fallback stays"
-        return 0
-        ;;
-    esac
-
-    log "${user}: fetching the blink.cmp fuzzy library (${tag}, ${triple})"
-    base="https://github.com/saghen/blink.cmp/releases/download/${tag}"
-    mkdir -p "$lib_dir"
-
-    if ! curl -fsSL --retry 3 --max-time 180 \
-        -o "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${base}/${triple}.so"; then
-        warn "${user}: could not download the blink.cmp fuzzy lib — the Lua fallback still works"
-        rm -f "${lib_dir}/libblink_cmp_fuzzy.so.tmp"
-        return 0
-    fi
-    # blink writes the checksum beside the library and reads it back later, so
-    # fetch it too; verify while we have both.
-    if curl -fsSL --retry 3 --max-time 60 \
-        -o "${lib_dir}/libblink_cmp_fuzzy.so.sha256" "${base}/${triple}.so.sha256"; then
-        local want got
-        want=$(awk '{print $1; exit}' "${lib_dir}/libblink_cmp_fuzzy.so.sha256")
-        got=$(sha256sum "${lib_dir}/libblink_cmp_fuzzy.so.tmp" | awk '{print $1}')
-        if [ -n "$want" ] && [ "$want" != "$got" ]; then
-            warn "${user}: blink.cmp fuzzy lib checksum mismatch — discarding it"
-            rm -f "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${lib_dir}/libblink_cmp_fuzzy.so.sha256"
-            return 0
-        fi
-    fi
-    mv "${lib_dir}/libblink_cmp_fuzzy.so.tmp" "${lib_dir}/libblink_cmp_fuzzy.so"
-    printf '%s\n' "$tag" >"${lib_dir}/version"
-
-    local group
-    group=$(id -gn "$user" 2>/dev/null || echo "$user")
-    chown -R "${user}:${group}" "${plugin}/target" 2>/dev/null || true
-    log "${user}: blink.cmp fuzzy lib installed"
+    out=$(mktemp /var/tmp/b2b-nvim.XXXXXX 2>/dev/null) || out="/var/tmp/b2b-nvim.$$"
+    run_as_user "$user" "$NVIM_BIN" --headless --cmd "$NVIM_NO_CONFIRM" "$@" >"$out" 2>&1
+    rc=$?
+    mkdir -p "${home}/.local/state/nvim"
+    tr '\r' '\n' <"$out" | grep -v '^$' >>"${home}/.local/state/nvim/bootstrap.log"
+    tr '\r' '\n' <"$out" | grep -v '^$' |
+        grep -vE '^vim\.pack: ([0-9]+% )?Installing plugins \([0-9]+/[0-9]+\)' |
+        sed 's/^/[nvim-extras]     /'
+    rm -f "$out"
+    return "$rc"
 }
+
+# blink.cmp's prebuilt fuzzy library is fetched by install_nvim.sh (it is
+# kickstart's plugin); nvim-verify.lua below checks it is there.
 
 # markdown-preview.nvim ships its server as a prebuilt binary, NOT as part of
 # the git checkout: `vim.pack.add` clones the plugin and you get a
@@ -2256,20 +2228,36 @@ install_kulala_runtime() {
     chown -R "${user}:${group}" "${home}/.local/share/nvim" 2>/dev/null || true
 }
 
+BOOTSTRAP_FAILED=0
 bootstrap_user() {
-    local user="$1" home group
+    local user="$1" home group attempt
     home=$(getent passwd "$user" | cut -d: -f6)
     group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    mkdir -p "${home}/.local/state/nvim"
+
+    if [ ! -f "${B2B_LIB_DIR}/nvim-verify.lua" ] || [ ! -f "${B2B_LIB_DIR}/nvim-parsers.lua" ]; then
+        warn "${user}: ${B2B_LIB_DIR}/nvim-{parsers,verify}.lua are missing — run install_nvim.sh first"
+        BOOTSTRAP_FAILED=1
+        return 1
+    fi
 
     log "${user}: downloading the extra plugins (a few minutes on a cold cache)"
-    local i
-    for i in 1 2; do
-        run_as_user "$user" "$NVIM_BIN" --headless +'lua vim.cmd("sleep 300m")' +qa >/dev/null 2>&1 ||
-            warn "${user}: headless start ${i} returned non-zero"
+    # Twice per attempt (PackChanged hooks only fire once a plugin is on disk),
+    # up to three attempts: vim.pack reports a failed clone as a notification,
+    # not an error, so only counting what is on disk afterwards notices.
+    for attempt in 1 2 3; do
+        nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa ||
+            warn "${user}: headless start returned non-zero (attempt ${attempt})"
+        nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa >/dev/null || true
+        if nvim_headless "$user" -c 'lua vim.g.b2b_verify_mode = "plugins"' \
+            -c "luafile ${B2B_LIB_DIR}/nvim-verify.lua" >/dev/null; then
+            break
+        fi
+        if [ "$attempt" -lt 3 ]; then
+            warn "${user}: plugins still missing after attempt ${attempt} — retrying in 10 s"
+            sleep 10
+        fi
     done
-
-    log "${user}: refreshing treesitter parsers"
-    run_as_user "$user" "$NVIM_BIN" --headless +'silent! TSUpdateSync' +qa >/dev/null 2>&1 || true
 
     # Mason installs the language servers and formatters kickstart asks for
     # (lua-language-server, stylua). Nothing else triggers this: the plain
@@ -2280,11 +2268,13 @@ bootstrap_user() {
     #     'lua-language-server' is not executable
     # and nothing works, with no obvious cause.
     log "${user}: installing Mason language servers + formatters"
-    run_as_user "$user" "$NVIM_BIN" --headless \
-        +'silent! MasonToolsUpdateSync' +qa >/dev/null 2>&1 ||
+    nvim_headless "$user" +'silent! MasonToolsUpdateSync' +qa >/dev/null ||
         warn "${user}: MasonToolsUpdateSync returned non-zero"
 
-    install_blink_fuzzy "$user"
+    log "${user}: installing treesitter parsers (kickstart's list + B2B.parsers)"
+    nvim_headless "$user" -c "luafile ${B2B_LIB_DIR}/nvim-parsers.lua" -c qa ||
+        warn "${user}: the parser step returned non-zero"
+
     install_mkdp_binary "$user"
     install_kulala_runtime "$user"
 
@@ -2292,7 +2282,7 @@ bootstrap_user() {
     # be captured through :redir, and two things had to be got right:
     #  - each piece needs its own -c, because `redir` takes the whole rest of
     #    the line as its argument: `redir >> /dev/stdout | silent B2BExtras` is
-    #    read -r as a redirect to a file named "/dev/stdout | silent B2BExtras"
+    #    read as a redirect to a file named "/dev/stdout | silent B2BExtras"
     #    and fails with E488;
     #  - it cannot redirect to /dev/stdout at all, because under runuser stdout
     #    is a pipe, and Neovim refuses to open a pipe by name (E190).
@@ -2300,17 +2290,29 @@ bootstrap_user() {
     # directory rather than /tmp: nvim runs as them and must be able to create
     # it, and a mode-666 file in a world-writable /tmp is a symlink race
     # waiting to be lost.
-    log "${user}: verifying the extras"
+    log "${user}: what loaded (:B2BExtras)"
     local report_file="${home}/.local/state/nvim/b2b-extras.log"
     run_as_user "$user" "$NVIM_BIN" --headless \
         -c "redir! > ${report_file}" -c 'silent B2BExtras' -c 'redir END' -c 'qa' >/dev/null 2>&1 || true
     if [ -s "$report_file" ]; then
-        sed 's/^/[nvim-extras]   /' "$report_file"
+        grep -E '^\s+(ok|MISS|EMPTY) ' "$report_file" | awk '{print $1}' | sort | uniq -c | sed 's/^/[nvim-extras]   /'
+        grep -E '^\s+(MISS|EMPTY) ' "$report_file" | sed 's/^/[nvim-extras]   /'
     else
         warn "${user}: :B2BExtras produced no report"
     fi
 
     chown -R "${user}:${group}" "${home}/.local" "${home}/.cache" 2>/dev/null || true
+
+    # The verdict, from inside Neovim with this config loaded: every plugin on
+    # disk with code in it, every wanted parser, Mason's tools, blink's fuzzy
+    # library, markdown-preview's server. One PROBLEM line per finding.
+    log "${user}: verifying plugins, parsers, language servers, prebuilt binaries"
+    if nvim_headless "$user" -c "luafile ${B2B_LIB_DIR}/nvim-verify.lua"; then
+        log "${user}: everything the layer declares is installed"
+    else
+        warn "${user}: the bootstrap left things missing (see above, and ~/.local/state/nvim/bootstrap.log)"
+        BOOTSTRAP_FAILED=1
+    fi
 }
 
 health_report() {
@@ -2360,9 +2362,11 @@ else
     log "NVIM_BOOTSTRAP=0 — config written, plugins not downloaded"
 fi
 
+if [ "$BOOTSTRAP_FAILED" = "1" ]; then
+    die "the extras bootstrap is incomplete for:${configured} — the PROBLEM lines above say what is missing"
+fi
 log "=== done for:${configured} ==="
 log "inside nvim:  :B2BExtras   what loaded    |  :B2BMarkdown  reach the preview"
 log "              <leader>sS   start a session |  <leader>gg    lazygit"
 log "in the shell: vw           list sessions   |  vw <name>     open one"
-log "markdown preview: tunnel it from the host with"
-log "  ssh -p 4242 -L ${NVIM_MKDP_PORT}:127.0.0.1:${NVIM_MKDP_PORT} <user>@127.0.0.1"
+log "markdown preview: 127.0.0.1:${NVIM_MKDP_PORT} in the VM; \`ssh b2b\` forwards it to the host"
