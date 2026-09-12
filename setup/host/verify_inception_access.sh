@@ -138,6 +138,7 @@ fi
 # Fetch the CA so the check can demand a genuinely valid chain rather than -k.
 ca_tmp=$(mktemp)
 ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o ClearAllForwardings=yes \
     -o LogLevel=ERROR -o ConnectTimeout=8 "$SSH_ALIAS" \
     'for p in "$HOME/Documents/inception/secrets/ca.crt" "$HOME/inception/secrets/ca.crt"; do [ -r "$p" ] && { cat "$p"; exit 0; }; done; p=$(find "$HOME" -maxdepth 4 -name ca.crt -path "*secrets*" 2>/dev/null | head -1); [ -n "$p" ] && cat "$p"' >"$ca_tmp" 2>/dev/null
 if [ -s "$ca_tmp" ]; then
@@ -251,7 +252,7 @@ fi
 # A scratch profile always starts fresh and therefore always loads the pref —
 # which means the check below proves the MECHANISM, not the browser the user is
 # actually looking at. A Firefox that was already running when user.js was
-# written never read -r it and shows "Server Not Found". That combination once
+# written never read it and shows "Server Not Found". That combination once
 # reported "all checks passed" over a genuinely broken browser, so check it
 # explicitly and fail.
 ff_pid=$(pgrep -f '/firefox/firefox' 2>/dev/null | head -1)
@@ -270,9 +271,19 @@ if [ -n "$ff_pid" ] && [ "$configured" -gt 0 ]; then
             done
         done
         if [ "$ff_started" -lt "$newest_userjs" ]; then
-            fail "the running Firefox started before the pref was written — it has not read -r it"
-            # shellcheck disable=SC2059
-            printf "      ${C_DIM}quit Firefox completely — every window — and reopen it${C_RESET}\n"
+            # ...unless the restart that would have closed this gap was
+            # deliberately skipped. INCEPTION_NO_BROWSER_RESTART=1 is a
+            # documented opt-out (restart_browsers.sh), so failing on its
+            # consequence made `make inception` exit non-zero over a stack that
+            # was verified working end to end -- the one thing this verifier
+            # exists to avoid claiming. Still say it, as a warning.
+            if [ "${INCEPTION_NO_BROWSER_RESTART:-0}" = "1" ]; then
+                warn "the running Firefox predates the pref — INCEPTION_NO_BROWSER_RESTART=1, so restart it yourself"
+            else
+                fail "the running Firefox started before the pref was written — it has not read it"
+                # shellcheck disable=SC2059
+                printf "      ${C_DIM}quit Firefox completely — every window — and reopen it${C_RESET}\n"
+            fi
         else
             pass "the running Firefox started after the pref was written"
         fi
