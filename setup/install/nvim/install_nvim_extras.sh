@@ -2062,10 +2062,16 @@ setup_user() {
 # and a couple of plugin checks come back empty, so the saved report is full of
 # failures that do not exist in the terminal the user actually opens. Verified:
 # the same report run with TERM=xterm-256color has zero errors.
+#
+# From the user's home, for the reason install_nvim.sh's run_as_user gives:
+# vim.pack spawns git with nvim's working directory as `cwd`, and at first boot
+# that is cron's /root, which the user cannot enter -- every clone then fails
+# inside vim.pack with no error, and nothing reaches the disk.
 run_as_user() {
-    local user="$1"
+    local user="$1" home
     shift
-    set -- env "TERM=${NVIM_TERM:-xterm-256color}" "$@"
+    home=$(getent passwd "$user" | cut -d: -f6)
+    set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" "$@"
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
@@ -2394,11 +2400,13 @@ bootstrap_user() {
     # What that leaves is the plain startups below, and they abort. kickstart's
     # pattern is `vim.pack.add {...}` immediately followed by `require(...)`, so
     # the first require that fails ends init.lua THERE and every plugin declared
-    # after it is never asked for. Measured on the 2026-09-12 QEMU build: every
-    # run died at init.lua:347 on guess-indent, each attempt got a few more
-    # plugins in (1, then 22, then 14 ...), and three attempts ran out long
-    # before 57 plugins had converged -- so the feature was recorded as failed
-    # with 1 MB written to /home and 1.5 GB still free on it.
+    # after it is never asked for. On the 2026-09-12 QEMU build every run died
+    # at init.lua:347 on guess-indent and the feature was recorded as failed
+    # with 1 MB written to /home and 1.5 GB still free on it. The "1, then 22,
+    # then 14" in that log were vim.pack's progress counters, not arrivals:
+    # nothing arrived at all, because no clone could start from cron's /root
+    # (see run_as_user). The abort was the symptom; this pass stays because a
+    # single plugin that fails to clone still ends init.lua at its require.
     #
     # --clean loads no user config at all, so nothing can abort it, and it does
     # NOT move stdpath('data') (checked on 0.12.5), so what it installs is what
@@ -2537,6 +2545,23 @@ clear_provision_failed() {
     fi
 }
 
+# Flip this feature's failed lines in features.status to ok, for the reason
+# install_nvim.sh's mark_feature_ok gives: qemu_pipeline.sh fails `make all`
+# on them even after PROVISION_FAILED is clean.
+mark_feature_ok() {
+    local feature="$1" status="${B2B_FEATURES_STATUS:-/etc/b2b/features.status}" tmp
+    [ -f "$status" ] || return 0
+    grep -qE "^${feature} (failed|no-space) " "$status" 2>/dev/null || return 0
+    tmp="${status}.$$"
+    if awk -v f="$feature" '$1 == f && ($2 == "failed" || $2 == "no-space") { $2 = "ok"; $4 = "-" } { print }' \
+        "$status" >"$tmp" 2>/dev/null; then
+        cat "$tmp" >"$status" && rm -f "$tmp"
+        log "marked '${feature}' ok in ${status} (first boot had filed it as failed)"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Neovim extras (buffers, files, git, sessions, movement) ==="
 install_deps
@@ -2562,6 +2587,13 @@ if [ "$BOOTSTRAP_FAILED" = "1" ]; then
     die "the extras bootstrap is incomplete for:${configured} — the PROBLEM lines above say what is missing"
 fi
 clear_provision_failed nvim-extras
+# The nvim-extras feature is this layer AND the Excalidraw editor, which
+# install_excalidraw.sh builds afterwards; first boot files the feature as
+# failed when either fails. So it is ok only once both are there: after
+# `make nvim-extras` alone, an editor that never got built keeps it failed.
+if [ -s "${EXCALIDRAW_DIR:-/opt/excalidraw}/app/app.js" ]; then
+    mark_feature_ok nvim-extras
+fi
 log "=== done for:${configured} ==="
 log "inside nvim:  :B2BExtras   what loaded    |  :B2BMarkdown  reach the preview"
 log "              <leader>sS   start a session |  <leader>gg    lazygit"

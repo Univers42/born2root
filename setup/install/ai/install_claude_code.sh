@@ -316,6 +316,25 @@ MOTDEOF
     chmod 755 /etc/update-motd.d/51-b2b-claude-code 2>/dev/null || true
 }
 
+# A first boot that filed claude-code as failed leaves that line in
+# /etc/b2b/features.status, and qemu_pipeline.sh fails every later `make all`
+# on it, so `make claude_code` succeeding has to retract it. Same helper as
+# install_nvim.sh's mark_feature_ok; the reasoning is there. It flips nothing
+# at first boot, where feature_end writes the line after this script returns.
+mark_feature_ok() {
+    local feature="$1" status="${B2B_FEATURES_STATUS:-/etc/b2b/features.status}" tmp
+    [ -f "$status" ] || return 0
+    grep -qE "^${feature} (failed|no-space) " "$status" 2>/dev/null || return 0
+    tmp="${status}.$$"
+    if awk -v f="$feature" '$1 == f && ($2 == "failed" || $2 == "no-space") { $2 = "ok"; $4 = "-" } { print }' \
+        "$status" >"$tmp" 2>/dev/null; then
+        cat "$tmp" >"$status" && rm -f "$tmp"
+        log "marked '${feature}' ok in ${status} (first boot had filed it as failed)"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 log "=== Claude Code ==="
 rc=0
 install_claude_code || rc=1
@@ -325,6 +344,9 @@ write_motd_hint
 if [ ! -x "$CLAUDE_CODE_DEST" ]; then
     warn "claude was requested and is not installed"
     rc=1
+fi
+if [ "$rc" -eq 0 ]; then
+    mark_feature_ok claude-code
 fi
 log "=== done (claude: $([ -x "$CLAUDE_CODE_DEST" ] && "$CLAUDE_CODE_DEST" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo none)) ==="
 exit "$rc"

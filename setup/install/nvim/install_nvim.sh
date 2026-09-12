@@ -418,10 +418,27 @@ setup_user_config() {
 # and a couple of plugin checks come back empty, so the saved report is full of
 # failures that do not exist in the terminal the user actually opens. Verified:
 # the same report run with TERM=xterm-256color has zero errors.
+#
+# And the working directory matters more than TERM. vim.pack clones with
+#     git_cmd(cmd, uv.cwd())
+# so it passes nvim's own working directory to vim.system as `cwd`, and
+# runuser keeps the caller's. At first boot that caller is cron, started in
+# /root (mode 700). The user cannot enter it, so every clone's spawn threw
+# EACCES inside vim.pack's async task, where the error is dropped: each run
+# printed "100% Installing plugins", exited 0 and cloned nothing. That is the
+# whole of the 2026-09-12 QEMU build's nvim failure: 0 of 58 plugins on disk,
+# then every `require` in init.lua failing for want of them. Reproduced in that
+# guest on 0.12.5: from a directory the user cannot enter,
+# vim.system({'git','version'}, {cwd = uv.cwd()}) raises EACCES and
+# vim.pack.add installs nothing without a word; from $HOME it installs. `make
+# nvim` never showed it, because sudo over SSH starts in the user's own home.
+# env -C changes directory AFTER runuser has dropped to the user, so a home
+# the user cannot enter fails loudly here instead of silently in vim.pack.
 run_as_user() {
-    local user="$1"
+    local user="$1" home
     shift
-    set -- env "TERM=${NVIM_TERM:-xterm-256color}" "$@"
+    home=$(getent passwd "$user" | cut -d: -f6)
+    set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" "$@"
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else
@@ -707,6 +724,12 @@ LUAEOF
     # Run with --clean, so no user config is loaded and nothing can abort the
     # pass; installation still goes to stdpath('data'), which --clean does not
     # move. Whatever this leaves on disk, the normal startups below then find.
+    #
+    # The abort was real, but it was the symptom: on the 2026-09-12 QEMU build
+    # this pass reported "25 declared, 0 on disk" too, because no clone could
+    # start from cron's /root (see run_as_user). The pass stays, since one
+    # plugin that fails to clone still stops every declaration after it, and
+    # when nothing at all lands it now probes the spawn and names that cause.
     cat >"${B2B_LIB_DIR}/nvim-preinstall.lua" <<'LUAEOF'
 -- nvim-preinstall.lua — written by setup/install/nvim/install_nvim.sh.
 -- Installs every plugin the config declares, without loading the config:
@@ -763,6 +786,19 @@ end
 print(('preinstall: %d declared, %d on disk, %d missing%s'):format(
   #specs, #specs - #missing, #missing, ok and '' or ' (vim.pack.add errored)'))
 if not ok then print('  ' .. tostring(err):gsub('\n.*', '')) end
+-- vim.pack spawns git with this process's working directory as `cwd`, and a
+-- spawn that fails there dies inside its async task without an error. So when
+-- nothing landed, try that spawn once: it is the one cause MISSING cannot show.
+if #missing == #specs then
+  local cwd = vim.uv.cwd() or '?'
+  local spawned, sys = pcall(vim.system, { 'git', 'version' }, { cwd = cwd })
+  if spawned then
+    sys:wait()
+  else
+    print(('preinstall: git cannot be started from %s (%s) -- run nvim from a directory this user can enter'):format(
+      cwd, (tostring(sys):gsub('^.-:%d+: ', ''))))
+  end
+end
 for _, name in ipairs(missing) do print('  MISSING ' .. name) end
 -- Never fails the build on its own: the verification after the normal
 -- startups is the verdict, and a plugin missing here may still arrive there.
@@ -1031,6 +1067,28 @@ clear_provision_failed() {
     fi
 }
 
+# features.status is the pipelines' second verdict: qemu_pipeline.sh stops
+# `make all` on any " failed " or " no-space " line in it by itself. So a
+# clean re-run that only cleared PROVISION_FAILED still left the guest
+# failing, on lines describing an install that has since succeeded. This
+# flips this feature's own lines to ok. Their MB column measured the install
+# that failed, so it becomes "-" (unmeasured), not a cost to learn from. At
+# first boot it finds nothing to flip: feature_end appends only after this
+# script has returned. B2B_FEATURES_STATUS exists for the host-side test.
+mark_feature_ok() {
+    local feature="$1" status="${B2B_FEATURES_STATUS:-/etc/b2b/features.status}" tmp
+    [ -f "$status" ] || return 0
+    grep -qE "^${feature} (failed|no-space) " "$status" 2>/dev/null || return 0
+    tmp="${status}.$$"
+    if awk -v f="$feature" '$1 == f && ($2 == "failed" || $2 == "no-space") { $2 = "ok"; $4 = "-" } { print }' \
+        "$status" >"$tmp" 2>/dev/null; then
+        cat "$tmp" >"$status" && rm -f "$tmp"
+        log "marked '${feature}' ok in ${status} (first boot had filed it as failed)"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Neovim + kickstart.nvim install starting ==="
 [ "$NVIM_PURGE" = "1" ] && purge
@@ -1063,4 +1121,5 @@ if [ "$BOOTSTRAP_FAILED" = "1" ]; then
     die "the plugin bootstrap is incomplete for:${configured} — the PROBLEM lines above say what is missing"
 fi
 clear_provision_failed nvim
-log "=== done: $(/usr/local/bin/nvim --version | head -n1) for:${configured} ==="
+mark_feature_ok nvim
+log "=== done:$(/usr/local/bin/nvim --version | head -n1) for:${configured} ==="
