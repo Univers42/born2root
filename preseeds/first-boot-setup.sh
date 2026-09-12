@@ -99,6 +99,27 @@ feature_fail() {
     printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
     echo "B2B-FEATURE-FAILED $1: $2" >/dev/console 2>/dev/null || true
 }
+# Free space on a mount, in MB, or "?" when df cannot say. Used in messages.
+avail_mb() { df -k "$1" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1024; f=1} END {if (!f) print "?"}'; }
+# Disk space guard (same as b2b-setup.sh). Defined HERE, with the other
+# section-0 helpers, because the first caller is the nvim section right below:
+# when the sections were reordered to run required features first, this stayed
+# in the dev-tools section 450 lines down, so the nvim guard ran as
+# "check_disk_space: command not found" -- non-zero, like a full disk -- and
+# nvim was filed as failed for lack of space on a root with 1.6 GB free.
+check_disk_space() {
+    local mount="$1" min_mb="${2:-200}"
+    local avail_kb
+    avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
+    [ -z "$avail_kb" ] && return 0
+    local avail_mb
+    avail_mb=$((avail_kb / 1024))
+    if [ "$avail_mb" -lt "$min_mb" ]; then
+        echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping"
+        return 1
+    fi
+    return 0
+}
 
 ### ─── 3b. Ensure NAT keepalive + SSH stability services are running ─────────
 # b2b-setup.sh creates these in chroot but systemctl enable may not stick.
@@ -223,7 +244,7 @@ if [ -x /root/install_nvim.sh ] || [ -f /root/install_nvim.sh ]; then
             fi
         fi
     else
-        feature_fail nvim "less than 1000 MB free on / before install_nvim.sh"
+        feature_fail nvim "only $(avail_mb /) MB free on / before install_nvim.sh (needs 1000)"
     fi
 else
     echo "[SKIP] Neovim — /root/install_nvim.sh not present"
@@ -664,21 +685,6 @@ feature_begin nodejs /
 # CRITICAL: Every optional install checks disk space first.
 # Filling / caused the original cascading dpkg/GRUB failure loop.
 echo "--- Ensuring third-party dev tools are installed ---"
-
-# Disk space check helper (same as b2b-setup.sh)
-check_disk_space() {
-    local mount="$1" min_mb="${2:-200}"
-    local avail_kb
-    avail_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
-    [ -z "$avail_kb" ] && return 0
-    local avail_mb
-    avail_mb=$((avail_kb / 1024))
-    if [ "$avail_mb" -lt "$min_mb" ]; then
-        echo "[WARN] LOW DISK: $mount has only ${avail_mb}MB free (need ${min_mb}MB) — skipping"
-        return 1
-    fi
-    return 0
-}
 
 # Node.js + npm (not installed in chroot — triggers hang)
 if feature_on nodejs && ! command -v node >/dev/null 2>&1 && check_disk_space / 300; then
