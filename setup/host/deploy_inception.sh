@@ -34,7 +34,15 @@ BRANCH="${INCEPTION_BRANCH:-main}"
 SRC="${INCEPTION_SRC:-${SRC:-}}"
 
 SSH_ALIAS="${SSH_ALIAS:-b2b}"
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+# ClearAllForwardings because the `Host b2b` block orchestrate.sh writes carries
+# LocalForward 8420/8421 (Neovim's markdown preview and Excalidraw, for
+# interactive sessions). Every short-lived ssh here re-binds them, and once one
+# session or an `ssh -f -N b2b` holds them the rest print five lines of
+# "Address already in use / Could not request local forwarding" each -- 25 lines
+# of what reads as failure in one `make inception`, over forwards none of these
+# command connections use.
+SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+    -o LogLevel=ERROR -o ClearAllForwardings=yes)
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -206,6 +214,58 @@ else
             git clone -q --branch '$BRANCH' '$REPO_URL' '$GUEST_DIR'
         fi" || die "clone/pull failed"
     ok "repository present at ${GUEST_DIR}"
+fi
+
+# ── 3b. Dockerfiles the parser cannot read ──────────────────────────────────
+# Docker ends a line continuation AT the backslash: whatever follows it on the
+# same line is not a comment, it is the end of the instruction. Upstream's
+# nginx Dockerfile carries five such inline notes plus two editor artifacts
+# (a stray `+`, a literal `<F6>`), so its RUN block is cut in two and the
+# second half is read as an instruction of its own:
+#
+#     ERROR: dockerfile parse error on line 16: unknown instruction: :
+#
+# nginx is the first image compose builds, so the stack dies there and nothing
+# below this point ever runs. Measured 2026-09-12 from a pristine clone of
+# Univers42/Inception main (2e2962b) inside the b2r guest; 9e74aaa has the same
+# defect. It breaks `make inception` for every build that does not happen to
+# carry a local fix in the uploaded tree -- which is exactly what was lost the
+# last time /goinfre was wiped.
+#
+# So: find the broken continuations before the build, and repair the guest's
+# working copy from fixes/inception-nginx-dockerfile.patch while that patch
+# still applies. The real home for the fix is a commit in Univers42/Inception,
+# which is why the patch says so about itself. INCEPTION_NO_PATCH=1 refuses
+# instead of repairing.
+step "Checking the Dockerfiles parse"
+DOCKERFILE_PATCH="${INCEPTION_PATCH:-$REPO_ROOT/fixes/inception-nginx-dockerfile.patch}"
+# A bracket expression holds the backslash, so nothing here has to survive two
+# rounds of shell quoting on the way to the guest's grep.
+scan_continuations() {
+    vm_ssh "grep -rnE '[\\][[:space:]]+[^[:space:]]' '$GUEST_DIR/srcs' --include=Dockerfile" 2>/dev/null
+}
+broken=$(scan_continuations)
+if [ -z "$broken" ]; then
+    ok "every Dockerfile ends its continuations at the backslash"
+else
+    printf '%s\n' "$broken" | sed "s|^${GUEST_DIR}/|    |"
+    warn "$(printf '%s\n' "$broken" | grep -c .) line(s) continue past the backslash — docker cannot parse that"
+    [ "${INCEPTION_NO_PATCH:-0}" = "1" ] &&
+        die "INCEPTION_NO_PATCH=1 — nothing was repaired. Fix the lines above in the Inception repo."
+    [ -r "$DOCKERFILE_PATCH" ] ||
+        die "no patch at $DOCKERFILE_PATCH — fix the lines above in the Inception repo"
+    if vm_ssh "cd '$GUEST_DIR' && git apply --check -" <"$DOCKERFILE_PATCH" 2>/dev/null &&
+        vm_ssh "cd '$GUEST_DIR' && git apply -" <"$DOCKERFILE_PATCH" 2>/dev/null; then
+        ok "applied $(basename "$DOCKERFILE_PATCH") to the guest's working copy"
+    else
+        die "$(basename "$DOCKERFILE_PATCH") no longer applies — upstream moved; fix the lines above in the Inception repo"
+    fi
+    broken=$(scan_continuations)
+    if [ -n "$broken" ]; then
+        printf '%s\n' "$broken" | sed "s|^${GUEST_DIR}/|    |"
+        die "still unparseable after the patch — the lines above need fixing in the Inception repo"
+    fi
+    ok "the Dockerfiles parse now (commit the patch in Inception to make it stick)"
 fi
 
 # ── 4. Guest-side domain resolution (the subject's own requirement) ─────────

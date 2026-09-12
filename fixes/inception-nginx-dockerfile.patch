@@ -1,0 +1,67 @@
+Univers42/Inception: make srcs/requirements/nginx/Dockerfile parseable again.
+
+Docker's parser ends a line continuation at the backslash. Anything after it
+on the same line is not a comment, it is the end of the instruction -- so the
+inline `# ...` notes on the RUN block's continuation lines cut the instruction
+in two and `: "bust=${CACHE_BUST}"` becomes an instruction of its own:
+
+    ERROR: dockerfile parse error on line 16: unknown instruction: :
+
+Two editor artifacts ride along on the same block: a stray `+` after
+`apk update -q \` and a literal `<F6>` after `apk add nginx \`.
+
+Measured 2026-09-12 against upstream main (2e2962b) and 9e74aaa, both from a
+pristine `git clone` inside the b2r guest: nginx is the first image compose
+builds, so the whole stack dies here and `make inception` never reaches the
+other seven images. With this patch applied: 8 images, 534.1 MB, all eight
+containers healthy, https 200 inside the guest and from the host.
+
+The comments are kept -- moved above the RUN, where the parser is happy to
+have them.
+
+This lives in born2root because born2root is what pushes Inception into the
+VM; the real home for it is a commit in Univers42/Inception.
+Apply with:  git -C <inception> apply /path/to/this/file
+
+diff --git a/srcs/requirements/nginx/Dockerfile b/srcs/requirements/nginx/Dockerfile
+index 4b8b8e2..fee9270 100644
+--- a/srcs/requirements/nginx/Dockerfile
++++ b/srcs/requirements/nginx/Dockerfile
+@@ -12,19 +12,27 @@ ARG APK_CACHE_ID=apk
+ #  CACHE_BUST=$(date +%s)) and Docker sees a different instruction string, so it invalidtates the cache
+ #  and actually re-runs apk update/apk add, pulling resh package version of resuing an old cache layer.
+ ARG CACHE_BUST=0
+-RUN --mount=type=cache,id=${APK_CACHE_ID}-nginx,sharing=locked,target=/var/cache/apk \ # a buildkit cache mount
++# --mount=type=cache is a BuildKit cache mount. It can only attach to one
++# exact path (target=/var/cache/apk):
++# https://docs.docker.com/reference/dockerfile/#run---mounttypecache
++# apk caches packages at /etc/apk/cache by default, so that path is symlinked
++# onto the mount for the duration of the step and the symlink is removed
++# afterwards, so no dangling symlink is left in the image.
++# Alpine's default nginx config ships its own ssl_protocols line (often with
++# older TLS versions). The sed rewrites it in place to force TLS 1.2/1.3 only,
++# satisfying the subject's TLS requirement without hand-writing nginx.conf.
++# /run/nginx holds nginx's runtime PID/socket files; /etc/nginx/ssl is where
++# the entrypoint script copies the cert and key.
++RUN --mount=type=cache,id=${APK_CACHE_ID}-nginx,sharing=locked,target=/var/cache/apk \
+     : "bust=${CACHE_BUST}" \
+-    # buildKit cache mount can only attack to one exact path - target=/var/cache/apk
+-    # https://docs.docker.com/reference/dockerfile/#run---mounttypecache
+-    && ln -sf /var/cache/apk /etc/apk/cache \   # alpine apk tool by default caches packages at /etc/apk/cache
+-    && apk update -q \  +
+-    && apk add nginx \<F6>
+-    # alpine's default nginx cofig ships with its own ssl_protocols line (often includes older TLS version or default) this rewrites it in-place ot force only TLS 1.2/1.3 satisfying the subject TLS requirement without hand-writing the whole nginx.conf
++    && ln -sf /var/cache/apk /etc/apk/cache \
++    && apk update -q \
++    && apk add nginx \
+     && sed -i 's/^\([[:space:]]*\)ssl_protocols .*/\1ssl_protocols TLSv1.2 TLSv1.3;/' /etc/nginx/nginx.conf \
+-    && rm /etc/apk/cache \ # remove the symlink which avoid having a dangling/pointless symlink 
++    && rm /etc/apk/cache \
+     && mkdir -p \
+-        /run/nginx \    # for its runtime PID/SOCKET files, and 
+-        /etc/nginx/ssl  # the destination of the entrypoint scirpt copies the cert/key
++        /run/nginx \
++        /etc/nginx/ssl
+ 
+ # configuration repo's config
+ COPY conf/nginx.conf /etc/nginx/http.d/default.conf.template

@@ -1,0 +1,52 @@
+Univers42/Inception: find hellish where a 42 machine can actually keep it.
+
+The Makefile hunts for an interpreter in five fixed system paths and stops at
+parse time when none of them exists:
+
+    Makefile:29: *** no usable hellish interpreter.  Stop.
+
+On a 42 machine there is no root, so a hand-built or downloaded hellish lives
+in the user's own bin -- /home/<login>/.local/bin/hellish here -- and the list
+never looked there. `make`, `make setup`, `make test`, everything, refused to
+run on the host that owns the project, while the same tree built fine inside
+the born2root VM (where first-boot installs /usr/bin/hellish). Measured
+2026-09-12 against upstream main (2e2962b): before, the error above; after,
+SCRIPT_SH = /home/dlesieur/.local/bin/hellish and `make -n setup` expands.
+
+`command -v` is consulted last, so a system install still wins and no existing
+setup changes behaviour. The probe still has the final say: a candidate counts
+only if it prints INC_SH=<its own path>.
+
+born2root's own Makefile solved the same problem by asking the shell make was
+launched from (tools/launcher_probe.sh); this is the smaller version of that.
+
+Apply with:  git -C <inception> apply /path/to/this/file
+
+diff --git a/Makefile b/Makefile
+index 9a701e9..b87ae79 100644
+--- a/Makefile
++++ b/Makefile
+@@ -6,8 +6,22 @@ export BUILDX_NO_DEFAULT_ATTESTATIONS = 1
+ COMPOSE  = docker compose -f srcs/docker-compose.yml
+ 
+ ifeq ($(origin SCRIPT_SH),undefined)
++# The five system paths are where a packaged hellish lands, and where the
++# containers find it. A hellish built or downloaded by hand lands in the
++# user's own bin -- on a 42 machine there is no root, so that is the ONLY
++# place it can be, and with the list stopping at /usr/local the Makefile
++# aborted at parse time on the very host that runs the project:
++#
++#     Makefile:29: *** no usable hellish interpreter.  Stop.
++#
++# `command -v` is asked last, so a system install still wins and nothing
++# about an existing setup changes; it only adds the case where hellish is on
++# PATH somewhere else (~/.local/bin here). The probe still decides: a
++# candidate is used only if it prints INC_SH=<path> for itself.
+ _inc_cands := $(wildcard /bin/hellish /usr/bin/hellish /usr/local/bin/hellish \
+-	/bin/hellish.real /usr/bin/hellish.real)
++	/bin/hellish.real /usr/bin/hellish.real) \
++	$(shell command -v hellish 2>/dev/null) \
++	$(shell command -v hellish.real 2>/dev/null)
+ _inc_try    = $(filter INC_SH=%,$(shell $(1) tests/launcher_probe.sh 2>/dev/null))
+ _inc_found := $(firstword $(foreach c,$(_inc_cands),$(call _inc_try,$(c))))
+ SCRIPT_SH  := $(strip $(patsubst INC_SH=%,%,$(_inc_found)))

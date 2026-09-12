@@ -205,7 +205,7 @@ run_provisioner() {
     vm_ssh_tty "chmod +x /tmp/${remote} && ${SUDO_CMD} env ${envs} bash /tmp/${remote}"
     local rc=${PIPESTATUS[0]}
     vm_ssh "rm -f /tmp/${remote}" >/dev/null 2>&1 || true
-    [ "$rc" -eq 0 ] || warn "${label} exited ${rc} -- read -r the output above before trusting it"
+    [ "$rc" -eq 0 ] || warn "${label} exited ${rc} -- read the output above before trusting it"
 }
 
 show_health() {
