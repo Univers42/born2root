@@ -13,7 +13,8 @@
 #
 #   minimal   8-14 GB   everything Born2beRoot mandates + hellish + nvim
 #   standard 15-29 GB   + the bonus web stack, Docker, node, python tools,
-#                         the nvim IDE layer, Herdr + Claude Code
+#                         the nvim IDE layer with the Excalidraw editor,
+#                         Herdr + opencode
 #   full      30+ GB    every non-explicit feature (today: same as standard;
 #                         the name is stable so it can grow)
 #
@@ -72,20 +73,33 @@ RECIPE="$HERE/partition_recipe.sh"
 #                                database grows with use.
 #   hellish   /home  40 -> 1     the binary lives on /, ~/.hellish is tiny.
 # docker's /var figure stays 3300: it is the build PEAK (2.35 GB of build
-# cache measured on the host), not the 178 MB the engine alone costs. nvim's
-# 300 on /home and nvim-extras' 400 are still estimates: the plugin bootstrap
-# left /home at 3 MB on that build, so the cost lands at first launch.
+# cache measured on the host), not the 178 MB the engine alone costs.
+#
+# 2026-09-12, second pass (opencode replaces Claude Code, Excalidraw joins the
+# extras, plugins installed at build time):
+#   devtools-apt  /   450 -> 279   the apt transaction, by history.log
+#   devtools-extra /    0 -> 200   herdr 24 MB + opencode 176 MB, both in
+#                 /opt 110 -> 0    /usr/local/bin (install_devtools.sh). Claude
+#                                  Code's 414 MB were on / too, uncounted: the
+#                                  npm prefix never moved to /opt.
+#   nvim-extras   /opt  0 -> 30    the bundled Excalidraw editor
+#   nvim, nvim-extras /home 300, 400: the plugin sets, 57 plugins + parsers +
+#                                  Mason, measured 321 MB in all on the
+#                                  2026-09-12 guest once installed by hand;
+#                                  the build now installs them, and its
+#                                  features.status is where these get
+#                                  corrected next.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      100   0     0     0      -
-devtools-apt       base      450   0     0     0      -
+devtools-apt       base      279   0     0     0      -
 nvim               base      382   120   0     300    devtools-apt
 hellish-upstream   base      0     0     0     1      -
 webstack           standard  400   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
-nvim-extras        standard  92    0     0     400    nvim
-devtools-extra     standard  0     110   0     0      nodejs
+nvim-extras        standard  92    30    0     400    nvim
+devtools-extra     standard  200   0     0     0      nodejs
 docker             standard  400   0     3300  0      -
 ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -

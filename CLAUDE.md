@@ -28,7 +28,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Project footprint against the quota (fails when over) | `make space` |
 | Status dashboard / follow the headless serial console | `make status`, `make console` |
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
-| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make hellish_plugins`, `make provision`, `make shell_vm` |
+| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
 
 `make all` runs `prepare` first: `make deps`, then
@@ -133,9 +133,22 @@ sudo, pwquality, AppArmor, cron monitoring, TRIM via crypttab, `lvm.conf` and
 `first-boot-setup.sh` runs once via an `@reboot` crontab and self-deletes:
 Docker, WordPress, third-party tools, nvim, hellish plugins. It sources
 `/etc/b2b/features.conf`, installs required features first, writes the measured
-cost of each to `/etc/b2b/features.status`, and on a required feature failing
-prints `B2B-FEATURE-FAILED` to the serial console, which fails `make all`, and
-records why in `/etc/b2b/PROVISION_FAILED`.
+cost of each to `/etc/b2b/features.status` (one line per mount a feature
+touches), and on a required feature failing prints `B2B-FEATURE-FAILED` to the
+serial console, which fails `make all`, and records why in
+`/etc/b2b/PROVISION_FAILED`. Provisioners are run through `run_logged`, never
+`provisioner | tee log`: without `pipefail` a pipeline's status is `tee`'s, so
+every provisioner used to report success whatever it did.
+
+Everything the editor needs is installed **at build time and then verified**:
+`install_nvim.sh` and `install_nvim_extras.sh` retry the `vim.pack` download up
+to three times, install the tree-sitter parsers with a wait (nvim-treesitter's
+`main` installs asynchronously and a headless Neovim exits under it), then run
+`/usr/local/lib/b2b/nvim-verify.lua`, which exits 1 when a declared plugin,
+parser, language server or prebuilt binary is missing. A headless
+`vim.pack.add` is also wrapped with `confirm = false`, because its default is
+to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
+`/opt/excalidraw` and smoke-tests its server before returning.
 
 ### One number: `SIZE_B2B`
 

@@ -28,7 +28,7 @@ accident.
 - [What's Inside the VM](#whats-inside-the-vm)
 - [The Neovim Setup](#the-neovim-setup)
 - [Disk Layout & Growing a Partition](#disk-layout--growing-a-partition)
-- [Herdr, Claude Code & Optional AI](#herdr-claude-code--optional-ai)
+- [Herdr, opencode & Optional AI](#herdr-opencode--optional-ai)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -275,10 +275,11 @@ make all
 | `make prune_vms`        | Delete ALL VirtualBox VMs                                                   |
 | `make list_vms`         | List all VirtualBox VMs                                                     |
 | `make provision`        | Re-run the Neovim + hellishrc install inside a built VM                     |
-| `make nvim`             | Neovim (latest upstream) + kickstart + the whole plugin layer               |
+| `make nvim`             | Neovim + kickstart + extras + Excalidraw, every plugin installed & verified |
 | `make hellish_plugins`  | The hellishrc plugin framework                                              |
 | `make nvim_health`      | Print `:checkhealth` from inside the VM                                     |
-| `make devtools`         | Herdr (persistent terminal panes) + Claude Code                             |
+| `make devtools`         | Herdr (persistent terminal panes) + opencode (AI coding agent)              |
+| `make excalidraw`       | Rebuild just the Excalidraw editor (`:Excalidraw`)                          |
 | `make ai AI_MODE=local` | Ollama + a model sized to the VM's RAM                                      |
 | `make global_scope`     | Put npm globals and AI models on `/opt`                                     |
 | `make help`             | Show this help in the terminal                                              |
@@ -732,31 +733,103 @@ what this setup is modelled on:
   gdb 14 (`gdb -i dap`) and trixie ships 16.3, so C/C++ debugging uses the gdb
   that is already installed. No codelldb download, no Rust toolchain.
 
-Three things are fetched at **build time** rather than on your first `nvim`,
-because each is a silent network download that would otherwise happen behind a
-spinner the first time you press its key: blink.cmp's fuzzy library, the
-markdown-preview server binary, and kulala's `kulala-core` + http grammar.
+### Everything is installed at build time, and checked
 
-Run **`:B2BExtras`** inside Neovim to see exactly what loaded and what did not.
+`nvim` in this VM opens **finished**: every plugin cloned, every tree-sitter
+parser compiled, the language servers in place, and the three prebuilt binaries
+that are not part of any git checkout already fetched — blink.cmp's fuzzy
+library, the markdown-preview server, and kulala's `kulala-core` + http grammar.
 
-#### Seeing the markdown preview from your host
+That is not just an intention, it is checked. After the install the build runs
+`nvim-verify.lua` inside Neovim with your real config loaded and fails when
+anything the config declares is not actually on disk:
 
-The preview is a web server _inside the VM_, and the VM has no browser. So it
-binds to **`127.0.0.1:8420`** only, prints its URL instead of trying to launch
-anything, and you reach it over an SSH tunnel:
+| Checked | How |
+| --- | --- |
+| every plugin `vim.pack` knows about | the directory exists **and holds code** — a repo whose branch was emptied upstream clones perfectly and installs nothing |
+| every tree-sitter parser | kickstart's list plus `B2B.parsers` (C, C++, PHP, JS/TS, SQL, Dockerfile, …) |
+| language servers and formatters | `lua-language-server` and `stylua` are executable |
+| the prebuilt binaries | blink.cmp's `.so`, markdown-preview's server |
 
-```bash
-# on the HOST, once per session
-ssh -p 4242 -L 8420:127.0.0.1:8420 dlesieur@127.0.0.1
+A failure prints one `PROBLEM` line per finding, records `nvim-extras` as
+failed in `/etc/b2b/features.status`, and **stops `make all`**. The plugin
+download is retried up to three times before that verdict, ten seconds apart,
+because on a NAT'd VM in its first minute of network a failed clone is ordinary
+— and `vim.pack` reports one as a notification, not an error.
+
+> The 2026-09-12 build is why this exists: first boot ran the bootstrap with
+> `NVIM_BOOTSTRAP=0`, sent its output to `/dev/null`, and produced a VM whose
+> `nvim` was missing all 38 extra plugins — reported as `nvim ok`.
+
+Run **`:B2BExtras`** inside Neovim to see what loaded, and
+`~/.local/state/nvim/bootstrap.log` for what the build's Neovim runs printed.
+
+#### Mermaid, Excalidraw, and how the browser part reaches your host
+
+Two of the VS Code features people miss most are graphical, and the VM has no
+display. Both run as a **web server inside the VM, rendered by the browser on
+your host** — no X server in the VM, which the subject would score 0 for.
+
+| | Where | Port in the VM |
+| --- | --- | --- |
+| Markdown preview, with **mermaid** diagrams and KaTeX | `<leader>mp` | 8420 |
+| **Excalidraw** drawings | `:Excalidraw` / `<leader>me` | 8421 |
+
+Both bind **`127.0.0.1` only**, and the build writes the two forwards into the
+`Host b2b` block of your host's `~/.ssh/config`:
+
+```sshconfig
+LocalForward 8420 127.0.0.1:8420
+LocalForward 8421 127.0.0.1:8421
 ```
 
-Then `<leader>mp` inside Neovim and open the URL it echoes. `:B2BMarkdown`
-prints this reminder, plus whether the server binary is actually present.
+So while you are connected with **`ssh b2b`**, the URL Neovim prints is a URL
+your host browser opens as it is. Nothing to tunnel by hand. (A second
+concurrent `ssh b2b` cannot bind the same two host ports and says so on stderr;
+the session itself is unaffected. From an ssh session that did not come from
+this config, tunnel it yourself: `ssh -p 4242 -L 8420:127.0.0.1:8420
+dlesieur@127.0.0.1`.)
 
-Port 8420 and not 8080/8090 on purpose: this VM already serves lighttpd on
+**Mermaid** needs nothing extra — a ```` ```mermaid ```` fenced block is a
+diagram in the preview:
+
+````markdown
+```mermaid
+graph TD
+  A[make all] --> B[preseeded ISO] --> C[ssh b2b]
+```
+````
+
+**Excalidraw** is the real editor — the official `@excalidraw/excalidraw`
+React component, bundled at build time into `/opt/excalidraw` (22 MB, fonts
+included, no CDN at runtime) and served by a ~140-line Node server with no
+dependencies. `:Excalidraw` on any buffer starts it, creates the `.excalidraw`
+file if it is new, and prints the URL:
+
+```text
+:Excalidraw                  draw for the current file (notes.md → notes.excalidraw)
+:Excalidraw diagram          create/open diagram.excalidraw
+<leader>me                   the same, for the current buffer
+excalidraw diagram           the same from any shell in the VM
+```
+
+Every change is saved back to the `.excalidraw` **and** exported beside it as
+`<name>.excalidraw.svg`, with the scene embedded — so the drawing renders in
+the markdown preview, on GitHub, and re-opens in excalidraw.com:
+
+```markdown
+![architecture](arch.excalidraw.svg)
+```
+
+The Neovim side is one more drop-in (`55-b2b-excalidraw.lua`), the server stops
+with the Neovim that started it, and the file API only accepts absolute
+`*.excalidraw` paths.
+
+Port 8420/8421 and not 8080/8090 on purpose: this VM already serves lighttpd on
 80/443 and the Inception stack on 8080/8081/8082 with its static site on 8090.
-Override with `NVIM_MKDP_PORT` if it still clashes. Binding to loopback rather
-than `0.0.0.0` also means UFW's allow-list needs no hole punched in it.
+Override with `NVIM_MKDP_PORT` / `EXCALIDRAW_PORT`. Binding to loopback rather
+than `0.0.0.0` also means UFW's allow-list needs no hole punched in it — and
+the Excalidraw file API is never exposed beyond your own ssh session.
 
 ### Keybindings
 
@@ -973,11 +1046,11 @@ decided at runtime, inside the guest, by free-space guards that printed
 `[SKIP]` and carried on — so a small disk produced no error, just a VM quietly
 missing things, and Docker could run before nvim and starve it.
 
-| Profile      | `SIZE_B2B` | Installs                                                                                                                                |
-| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish**                                         |
-| **standard** | 15–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer, Herdr + Claude Code |
-| **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow)                                          |
+| Profile      | `SIZE_B2B` | Installs                                                                                                                                          |
+|--------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish**                                                   |
+| **standard** | 15–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer + Excalidraw, Herdr + opencode |
+| **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow)                                                    |
 
 AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
 be turned off. Everything else can be, per feature:
@@ -1024,7 +1097,7 @@ and sharing it only creates permission problems.
 
 ---
 
-## Herdr, Claude Code & Optional AI
+## Herdr, opencode & Optional AI
 
 ### Herdr — persistent terminal panes
 
@@ -1044,10 +1117,28 @@ subject is explicit that installing a graphics server scores **0**. Herdr gives
 the tiled-pane workflow entirely inside the terminal, with nothing installed
 that could put the grade at risk.
 
-### Claude Code
+### opencode
 
-`npm install -g @anthropic-ai/claude-code`, landing in `/opt/npm-global` so it
-does not consume `/`. Run `claude` in the VM.
+[opencode](https://opencode.ai) is the AI coding agent in this VM: one static
+binary in `/usr/local/bin`, fetched from its GitHub release like Herdr, that
+works with **any** provider — Anthropic, OpenAI, GitHub Copilot, or the local
+Ollama below.
+
+```bash
+opencode                 # the TUI, in the project you are standing in
+opencode auth login      # store a provider key (skip this with AI_MODE=local)
+```
+
+It replaced Claude Code on 2026-09-12, for two measured reasons: that one was
+tied to a single vendor, and its npm tree was **414 MB on `/`** — the npm
+prefix that was supposed to move it to `/opt` never applied to it. opencode is
+176 MB, and `AI_MODE=local` wires it to a model running on the box, so the VM
+has a coding agent that needs no account and no network.
+
+Upstream's `curl https://opencode.ai/install | bash` is deliberately **not**
+used: it installs per user into `~/.opencode/bin`, on the `/home` volume this
+layout sizes for Neovim's plugins, and piping a remote script into a shell
+during an unattended first boot is unreviewable.
 
 ### Optional AI — `AI_MODE`
 
