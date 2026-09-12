@@ -2385,6 +2385,32 @@ bootstrap_user() {
         return 1
     fi
 
+    # The pass that cannot be aborted by the config, and the reason this layer
+    # kept coming up empty. install_nvim.sh runs nvim-preinstall.lua too, but it
+    # runs BEFORE this script writes the extras configs, so it only ever saw
+    # kickstart's own declarations -- every plugin named in 10-b2b-plugins.lua,
+    # 50-b2b-markdown.lua and 60-b2b-ide.lua was invisible to it.
+    #
+    # What that leaves is the plain startups below, and they abort. kickstart's
+    # pattern is `vim.pack.add {...}` immediately followed by `require(...)`, so
+    # the first require that fails ends init.lua THERE and every plugin declared
+    # after it is never asked for. Measured on the 2026-09-12 QEMU build: every
+    # run died at init.lua:347 on guess-indent, each attempt got a few more
+    # plugins in (1, then 22, then 14 ...), and three attempts ran out long
+    # before 57 plugins had converged -- so the feature was recorded as failed
+    # with 1 MB written to /home and 1.5 GB still free on it.
+    #
+    # --clean loads no user config at all, so nothing can abort it, and it does
+    # NOT move stdpath('data') (checked on 0.12.5), so what it installs is what
+    # the normal startups below then find.
+    if [ -r "${B2B_LIB_DIR}/nvim-preinstall.lua" ]; then
+        log "${user}: pre-installing every declared plugin (config not loaded)"
+        run_as_user "$user" "$NVIM_BIN" --clean --headless \
+            -c "luafile ${B2B_LIB_DIR}/nvim-preinstall.lua" -c qa 2>&1 |
+            tr '\r' '\n' | grep -E '^preinstall:|^  MISSING' |
+            sed 's/^/[nvim-extras]     /' || true
+    fi
+
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"

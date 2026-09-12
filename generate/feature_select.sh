@@ -1,5 +1,5 @@
 #!/usr/bin/env hellish
-# Pick what goes in the guest, by hand, before anything is built.
+# Pick what goes in the guest, with the disk resizing under you as you pick.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -12,23 +12,45 @@
 #
 # So this inverts it. The strict minimum -- the `base` tier, everything
 # Born2beRoot mandates plus the editor and the shell -- is not negotiable and
-# is not a question. Everything else starts OFF and is a line you tick. The
-# automatic size-based set is still one keystroke away (`d`), because it is a
-# sensible answer, not because it should happen to you.
+# is not a question. Everything else starts OFF and is a line you tick.
+#
+# AND THE DISK FOLLOWS THE CHOICE, not the other way round. Refusing a set
+# because it is 30 MB over is the tail wagging the dog: the volumes are LVM
+# logical volumes carved from one number by partition_recipe.sh, so if the set
+# does not fit, the honest answer is to grow the disk and say by how much.
+# Every tick re-derives the smallest SIZE_B2B at or above your floor that holds
+# the set, and every bar redraws at that size. Untick and it shrinks back --
+# that is the half people forget, and a picker that only grows punishes you for
+# exploring. `g` pins the disk instead, for when the floor is a hard quota (the
+# 15 GB one at school) and overflowing has to be a refusal.
+#
+# HOW THE NUMBERS ARE GOT
+#   The manifest, its NOT_INSTALLED reservations, USABLE_PERMILLE and the tier
+#   thresholds are all read out of feature_profile.sh, and the volume sizes
+#   come from partition_recipe.sh --sizes. Nothing here is a second copy of
+#   either; only the summation is local.
+#
+# WHY THE HOT PATH FORKS NOTHING
+#   The first version of this screen looked right and hung. Growing the disk
+#   probes up to ~190 sizes, each summing ~17 manifest rows over 4 mounts, and
+#   every one of those lookups was an awk, a tr or a $( ) -- tens of thousands
+#   of processes for ONE keypress. So the manifest is parsed once into shell
+#   variables, keys are underscored with ${v//-/_} rather than tr, values are
+#   read with eval-assign rather than command substitution, and each disk
+#   size's layout is parsed once and memoised. After that a keystroke is
+#   arithmetic.
 #
 # WHAT IT WRITES
-#   .b2b-features at the repo root, holding the size it was chosen for and the
-#   FEATURES string it produced. feature_profile.sh reads it when FEATURES is
-#   not set in the environment, so `make features`, the ISO build and the
-#   preflight check all agree without anything being passed between them.
-#   The size is recorded because a selection is only valid for the disk it was
-#   fitted to: change SIZE_B2B and the file is ignored and you are asked again.
+#   .b2b-features at the repo root: the size it settled on and the FEATURES
+#   string. feature_profile.sh reads it when FEATURES is unset, so `make
+#   features`, the preflight check and the ISO's features.conf all agree
+#   without anything being threaded between them.
 #
 # WHEN IT DOES NOT RUN
-#   Only a terminal gets asked. No tty, FEATURES/PROFILE already set in the
-#   environment, or B2B_NO_SELECT=1 -- CI, `make -n`, a scripted rebuild -- and
-#   this is skipped entirely and the size-based default stands. A build that
-#   blocks on a prompt nobody can see is worse than a build that chose for you.
+#   Only a terminal gets asked. No tty, FEATURES/PROFILE already set, or
+#   B2B_NO_SELECT=1 -- CI, `make -n`, a scripted rebuild -- and this is skipped
+#   and the size-based default stands. A build that blocks on a prompt nobody
+#   can see is worse than a build that chose for you.
 #
 # USAGE
 #   generate/feature_select.sh            interactive; writes .b2b-features
@@ -40,27 +62,36 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 FP="$HERE/feature_profile.sh"
+RECIPE="$HERE/partition_recipe.sh"
 SEL_FILE="${B2B_SELECT_FILE:-$ROOT/.b2b-features}"
 SH="${SCRIPT_SH:-bash}"
 
-SIZE_B2B="${SIZE_B2B:-15}"
+SIZE_FLOOR="${SIZE_B2B:-15}"
 VM_RAM_MB="${VM_RAM_MB:-2048}"
-AI_MODE="${AI_MODE:-off}"
+AUTOGROW=1
+MAX_GROW_GB="${MAX_GROW_GB:-120}"
+MIN_FLOOR_GB=8
 
-C_R='\033[0m'
-C_B='\033[1m'
-C_DIM='\033[2m'
-C_GRN='\033[32m'
-C_YEL='\033[33m'
-C_RED='\033[31m'
+C_R=$(printf '\033[0m')
+C_B=$(printf '\033[1m')
+C_DIM=$(printf '\033[2m')
+C_GRN=$(printf '\033[32m')
+C_YEL=$(printf '\033[33m')
+C_RED=$(printf '\033[31m')
+C_CYA=$(printf '\033[36m')
 
 case "${1:---select}" in
 --show)
-    [ -f "$SEL_FILE" ] && cat "$SEL_FILE" || echo "no saved selection ($SEL_FILE)"
+    if [ -f "$SEL_FILE" ]; then
+        cat "$SEL_FILE"
+    else
+        echo "no saved selection ($SEL_FILE)"
+    fi
     exit 0
     ;;
 --clear)
-    rm -f "$SEL_FILE" && echo "forgot $SEL_FILE — back to the size-based default"
+    rm -f "$SEL_FILE"
+    echo "forgot $SEL_FILE — back to the size-based default"
     exit 0
     ;;
 --select) ;;
@@ -74,257 +105,484 @@ esac
 if [ "${B2B_NO_SELECT:-0}" = "1" ]; then
     exit 0
 fi
-# ${VAR+x} is "set, even if empty" -- the right test here. A caller that ran
-# `make all FEATURES=` has stated a choice (nothing extra) and must not be
+# A caller that ran `make all FEATURES=...` has stated a choice and must not be
 # second-guessed by a prompt.
-if [ -n "${FEATURES+x}" ] && [ -n "${FEATURES:-}" ]; then
+if [ -n "${FEATURES:-}" ]; then
     exit 0
 fi
-if [ -n "${PROFILE:-}" ] && [ "${PROFILE}" != "auto" ]; then
+if [ -n "${PROFILE:-}" ] && [ "$PROFILE" != "auto" ]; then
     exit 0
 fi
 if [ ! -t 0 ] || [ ! -t 1 ]; then
     exit 0
 fi
 
-# ── The manifest, read from the one place that defines it ───────────────────
-# Parsed out of feature_profile.sh rather than duplicated: two lists of
-# features that can disagree is exactly the bug this project keeps fixing.
-manifest() { sed -n "/^MANIFEST='/,/^'/p" "$FP" | awk 'NF == 7'; }
+# ── Everything below comes out of feature_profile.sh ────────────────────────
 NOT_INSTALLED=$(sed -n "s/^NOT_INSTALLED='\(.*\)'/\1/p" "$FP")
+PERMILLE=$(sed -n 's/^USABLE_PERMILLE=\([0-9]*\).*/\1/p' "$FP" | head -n1)
+STANDARD_FROM=$(sed -n 's/^STANDARD_FROM_GB=\([0-9]*\).*/\1/p' "$FP" | head -n1)
+FULL_FROM=$(sed -n 's/^FULL_FROM_GB=\([0-9]*\).*/\1/p' "$FP" | head -n1)
+[ -n "$PERMILLE" ] || PERMILLE=744
+[ -n "$STANDARD_FROM" ] || STANDARD_FROM=15
+[ -n "$FULL_FROM" ] || FULL_FROM=30
 
-# A feature the user can decide about: not base (base is the strict minimum,
-# and turning it off is not a smaller born2root, it is a different project) and
-# not a reservation (nothing installs those; they are space the workflow
-# claims). AI is left out too -- AI_MODE is its own switch with its own
-# semantics, and offering ai-local as a tickbox would hide a multi-GB download
-# behind a checkmark.
-optional_names() {
-    manifest | while read -r name tier _ _ _ _ _; do
-        case "$tier" in base) continue ;; esac
-        case "$name" in ai-*) continue ;; esac
-        case " $NOT_INSTALLED " in *" $name "*) continue ;; esac
-        printf '%s\n' "$name"
-    done
-}
-field() { manifest | awk -v n="$1" -v c="$2" '$1 == n { print $c }'; }
-# OPTIONAL is one name per line, because the menu indexes it with sed. So
-# membership is grep -qx, NOT `case " $OPTIONAL " in *" $n "*)`: that pattern
-# needs space separators and silently never matches a newline-separated list,
-# which is what made `d` (size default) a no-op that redrew an unchanged menu.
-is_optional() { printf '%s\n' "$OPTIONAL" | grep -qx -- "$1"; }
+# Parsed ONCE into variables. Keys are the names with hyphens underscored,
+# because a hyphen is not legal in a variable name.
+ALL_KEYS=""
+OPT_KEYS=""
+# shellcheck disable=SC2034  # c1..c4 and req are consumed by the eval below
+while read -r n tier c1 c2 c3 c4 req; do
+    case "$n" in '' | ai-*) continue ;; esac
+    k=${n//-/_}
+    eval "NAME_${k}=\$n TIER_${k}=\$tier REQ_${k}=\$req COST_${k}=\"\$c1 \$c2 \$c3 \$c4\""
+    ALL_KEYS="${ALL_KEYS}${ALL_KEYS:+ }$k"
+    case "$tier" in base) continue ;; esac
+    case " $NOT_INSTALLED " in *" $n "*) continue ;; esac
+    eval "OPT_${k}=1"
+    OPT_KEYS="${OPT_KEYS}${OPT_KEYS:+ }$k"
+done <<MANIEOF
+$(sed -n "/^MANIFEST='/,/^'/p" "$FP" | awk 'NF == 7')
+MANIEOF
+[ -n "$OPT_KEYS" ] || exit 0
 
-OPTIONAL=$(optional_names)
-[ -n "$OPTIONAL" ] || exit 0
+COUNT=0
+for k in $OPT_KEYS; do
+    COUNT=$((COUNT + 1))
+done
 
-# ── State: the strict minimum, and nothing else ─────────────────────────────
+# ── Selection state, keyed the same way ─────────────────────────────────────
 CHOSEN=""
 is_chosen() {
     case " $CHOSEN " in *" $1 "*) return 0 ;; esac
     return 1
 }
-choose() { is_chosen "$1" || CHOSEN="${CHOSEN}${CHOSEN:+ }$1"; }
+choose() {
+    is_chosen "$1" || CHOSEN="${CHOSEN}${CHOSEN:+ }$1"
+}
 unchoose() {
-    local out="" n
-    for n in $CHOSEN; do
-        [ "$n" = "$1" ] || out="${out}${out:+ }$n"
+    local out="" x
+    for x in $CHOSEN; do
+        [ "$x" = "$1" ] || out="${out}${out:+ }$x"
     done
     CHOSEN="$out"
 }
-
-# The set the tiers would pick on their own, cached: every redraw asks twice.
-AUTO_SET=""
-auto_set() {
-    [ -n "$AUTO_SET" ] || AUTO_SET=$(SIZE_B2B="$SIZE_B2B" VM_RAM_MB="$VM_RAM_MB" \
-        AI_MODE=off PROFILE=auto FEATURES='' "$SH" "$FP" --resolve 2>/dev/null |
-        sed -n 's/^feature=//p')
-    printf '%s\n' "$AUTO_SET"
+is_opt_key() {
+    local v
+    eval "v=\${OPT_$1-}"
+    [ -n "$v" ]
 }
-in_auto() { auto_set | grep -qx -- "$1"; }
+tier_on_at() { # <tier> <gb>
+    case "$1" in
+    base) return 0 ;;
+    standard) [ "$2" -ge "$STANDARD_FROM" ] && return 0 ;;
+    full) [ "$2" -ge "$FULL_FROM" ] && return 0 ;;
+    esac
+    return 1
+}
 
-# The FEATURES string for the current ticks, expressed as a DIFF against the
-# automatic set rather than as an absolute list under PROFILE=minimal.
-#
-# The absolute form was tried first and is wrong. PROFILE=minimal switches off
-# the `standard` tier wholesale, and two of its rows are not installs at all --
-# vscode-remote and inception-data are RESERVATIONS, space the documented
-# workflow claims whether or not first boot writes it. Ticking boxes under
-# minimal silently dropped 700 MB of /home reservation and the fit check got
-# more permissive the more deliberate you were: /home "needed" fell from 1106
-# to 406 MB, which is exactly the accounting that let a 974 MB /home pass and
-# then fill up completely.
-#
-# As a diff, the tier logic and its reservations stay exactly as designed and
-# the ticks only say where you differ from them. Unticking a feature a
-# reservation depends on takes that reservation with it -- otherwise
-# feature_profile.sh's own dependency check refuses the set it was handed.
-features_str() {
-    local n req out=""
-    for n in $OPTIONAL; do
-        if is_chosen "$n"; then
-            in_auto "$n" || out="${out}${out:+ }+${n}"
-        else
-            in_auto "$n" && out="${out}${out:+ }-${n}"
+# ── The layout for a size, parsed once per size ─────────────────────────────
+S_ROOT=0
+S_OPT=0
+S_VAR=0
+S_HOME=0
+S_SWAP=0
+S_BOOT=0
+load_sizes() { # <gb>
+    local gb="$1" cached raw name val
+    eval "cached=\${SZC_$gb-}"
+    if [ -z "$cached" ]; then
+        raw=$(SIZE_B2B="$gb" DISK_SIZE_MB=$((gb * 1024)) VM_RAM_MB="$VM_RAM_MB" \
+            "$SH" "$RECIPE" --sizes 2>/dev/null)
+        while read -r line; do
+            case "$line" in *=*) ;; *) continue ;; esac
+            name=${line%%=*}
+            # shellcheck disable=SC2034  # read back through eval, per size
+            val=${line#*=}
+            case "$name" in
+            root | opt | var | home | swap | boot)
+                eval "SZ_${name}_${gb}=\$val"
+                ;;
+            esac
+        done <<SZEOF
+$raw
+SZEOF
+        eval "SZC_$gb=1"
+    fi
+    eval "S_ROOT=\${SZ_root_$gb:-0} S_OPT=\${SZ_opt_$gb:-0}"
+    eval "S_VAR=\${SZ_var_$gb:-0} S_HOME=\${SZ_home_$gb:-0}"
+    eval "S_SWAP=\${SZ_swap_$gb:-0} S_BOOT=\${SZ_boot_$gb:-0}"
+    S_ROOT=$((S_ROOT * PERMILLE / 1000))
+    S_OPT=$((S_OPT * PERMILLE / 1000))
+    S_VAR=$((S_VAR * PERMILLE / 1000))
+    S_HOME=$((S_HOME * PERMILLE / 1000))
+}
+
+# ── What the set costs at a size ────────────────────────────────────────────
+NEED_ROOT=0
+NEED_OPT=0
+NEED_VAR=0
+NEED_HOME=0
+compute_need() { # <gb>
+    local gb="$1" k tier req rk
+    NEED_ROOT=0
+    NEED_OPT=0
+    NEED_VAR=0
+    NEED_HOME=0
+    for k in $ALL_KEYS; do
+        eval "tier=\$TIER_$k"
+        if [ "$tier" != base ]; then
+            if is_opt_key "$k"; then
+                is_chosen "$k" || continue
+            else
+                # a reservation: gated by its tier AND by its dependency
+                tier_on_at "$tier" "$gb" || continue
+                eval "req=\$REQ_$k"
+                if [ "$req" != "-" ]; then
+                    rk=${req//-/_}
+                    if is_opt_key "$rk" && ! is_chosen "$rk"; then
+                        continue
+                    fi
+                fi
+            fi
         fi
-    done
-    for n in $NOT_INSTALLED; do
-        in_auto "$n" || continue
-        req=$(field "$n" 7)
-        [ "$req" = "-" ] && continue
-        is_optional "$req" || continue
-        is_chosen "$req" || out="${out}${out:+ }-${n}"
-    done
-    printf '%s' "$out"
-}
-
-# Dependencies, so ticking a box cannot produce a set feature_profile.sh will
-# refuse. Ticking devtools-extra ticks nodejs; unticking nodejs unticks what
-# needs it. Doing this silently is right here: the list is being edited live
-# and the next redraw shows exactly what happened.
-resolve_deps() {
-    local changed=1 n req
-    while [ "$changed" = 1 ]; do
-        changed=0
-        for n in $OPTIONAL; do
-            is_chosen "$n" || continue
-            req=$(field "$n" 7)
-            [ "$req" = "-" ] && continue
-            case "$(field "$req" 2)" in base) continue ;; esac
-            is_chosen "$req" && continue
-            choose "$req"
-            changed=1
-        done
-        for n in $OPTIONAL; do
-            is_chosen "$n" || continue
-            req=$(field "$n" 7)
-            [ "$req" = "-" ] && continue
-            case "$(field "$req" 2)" in base) continue ;; esac
-            is_chosen "$req" && continue
-            unchoose "$n"
-            changed=1
-        done
+        # shellcheck disable=SC2086  # exactly four numeric fields, split on purpose
+        eval "set -- \$COST_$k"
+        NEED_ROOT=$((NEED_ROOT + $1))
+        NEED_OPT=$((NEED_OPT + $2))
+        NEED_VAR=$((NEED_VAR + $3))
+        NEED_HOME=$((NEED_HOME + $4))
     done
 }
 
-# What the size-based default would have picked, as the `d` shortcut.
-apply_default() {
-    CHOSEN=""
-    local n
-    for n in $(SIZE_B2B="$SIZE_B2B" VM_RAM_MB="$VM_RAM_MB" AI_MODE=off \
-        "$SH" "$FP" --resolve 2>/dev/null | sed -n 's/^feature=//p'); do
-        is_optional "$n" && choose "$n"
-    done
+fits_at() { # <gb>
+    compute_need "$1"
+    load_sizes "$1"
+    [ "$NEED_ROOT" -le "$S_ROOT" ] || return 1
+    [ "$NEED_OPT" -le "$S_OPT" ] || return 1
+    [ "$NEED_VAR" -le "$S_VAR" ] || return 1
+    [ "$NEED_HOME" -le "$S_HOME" ] || return 1
     return 0
 }
 
-# Does the current selection fit? Returns the overflow lines feature_profile.sh
-# produces, or nothing.
-fit_report() {
-    SIZE_B2B="$SIZE_B2B" VM_RAM_MB="$VM_RAM_MB" AI_MODE="$AI_MODE" \
-        PROFILE=auto FEATURES="$(features_str)" \
-        "$SH" "$FP" --table 2>&1
+SIZE_GB="$SIZE_FLOOR"
+FITS=1
+resize() {
+    local g
+    if [ "$AUTOGROW" != 1 ]; then
+        SIZE_GB="$SIZE_FLOOR"
+        if fits_at "$SIZE_GB"; then FITS=1; else FITS=0; fi
+        compute_need "$SIZE_GB"
+        load_sizes "$SIZE_GB"
+        return 0
+    fi
+    g="$SIZE_FLOOR"
+    while [ "$g" -le "$MAX_GROW_GB" ]; do
+        if fits_at "$g"; then
+            SIZE_GB="$g"
+            FITS=1
+            return 0
+        fi
+        g=$((g + 1))
+    done
+    SIZE_GB="$SIZE_FLOOR"
+    FITS=0
+    compute_need "$SIZE_GB"
+    load_sizes "$SIZE_GB"
 }
 
-# ── Draw ────────────────────────────────────────────────────────────────────
-draw() {
-    local n i=1 tier mark cost report
-    report=$(fit_report)
-    printf '\n'
-    # shellcheck disable=SC2059
-    printf "${C_B}  What goes in the VM${C_R}  ${C_DIM}(SIZE_B2B=%s)${C_R}\n\n" "$SIZE_B2B"
-    # shellcheck disable=SC2059
-    printf "  ${C_GRN}[x]${C_R} %-18s ${C_DIM}%s${C_R}\n" "the strict minimum" \
-        "Born2beRoot's requirements, nvim, hellish — always installed"
-    printf '\n'
-    for n in $OPTIONAL; do
-        tier=$(field "$n" 2)
-        cost="$(field "$n" 3)/$(field "$n" 4)/$(field "$n" 5)/$(field "$n" 6)"
-        if is_chosen "$n"; then mark="${C_GRN}[x]${C_R}"; else mark="${C_DIM}[ ]${C_R}"; fi
-        # shellcheck disable=SC2059
-        printf "  %2d %b %-16s ${C_DIM}%-8s %14s MB  %s${C_R}\n" \
-            "$i" "$mark" "$n" "$tier" "$cost" "$(feature_blurb "$n")"
+# ── Dependencies, so a tick can never build a set the checker refuses ───────
+resolve_deps() {
+    local changed=1 k req rk
+    while [ "$changed" = 1 ]; do
+        changed=0
+        for k in $OPT_KEYS; do
+            is_chosen "$k" || continue
+            eval "req=\$REQ_$k"
+            [ "$req" = "-" ] && continue
+            rk=${req//-/_}
+            is_opt_key "$rk" || continue
+            is_chosen "$rk" && continue
+            choose "$rk"
+            changed=1
+        done
+    done
+}
+cascade_off() {
+    local changed=1 k req rk
+    while [ "$changed" = 1 ]; do
+        changed=0
+        for k in $OPT_KEYS; do
+            is_chosen "$k" || continue
+            eval "req=\$REQ_$k"
+            [ "$req" = "-" ] && continue
+            rk=${req//-/_}
+            is_opt_key "$rk" || continue
+            is_chosen "$rk" && continue
+            unchoose "$k"
+            changed=1
+        done
+    done
+}
+apply_default() {
+    local k tier
+    CHOSEN=""
+    for k in $OPT_KEYS; do
+        eval "tier=\$TIER_$k"
+        tier_on_at "$tier" "$SIZE_FLOOR" && choose "$k"
+    done
+    resolve_deps
+}
+apply_all() {
+    local k
+    CHOSEN=""
+    for k in $OPT_KEYS; do
+        choose "$k"
+    done
+    resolve_deps
+}
+
+# ── Drawing ─────────────────────────────────────────────────────────────────
+BAR_W=22
+bar() { # <used> <cap>
+    local used="$1" cap="$2" filled i out="" col
+    [ "$cap" -gt 0 ] || cap=1
+    filled=$((used * BAR_W / cap))
+    [ "$filled" -gt "$BAR_W" ] && filled=$BAR_W
+    [ "$filled" -lt 0 ] && filled=0
+    if [ "$used" -gt "$cap" ]; then
+        col="$C_RED"
+    elif [ $((used * 100 / cap)) -ge 90 ]; then
+        col="$C_YEL"
+    else
+        col="$C_GRN"
+    fi
+    i=0
+    while [ "$i" -lt "$filled" ]; do
+        out="${out}#"
         i=$((i + 1))
     done
-    printf '\n'
-    printf '%s\n' "$report" | sed -n '/needed (on)/,/usable at this size/p' | sed 's/^/  /'
-    if printf '%s\n' "$report" | grep -q '✓ fits'; then
-        # shellcheck disable=SC2059
-        printf "  ${C_GRN}✓ fits${C_R}\n"
-    else
-        # shellcheck disable=SC2059
-        printf "  ${C_RED}✗ does not fit:${C_R}\n"
-        printf '%s\n' "$report" | sed -n 's/^      \(\/[a-z]*\) needs/      \1 needs/p' | sed 's/^/  /'
-    fi
-    printf '\n'
-    # shellcheck disable=SC2059
-    printf "  ${C_DIM}number${C_R} toggle   ${C_DIM}a${C_R} all that fit   ${C_DIM}d${C_R} size default   ${C_DIM}n${C_R} none   ${C_DIM}Enter${C_R} build\n\n"
+    while [ "$i" -lt "$BAR_W" ]; do
+        out="${out}."
+        i=$((i + 1))
+    done
+    printf '%s%s%s' "$col" "$out" "$C_R"
 }
-
-# One line each, for people who have not read feature_profile.sh. Kept here
-# rather than in the manifest so the manifest stays a table of numbers.
-feature_blurb() {
+blurb() {
     case "$1" in
     webstack) echo "lighttpd + MariaDB + PHP + WordPress (the bonus)" ;;
-    nodejs) echo "Node + the npm globals" ;;
-    pytools) echo "pipx tools (ruff, …)" ;;
-    nvim-extras) echo "the nvim IDE layer + Excalidraw + markdown preview" ;;
-    devtools-extra) echo "Herdr (persistent panes) + opencode" ;;
+    nodejs) echo "Node and the npm globals" ;;
+    pytools) echo "pipx tools (ruff, ...)" ;;
+    nvim-extras) echo "nvim IDE layer + Excalidraw + markdown/mermaid preview" ;;
+    devtools-extra) echo "Herdr persistent panes + opencode" ;;
     claude-code) echo "Claude Code, beside opencode" ;;
     docker) echo "Docker engine (Inception needs it)" ;;
     *) echo "" ;;
     esac
 }
 
+CURSOR=1
+# shellcheck disable=SC2120  # the `set --` inside is eval'd cost fields, not args
+draw() {
+    local k i name tier disk
+    printf '\033[H\033[2J'
+    if [ "$SIZE_GB" -ne "$SIZE_FLOOR" ]; then
+        disk="${C_CYA}${SIZE_FLOOR} -> ${SIZE_GB} GB${C_R} ${C_DIM}(grown to fit)${C_R}"
+    elif [ "$AUTOGROW" != 1 ]; then
+        disk="${C_B}${SIZE_GB} GB${C_R} ${C_DIM}(pinned, g to unpin)${C_R}"
+    else
+        disk="${C_B}${SIZE_GB} GB${C_R}"
+    fi
+    printf '\n  %sWhat goes in the VM%s                            disk %b\n\n' "$C_B" "$C_R" "$disk"
+    printf '      %s[x]%s %-15s %s%s%s\n\n' "$C_GRN" "$C_R" "the strict minimum" \
+        "$C_DIM" "Born2beRoot, nvim, hellish - always installed" "$C_R"
+    printf '      %s%-15s     /  /opt  /var /home MB%s\n' "$C_DIM" "" "$C_R"
+
+    i=1
+    for k in $OPT_KEYS; do
+        eval "name=\$NAME_$k tier=\$TIER_$k"
+        if [ "$i" = "$CURSOR" ]; then
+            printf '  %s>%s ' "$C_CYA" "$C_R"
+        else
+            printf '    '
+        fi
+        if is_chosen "$k"; then
+            printf '%s[x]%s ' "$C_GRN" "$C_R"
+        else
+            printf '%s[ ]%s ' "$C_DIM" "$C_R"
+        fi
+        # shellcheck disable=SC2086
+        eval "set -- \$COST_$k"
+        printf '%-15s %5s %5s %5s %5s  %s%s%s\n' "$name" "$1" "$2" "$3" "$4" \
+            "$C_DIM" "$(blurb "$name")" "$C_R"
+        i=$((i + 1))
+    done
+
+    printf '\n'
+    printf '    %-6s %b %5s / %-5s\n' "/" "$(bar "$NEED_ROOT" "$S_ROOT")" "$NEED_ROOT" "$S_ROOT"
+    printf '    %-6s %b %5s / %-5s\n' "/opt" "$(bar "$NEED_OPT" "$S_OPT")" "$NEED_OPT" "$S_OPT"
+    printf '    %-6s %b %5s / %-5s\n' "/var" "$(bar "$NEED_VAR" "$S_VAR")" "$NEED_VAR" "$S_VAR"
+    printf '    %-6s %b %5s / %-5s\n' "/home" "$(bar "$NEED_HOME" "$S_HOME")" "$NEED_HOME" "$S_HOME"
+    printf '\n'
+    if [ "$FITS" = 1 ]; then
+        printf '    %s* fits%s  %sswap %s MB, /boot %s MB, 20%% of each volume kept free%s\n' \
+            "$C_GRN" "$C_R" "$C_DIM" "$S_SWAP" "$S_BOOT" "$C_R"
+    else
+        printf '    %s* does not fit at %s GB (pinned) - untick something, or press g%s\n' \
+            "$C_RED" "$SIZE_GB" "$C_R"
+    fi
+    printf '\n    %sarrows%s move  %sspace%s tick  %sa%s all  %sd%s default  %sn%s none  %sg%s grow=%s  %s+/-%s floor  %sEnter%s build  %sq%s quit\n' \
+        "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R" \
+        "$(if [ "$AUTOGROW" = 1 ]; then echo on; else echo off; fi)" \
+        "$C_DIM" "$C_R" "$C_DIM" "$C_R" "$C_DIM" "$C_R"
+}
+
+# ── Raw-mode key reading ────────────────────────────────────────────────────
+STTY_SAVE=$(stty -g 2>/dev/null || echo "")
+restore() {
+    [ -n "$STTY_SAVE" ] && stty "$STTY_SAVE" 2>/dev/null
+    printf '\033[?25h'
+}
+trap 'restore; exit 130' INT TERM
+trap restore EXIT
+stty -echo -icanon min 1 time 0 2>/dev/null
+printf '\033[?25l'
+
+ESC=$(printf '\033')
+read_key() {
+    local k rest
+    k=$(dd bs=1 count=1 2>/dev/null)
+    if [ -z "$k" ]; then
+        printf 'ENTER'
+        return 0
+    fi
+    if [ "$k" = "$ESC" ]; then
+        rest=$(dd bs=1 count=2 2>/dev/null)
+        case "$rest" in
+        '[A') printf 'UP' ;;
+        '[B') printf 'DOWN' ;;
+        *) printf 'ESC' ;;
+        esac
+        return 0
+    fi
+    printf '%s' "$k"
+}
+
 # ── Loop ────────────────────────────────────────────────────────────────────
-count=$(printf '%s\n' "$OPTIONAL" | wc -l)
+resize
 while :; do
     draw
-    printf '  > '
-    read -r reply || reply=""
-    case "$reply" in
-    "")
-        if printf '%s\n' "$(fit_report)" | grep -q '✓ fits'; then break; fi
-        # shellcheck disable=SC2059
-        printf "\n  ${C_YEL}That set does not fit. Untick something, or build a bigger disk.${C_R}\n"
-        fit_report | sed -n '/This set fits from/p' | sed 's/^/  /'
+    key=$(read_key)
+    case "$key" in
+    UP | k)
+        [ "$CURSOR" -gt 1 ] && CURSOR=$((CURSOR - 1))
+        ;;
+    DOWN | j)
+        [ "$CURSOR" -lt "$COUNT" ] && CURSOR=$((CURSOR + 1))
+        ;;
+    ' ' | x)
+        i=1
+        for k in $OPT_KEYS; do
+            if [ "$i" = "$CURSOR" ]; then
+                if is_chosen "$k"; then
+                    unchoose "$k"
+                    cascade_off
+                else
+                    choose "$k"
+                    resolve_deps
+                fi
+                break
+            fi
+            i=$((i + 1))
+        done
+        resize
         ;;
     a)
-        # Everything that still fits, added cheapest-first so one expensive
-        # feature cannot shut out three small ones.
+        apply_all
+        resize
+        ;;
+    d)
+        apply_default
+        resize
+        ;;
+    n)
         CHOSEN=""
-        for n in $(for m in $OPTIONAL; do
-            printf '%s %s\n' "$(($(field "$m" 3) + $(field "$m" 4) + $(field "$m" 5) + $(field "$m" 6)))" "$m"
-        done | sort -n | awk '{print $2}'); do
-            choose "$n"
-            resolve_deps
-            printf '%s\n' "$(fit_report)" | grep -q '✓ fits' || unchoose "$n"
-        done
+        resize
         ;;
-    d) apply_default ;;
-    n) CHOSEN="" ;;
-    q | Q) exit 130 ;;
-    *[!0-9]*) ;;
-    *)
-        if [ "$reply" -ge 1 ] && [ "$reply" -le "$count" ]; then
-            name=$(printf '%s\n' "$OPTIONAL" | sed -n "${reply}p")
-            if is_chosen "$name"; then unchoose "$name"; else choose "$name"; fi
+    g)
+        if [ "$AUTOGROW" = 1 ]; then
+            AUTOGROW=0
+        else
+            AUTOGROW=1
         fi
+        resize
         ;;
+    '+' | '=')
+        SIZE_FLOOR=$((SIZE_FLOOR + 1))
+        resize
+        ;;
+    '-')
+        [ "$SIZE_FLOOR" -gt "$MIN_FLOOR_GB" ] && SIZE_FLOOR=$((SIZE_FLOOR - 1))
+        resize
+        ;;
+    ENTER)
+        [ "$FITS" = 1 ] && break
+        ;;
+    q | Q)
+        exit 130
+        ;;
+    *) ;;
     esac
-    resolve_deps
 done
+restore
+printf '\033[H\033[2J'
 
 # ── Save ────────────────────────────────────────────────────────────────────
+# The ticks as a diff against what the tiers would pick AT THE SIZE WE SETTLED
+# ON, not at the floor: growing the disk can switch a tier on by itself, and a
+# diff computed against the old size would re-add what was never ticked.
+features_str() {
+    local k out="" name tier req rk
+    for k in $OPT_KEYS; do
+        eval "name=\$NAME_$k tier=\$TIER_$k"
+        if is_chosen "$k"; then
+            tier_on_at "$tier" "$SIZE_GB" || out="${out}${out:+ }+${name}"
+        else
+            tier_on_at "$tier" "$SIZE_GB" && out="${out}${out:+ }-${name}"
+        fi
+    done
+    for name in $NOT_INSTALLED; do
+        k=${name//-/_}
+        eval "tier=\${TIER_$k-}"
+        [ -n "$tier" ] || continue
+        tier_on_at "$tier" "$SIZE_GB" || continue
+        eval "req=\$REQ_$k"
+        [ "$req" = "-" ] && continue
+        rk=${req//-/_}
+        is_opt_key "$rk" || continue
+        is_chosen "$rk" || out="${out}${out:+ }-${name}"
+    done
+    printf '%s' "$out"
+}
+
 {
-    printf '# Written by generate/feature_select.sh — what you ticked, and for\n'
-    printf '# which disk. feature_profile.sh reads this when FEATURES is unset;\n'
-    printf '# change SIZE_B2B and it is ignored and you are asked again.\n'
+    printf '# Written by generate/feature_select.sh - what you ticked, and the\n'
+    printf '# disk it was fitted to. feature_profile.sh reads this when FEATURES\n'
+    printf '# is unset; a different SIZE_B2B ignores it and you are asked again.\n'
     printf '# Forget it with: generate/feature_select.sh --clear\n'
-    printf 'B2B_SELECT_SIZE_GB=%s\n' "$SIZE_B2B"
+    printf 'B2B_SELECT_SIZE_GB=%s\n' "$SIZE_GB"
     printf 'B2B_SELECT_PROFILE=auto\n'
     printf 'B2B_SELECT_FEATURES=%s\n' "$(features_str)"
 } >"$SEL_FILE"
 
-# shellcheck disable=SC2059
-printf "\n  ${C_GRN}saved${C_R} %s\n" "$SEL_FILE"
-printf '  %s\n\n' "the strict minimum${CHOSEN:+ + }$(printf '%s' "$CHOSEN" | tr ' ' ',')"
+names=""
+for k in $CHOSEN; do
+    eval "n=\$NAME_$k"
+    names="${names}${names:+,}$n"
+done
+printf '  %ssaved%s %s\n' "$C_GRN" "$C_R" "$SEL_FILE"
+printf '  disk %s GB — the strict minimum%s\n' "$SIZE_GB" "${names:+ + $names}"
+if [ "$SIZE_GB" -ne "${SIZE_B2B:-15}" ]; then
+    printf '  %sthe disk grew to hold this set. Build it with:%s make all SIZE_B2B=%s\n' \
+        "$C_YEL" "$C_R" "$SIZE_GB"
+fi
+printf '\n'

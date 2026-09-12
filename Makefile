@@ -223,7 +223,7 @@ C_CYAN   := \033[36m
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
-        space slim partitions features features_select
+        space slim partitions features features_select _build
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -251,11 +251,30 @@ MAKE_BIN := $(MAKE)
 no_root:
 	@$(SCRIPT_SH) utils/vm_path.sh --no-root "make all VM_PATH=$(VM_PATH)"
 
+# `all` is a two-step: pick, then build at the size the pick settled on.
+#
+# The picker can GROW the disk -- that is the point of it -- and SIZE_B2B is
+# not one variable but three: DISK_SIZE_MB and SPACE_BUDGET_GB are derived from
+# it at PARSE time, long before any recipe runs. Setting it from inside a
+# recipe would leave the ISO carrying a 16 GB feature set and the qcow2 built
+# at 15. So the picker runs here, and the build is a fresh sub-make given the
+# size it chose, with B2B_NO_SELECT=1 so it does not ask twice.
 all: no_root prepare
 	@$(SCRIPT_SH) utils/luks_mode.sh --banner "$(LUKS)" || exit 1
 	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" SCRIPT_SH="$(SCRIPT_SH)" \
 		$(SCRIPT_SH) generate/feature_select.sh || exit 1
+	@sel=$$(sed -n 's/^B2B_SELECT_SIZE_GB=//p' .b2b-features 2>/dev/null | head -n1); \
+	if [ -n "$$sel" ] && [ "$$sel" != "$(SIZE_B2B)" ]; then \
+		printf "$(C_BLUE)>$(C_RESET) building at SIZE_B2B=%s, the size your selection needs\n" "$$sel"; \
+	else \
+		sel="$(SIZE_B2B)"; \
+	fi; \
+	$(MAKE_BIN) --no-print-directory _build SIZE_B2B="$$sel" B2B_NO_SELECT=1
+
+# The build proper. Never call this directly -- `make all` is the entry point;
+# this exists only so the size the picker chose can be a real make variable.
+_build:
 	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 		$(SCRIPT_SH) utils/space_budget.sh --preflight "$(DISK_SIZE_MB)" || exit 1
 	@backend=$$(BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
