@@ -292,10 +292,14 @@ The sgoinfre VM was not touched. Commits, in order: `94a1e97` `76c9b17`
    the extras' bootstrap logged `MISS nvim-treesitter-context` / `module
    'treesitter-context' not found`. The 700 MB the manifest reserves on
    `/home` is for this and has not been spent on any build yet.
-2. **Inception Dockerfile fix** is applied but uncommitted in
-   `~/goinfre/Inception` (patch handed to the owner; applies to `9e74aaa` and
-   to main `2e2962b`, which has the same defects). It is lost with the next
-   wipe unless committed there.
+2. **Both Inception fixes still need a commit in `Univers42/Inception`.**
+   They now live in born2root as patches, so a wipe no longer loses them:
+   `fixes/inception-nginx-dockerfile.patch` and
+   `fixes/inception-host-hellish-path.patch`. Both apply clean to main
+   (`2e2962b`) and are applied to the working tree of the clone at
+   `/goinfre/dlesieur/Inception`. Until they are committed upstream,
+   `make inception` repairs the Dockerfile in the guest on every deploy and
+   says so.
 3. `devtools-extra` writes no `features.status` line; `pytools` records `-`.
 4. `select_backend.sh` reports VirtualBox "available" on a host whose user
    is not in `vboxusers` (check_deps says so), so `BACKEND=auto` without a
@@ -313,3 +317,48 @@ The sgoinfre VM was not touched. Commits, in order: `94a1e97` `76c9b17`
 - `${PIPESTATUS[0]}` is empty; capture exit codes without a pipe.
 - An unmatched glob (`--include=*.sh`, `.env.*`) aborts the command as in
   zsh; quote patterns meant for the program.
+
+## Third pass, 2026-09-12 late afternoon (`make inception` was broken)
+
+The symptom reported: `make inception` "stopped working because of a parsing
+error". Two separate parse failures, both upstream in `Univers42/Inception`,
+neither in born2root:
+
+1. **Docker could not parse the nginx Dockerfile.** `RUN`'s continuation lines
+   carry inline `# ...` notes after the backslash, plus a stray `+` and a
+   literal `<F6>`. Docker ends a continuation *at* the backslash, so the
+   instruction is cut in two and its second half is read as an instruction:
+   `dockerfile parse error on line 16: unknown instruction: :`. nginx is the
+   first image compose builds, so the whole stack died there. Proved from a
+   pristine `git clone` of main inside the b2r guest, not inferred.
+   It had been invisible because the only tree that ever built carried the fix
+   as an *uncommitted* change, and `make inception` without `SRC=` clones from
+   GitHub.
+2. **`make` in the Inception tree stopped at parse time on the host.**
+   `Makefile:29: *** no usable hellish interpreter.` Its candidate list is
+   five system paths; this host's hellish is `~/.local/bin/hellish`, because
+   a 42 machine has no root. The same tree builds inside the VM, where
+   first-boot installs `/usr/bin/hellish` -- which is why only the host saw it.
+
+Fixed in born2root (both patches checked in under `fixes/`):
+
+- `deploy_inception.sh` gained section 3b: after the sources are in the guest
+  it greps every Dockerfile for a continuation that does not end at the
+  backslash, applies `fixes/inception-nginx-dockerfile.patch` to the guest's
+  working copy when it still applies, re-checks, and refuses with the offending
+  lines when it does not. `INCEPTION_NO_PATCH=1` refuses instead of repairing.
+- The verifier no longer *fails* on "the running Firefox predates the pref"
+  when `INCEPTION_NO_BROWSER_RESTART=1` asked for the restart to be skipped:
+  that documented opt-out was making `make inception` exit 2 over a stack
+  verified working end to end. It warns now.
+- `ClearAllForwardings=yes` on both scripts' ssh connections. The `Host b2b`
+  block carries `LocalForward 8420/8421`; once any session holds them, every
+  short-lived ssh printed five lines of "Address already in use / Could not
+  request local forwarding" -- 25 lines per `make inception` that read as
+  failure and are not.
+- The `read -r` sweep in `8ad11c2` had rewritten the word "read" inside prose
+  and inside user-facing messages ("it has not read -r it") in five scripts.
+
+Verified: with the guest's Dockerfile reverted to upstream's broken version,
+`make inception VM_NAME=b2r` detects the five lines, patches, builds, and ends
+`All required checks passed.` with exit 0. All four CI linters clean.
