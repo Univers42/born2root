@@ -710,7 +710,17 @@ pop_iso:
 	 mv tmp_$(VMS_ISO_TAR) $(VMS_ISO_TAR)
 
 # =========@@ Destroy helpers @@===============================================
+# A running QEMU guest is stopped first. This target only knew VirtualBox, and
+# `make re` / `make fclean` then rm -rf the VM directory -- so on the QEMU
+# backend they deleted the qcow2 out from under a guest still running from it.
+# QEMU keeps the unlinked file open: its space is not freed and the guest keeps
+# its forwarded ports, running headless with nothing on disk left to name it.
+# `qemu_vm.sh stop` flushes the qcow2 and exits, prints "not running" when
+# there is nothing to stop, and finds a guest started from another VM_PATH.
 rm_disk_image: guard_host
+	@if command -v qemu-system-x86_64 >/dev/null 2>&1; then \
+		$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop || exit 1; \
+	fi
 	@if VBoxManage showvminfo "$(VM_NAME)" >/dev/null 2>&1; then \
 		state=$$(VBoxManage showvminfo "$(VM_NAME)" --machinereadable 2>/dev/null \
 			| grep '^VMState=' | cut -d'"' -f2); \
