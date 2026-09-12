@@ -15,8 +15,9 @@
 #   standard 15-29 GB   + the bonus web stack, Docker, node, python tools,
 #                         the nvim IDE layer with the Excalidraw editor,
 #                         Herdr + opencode
-#   full      30+ GB    every non-explicit feature (today: same as standard;
-#                         the name is stable so it can grow)
+#   full      30+ GB    + what only a big disk can hold: Claude Code, whose
+#                         one binary is 319 MB on / and does not fit beside
+#                         everything else in the 15 GB school quota
 #
 # PROFILE=... overrides the size-based pick, FEATURES="+docker -pytools" adds
 # or removes single features, and AI_MODE=client|local turns on the two AI
@@ -122,6 +123,31 @@ RECIPE="$HERE/partition_recipe.sh"
 #                                   (and `make fresh`) spend /home, not /var.
 # Total /home cost 911 -> checked against a volume that went 1075 -> 1639 MB
 # in the same pass (generate/partition_recipe.sh, home's weight 9 -> 18).
+#
+# 2026-09-12, fourth pass -- kulala-core, which was in no column at all.
+#   nvim-extras   /opt   30 -> 135   kulala.nvim downloads a 103 MB executable
+#                                    (kulala-core 0.37.0, measured) the first
+#                                    time you use it, into ~/.local/share/nvim.
+#                                    Per user, on /home, unbudgeted -- on the
+#                                    build whose /home came up 100% full. It is
+#                                    now fetched once into /opt/kulala/bin by
+#                                    install_nvim_extras.sh and pointed at by
+#                                    kulala_core.path, so it is one copy on the
+#                                    volume that exists for exactly this, and
+#                                    the /home column is honest again.
+#
+# 2026-09-12, fifth pass -- Claude Code returns, beside opencode rather than
+# instead of it (setup/install/ai/install_claude_code.sh explains why both).
+#   claude-code   /     320   the self-contained binary, 334645552 bytes in the
+#                             2.1.236 release manifest, in /usr/local/bin. Not
+#                             the 414 MB the npm package cost on the
+#                             2026-09-12 build, and no node under it.
+# This is the first feature in the `full` tier, and it is there because of
+# arithmetic, not taste: at SIZE_B2B=15 the standard set leaves 289 MB on /,
+# and 320 does not go into 289. Putting it in `standard` would make the
+# default build -- the school quota -- fail the fit check. From 16 GB up it
+# fits, and `FEATURES="+claude-code"` is how you ask for it there; the check
+# below names the smallest size when it does not.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      100   0     0     0      -
@@ -133,8 +159,9 @@ hellish-upstream   base      0     0     0     1      -
 webstack           standard  400   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
-nvim-extras        standard  92    30    0     150    nvim
+nvim-extras        standard  92    135   0     150    nvim
 devtools-extra     standard  200   0     0     0      nodejs
+claude-code        full      320   0     0     0      -
 docker             standard  400   0     3300  0      -
 inception-data     standard  0     0     0     200    docker
 ai-client          explicit  50    0     0     0      -
@@ -183,6 +210,27 @@ SIZE_GB=$((DISK_MB / 1024))
 PROFILE="${PROFILE:-auto}"
 FEATURES="${FEATURES:-}"
 AI_MODE="${AI_MODE:-off}"
+
+# A hand-picked set beats the size-based guess. generate/feature_select.sh
+# writes .b2b-features when someone ticks boxes before a build; reading it here
+# rather than passing it through the Makefile is what makes `make features`,
+# the preflight check and the ISO's features.conf agree without anything being
+# threaded between them.
+#
+# Two guards. The environment always wins -- a caller who said FEATURES= or
+# PROFILE= has stated a choice and must not be overridden by a stale file. And
+# the selection is only valid for the disk it was fitted to: 12 features that
+# fit 30 GB are not a set for 15, so a size change ignores the file instead of
+# quietly refusing with a list the person never chose for this disk.
+SEL_FILE="${B2B_SELECT_FILE:-$HERE/../.b2b-features}"
+if [ -z "$FEATURES" ] && [ "$PROFILE" = auto ] && [ -f "$SEL_FILE" ]; then
+    sel_size=$(sed -n 's/^B2B_SELECT_SIZE_GB=//p' "$SEL_FILE" | head -n1)
+    if [ "${sel_size:-}" = "$SIZE_GB" ]; then
+        PROFILE=$(sed -n 's/^B2B_SELECT_PROFILE=//p' "$SEL_FILE" | head -n1)
+        FEATURES=$(sed -n 's/^B2B_SELECT_FEATURES=//p' "$SEL_FILE" | head -n1)
+        PROFILE="${PROFILE:-auto}"
+    fi
+fi
 case "$AI_MODE" in off | client | local) ;; *)
     echo "feature_profile: AI_MODE must be off, client or local (got '$AI_MODE')" >&2
     exit 1
@@ -223,7 +271,13 @@ for n in $(names); do
     case "$tier" in
     base) on=on ;;
     standard) if [ "$PROFILE" = minimal ]; then on=off; else on=on; fi ;;
+    # `full` is a real tier now, not a synonym for standard: a feature here is
+    # chosen automatically only on a 30 GB+ disk, and asked for by name below
+    # that. Without this arm $on would keep the PREVIOUS feature's value and
+    # the row would silently inherit it.
+    full) if [ "$PROFILE" = full ]; then on=on; else on=off; fi ;;
     explicit) on=off ;;
+    *) die "manifest: '$n' has unknown tier '$tier'" ;;
     esac
     STATE="${STATE}${STATE:+$NL}$n=$on"
 done
@@ -255,9 +309,9 @@ for tok in $FEATURES; do
     esac
 done
 
-# Dependencies are enforced, not silently satisfied. Turning on Claude Code
-# and turning off node is a contradiction the person should see, not a
-# surprise install of node they asked not to have.
+# Dependencies are enforced, not silently satisfied. Asking for devtools-extra
+# with -nodejs is a contradiction the person should see, not a surprise install
+# of node they said they did not want.
 for n in $(names); do
     is_on "$n" || continue
     req=$(field "$n" 7)

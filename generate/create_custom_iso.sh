@@ -340,6 +340,7 @@ for PROVISIONER in \
     setup/install/tools/install_global_scope.sh \
     setup/install/tools/install_devtools.sh \
     setup/install/ai/install_ai.sh \
+    setup/install/ai/install_claude_code.sh \
     setup/install/nvim/install_nvim.sh \
     setup/install/nvim/install_nvim_extras.sh \
     setup/install/nvim/install_excalidraw.sh \

@@ -17,6 +17,7 @@
 #   setup/host/provision_vm.sh <vm-name> nvim          # kickstart + extras + excalidraw
 #   setup/host/provision_vm.sh <vm-name> excalidraw    # just the Excalidraw editor
 #   setup/host/provision_vm.sh <vm-name> devtools      # herdr + opencode
+#   setup/host/provision_vm.sh <vm-name> claude-code   # Claude Code, beside it
 #   setup/host/provision_vm.sh <vm-name> hellish
 #   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
 #   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
@@ -289,6 +290,11 @@ devtools)
         install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_" "Herdr + opencode"
     ok "devtools provisioning finished"
     ;;
+claude-code)
+    run_provisioner setup/install/ai/install_claude_code.sh \
+        install_claude_code.sh "CLAUDE_CODE_ INSTALL_CLAUDE" "Claude Code"
+    ok "Claude Code provisioning finished"
+    ;;
 ai)
     [ -n "${AI_MODE:-}" ] || die "set AI_MODE=client or AI_MODE=local (see setup/install/ai/install_ai.sh)"
     run_provisioner setup/install/ai/install_ai.sh \
@@ -314,6 +320,20 @@ all)
         install_hellish_plugins.sh HELLISH_ "hellishrc plugin framework"
     run_provisioner setup/install/tools/install_devtools.sh \
         install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_" "Herdr + opencode"
+    # Claude Code only when this guest's build budgeted for it. It is a
+    # full-tier feature (320 MB on /, and the standard set leaves 289 MB at
+    # SIZE_B2B=15), so running it unconditionally here would push a 15 GB
+    # machine's / to the wall. features.conf inside the guest is the record of
+    # what the fit check allowed, so ask it instead of guessing from the host.
+    want_claude=0
+    [ "${INSTALL_CLAUDE_CODE:-}" = "1" ] && want_claude=1
+    vm_ssh 'grep -qx B2B_FEATURE_claude_code=on /etc/b2b/features.conf' 2>/dev/null && want_claude=1
+    if [ "$want_claude" = 1 ]; then
+        run_provisioner setup/install/ai/install_claude_code.sh \
+            install_claude_code.sh "CLAUDE_CODE_ INSTALL_CLAUDE" "Claude Code"
+    else
+        info "claude-code is off in this build's features.conf — skipping (INSTALL_CLAUDE_CODE=1 forces it)"
+    fi
     # AI is opt-in: without AI_MODE this step does nothing at all.
     if [ -n "${AI_MODE:-}" ] && [ "${AI_MODE}" != "off" ]; then
         run_provisioner setup/install/ai/install_ai.sh \
@@ -325,6 +345,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | ai | health | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | ai | health | all)"
     ;;
 esac

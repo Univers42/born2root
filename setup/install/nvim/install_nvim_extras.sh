@@ -1820,11 +1820,37 @@ end
 --     stack traceback over whatever you were doing. Verified on a box without
 --     the CLI. So its own parser handling is enabled only when the CLI exists.
 --
+-- kulala ALSO needs kulala-core, the executable that actually performs the
+-- requests, and left to itself it downloads that per user into
+-- ~/.local/share/nvim/kulala.nvim/bin. Measured 2026-09-12: **103 MB**, on the
+-- /home volume this layout sizes for Neovim's plugins -- and unbudgeted, on the
+-- build whose /home came up 100% full. When that download fails there is no
+-- error at build time; you meet it on your first interactive nvim, as
+--
+--     Backend not found. Downloading 0.37.0...
+--     Press ENTER or type command to continue
+--
+-- which is the exact thing this project installs at build time to avoid.
+--
+-- So the binary is fetched once by install_kulala_core() into /opt -- the
+-- volume that exists for machine-wide extras dpkg does not manage, the same
+-- argument as npm globals and Ollama models -- and pointed at here. `path` is
+-- documented as "when set, this path is used exclusively": it also
+-- short-circuits kulala's version check, so nothing ever re-downloads behind
+-- your back. One copy, on the right volume, shared by every user.
+--
 -- Everything else is left at its defaults on purpose: display_mode = 'split'
 -- and default_view = 'body' are already the defaults, and they live under `ui`,
 -- not at the top level, so setting them there does nothing at all.
+local KULALA_CORE = '/opt/kulala/bin/kulala-core'
 try('kulala', function()
-  require('kulala').setup { treesitter = { enable = exe 'tree-sitter' } }
+  require('kulala').setup {
+    treesitter = { enable = exe 'tree-sitter' },
+    -- nil, not '', when it is absent: an empty string is falsy-but-set to
+    -- kulala's own check and would disable the download without providing a
+    -- binary, which is the one combination that cannot work.
+    kulala_core = { path = vim.fn.executable(KULALA_CORE) == 1 and KULALA_CORE or nil },
+  }
   map('<leader>ks', function() require('kulala').run() end, '[K]ulala: [s]end request')
   map('<leader>ka', function() require('kulala').run_all() end, '[K]ulala: send [a]ll')
   map('<leader>kt', function() require('kulala').toggle_view() end, '[K]ulala: [t]oggle body/headers')
@@ -2214,10 +2240,86 @@ install_mkdp_binary() {
 # and a compile behind a progress spinner — and on a VM with no route they fail
 # and retry on every start forever. So they are done here, at build time.
 #
-# Neither can be done with a plain headless start: both are driven by vim.system
-# callbacks and Neovim exits before they resolve. vim.wait is what makes this
-# work — it blocks while still pumping the event loop. Same trap, and the same
-# shape of answer, as the blink.cmp fuzzy library and the markdown-preview binary.
+# THE BACKEND IS NOT DOWNLOADED THROUGH NEOVIM ANY MORE.
+# It used to be: nvim --headless, backend.ensure_installed, vim.wait. That works
+# (verified against kulala 0.37.0), and it is still the wrong place for it. The
+# binary is 103 MB and kulala puts it under ~/.local/share/nvim, per user, on
+# the /home volume this layout sizes for plugins — 103 MB that appeared in no
+# column of generate/feature_profile.sh, on the build whose /home came up 100%
+# full. A download that big failing inside a headless callback is also the
+# quietest possible failure: the step warns, the build says ok, and the person
+# meets "Backend not found. Downloading 0.37.0..." on their first nvim.
+#
+# So it is fetched once, here, with curl, into /opt — the volume that exists
+# for machine-wide extras dpkg does not manage (npm globals, Ollama models) —
+# and 60-b2b-md.lua's sibling 60-b2b-ide.lua points kulala's `kulala_core.path`
+# at it. One copy for every user, on a volume with room, downloaded by code
+# whose failure is a return status rather than a notification.
+#
+# The version is read from the plugin checkout rather than pinned here, so it
+# follows kulala instead of drifting from it.
+KULALA_CORE_DIR="${KULALA_CORE_DIR:-/opt/kulala/bin}"
+install_kulala_core() {
+    local plugin="$1" ver arch url dest tmp
+    dest="${KULALA_CORE_DIR}/kulala-core"
+
+    ver=$(sed -n 's/.*return[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' \
+        "${plugin}/lua/kulala/globals/versions/backend.lua" 2>/dev/null | head -n1)
+    if [ -z "$ver" ]; then
+        warn "cannot read kulala's required backend version — skipping kulala-core"
+        return 0
+    fi
+    case "$(uname -m)" in
+    x86_64 | amd64) arch="x86_64" ;;
+    aarch64 | arm64) arch="aarch64" ;;
+    *)
+        warn "no kulala-core build for $(uname -m) — .http requests will not run"
+        return 0
+        ;;
+    esac
+
+    if [ -x "$dest" ] && [ "$(cat "${KULALA_CORE_DIR}/version.txt" 2>/dev/null)" = "$ver" ]; then
+        log "kulala-core ${ver} already installed"
+        return 0
+    fi
+
+    url="https://github.com/mistweaverco/kulala-core/releases/download/v${ver}/kulala-core-linux-${arch}"
+    log "fetching kulala-core ${ver} (~103 MB) into ${KULALA_CORE_DIR}"
+    mkdir -p "$KULALA_CORE_DIR"
+    tmp=$(mktemp "${KULALA_CORE_DIR}/.kulala-core.XXXXXX") || {
+        warn "mktemp in ${KULALA_CORE_DIR} failed"
+        return 0
+    }
+    if ! curl -fL --retry 3 --retry-delay 2 --max-time 600 -o "$tmp" "$url" 2>/dev/null; then
+        warn "could not download kulala-core — .http requests will not run"
+        warn "retry with: ${SCRIPT_SH:-bash} install_nvim_extras.sh, or set kulala_core.path yourself"
+        rm -f "$tmp"
+        return 0
+    fi
+    # Upstream publishes no checksum beside the asset. What a rate-limited or
+    # redirected download actually gives you is an HTML page saved under the
+    # right name, so prove it is a Linux executable before installing it.
+    if ! head -c4 "$tmp" | grep -q $'\x7fELF'; then
+        warn "the kulala-core download is not an ELF binary — discarding it"
+        rm -f "$tmp"
+        return 0
+    fi
+    chmod 755 "$tmp"
+    mv -f "$tmp" "$dest" || {
+        warn "could not install ${dest}"
+        rm -f "$tmp"
+        return 0
+    }
+    printf '%s\n' "$ver" >"${KULALA_CORE_DIR}/version.txt"
+    log "kulala-core ${ver} installed at ${dest}"
+}
+
+# The grammar half stays in Neovim, because only kulala knows how to build it:
+# it git-fetches mistweaverco/tree-sitter-kulala-http and shells out to the
+# tree-sitter CLI. It cannot be done with a plain headless start -- the work is
+# driven by vim.system callbacks and Neovim exits before they resolve. vim.wait
+# is what makes it work: it blocks while still pumping the event loop. Same
+# trap, and the same shape of answer, as the markdown-preview binary.
 install_kulala_runtime() {
     local user="$1" home plugin
     home=$(getent passwd "$user" | cut -d: -f6)
@@ -2227,44 +2329,31 @@ install_kulala_runtime() {
         return 0
     }
 
+    # Once, not once per user: /opt is shared, and the binary is 103 MB.
+    install_kulala_core "$plugin"
+
     if ! command -v tree-sitter >/dev/null 2>&1; then
         warn "${user}: no tree-sitter CLI on PATH — kulala's grammar cannot be built"
         warn "${user}: install_nvim.sh installs it (npm i -g tree-sitter-cli); .http files will not parse"
     fi
 
-    log "${user}: fetching kulala-core and building its http grammar"
+    log "${user}: building kulala's http grammar"
     # shellcheck disable=SC2016
     run_as_user "$user" "$NVIM_BIN" --headless -c 'lua
         -- Every predicate is wrapped: these APIs throw when the thing they are
         -- asked about has never been installed, and an error inside vim.wait
         -- aborts the wait rather than returning false.
         local function settled(fn) return function() local ok, r = pcall(fn) return ok and r end end
-
-        -- 300s each, not 600s. run_as_user wraps this whole invocation in
-        -- `timeout $NVIM_BOOTSTRAP_TIMEOUT` (1200s), and two 600s waits add up
-        -- to exactly that -- so a slow network would get the process killed
-        -- mid-download with no message rather than reporting what failed.
-        local WAIT = 300000
-
-        local ok_b, backend = pcall(require, "kulala.backend")
-        if ok_b then
-            pcall(backend.ensure_installed, function() end)
-            print(vim.wait(WAIT, settled(backend.is_up_to_date), 1000)
-                and "kulala-core ready" or "kulala-core NOT ready (network?)")
-        else
-            print("kulala.backend not available")
-        end
-
         local ok_p, parser = pcall(require, "kulala.config.parser")
         if ok_p then
             -- 60-b2b-ide.lua already called kulala.setup() during startup, which
             -- kicks the grammar fetch off; this only waits for it to land.
-            print(vim.wait(WAIT, settled(parser.is_up_to_date), 1000)
+            print(vim.wait(300000, settled(parser.is_up_to_date), 1000)
                 and "kulala grammar ready" or "kulala grammar NOT ready (no CLI, or network?)")
         else
             print("kulala.config.parser not available")
         end
-    ' -c 'qa' 2>&1 | sed 's/^/[nvim-extras]   /' || warn "${user}: kulala runtime setup returned non-zero"
+    ' -c 'qa' 2>&1 | sed 's/^/[nvim-extras]   /' || warn "${user}: kulala grammar setup returned non-zero"
 
     local group
     group=$(id -gn "$user" 2>/dev/null || echo "$user")

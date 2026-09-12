@@ -13,3 +13,6 @@ dist/
 # Local secrets (GH_PAT and friends): never committed
 .env
 .env.*
+
+# generate/feature_select.sh: which features you ticked, for which disk.
+.b2b-features

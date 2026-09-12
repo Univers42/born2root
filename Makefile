@@ -219,11 +219,11 @@ C_CYAN   := \033[36m
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
-        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
+        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
-        space slim partitions features
+        space slim partitions features features_select
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -253,6 +253,9 @@ no_root:
 
 all: no_root prepare
 	@$(SCRIPT_SH) utils/luks_mode.sh --banner "$(LUKS)" || exit 1
+	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" SCRIPT_SH="$(SCRIPT_SH)" \
+		$(SCRIPT_SH) generate/feature_select.sh || exit 1
 	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 		$(SCRIPT_SH) utils/space_budget.sh --preflight "$(DISK_SIZE_MB)" || exit 1
 	@backend=$$(BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
@@ -734,6 +737,14 @@ features:
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
 		$(SCRIPT_SH) generate/feature_profile.sh --table
 
+# Tick what you want installed, instead of letting the disk size decide. The
+# strict minimum is always on; everything else starts off. `make all` runs this
+# by itself when a terminal is attached, so this target is for changing your
+# mind without rebuilding. --show prints the saved choice, --clear forgets it.
+features_select:
+	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
+		SCRIPT_SH="$(SCRIPT_SH)" $(SCRIPT_SH) generate/feature_select.sh $(ARGS)
+
 # Hand back what is no longer used: the ISOs once the VM is installed, the
 # guest's apt cache and orphaned packages, and the blocks the guest has freed
 # but never trimmed. `make slim COMPACT=1` also rewrites the image without its
@@ -848,6 +859,13 @@ global_scope:
 # Herdr (persistent terminal panes over SSH) + opencode (the AI coding agent).
 devtools:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
+
+# Claude Code, installed beside opencode rather than instead of it. This is
+# also how the version moves: the binary is root-owned in /usr/local/bin, so
+# its auto-updater is switched off in the guest.
+#   make claude_code CLAUDE_CODE_VERSION=2.1.236   pin instead of the channel
+claude_code:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" claude-code
 
 # Optional AI. Does nothing unless AI_MODE is client or local:
 #   make ai AI_MODE=local        a model sized to this VM's RAM

@@ -59,6 +59,22 @@ check "13 GB standard: names 15" "$(fits_from env SIZE_B2B=13 PROFILE=standard "
 check "14 GB standard, explicit: refused" "$(rc_of env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" 1
 check "14 GB standard: names 15" "$(fits_from env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" "fits from SIZE_B2B=15"
 check "8 GB full: refused" "$(rc_of env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check)" 1
+# ── The `full` tier is real, and claude-code is why ─────────────────────────
+# Until Claude Code came back beside opencode, `full` was a profile name with
+# no feature behind it, and the tier `case` in the state loop had no arm for
+# it -- a manifest row saying `full` would have inherited whatever $on the
+# PREVIOUS row left behind. These pin the arm and the arithmetic that put
+# claude-code there: 320 MB on / against the 289 MB the standard set leaves at
+# SIZE_B2B=15, so the default build must NOT have it, 30 GB must, and asking
+# for it at 15 must refuse and name 16 rather than overfill /.
+check "15 GB (default): no claude-code" "$(SIZE_B2B=15 "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 0
+check "29 GB: still no claude-code" "$(SIZE_B2B=29 "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 0
+check "30 GB (full): claude-code on" "$(SIZE_B2B=30 "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 1
+check "15 GB +claude-code: refused" "$(rc_of env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check)" 1
+check "15 GB +claude-code: names 16" "$(fits_from env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check)" "fits from SIZE_B2B=16"
+check "15 GB +claude-code: overflows / and only /" "$(env SIZE_B2B=15 FEATURES=+claude-code "${FP[@]}" --check 2>&1 | grep -c '^      / ')" 1
+check "16 GB +claude-code: fits" "$(rc_of env SIZE_B2B=16 FEATURES=+claude-code "${FP[@]}" --check)" 0
+check "30 GB full: -claude-code drops it" "$(SIZE_B2B=30 FEATURES=-claude-code "${FP[@]}" --resolve | grep -c '^feature=claude-code$')" 0
 check "8 GB full: names a size" "$(fits_from env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check | grep -c .)" 1
 # Docker's /var cost is the measured one (Inception with bonus: 2.35 GB of
 # build cache alone), so even alone it needs a 14 GB /var. The override is
@@ -79,6 +95,26 @@ check "unknown feature is an error" "$(rc_of env FEATURES=+kubernetes "${FP[@]}"
 check "bad token is an error" "$(rc_of env FEATURES=docker "${FP[@]}" --resolve)" 1
 check "bad PROFILE is an error" "$(rc_of env PROFILE=huge "${FP[@]}" --resolve)" 1
 check "bad AI_MODE is an error" "$(rc_of env AI_MODE=yes "${FP[@]}" --resolve)" 1
+
+# ── The hand-picked selection file ──────────────────────────────────────────
+# generate/feature_select.sh writes .b2b-features and feature_profile.sh reads
+# it when FEATURES is unset, so the picker, `make features`, the preflight
+# check and the ISO's features.conf cannot disagree. Three things must hold, and
+# each was wrong at some point while it was written: the environment beats the
+# file, a file written for another disk is ignored rather than applied to this
+# one, and the ticks are a DIFF against the tier set -- an absolute list under
+# PROFILE=minimal silently dropped the vscode-remote and inception-data
+# reservations and made the fit check more permissive the more deliberate you were.
+sel=$(mktemp)
+trap 'rm -f "$sel"' EXIT
+printf 'B2B_SELECT_SIZE_GB=15\nB2B_SELECT_PROFILE=auto\nB2B_SELECT_FEATURES=-docker -inception-data\n' >"$sel"
+check "selection file drops docker" "$(SIZE_B2B=15 B2B_SELECT_FILE=$sel "${FP[@]}" --resolve | grep -c '^feature=docker$')" 0
+check "selection file keeps the base set" "$(SIZE_B2B=15 B2B_SELECT_FILE=$sel "${FP[@]}" --resolve | grep -c '^feature=nvim$')" 1
+check "selection file keeps the vscode-remote reservation" "$(SIZE_B2B=15 B2B_SELECT_FILE=$sel "${FP[@]}" --resolve | grep -c '^feature=vscode-remote$')" 1
+check "explicit FEATURES beats the file" "$(SIZE_B2B=15 FEATURES=+docker B2B_SELECT_FILE=$sel "${FP[@]}" --resolve | grep -c '^feature=docker$')" 1
+check "explicit PROFILE beats the file" "$(SIZE_B2B=15 PROFILE=standard B2B_SELECT_FILE=$sel "${FP[@]}" --resolve | grep -c '^feature=docker$')" 1
+check "a file for another size is ignored" "$(SIZE_B2B=20 B2B_SELECT_FILE=$sel "${FP[@]}" --resolve | grep -c '^feature=docker$')" 1
+check "no file, no change" "$(SIZE_B2B=15 B2B_SELECT_FILE=/nonexistent "${FP[@]}" --resolve | grep -c '^feature=docker$')" 1
 
 # ── The conf the guest reads ────────────────────────────────────────────────
 conf=$(SIZE_B2B=10 "${FP[@]}" --conf)

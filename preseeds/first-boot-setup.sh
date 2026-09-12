@@ -801,7 +801,7 @@ echo "[OK] Third-party tools check complete"
 
 feature_end nodejs ok
 if feature_on pytools; then printf "pytools ok /opt -\n" >>/etc/b2b/features.status; else feature_off pytools; fi
-### ─── 4c. Herdr, opencode, and the optional local AI ───────────────────────
+### ─── 4c. Herdr, opencode, Claude Code, and the optional local AI ──────────
 # Herdr and opencode are the STANDARD feature devtools-extra, measured on /
 # where both binaries live (see install_devtools.sh for why not /opt). The
 # installer exits non-zero when a tool it was asked for is not on PATH
@@ -824,6 +824,35 @@ else
     else
         echo "[FAIL] devtools install reported errors — see /var/log/b2b-provision.log"
         feature_end devtools-extra failed
+    fi
+fi
+
+# Claude Code is its own feature, claude-code, and it sits BESIDE opencode --
+# setup/install/ai/install_claude_code.sh has the argument for keeping both.
+# It is off in the default 15 GB build for one reason: its single binary is
+# 320 MB on / and the standard set leaves 289 MB there, so `full` (30 GB+) is
+# the tier that gets it automatically and FEATURES="+claude-code" is how a
+# 16-29 GB disk asks. Either way the host already checked it fits before this
+# ISO existed, so reaching here means the space was budgeted.
+echo "--- Installing Claude Code ---"
+if ! feature_on claude-code; then
+    feature_off claude-code
+elif [ ! -f /root/install_claude_code.sh ]; then
+    echo "[FAIL] claude-code — /root/install_claude_code.sh is not in the ISO"
+    printf 'claude-code failed - 0\n' >>/etc/b2b/features.status
+else
+    feature_begin claude-code /
+    chmod +x /root/install_claude_code.sh 2>/dev/null || true
+    # 450, not 320: the download is staged on /var but lands on /, and the
+    # binary is copied there before the staging copy goes away.
+    if ! check_disk_space / 450; then
+        echo "[SKIP] Claude Code — insufficient disk space"
+        feature_end claude-code no-space
+    elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_claude_code.sh; then
+        feature_end claude-code ok
+    else
+        echo "[FAIL] Claude Code install reported errors — see /var/log/b2b-provision.log"
+        feature_end claude-code failed
     fi
 fi
 

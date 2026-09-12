@@ -28,7 +28,7 @@ accident.
 - [What's Inside the VM](#whats-inside-the-vm)
 - [The Neovim Setup](#the-neovim-setup)
 - [Disk Layout & Growing a Partition](#disk-layout--growing-a-partition)
-- [Herdr, opencode & Optional AI](#herdr-opencode--optional-ai)
+- [Herdr, opencode, Claude Code & Optional AI](#herdr-opencode-claude-code--optional-ai)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -419,6 +419,7 @@ make all
 | `make hellish_plugins`  | The hellishrc plugin framework                                              |
 | `make nvim_health`      | Print `:checkhealth` from inside the VM                                     |
 | `make devtools`         | Herdr (persistent terminal panes) + opencode (AI coding agent)              |
+| `make claude_code`      | Claude Code, beside opencode (`full` tier: 320 MB on `/`)                   |
 | `make excalidraw`       | Rebuild just the Excalidraw editor (`:Excalidraw`)                          |
 | `make ai AI_MODE=local` | Ollama + a model sized to the VM's RAM                                      |
 | `make global_scope`     | Put npm globals and AI models on `/opt`                                     |
@@ -1190,7 +1191,7 @@ missing things, and Docker could run before nvim and starve it.
 |--------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish**                                                   |
 | **standard** | 15–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer + Excalidraw, Herdr + opencode |
-| **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow)                                                    |
+| **full**     | 30+        | + **Claude Code**, whose one binary is 320 MB on `/` and does not fit beside everything else in the 15 GB school quota                            |
 
 AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
 be turned off. Everything else can be, per feature:
@@ -1237,7 +1238,7 @@ and sharing it only creates permission problems.
 
 ---
 
-## Herdr, opencode & Optional AI
+## Herdr, opencode, Claude Code & Optional AI
 
 ### Herdr — persistent terminal panes
 
@@ -1269,16 +1270,56 @@ opencode                 # the TUI, in the project you are standing in
 opencode auth login      # store a provider key (skip this with AI_MODE=local)
 ```
 
-It replaced Claude Code on 2026-09-12, for two measured reasons: that one was
-tied to a single vendor, and its npm tree was **414 MB on `/`** — the npm
-prefix that was supposed to move it to `/opt` never applied to it. opencode is
-176 MB, and `AI_MODE=local` wires it to a model running on the box, so the VM
-has a coding agent that needs no account and no network.
+It replaced the **npm** Claude Code on 2026-09-12, for two measured reasons:
+that package was tied to a single vendor, and its tree was **414 MB on `/`** —
+the npm prefix that was supposed to move it to `/opt` never applied to it.
+opencode is 176 MB, and `AI_MODE=local` wires it to a model running on the box,
+so the VM has a coding agent that needs no account and no network.
 
 Upstream's `curl https://opencode.ai/install | bash` is deliberately **not**
 used: it installs per user into `~/.opencode/bin`, on the `/home` volume this
 layout sizes for Neovim's plugins, and piping a remote script into a shell
 during an unattended first boot is unreviewable.
+
+### Claude Code — beside opencode, not instead of it
+
+That 2026-09-12 argument was about the **npm package**, and it is still true of
+the npm package. It was never an argument that opencode can _be_ Claude Code:
+opencode holding an Anthropic key is opencode talking to Anthropic's models —
+different agent loop, different tools, no skills, no subagents, no hooks, no
+`/commands`, and none of the `CLAUDE.md` handling this repository is written
+around. So both are installed and you pick per task.
+
+Anthropic ships a self-contained binary now, so none of the old cost applies:
+**320 MB in `/usr/local/bin/claude`**, no node runtime under it, and — unlike
+Herdr and opencode, whose upstreams publish no checksums — a release manifest
+with a **published SHA256 that the installer verifies**. The compressed
+artifact is fetched when the guest has `zstd`: 74 MB on the wire instead of
+335, for bytes that are checksummed twice.
+
+```bash
+claude                 # the TUI, in the project you are standing in
+## /login               prints a URL — open it in a browser on the HOST
+```
+
+**No credential is baked into the ISO.** An ISO gets copied to USB sticks and
+handed to classmates; an OAuth token inside one is a leaked token. Log in from
+the guest (the flow is copy-paste, so the VM needs no browser) or export
+`ANTHROPIC_API_KEY`. The auto-updater is switched off in
+`/etc/profile.d/b2b-claude-code.sh`, because the binary is root-owned and a
+user shell can only watch the update fail; `make claude_code` is how the
+version moves.
+
+**It is off in the default build, and that is arithmetic, not taste.** At
+`SIZE_B2B=15` the standard set leaves 289 MB on `/` and this needs 320, so it
+is a `full`-tier feature — automatic from 30 GB, and asked for by name below
+that:
+
+```bash
+make all SIZE_B2B=16 FEATURES="+claude-code"   # fits from 16 GB up
+make all SIZE_B2B=15 FEATURES="+claude-code"   # refused: "fits from SIZE_B2B=16"
+make claude_code                               # add it to a VM already built
+```
 
 ### Optional AI — `AI_MODE`
 

@@ -28,7 +28,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Project footprint against the quota (fails when over) | `make space` |
 | Status dashboard / follow the headless serial console | `make status`, `make console` |
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
-| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make hellish_plugins`, `make provision`, `make shell_vm` |
+| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
 
 `make all` runs `prepare` first: `make deps`, then
@@ -162,7 +162,9 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
   standard 15–29, full 30+, overridable with `PROFILE=` and
   `FEATURES="+docker -pytools"`, checked mount by mount against that layout
   with 20% headroom. A set that does not fit fails the ISO build and names the
-  smallest size that would.
+  smallest size that would. `full` is not a synonym for `standard`: today it
+  is what claude-code lives in, because its 320 MB does not fit the 289 MB the
+  standard set leaves on `/` at the default 15 GB.
 
 Two marker contracts in `preseeds/preseed.cfg` matter when editing it. The
 `RECIPE-BEGIN`/`RECIPE-END` block is the generator's output for the default size

@@ -660,6 +660,33 @@ if mode == 'all' then
     and vim.fn.executable(opt_all .. 'markdown-preview.nvim/app/bin/markdown-preview-linux') ~= 1 then
     problem 'markdown-preview server binary missing (app/bin/markdown-preview-linux)'
   end
+
+  -- kulala-core, the executable that actually performs .http requests. This
+  -- check is the whole reason the 2026-09-12 build shipped without it and said
+  -- nothing: the download was a warning inside a headless callback, and no
+  -- later step asked whether it had worked. You found out at your first
+  -- interactive nvim, as "Backend not found. Downloading 0.37.0...".
+  --
+  -- install_nvim_extras.sh puts it on /opt and points kulala's kulala_core.path
+  -- there, so /opt is where this looks; a per-user copy under stdpath('data')
+  -- counts too, for a machine provisioned before that move.
+  if vim.fn.isdirectory(opt_all .. 'kulala.nvim') == 1
+    and vim.fn.executable '/opt/kulala/bin/kulala-core' ~= 1
+    and vim.fn.executable(vim.fn.stdpath 'data' .. '/kulala.nvim/bin/kulala-core') ~= 1 then
+    problem 'kulala-core missing (/opt/kulala/bin/kulala-core) — .http requests cannot run'
+  end
+
+  -- Its treesitter grammar is the other half, and the other message you would
+  -- otherwise meet interactively ("Setting up tree-sitter ..."). Only checked
+  -- when the tree-sitter CLI exists, because without the CLI the config
+  -- deliberately turns kulala's own parser handling off rather than letting it
+  -- throw from a scheduled callback.
+  if vim.fn.isdirectory(opt_all .. 'kulala.nvim') == 1 and vim.fn.executable 'tree-sitter' == 1 then
+    local grammar = vim.api.nvim_get_runtime_file('parser/kulala_http.so', false)
+    if #grammar == 0 then
+      problem 'kulala_http treesitter grammar missing — .http files will not parse'
+    end
+  end
 end
 
 print(('verify (%s): %d plugins, %d parsers, %d problem(s)'):format(mode, #plugins, parsers_installed, #problems))
