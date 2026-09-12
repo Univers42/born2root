@@ -155,6 +155,39 @@ case "$var_free_mb" in
     ;;
 esac
 
+# ── 2c. /var is not the only volume the stack spends ────────────────────────
+# The images and the build cache go to /var, which is what the check above
+# measures -- but the DATA does not. Inception's compose file bind-mounts
+# /home/<login>/data for MariaDB, WordPress and the backups, so the database
+# and the whole WordPress tree land on /home. Measured on the 2026-09-12
+# guest: 197 MB there (mariadb 77, wordpress 121) against a /home that was
+# 974 MB in total and already held Neovim's plugins and VS Code's remote
+# server. It filled completely, and a full /home is not a clean failure --
+# git could not write a ref lock, ssh could not update known_hosts, and the
+# Neovim bootstrap silently installed nothing. So measure the volume the data
+# actually goes to, before the build, in the same style as the /var check.
+INCEPTION_HOME_NEED_MB="${INCEPTION_HOME_NEED_MB:-400}"
+step "Checking /home has room for the data volumes (${INCEPTION_HOME_NEED_MB} MB)"
+home_free_mb=$(vm_ssh "df -Pm \"\$HOME\" 2>/dev/null | awk 'NR==2 {print \$4}'" 2>/dev/null | tr -d '\r')
+home_size_mb=$(vm_ssh "df -Pm \"\$HOME\" 2>/dev/null | awk 'NR==2 {print \$2}'" 2>/dev/null | tr -d '\r')
+case "$home_free_mb" in
+'' | *[!0-9]*) warn "could not read /home free space in the guest — continuing without the check" ;;
+*)
+    if [ "$home_free_mb" -lt "$INCEPTION_HOME_NEED_MB" ]; then
+        printf "    /home: %s MB free of %s MB\n" "$home_free_mb" "$home_size_mb"
+        printf "    biggest things in it:\n"
+        # shellcheck disable=SC2016  # $HOME is the GUEST's, expanded there
+        vm_ssh 'du -sm "$HOME"/.[!.]* "$HOME"/* 2>/dev/null | sort -rn | head -5' 2>/dev/null |
+            awk '{ printf "      %6s MB  %s\n", $1, $2 }'
+        printf "\n    MariaDB, WordPress and the backups are bind-mounted from \$HOME/data.\n"
+        printf "    Free some, or rebuild bigger:  make all SIZE_B2B=20\n"
+        printf "    Or, if you know better:  INCEPTION_HOME_NEED_MB=%s make inception\n\n" "$home_free_mb"
+        die "/home has ${home_free_mb} MB free; the data volumes need about ${INCEPTION_HOME_NEED_MB} MB"
+    fi
+    ok "/home: ${home_free_mb} MB free of ${home_size_mb} MB"
+    ;;
+esac
+
 # ── 3. Get the sources into the guest ───────────────────────────────────────
 if [ -n "$SRC" ]; then
     [ -d "$SRC" ] || die "SRC='$SRC' is not a directory"

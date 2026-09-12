@@ -255,7 +255,17 @@ echo "--- Installing Neovim + kickstart.nvim ---"
 if [ -f /root/install_nvim.sh ]; then
     # The profile check on the host already proved nvim fits, so a guard
     # tripping here means the check was wrong -- a failed build, not a [SKIP].
-    if check_disk_space / 1000; then
+    #
+    # /home as well as /: the plugins, their parsers, Mason's language servers
+    # and npm's cache all live in the USER's home, and only / was ever checked.
+    # On the 2026-09-12 VirtualBox build /home filled to 974 MB of 974 MB and
+    # the failure was unreadable -- vim.pack reports a failed clone as a
+    # notification, not an error, so the bootstrap logged 132 "Installing
+    # plugins" lines, left ZERO plugins on disk, retried three times, and
+    # never once said "no space". Mason's downloads came back as curl(23) and
+    # git could not even write a ref lock. 400 MB is nvim + nvim-extras from
+    # the manifest (200 + 150) with a little room over.
+    if check_disk_space / 1000 && check_disk_space /home 400; then
         chmod +x /root/install_nvim.sh 2>/dev/null || true
         # NVIM_BOOTSTRAP=1: kickstart's plugins, tree-sitter parsers and
         # language servers are installed NOW, at build time, and the script
@@ -270,7 +280,7 @@ if [ -f /root/install_nvim.sh ]; then
             feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
         fi
     else
-        feature_fail nvim "only $(avail_mb /) MB free on / before install_nvim.sh (needs 1000)"
+        feature_fail nvim "not enough room before install_nvim.sh: / has $(avail_mb /) MB free (needs 1000), /home has $(avail_mb /home) MB (needs 400)"
     fi
 else
     feature_fail nvim "/root/install_nvim.sh is not in the ISO"
@@ -292,6 +302,12 @@ else
     feature_begin nvim-extras / /home /opt
     NVIM_EXTRAS_STATUS=ok
     echo "--- Installing the Neovim extras layer ---"
+    # Same guard as the nvim section above, for the same reason: this layer's
+    # plugins go to /home, and a full /home fails it invisibly.
+    if ! check_disk_space /home 200; then
+        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
+        NVIM_EXTRAS_STATUS=failed
+    fi
     chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
     if run_logged /var/log/b2b-nvim-install.log \
         env NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then

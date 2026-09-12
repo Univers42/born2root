@@ -48,10 +48,16 @@ done
 
 # ── Refusals name the size that works ───────────────────────────────────────
 check "13 GB standard: refused" "$(rc_of env SIZE_B2B=13 PROFILE=standard "${FP[@]}" --check)" 1
-check "13 GB standard: names 14" "$(fits_from env SIZE_B2B=13 PROFILE=standard "${FP[@]}" --check)" "fits from SIZE_B2B=14"
-# Explicit PROFILE=standard at 14 passes the fit check since the 2026-09-12
-# calibration (by <5% on every mount); the AUTOMATIC pick stays minimal there.
-check "14 GB standard, explicit: fits" "$(rc_of env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" 0
+check "13 GB standard: names 15" "$(fits_from env SIZE_B2B=13 PROFILE=standard "${FP[@]}" --check)" "fits from SIZE_B2B=15"
+# The standard set needed 14 GB until the /home column was corrected from a
+# guest whose /home was 100% full (2026-09-12, third pass): .vscode-server,
+# Inception's bind-mounted data and npm's cache were all unbudgeted, and
+# counting them moved the smallest standard disk from 14 to 15 -- which is the
+# size the automatic pick already used, so STANDARD_FROM_GB does not move.
+# 14 now refuses, and names 15, instead of fitting by a margin that was not
+# really there.
+check "14 GB standard, explicit: refused" "$(rc_of env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" 1
+check "14 GB standard: names 15" "$(fits_from env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" "fits from SIZE_B2B=15"
 check "8 GB full: refused" "$(rc_of env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check)" 1
 check "8 GB full: names a size" "$(fits_from env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check | grep -c .)" 1
 # Docker's /var cost is the measured one (Inception with bonus: 2.35 GB of

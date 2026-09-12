@@ -89,21 +89,63 @@ RECIPE="$HERE/partition_recipe.sh"
 #                                  the build now installs them, and its
 #                                  features.status is where these get
 #                                  corrected next.
+#
+# 2026-09-12, third pass -- the /home column, from a guest whose /home was
+# 100% FULL (974 MB, 0 available) with every feature reporting ok. `du` on the
+# real thing says the editor was never the problem; what the column was
+# missing was everything ELSE that lives in the user's home:
+#   nvim        /home  300 -> 200   .local/share/nvim with 57 plugins, its
+#   nvim-extras /home  400 -> 150   parsers and Mason: 201 MB measured, not
+#                                   the 700 estimated. The estimate was the
+#                                   only /home entry, and it was too big.
+#   npm-cache   /home    0 -> 55    ~/.npm survives the global prefix moving
+#                                   to /opt (install_global_scope.sh): npm
+#                                   caches per USER, and the provider install
+#                                   runs as the user.
+#   vscode-remote /home  0 -> 500   .vscode-server, 483 MB measured. Not
+#                                   installed by the build -- it arrives the
+#                                   first time anyone connects the way the
+#                                   README tells them to, so the space is
+#                                   claimed whether or not the ISO put it
+#                                   there. A model that ignores it says "fits"
+#                                   about a disk that does not. Tier
+#                                   `standard`, not base: 483 MB cannot be
+#                                   reserved inside a minimal build's 512 MB
+#                                   /home, and raising that floor would push
+#                                   MIN_DISK past 8192 and lose the 8 GB
+#                                   minimum. A minimal guest is edited over
+#                                   plain ssh; from 15 GB up the VS Code
+#                                   workflow is budgeted for.
+#   inception-data /home 0 -> 200   MariaDB + WordPress, 197 MB measured.
+#                                   Inception's compose file bind-mounts
+#                                   /home/<login>/data, so `make inception`
+#                                   (and `make fresh`) spend /home, not /var.
+# Total /home cost 911 -> checked against a volume that went 1075 -> 1639 MB
+# in the same pass (generate/partition_recipe.sh, home's weight 9 -> 18).
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      100   0     0     0      -
 devtools-apt       base      279   0     0     0      -
-nvim               base      382   120   0     300    devtools-apt
+nvim               base      382   120   0     200    devtools-apt
+npm-cache          base      0     0     0     55     nvim
+vscode-remote      standard  0     0     0     500    -
 hellish-upstream   base      0     0     0     1      -
 webstack           standard  400   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
-nvim-extras        standard  92    30    0     400    nvim
+nvim-extras        standard  92    30    0     150    nvim
 devtools-extra     standard  200   0     0     0      nodejs
 docker             standard  400   0     3300  0      -
+inception-data     standard  0     0     0     200    docker
 ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -
 '
+# vscode-remote and inception-data are SPACE, not steps: nothing installs them
+# at first boot, and first-boot-setup.sh has no section for either. They are in
+# the manifest because the fit check is a model of the disk, and a disk the
+# documented workflow fills is not a disk that fits. Keeping them out is what
+# let a 974 MB /home pass the check and then fill up completely.
+NOT_INSTALLED='vscode-remote inception-data npm-cache'
 # ai-local's /opt cost is Ollama (~1 GB) plus the model install_ai.sh will pick
 # for this much RAM. Its thresholds, mirrored here so the fit check agrees:
 ai_model_mb() {
@@ -116,11 +158,12 @@ ai_model_mb() {
     else echo 9000; fi # qwen3:14b
 }
 
-# With the 2026-09-12 costs the model puts the standard set inside 14 GB, but
-# by under 5% on every mount (/ 2941 of 3069 usable, /home 701 of 731) and
-# with nvim's /home figure still an estimate. The automatic pick therefore
-# stays at 15 -- an explicit PROFILE=standard at 14 passes the fit check and
-# is allowed -- until a 14 GB build confirms the margin. 15 fits with room.
+# The standard set fitted 14 GB under the 2026-09-12 costs, by under 5% on
+# every mount and with nvim's /home figure still an estimate. The third pass
+# that day settled it the other way: with .vscode-server, Inception's data and
+# npm's cache counted, 14 GB refuses and names 15. The automatic threshold was
+# already 15, so nothing moves here -- the model just stopped claiming a
+# margin it did not have.
 STANDARD_FROM_GB=15
 FULL_FROM_GB=30
 # Usable fraction of a volume: ext4 shows ~93% of the partman figure, and 20%
@@ -305,6 +348,11 @@ emit_table() {
     printf '    %-18s %-9s %-4s %6s %6s %6s %6s   %s\n' feature tier "" / /opt /var /home requires
     for n in $(names); do
         if is_on "$n"; then st=on; else st=off; fi
+        # A reservation reads as "on" like everything else, which invites the
+        # wrong conclusion that first boot installs it. Mark it instead.
+        case " $NOT_INSTALLED " in
+        *" $n "*) [ "$st" = on ] && st=rsvd ;;
+        esac
         printf '    %-18s %-9s %-4s %6s %6s %6s %6s   %s\n' "$n" "$(field "$n" 2)" "$st" \
             "$(cost_of "$n" 3)" "$(cost_of "$n" 4)" "$(cost_of "$n" 5)" "$(cost_of "$n" 6)" "$(field "$n" 7)"
     done
@@ -313,6 +361,7 @@ emit_table() {
         "$(usable "$SIZES" root)" "$(usable "$SIZES" opt)" "$(usable "$SIZES" var)" "$(usable "$SIZES" home)" \
         "(80% of the mounted volume)"
     printf '\n'
+    printf '    %s\n\n' "rsvd = space the workflow claims, not a step first boot runs"
     if [ -z "$OVERFLOW" ]; then
         printf '  ✓ fits\n\n'
     else

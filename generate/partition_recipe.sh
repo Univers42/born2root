@@ -53,12 +53,42 @@ OVERHEAD_MB=20 # LUKS2 header (16 MB) plus LVM physical-extent rounding
 # Calibrated on the first real build (2026-09-11): / held 2.7 GB before nvim
 # on a 3.3 GB root, so root's floor and share went up and home/opt/tmp gave
 # some back. See generate/feature_profile.sh for the per-feature numbers.
+#
+# home's weight went 9 -> 18 on 2026-09-12, from a built guest with /home
+# 100% FULL (974 MB, 0 available). The model only ever charged /home for
+# Neovim's plugins; `du` on the real thing found three consumers nobody had
+# budgeted, all of them part of this VM's documented workflow:
+#
+#   .vscode-server   483 MB   VS Code Remote SSH, the way the README says to
+#                             connect. Downloaded on first connect.
+#   data/            197 MB   Inception's MariaDB + WordPress volumes: its
+#                             compose file bind-mounts /home/<login>/data.
+#                             deploy_inception.sh's pre-flight checked /var,
+#                             where the images go, not /home, where the data
+#                             does.
+#   .npm              55 MB   npm's cache stays in the user's home even with
+#                             the global prefix moved to /opt.
+#
+# A full /home is not a clean failure: git could not write a ref lock, `ssh`
+# could not update known_hosts, Mason's downloads died as curl(23), and the
+# Neovim bootstrap logged 132 "Installing plugins" lines and left ZERO plugins
+# on disk -- vim.pack reports a failed clone as a notification, so the only
+# symptom was a missing plugin. The floor stays 512: raising it would push
+# MIN_DISK past 8192 and take the 8 GB minimum with it. Only the surplus share
+# moves, so 8 GB is byte-identical and /var (the remainder) gives up 564 MB at
+# 15 GB while keeping room for docker's 3300 MB build peak.
+#
+# srv's weight went 2 -> 0 in the same pass, to give some of that back. It
+# keeps its floor -- preseed.cfg mounts it and b2b-setup.sh's guard covers it
+# -- but no feature in the manifest charges /srv anything, and on the built
+# guest it held 104 KB of a 328 MB volume. Its surplus share was the cheapest
+# 125 MB on the disk to hand to /var.
 LAYOUT='
 root    2816  25   30720
 swap       0   0    4096
-home     512   9  102400
+home     512  18  102400
 opt      256   5   20480
-srv      256   2   10240
+srv      256   0   10240
 tmp      256   3   10240
 var-log  384   3   20480
 var     2048   0       0

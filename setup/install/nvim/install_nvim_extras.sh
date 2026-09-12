@@ -2050,6 +2050,45 @@ run_as_user() {
 # run's output is kept in ~/.local/state/nvim/bootstrap.log instead of going
 # to /dev/null, which is how the 2026-09-12 build lost the reason 38 plugins
 # were missing. Returns Neovim's own exit status.
+# ── A full disk, named ──────────────────────────────────────────────────────
+# vim.pack reports a failed clone as a NOTIFICATION, not an error, and Mason's
+# downloads surface as curl(23) "Failure writing output" -- so on a full /home
+# the bootstrap exits 0, installs nothing, and the retry loop tries twice more
+# for nothing. Measured on the 2026-09-12 VirtualBox build: 132 "Installing
+# plugins" lines, zero plugins on disk, and not one line saying "no space".
+#
+# So: refuse before spending the time, and if a run still hits ENOSPC, say so
+# in the words the log actually contains. HOME_MIN_MB is nvim + nvim-extras
+# from generate/feature_profile.sh's manifest, with room over.
+NVIM_HOME_MIN_MB="${NVIM_HOME_MIN_MB:-400}"
+free_mb() { df -Pm "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'; }
+enospc_in() { grep -qiE 'ENOSPC|no space left on device|Failure writing output' "$1" 2>/dev/null; }
+
+# Fails the bootstrap rather than warning: every later step depends on the
+# plugins being on disk, and each one costs minutes before failing on its own.
+check_home_space() {
+    local user="$1" home avail
+    home=$(getent passwd "$user" | cut -d: -f6)
+    avail=$(free_mb "$home")
+    case "$avail" in
+    '' | *[!0-9]*)
+        warn "${user}: could not read free space on ${home} — continuing"
+        return 0
+        ;;
+    esac
+    if [ "$avail" -lt "$NVIM_HOME_MIN_MB" ]; then
+        warn "${user}: ${home} has only ${avail} MB free (needs ${NVIM_HOME_MIN_MB})"
+        warn "  the plugins, their parsers, Mason's servers and npm's cache all live there."
+        warn "  Biggest things in it:"
+        du -sm "${home}"/.[!.]* "${home}"/* 2>/dev/null | sort -rn | head -5 |
+            awk '{ printf "[nvim]       %6s MB  %s\n", $1, $2 }'
+        warn "  Free some, or rebuild with more: make all SIZE_B2B=20"
+        return 1
+    fi
+    log "${user}: ${avail} MB free on ${home}"
+    return 0
+}
+
 NVIM_NO_CONFIRM='lua local add = vim.pack.add; vim.pack.add = function(specs, opts) opts = opts or {}; if opts.confirm == nil then opts.confirm = false end; return add(specs, opts) end'
 nvim_headless() {
     local user="$1" home out rc
@@ -2063,6 +2102,10 @@ nvim_headless() {
     tr '\r' '\n' <"$out" | grep -v '^$' |
         grep -vE '^vim\.pack: ([0-9]+% )?Installing plugins \([0-9]+/[0-9]+\)' |
         sed 's/^/[nvim-extras]     /'
+    if enospc_in "$out"; then
+        warn "the disk filled up during that run (ENOSPC) — everything after it is unreliable"
+        NVIM_ENOSPC=1
+    fi
     rm -f "$out"
     return "$rc"
 }
@@ -2229,6 +2272,9 @@ install_kulala_runtime() {
 }
 
 BOOTSTRAP_FAILED=0
+# Set by nvim_headless the moment a run reports ENOSPC; the retry loops read it
+# so they stop instead of spending minutes re-cloning onto a full volume.
+NVIM_ENOSPC=0
 bootstrap_user() {
     local user="$1" home group attempt
     home=$(getent passwd "$user" | cut -d: -f6)
@@ -2245,6 +2291,11 @@ bootstrap_user() {
     # Twice per attempt (PackChanged hooks only fire once a plugin is on disk),
     # up to three attempts: vim.pack reports a failed clone as a notification,
     # not an error, so only counting what is on disk afterwards notices.
+    if ! check_home_space "$user"; then
+        BOOTSTRAP_FAILED=1
+        return 1
+    fi
+
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"
@@ -2252,6 +2303,12 @@ bootstrap_user() {
         if nvim_headless "$user" -c 'lua vim.g.b2b_verify_mode = "plugins"' \
             -c "luafile ${B2B_LIB_DIR}/nvim-verify.lua" >/dev/null; then
             break
+        fi
+        if [ "$NVIM_ENOSPC" = "1" ]; then
+            warn "${user}: stopping after attempt ${attempt} — the volume is full, retrying cannot help"
+            check_home_space "$user" || true
+            BOOTSTRAP_FAILED=1
+            return 1
         fi
         if [ "$attempt" -lt 3 ]; then
             warn "${user}: plugins still missing after attempt ${attempt} — retrying in 10 s"
@@ -2341,6 +2398,30 @@ health_report() {
     return 0
 }
 
+# ── Retract a failed first boot's verdict ───────────────────────────────────
+# The counterpart of install_nvim.sh's helper: feature_fail() in
+# first-boot-setup.sh appends "<feature> <why>" to /etc/b2b/PROVISION_FAILED
+# and nothing removed it again, so one bad first boot left the guest marked
+# failed for ever -- `make nvim` could fix the cause and `make all` would
+# still stop on the stale line. Only this feature's own lines are dropped.
+clear_provision_failed() {
+    local feature="$1" marker=/etc/b2b/PROVISION_FAILED tmp
+    [ -f "$marker" ] || return 0
+    grep -q "^${feature} " "$marker" 2>/dev/null || return 0
+    tmp="${marker}.$$"
+    if grep -v "^${feature} " "$marker" >"$tmp" 2>/dev/null; then
+        if [ -s "$tmp" ]; then
+            cat "$tmp" >"$marker" && rm -f "$tmp"
+            log "cleared the '${feature}' line from ${marker} (other features still listed)"
+        else
+            rm -f "$tmp" "$marker"
+            log "removed ${marker} — nothing is failing any more"
+        fi
+    else
+        rm -f "$tmp"
+    fi
+}
+
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Neovim extras (buffers, files, git, sessions, movement) ==="
 install_deps
@@ -2365,6 +2446,7 @@ fi
 if [ "$BOOTSTRAP_FAILED" = "1" ]; then
     die "the extras bootstrap is incomplete for:${configured} — the PROBLEM lines above say what is missing"
 fi
+clear_provision_failed nvim-extras
 log "=== done for:${configured} ==="
 log "inside nvim:  :B2BExtras   what loaded    |  :B2BMarkdown  reach the preview"
 log "              <leader>sS   start a session |  <leader>gg    lazygit"

@@ -437,6 +437,45 @@ run_as_user() {
 # vim.pack.add, for this process only, with one that never asks.
 NVIM_NO_CONFIRM='lua local add = vim.pack.add; vim.pack.add = function(specs, opts) opts = opts or {}; if opts.confirm == nil then opts.confirm = false end; return add(specs, opts) end'
 
+# ── A full disk, named ──────────────────────────────────────────────────────
+# vim.pack reports a failed clone as a NOTIFICATION, not an error, and Mason's
+# downloads surface as curl(23) "Failure writing output" -- so on a full /home
+# the bootstrap exits 0, installs nothing, and the retry loop tries twice more
+# for nothing. Measured on the 2026-09-12 VirtualBox build: 132 "Installing
+# plugins" lines, zero plugins on disk, and not one line saying "no space".
+#
+# So: refuse before spending the time, and if a run still hits ENOSPC, say so
+# in the words the log actually contains. HOME_MIN_MB is nvim + nvim-extras
+# from generate/feature_profile.sh's manifest, with room over.
+NVIM_HOME_MIN_MB="${NVIM_HOME_MIN_MB:-400}"
+free_mb() { df -Pm "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'; }
+enospc_in() { grep -qiE 'ENOSPC|no space left on device|Failure writing output' "$1" 2>/dev/null; }
+
+# Fails the bootstrap rather than warning: every later step depends on the
+# plugins being on disk, and each one costs minutes before failing on its own.
+check_home_space() {
+    local user="$1" home avail
+    home=$(getent passwd "$user" | cut -d: -f6)
+    avail=$(free_mb "$home")
+    case "$avail" in
+    '' | *[!0-9]*)
+        warn "${user}: could not read free space on ${home} — continuing"
+        return 0
+        ;;
+    esac
+    if [ "$avail" -lt "$NVIM_HOME_MIN_MB" ]; then
+        warn "${user}: ${home} has only ${avail} MB free (needs ${NVIM_HOME_MIN_MB})"
+        warn "  the plugins, their parsers, Mason's servers and npm's cache all live there."
+        warn "  Biggest things in it:"
+        du -sm "${home}"/.[!.]* "${home}"/* 2>/dev/null | sort -rn | head -5 |
+            awk '{ printf "[nvim]       %6s MB  %s\n", $1, $2 }'
+        warn "  Free some, or rebuild with more: make all SIZE_B2B=20"
+        return 1
+    fi
+    log "${user}: ${avail} MB free on ${home}"
+    return 0
+}
+
 # nvim_headless <user> <nvim args...>: a headless Neovim run as <user>, its
 # output KEPT. Every run is appended to ~/.local/state/nvim/bootstrap.log, and
 # everything but vim.pack's progress counter is echoed here. The 2026-09-12
@@ -454,6 +493,10 @@ nvim_headless() {
     tr '\r' '\n' <"$out" | grep -v '^$' |
         grep -vE '^vim\.pack: ([0-9]+% )?Installing plugins \([0-9]+/[0-9]+\)' |
         sed 's/^/[nvim]     /'
+    if enospc_in "$out"; then
+        warn "the disk filled up during that run (ENOSPC) — everything after it is unreliable"
+        NVIM_ENOSPC=1
+    fi
     rm -f "$out"
     return "$rc"
 }
@@ -524,8 +567,19 @@ LUAEOF
 -- Run inside a headless Neovim with the user's config loaded; exits 1 when
 -- anything the config declares is not actually installed:
 --   nvim --headless -c 'luafile /usr/local/lib/b2b/nvim-verify.lua'
--- With `vim.g.b2b_verify_mode = 'plugins'` only the plugin checks run (used
--- between install attempts, before parsers and Mason have had their turn).
+-- `vim.g.b2b_verify_mode` scopes it to the layer being installed:
+--   'plugins'  plugin checks only (used between install attempts, before
+--              parsers and Mason have had their turn)
+--   'base'     plugins, parsers, Mason and blink.cmp's fuzzy library -- what
+--              install_nvim.sh installs itself
+--   'all'      the above plus artifacts only install_nvim_extras.sh provides
+--              (default, and what the extras layer verifies with)
+-- The split is not cosmetic: install_nvim.sh runs BEFORE the extras layer, and
+-- verifying markdown-preview's downloaded server binary there made it fail on
+-- every machine that already had the extras config -- the plugin is declared
+-- by that config, so it installs, while the binary arrives one script later.
+-- The build then wrote PROVISION_FAILED for an artifact that was about to
+-- appear, and `make all` stopped on it.
 local mode = vim.g.b2b_verify_mode or 'all'
 local problems = {}
 local function problem(fmt, ...) problems[#problems + 1] = fmt:format(...) end
@@ -559,7 +613,7 @@ if _G.B2B then
 end
 
 local parsers_installed = 0
-if mode == 'all' then
+if mode ~= 'plugins' then
   -- 2. Parsers: the same want-list nvim-parsers.lua installs.
   local ok, ts = pcall(require, 'nvim-treesitter')
   if ok then
@@ -595,8 +649,15 @@ if mode == 'all' then
     and vim.fn.filereadable(opt .. 'blink.cmp/target/release/libblink_cmp_fuzzy.so') ~= 1 then
     problem 'blink.cmp fuzzy library missing (target/release/libblink_cmp_fuzzy.so)'
   end
-  if vim.fn.isdirectory(opt .. 'markdown-preview.nvim') == 1
-    and vim.fn.executable(opt .. 'markdown-preview.nvim/app/bin/markdown-preview-linux') ~= 1 then
+end
+
+-- markdown-preview's server binary is downloaded by install_nvim_extras.sh,
+-- which runs after this script, so only the extras layer's own verification
+-- can hold it against the build.
+if mode == 'all' then
+  local opt_all = vim.fn.stdpath 'data' .. '/site/pack/core/opt/'
+  if vim.fn.isdirectory(opt_all .. 'markdown-preview.nvim') == 1
+    and vim.fn.executable(opt_all .. 'markdown-preview.nvim/app/bin/markdown-preview-linux') ~= 1 then
     problem 'markdown-preview server binary missing (app/bin/markdown-preview-linux)'
   end
 end
@@ -605,8 +666,85 @@ print(('verify (%s): %d plugins, %d parsers, %d problem(s)'):format(mode, #plugi
 for _, p in ipairs(problems) do print('  PROBLEM ' .. p) end
 if #problems > 0 then vim.cmd 'cquit 1' else vim.cmd 'qa' end
 LUAEOF
-    chmod 644 "${B2B_LIB_DIR}/nvim-parsers.lua" "${B2B_LIB_DIR}/nvim-verify.lua"
-    log "wrote ${B2B_LIB_DIR}/nvim-parsers.lua and nvim-verify.lua"
+    # nvim-preinstall.lua -- install every plugin the config DECLARES without
+    # running the config. Insurance against the way the 2026-09-12 VirtualBox
+    # build failed: kickstart's own pattern is
+    #
+    #     vim.pack.add { gh 'NMAC427/guess-indent.nvim' }
+    #     require('guess-indent').setup {}
+    #
+    # and when that require fails, init.lua aborts THERE -- so every plugin
+    # declared after it is never even asked for. That first boot logged 132
+    # "Installing plugins" lines and left ZERO plugins on disk, with no error
+    # naming a cause, and three retries each got no further than the same line.
+    # Run with --clean, so no user config is loaded and nothing can abort the
+    # pass; installation still goes to stdpath('data'), which --clean does not
+    # move. Whatever this leaves on disk, the normal startups below then find.
+    cat >"${B2B_LIB_DIR}/nvim-preinstall.lua" <<'LUAEOF'
+-- nvim-preinstall.lua — written by setup/install/nvim/install_nvim.sh.
+-- Installs every plugin the config declares, without loading the config:
+--   nvim --clean --headless -c 'luafile /usr/local/lib/b2b/nvim-preinstall.lua' -c qa
+if vim.pack == nil then
+  print 'preinstall: vim.pack is missing — Neovim 0.12+ is required'
+  vim.cmd 'cquit 1'
+end
+
+-- Only declarations are read, never comments: the configs are full of
+-- documentation links, and https://docs.docker.com/... is not a plugin.
+local hosts = { ['github.com'] = true, ['codeberg.org'] = true, ['gitlab.com'] = true }
+local cfg = vim.fn.stdpath 'config'
+local seen, specs = {}, {}
+local function want(url)
+  if not seen[url] then
+    seen[url] = true
+    specs[#specs + 1] = url
+  end
+end
+for _, file in ipairs(vim.fn.globpath(cfg, '**/*.lua', false, true)) do
+  for _, line in ipairs(vim.fn.readfile(file)) do
+    if not line:match '^%s*%-%-' then
+      -- `gh 'owner/repo'`: the helper both kickstart and the b2b layer use,
+      -- and it is only ever used for a plugin.
+      for repo in line:gmatch "gh%s*'([%w%.%_%-]+/[%w%.%_%-]+)'" do
+        want('https://github.com/' .. repo)
+      end
+      -- A bare URL counts only with exactly owner/repo on a known git host.
+      for host, owner, repo in line:gmatch "'https://([%w%.%-]+)/([%w%.%_%-]+)/([%w%.%_%-]+)'" do
+        if hosts[host] and not repo:match '%.%a%a%a?%a?$' then
+          want(('https://%s/%s/%s'):format(host, owner, repo))
+        end
+      end
+    end
+  end
+end
+
+if #specs == 0 then
+  print 'preinstall: no plugin declarations found in the config'
+  vim.cmd 'qa'
+end
+
+-- load = false: this pass only has to put the code on disk. Loading is what
+-- the normal startups after it are for, and a plugin that fails to load must
+-- not stop the rest from being installed.
+local ok, err = pcall(vim.pack.add, specs, { confirm = false, load = false })
+local root = vim.fn.stdpath 'data' .. '/site/pack/core/opt/'
+local missing = {}
+for _, url in ipairs(specs) do
+  local name = url:gsub('%.git$', ''):match '[^/]+$'
+  if vim.fn.isdirectory(root .. name) == 0 then missing[#missing + 1] = name end
+end
+print(('preinstall: %d declared, %d on disk, %d missing%s'):format(
+  #specs, #specs - #missing, #missing, ok and '' or ' (vim.pack.add errored)'))
+if not ok then print('  ' .. tostring(err):gsub('\n.*', '')) end
+for _, name in ipairs(missing) do print('  MISSING ' .. name) end
+-- Never fails the build on its own: the verification after the normal
+-- startups is the verdict, and a plugin missing here may still arrive there.
+vim.cmd 'qa'
+LUAEOF
+
+    chmod 644 "${B2B_LIB_DIR}/nvim-parsers.lua" "${B2B_LIB_DIR}/nvim-verify.lua" \
+        "${B2B_LIB_DIR}/nvim-preinstall.lua"
+    log "wrote ${B2B_LIB_DIR}/nvim-parsers.lua, nvim-verify.lua and nvim-preinstall.lua"
 }
 
 # blink.cmp (kickstart's completion engine) does its matching in a small Rust
@@ -699,6 +837,9 @@ install_blink_fuzzy() {
 # The bootstrap proper. Sets BOOTSTRAP_FAILED=1 when the verification at the
 # end finds anything missing; main turns that into exit 1.
 BOOTSTRAP_FAILED=0
+# Set by nvim_headless the moment a run reports ENOSPC; the retry loops read it
+# so they stop instead of spending minutes re-cloning onto a full volume.
+NVIM_ENOSPC=0
 bootstrap_user() {
     local user="$1" home group attempt
     home=$(getent passwd "$user" | cut -d: -f6)
@@ -707,6 +848,16 @@ bootstrap_user() {
     : >"${home}/.local/state/nvim/bootstrap.log"
 
     log "${user}: installing plugins (this takes a few minutes on a cold cache)"
+    # The pass that cannot be aborted by the config (see nvim-preinstall.lua):
+    # --clean, so init.lua is not loaded at all, and every declared plugin is
+    # asked for in one batch. `|| true` because its own report is the point;
+    # the verification below is what decides whether the build is good.
+    if [ -r "${B2B_LIB_DIR}/nvim-preinstall.lua" ]; then
+        run_as_user "$user" /usr/local/bin/nvim --clean --headless \
+            -c "luafile ${B2B_LIB_DIR}/nvim-preinstall.lua" -c qa 2>&1 |
+            tr '\r' '\n' | grep -E '^preinstall:|^  MISSING|^  ' |
+            sed 's/^/[nvim]     /' || true
+    fi
     # vim.pack.add() fetches synchronously at startup, so starting and quitting
     # IS the install. Twice per attempt: the PackChanged autocommands that build
     # telescope-fzf-native and run TSUpdate only fire once the plugin is on
@@ -714,6 +865,11 @@ bootstrap_user() {
     # clone as a notification, not an error, so nothing but counting the
     # directories afterwards notices -- and on a NAT'd VM in its first minute
     # of network a failed clone is the ordinary case, not the rare one.
+    if ! check_home_space "$user"; then
+        BOOTSTRAP_FAILED=1
+        return 1
+    fi
+
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 200m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"
@@ -721,6 +877,12 @@ bootstrap_user() {
         if nvim_headless "$user" -c 'lua vim.g.b2b_verify_mode = "plugins"' \
             -c "luafile ${B2B_LIB_DIR}/nvim-verify.lua" >/dev/null; then
             break
+        fi
+        if [ "$NVIM_ENOSPC" = "1" ]; then
+            warn "${user}: stopping after attempt ${attempt} — the volume is full, retrying cannot help"
+            check_home_space "$user" || true
+            BOOTSTRAP_FAILED=1
+            return 1
         fi
         if [ "$attempt" -lt 3 ]; then
             warn "${user}: plugins still missing after attempt ${attempt} — retrying in 10 s"
@@ -745,7 +907,10 @@ bootstrap_user() {
     chown -R "${user}:${group}" "${home}/.local" "${home}/.cache" 2>/dev/null || true
 
     log "${user}: verifying plugins, parsers, language servers"
-    if nvim_headless "$user" -c "luafile ${B2B_LIB_DIR}/nvim-verify.lua"; then
+    # 'base', not the default 'all': see the mode note in nvim-verify.lua --
+    # the extras layer's downloaded binaries are not this script's to produce.
+    if nvim_headless "$user" -c 'lua vim.g.b2b_verify_mode = "base"' \
+        -c "luafile ${B2B_LIB_DIR}/nvim-verify.lua"; then
         log "${user}: everything the config declares is installed"
     else
         warn "${user}: the bootstrap left things missing (see above, and ~/.local/state/nvim/bootstrap.log)"
@@ -804,12 +969,39 @@ purge() {
     # The /opt trees and the symlinks into them.
     rm -rf "${NVIM_OPT_DIR}"/nvim-v* "${NVIM_OPT_DIR}/nvim" "$NVIM_PYTHON_VENV"
     rm -f /usr/local/bin/nvim /etc/profile.d/nvim.sh /etc/profile.d/nvim-extras.sh
-    rm -f "${B2B_LIB_DIR}/nvim-parsers.lua" "${B2B_LIB_DIR}/nvim-verify.lua"
+    rm -f "${B2B_LIB_DIR}/nvim-parsers.lua" "${B2B_LIB_DIR}/nvim-verify.lua" \
+        "${B2B_LIB_DIR}/nvim-preinstall.lua"
     local alt
     for alt in editor vi vim; do
         update-alternatives --remove "$alt" /usr/local/bin/nvim >/dev/null 2>&1 || true
     done
     log "purge complete — installing from scratch"
+}
+
+# ── Retract a failed first boot's verdict ───────────────────────────────────
+# first-boot-setup.sh's feature_fail() appends "<feature> <why>" to
+# /etc/b2b/PROVISION_FAILED, the file the pipelines read to fail `make all`,
+# and nothing ever removed it again. So one bad first boot marked the guest
+# failed permanently: `make nvim` could fix the actual problem and every later
+# `make all` would still stop on the stale line. Clearing it is only honest
+# when THIS feature really did just succeed, so it runs on the success path
+# and drops only its own lines -- another feature's failure still stands.
+clear_provision_failed() {
+    local feature="$1" marker=/etc/b2b/PROVISION_FAILED tmp
+    [ -f "$marker" ] || return 0
+    grep -q "^${feature} " "$marker" 2>/dev/null || return 0
+    tmp="${marker}.$$"
+    if grep -v "^${feature} " "$marker" >"$tmp" 2>/dev/null; then
+        if [ -s "$tmp" ]; then
+            cat "$tmp" >"$marker" && rm -f "$tmp"
+            log "cleared the '${feature}' line from ${marker} (other features still listed)"
+        else
+            rm -f "$tmp" "$marker"
+            log "removed ${marker} — nothing is failing any more"
+        fi
+    else
+        rm -f "$tmp"
+    fi
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -843,4 +1035,5 @@ fi
 if [ "$BOOTSTRAP_FAILED" = "1" ]; then
     die "the plugin bootstrap is incomplete for:${configured} — the PROBLEM lines above say what is missing"
 fi
+clear_provision_failed nvim
 log "=== done: $(/usr/local/bin/nvim --version | head -n1) for:${configured} ==="
