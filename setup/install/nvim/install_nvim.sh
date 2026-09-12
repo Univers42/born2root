@@ -434,11 +434,23 @@ setup_user_config() {
 # nvim` never showed it, because sudo over SSH starts in the user's own home.
 # env -C changes directory AFTER runuser has dropped to the user, so a home
 # the user cannot enter fails loudly here instead of silently in vim.pack.
+#
+# CFLAGS, because of what came next on that guest once the clones worked:
+# `parser missing: gitcommit`, compile "Killed signal terminated program cc1".
+# `tree-sitter build` compiles every parser with -Wall, and -Wall turns on
+# -Wuninitialized, whose analysis of gitcommit's 3.3 MB generated parser.c
+# grew cc1 past 1.8 GB and through 1.9 GB of swap until the OOM killer ended
+# it -- alone, with nothing else compiling, in a 2 GB guest. Measured there:
+# -O2 with any one of 16 other -Wall warnings compiles in 3-4 s; -Wuninitialized
+# or -Wmaybe-uninitialized alone exhausts a 1.2 GB limit in 2 s. When CFLAGS is
+# set, tree-sitter uses it IN PLACE of -Wall, and with -Wno-uninitialized the
+# same build peaked at 460 MB. It only mutes warnings nobody reads here.
 run_as_user() {
     local user="$1" home
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
-    set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" "$@"
+    set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
+        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else
@@ -744,26 +756,45 @@ end
 local hosts = { ['github.com'] = true, ['codeberg.org'] = true, ['gitlab.com'] = true }
 local cfg = vim.fn.stdpath 'config'
 local seen, specs = {}, {}
-local function want(url)
+local function want(url, version)
   if not seen[url] then
-    seen[url] = true
-    specs[#specs + 1] = url
+    seen[url] = { src = url, version = version }
+    specs[#specs + 1] = seen[url]
+  elseif version ~= nil and seen[url].version == nil then
+    seen[url].version = version
   end
 end
+-- The version has to come along. kickstart pins some plugins, e.g.
+--   vim.pack.add { { src = gh 'saghen/blink.cmp', version = vim.version.range '1.*' } }
+-- and a URL-only pass installed blink.cmp's default branch, which is v2: its
+-- init.lua errors "blink.cmp v2 requires saghen/blink.lib", and init.lua ended
+-- there, before nvim-treesitter was ever added. vim.pack never re-checks a
+-- plugin already on disk, so the wrong checkout outlived every later start.
+-- Every pin in these configs is written on its spec's own line, so a version
+-- is taken only from a line holding exactly one spec.
+local function line_version(line)
+  local range = line:match "version%s*=%s*vim%.version%.range%s*%(?%s*'([^']*)'"
+  if range then return vim.version.range(range) end
+  return line:match "version%s*=%s*'([^']*)'"
+end
+local function name_of(url) return (url:gsub('%.git$', ''):match '[^/]+$') end
 for _, file in ipairs(vim.fn.globpath(cfg, '**/*.lua', false, true)) do
   for _, line in ipairs(vim.fn.readfile(file)) do
     if not line:match '^%s*%-%-' then
+      local urls = {}
       -- `gh 'owner/repo'`: the helper both kickstart and the b2b layer use,
       -- and it is only ever used for a plugin.
       for repo in line:gmatch "gh%s*'([%w%.%_%-]+/[%w%.%_%-]+)'" do
-        want('https://github.com/' .. repo)
+        urls[#urls + 1] = 'https://github.com/' .. repo
       end
       -- A bare URL counts only with exactly owner/repo on a known git host.
       for host, owner, repo in line:gmatch "'https://([%w%.%-]+)/([%w%.%_%-]+)/([%w%.%_%-]+)'" do
         if hosts[host] and not repo:match '%.%a%a%a?%a?$' then
-          want(('https://%s/%s/%s'):format(host, owner, repo))
+          urls[#urls + 1] = ('https://%s/%s/%s'):format(host, owner, repo)
         end
       end
+      local version = #urls == 1 and line_version(line) or nil
+      for _, url in ipairs(urls) do want(url, version) end
     end
   end
 end
@@ -778,14 +809,27 @@ end
 -- not stop the rest from being installed.
 local ok, err = pcall(vim.pack.add, specs, { confirm = false, load = false })
 local root = vim.fn.stdpath 'data' .. '/site/pack/core/opt/'
-local missing = {}
-for _, url in ipairs(specs) do
-  local name = url:gsub('%.git$', ''):match '[^/]+$'
-  if vim.fn.isdirectory(root .. name) == 0 then missing[#missing + 1] = name end
+local missing, pinned = {}, {}
+for _, spec in ipairs(specs) do
+  local name = name_of(spec.src)
+  if vim.fn.isdirectory(root .. name) == 0 then
+    missing[#missing + 1] = name
+  elseif spec.version ~= nil then
+    pinned[#pinned + 1] = name
+  end
 end
 print(('preinstall: %d declared, %d on disk, %d missing%s'):format(
   #specs, #specs - #missing, #missing, ok and '' or ' (vim.pack.add errored)'))
 if not ok then print('  ' .. tostring(err):gsub('\n.*', '')) end
+-- Move the pinned plugins onto their declared version. A fresh clone is
+-- already there and this is one fetch each; a checkout an earlier pass made
+-- without the pin (the blink.cmp v2 above, on every guest built before this
+-- fix) is corrected, which nothing else in vim.pack would do.
+if #pinned > 0 then
+  local uok, uerr = pcall(vim.pack.update, pinned, { force = true })
+  print(('preinstall: %d pinned plugin(s) synced to their declared version%s'):format(
+    #pinned, uok and '' or (' -- vim.pack.update errored: ' .. tostring(uerr):gsub('\n.*', ''))))
+end
 -- vim.pack spawns git with this process's working directory as `cwd`, and a
 -- spawn that fails there dies inside its async task without an error. So when
 -- nothing landed, try that spawn once: it is the one cause MISSING cannot show.
@@ -831,10 +875,6 @@ install_blink_fuzzy() {
     }
 
     lib_dir="${plugin}/target/release"
-    if [ -f "${lib_dir}/libblink_cmp_fuzzy.so" ]; then
-        log "${user}: blink.cmp fuzzy lib already present"
-        return 0
-    fi
 
     # The binary must match the checked-out tag, so read it from the checkout
     # rather than assuming the newest release.
@@ -853,6 +893,17 @@ install_blink_fuzzy() {
         sed 's/-[0-9]*-g[0-9a-f]*$//')
     if [ -z "$tag" ]; then
         warn "${user}: cannot determine the blink.cmp tag — skipping its fuzzy lib"
+        return 0
+    fi
+    # Present is not enough: it has to be THIS checkout's lib. The 2026-09-12
+    # QEMU guest held one fetched for v1.10.0 while nvim-preinstall.lua moved
+    # blink.cmp off its unpinned v2 checkout onto v1.10.2, and an early
+    # "already present" kept the stale lib for good. `version` is what the
+    # fetch below records, and what blink itself compares against the tag.
+    local have_tag
+    have_tag=$(cat "${lib_dir}/version" 2>/dev/null)
+    if [ -f "${lib_dir}/libblink_cmp_fuzzy.so" ] && [ "$have_tag" = "$tag" ]; then
+        log "${user}: blink.cmp fuzzy lib already present (${tag})"
         return 0
     fi
 
@@ -1049,12 +1100,18 @@ purge() {
 # `make all` would still stop on the stale line. Clearing it is only honest
 # when THIS feature really did just succeed, so it runs on the success path
 # and drops only its own lines -- another feature's failure still stands.
+#
+# awk, not `grep -v`: grep exits 1 when it selects no line, which is exactly the
+# case of a feature that was the only one failing, so that branch read as an
+# error and the marker was never removed. The 2026-09-12 QEMU guest kept
+# "nvim install_nvim.sh failed" after a `make nvim` that verified clean.
+# B2B_PROVISION_FAILED exists for the host-side test.
 clear_provision_failed() {
-    local feature="$1" marker=/etc/b2b/PROVISION_FAILED tmp
+    local feature="$1" marker="${B2B_PROVISION_FAILED:-/etc/b2b/PROVISION_FAILED}" tmp
     [ -f "$marker" ] || return 0
     grep -q "^${feature} " "$marker" 2>/dev/null || return 0
     tmp="${marker}.$$"
-    if grep -v "^${feature} " "$marker" >"$tmp" 2>/dev/null; then
+    if awk -v f="$feature" '$1 != f' "$marker" >"$tmp" 2>/dev/null; then
         if [ -s "$tmp" ]; then
             cat "$tmp" >"$marker" && rm -f "$tmp"
             log "cleared the '${feature}' line from ${marker} (other features still listed)"

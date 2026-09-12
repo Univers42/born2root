@@ -2066,12 +2066,16 @@ setup_user() {
 # From the user's home, for the reason install_nvim.sh's run_as_user gives:
 # vim.pack spawns git with nvim's working directory as `cwd`, and at first boot
 # that is cron's /root, which the user cannot enter -- every clone then fails
-# inside vim.pack with no error, and nothing reaches the disk.
+# inside vim.pack with no error, and nothing reaches the disk. And with
+# CFLAGS=-Wno-uninitialized: this layer's B2B.parsers is what adds gitcommit,
+# whose parser tree-sitter's default -Wall compile cannot fit in a 2 GB guest
+# (the measurement is in install_nvim.sh).
 run_as_user() {
     local user="$1" home
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
-    set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" "$@"
+    set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
+        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
@@ -2527,12 +2531,18 @@ health_report() {
 # and nothing removed it again, so one bad first boot left the guest marked
 # failed for ever -- `make nvim` could fix the cause and `make all` would
 # still stop on the stale line. Only this feature's own lines are dropped.
+#
+# awk, not `grep -v`: grep exits 1 when it selects no line, which is exactly the
+# case of a feature that was the only one failing, so that branch read as an
+# error and the marker was never removed. The 2026-09-12 QEMU guest kept
+# "nvim install_nvim.sh failed" after a `make nvim` that verified clean.
+# B2B_PROVISION_FAILED exists for the host-side test.
 clear_provision_failed() {
-    local feature="$1" marker=/etc/b2b/PROVISION_FAILED tmp
+    local feature="$1" marker="${B2B_PROVISION_FAILED:-/etc/b2b/PROVISION_FAILED}" tmp
     [ -f "$marker" ] || return 0
     grep -q "^${feature} " "$marker" 2>/dev/null || return 0
     tmp="${marker}.$$"
-    if grep -v "^${feature} " "$marker" >"$tmp" 2>/dev/null; then
+    if awk -v f="$feature" '$1 != f' "$marker" >"$tmp" 2>/dev/null; then
         if [ -s "$tmp" ]; then
             cat "$tmp" >"$marker" && rm -f "$tmp"
             log "cleared the '${feature}' line from ${marker} (other features still listed)"

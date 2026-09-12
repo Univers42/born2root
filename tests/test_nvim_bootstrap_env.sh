@@ -15,6 +15,8 @@
 #    `make nvim` that fixed the guest cleared PROVISION_FAILED, but the "nvim
 #    failed" lines in features.status stayed, and qemu_pipeline.sh fails
 #    `make all` on those alone. "nvim" must not touch "nvim-extras".
+#
+# 3. clear_provision_failed, the other half of that verdict (see below).
 set -e
 
 cd "$(dirname "$0")/.."
@@ -51,7 +53,7 @@ PATH="$TMP/bin:$PATH"
 export PATH
 # shellcheck disable=SC2034 # read by the run_as_user bodies eval'd below
 NVIM_BOOTSTRAP_TIMEOUT=20
-unset NVIM_TERM
+unset NVIM_TERM NVIM_CFLAGS
 
 for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim_extras.sh; do
     name=$(basename "$script")
@@ -71,6 +73,9 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     # shellcheck disable=SC2016 # $TERM is meant for the inner sh
     check "$name: TERM still reaches the command" \
         "$(run_as_user alice sh -c 'printf %s "$TERM"')" "xterm-256color"
+    # shellcheck disable=SC2016 # $CFLAGS is meant for the inner sh
+    check "$name: parser compiles skip -Wuninitialized" \
+        "$(run_as_user alice sh -c 'printf %s "$CFLAGS"')" "-Wno-uninitialized"
     chmod 755 "$TMP/locked"
     cd "$REPO"
 done
@@ -117,6 +122,35 @@ EOF
     rm -f "$B2B_FEATURES_STATUS"
     mark_feature_ok nvim
     check "$name: no status file is not an error" "$?" "0"
+done
+
+# 3. clear_provision_failed removes the marker when this feature was its only
+#    line. The bug: it filtered with `grep -v`, which exits 1 when nothing is
+#    left, took that for an error, and kept the marker -- so after a clean
+#    `make nvim` the guest still read as failed and `make all` still stopped.
+B2B_PROVISION_FAILED="$TMP/PROVISION_FAILED"
+for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim_extras.sh; do
+    name=$(basename "$script")
+    body=$(awk '/^clear_provision_failed\(\) \{/,/^}/' "$REPO/$script")
+    if [ -z "$body" ]; then
+        check "$name: clear_provision_failed found" "missing" "present"
+        continue
+    fi
+    eval "$body"
+
+    printf 'nvim install_nvim.sh failed (plugins missing)\n' >"$B2B_PROVISION_FAILED"
+    clear_provision_failed nvim
+    check "$name: the only failing feature removes the marker" \
+        "$([ -e "$B2B_PROVISION_FAILED" ] && echo present || echo removed)" "removed"
+
+    printf 'nvim why\nnvim-extras why\ndocker why\n' >"$B2B_PROVISION_FAILED"
+    clear_provision_failed nvim
+    check "$name: other features' lines stay" \
+        "$(tr '\n' '|' <"$B2B_PROVISION_FAILED")" "nvim-extras why|docker why|"
+    clear_provision_failed webstack
+    check "$name: a feature with no line changes nothing" \
+        "$(tr '\n' '|' <"$B2B_PROVISION_FAILED")" "nvim-extras why|docker why|"
+    rm -f "$B2B_PROVISION_FAILED"
 done
 
 exit "$fail"
