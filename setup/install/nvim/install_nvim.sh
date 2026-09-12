@@ -394,12 +394,23 @@ setup_user_config() {
 
     # Everything under the user's home must belong to the user, not to root —
     # this whole script runs as root, and nvim refuses to write state it cannot own.
+    #
+    # The PARENTS too, not just the nvim leaves. On a fresh home this mkdir -p
+    # is what creates ~/.cache and ~/.local, as root, and chowning only
+    # ~/.cache/nvim left ~/.cache itself root:root 755. Nothing in nvim cares,
+    # but `tree-sitter build` keeps its lock in ~/.cache/tree-sitter/lock, so
+    # on the 2026-09-13 15 GB build every parser compile at first boot died on
+    #     Permission denied (os error 13) (/home/dlesieur/.cache/tree-sitter/lock)
+    # and nvim was filed as failed. The chown -R after the parser step then
+    # repaired it, which is why nvim-extras compiled all 40 parsers minutes
+    # later, and why `make nvim` on a lived-in home never showed it. Reproduced
+    # in that guest: tree-sitter build with XDG_CACHE_HOME=/var/cache (root,
+    # 755) fails with exactly that error; under the user's own ~/.cache it builds.
     local group
     group=$(id -gn "$user" 2>/dev/null || echo "$user")
     mkdir -p "${home}/.local/share/nvim" "${home}/.local/state/nvim" "${home}/.cache/nvim"
     chown -R "${user}:${group}" \
-        "${home}/.config" "${home}/.local/share/nvim" \
-        "${home}/.local/state/nvim" "${home}/.cache/nvim" 2>/dev/null || true
+        "${home}/.config" "${home}/.local" "${home}/.cache" 2>/dev/null || true
     return 0
 }
 
