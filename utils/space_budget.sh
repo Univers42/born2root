@@ -109,8 +109,16 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
     # The virtual size is the worst case the image can ever reach, which is
     # exactly the number a budget should be checked against: a disk that fits
     # only while it stays thin is a quota overrun waiting for a busy week.
-    # An existing disk is replaced, not added to, so take the larger of the two.
-    [ "$VM_KB" -gt "$WANT_KB" ] && WANT_KB="$VM_KB"
+    # An existing disk is not replaced: qemu_vm.sh create is a no-op when the
+    # qcow2 exists, so `make all` reuses it at whatever size it already is --
+    # a 120 GB-virtual, 43 GB-real image stays exactly that. Count it, and say
+    # so, because "new disk: 15 GB" on screen next to a 43 GB total reads as
+    # nonsense until you know the disk on disk is the one being kept.
+    EXISTING_KB=0
+    if [ "$VM_KB" -gt "$WANT_KB" ]; then
+        EXISTING_KB="$VM_KB"
+        WANT_KB="$VM_KB"
+    fi
     # The ISOs are build INPUTS, not part of the finished project: `make slim`
     # removes them once the VM is installed. Counting them here made every
     # rebuild fail its own budget (source + 1.7 GB of ISOs + the disk), while
@@ -124,7 +132,11 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
     printf '    %-34s %10s   %s\n' "ISOs" "$(human "$ISO_KB")" "(build input; not counted — make slim removes them)"
     [ "$OTHER_VM_KB" -gt 0 ] &&
         printf '    %-34s %10s\n' "other VM disks still in the repo" "$(human "$OTHER_VM_KB")"
-    printf '    %-34s %10s\n' "VM disk, at its maximum" "$(human "$WANT_KB")"
+    if [ "$EXISTING_KB" -gt 0 ]; then
+        printf '    %-34s %10s   %s\n' "existing VM '$VM_NAME', kept as is" "$(human "$WANT_KB")" "($VM_PATH/$VM_NAME)"
+    else
+        printf '    %-34s %10s\n' "VM disk, at its maximum" "$(human "$WANT_KB")"
+    fi
     printf '    %-34s %10s\n\n' "projected total, once slimmed" "$(human "$PROJECTED_KB")"
 
     FAIL=0
@@ -132,12 +144,18 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
         printf '  %s✗%s A %s VM would put this project %s over the %s GB budget.\n\n' \
             "$RED" "$OFF" "$(human "$WANT_KB")" \
             "$(human $((PROJECTED_KB - BUDGET_KB)))" "$SPACE_BUDGET_GB"
+        if [ "$EXISTING_KB" -gt 0 ]; then
+            printf '    %sThere is already a VM here and make all would keep its disk.%s\n' "$BLD" "$OFF"
+            printf '    To build a right-sized one, build it under another name or path:\n'
+            printf '      %scd ~/goinfre/born2root && make all VM_NAME=b2r%s\n' "$BLD" "$OFF"
+            printf '    Or remove this one (destroys it): %smake rm_disk_image VM_NAME=%s%s\n\n' "$BLD" "$VM_NAME" "$OFF"
+        fi
         # Only offer a smaller disk when a smaller disk is actually the answer.
         # When the fixed costs already exceed the budget on their own, no disk
         # size fits and suggesting one (a negative number, at that) sends
         # someone off tuning the wrong knob.
         ROOM_MB=$(((BUDGET_KB - REPO_KB - OTHER_VM_KB) / 1024))
-        if [ "$ROOM_MB" -gt 1024 ]; then
+        if [ "$EXISTING_KB" -eq 0 ] && [ "$ROOM_MB" -gt 1024 ]; then
             printf '    %sDISK_SIZE_MB=%s%s   the largest disk that still fits\n' \
                 "$BLD" "$ROOM_MB" "$OFF"
         fi

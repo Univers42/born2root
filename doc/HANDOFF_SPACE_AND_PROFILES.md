@@ -7,6 +7,10 @@ that remains.
 
 ## Ground rules that were learned the hard way
 
+- **Build from `~/goinfre/born2root`, never from the sgoinfre checkout.**
+  In sgoinfre `VM_NAME=debian` resolves to the old 43 GB VM and `make all`
+  reuses an existing qcow2 at its current size; the pre-flight refuses that
+  build (correctly) and now says why.
 - **Never touch the VM in `/sgoinfre/students/dlesieur/born2root`.** It is
   the owner's working machine (120 GB virtual, 43 GB real, LUKS with no
   discard). It is stopped and must stay as it is unless the owner says so.
