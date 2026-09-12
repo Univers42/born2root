@@ -879,8 +879,12 @@ fi
 if [ -f /etc/lvm/lvm.conf ]; then
     if grep -qE '^[[:space:]]*issue_discards[[:space:]]*=[[:space:]]*1' /etc/lvm/lvm.conf; then
         echo "[OK] lvm.conf already sets issue_discards = 1"
-    elif grep -qE '^[[:space:]]*issue_discards[[:space:]]*=' /etc/lvm/lvm.conf; then
-        sed -i -E 's|^([[:space:]]*)issue_discards[[:space:]]*=.*|\1issue_discards = 1|' /etc/lvm/lvm.conf
+    elif grep -qE '^[[:space:]]*#?[[:space:]]*issue_discards[[:space:]]*=' /etc/lvm/lvm.conf; then
+        # Debian ships the key only as its commented default, `# issue_discards = 0`,
+        # inside the devices { } section. Uncommenting it in place keeps it in
+        # that section; the previous pattern skipped the commented form and
+        # left every guest with the default (measured on trixie: no-op).
+        sed -i -E 's|^([[:space:]]*)#?[[:space:]]*issue_discards[[:space:]]*=.*|\1issue_discards = 1|' /etc/lvm/lvm.conf
         echo "[OK] lvm.conf: issue_discards = 1"
     else
         echo "[WARN] no issue_discards key in lvm.conf — leaving the file alone"
