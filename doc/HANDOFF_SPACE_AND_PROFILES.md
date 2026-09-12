@@ -217,3 +217,99 @@ Each is self-contained and states the expected result.
   `setup/host/deploy_inception.sh` (section 2b pre-flight, post-build prune).
 - Tests: `tests/test_partition_recipe.sh`, `tests/test_feature_profile.sh`.
 - Docs: `README.md` ("Disk Layout", "Installation profiles"), this file.
+
+## Second pass, 2026-09-12 afternoon (verification from `~/goinfre/born2root`)
+
+Everything below was run from a fresh clone, `VM_NAME=b2r`, `BACKEND=qemu`.
+The sgoinfre VM was not touched. Commits, in order: `94a1e97` `76c9b17`
+`933f069` `3f53f04` `a0d92d4` `6162d02` `ab2c504` `10717ae`.
+
+### Fixed
+
+- **CI was red on every push since `173d703`.** One step, Markdownlint:
+  `ci.yml` installed `markdownlint-cli` unpinned, and the version npm
+  resolves now (0.49.1) adds MD060 table-column-style, which 0.45.0 (the one
+  verified locally) lacks. Two README tables and the state table above were
+  realigned and the CLI is pinned to 0.49.1. Green from `3f53f04` on.
+- **nvim never installed at first boot** (`a0d92d4`). `3334c1f` moved the
+  nvim section to the front but left its guard, `check_disk_space`, defined
+  450 lines later: the guard ran as `command not found`, which reads as a
+  full disk, and nvim was filed as failed "for lack of space" with 1.6 GB
+  free. Straight from `/var/log/first-boot.log` on the first b2r build. The
+  first real build's "nvim guard tripped" almost certainly had this cause.
+- **lvm.conf `issue_discards` was a no-op** (`6162d02`). trixie ships only the
+  commented default `# issue_discards = 0`; the pattern skipped it and
+  printed a WARN. Now uncommented in place; verified `= 1` on the rebuild.
+- **`make all` now fails on a first-boot failure** (`ab2c504`). The QEMU
+  pipeline's host phase waits for first boot (its `@reboot` line gone from
+  `/etc/crontab`), prints each `features.status` line as it lands, and exits
+  1 with the contents of `/etc/b2b/PROVISION_FAILED` when present. Proven
+  both ways: the pre-fix build exited 0 with nvim failed; after the fix a
+  planted marker stopped `make all`, removing it let it pass.
+- Pre-flight names an existing VM instead of suggesting a smaller disk
+  (`76c9b17`); the pull target stops when the pull changed the Makefile it
+  was parsed from (`933f069`, with a test).
+
+### Measured (extends the list above)
+
+- `make all VM_NAME=b2r BACKEND=qemu`: 9m19s wall clock, of which the
+  unattended install 5m10s and first boot 1m55s after sshd answered.
+  Pre-flight printed `projected total, once slimmed 15.0 GB`: a fresh clone
+  is 11 MB of source, the 345 MB (and the 15.3 GB) belonged to the sgoinfre
+  tree with its nested repos.
+- `features.status` on the rebuilt guest, every line ok:
+  `nvim / 474`, `hellish-upstream /home 1`, `webstack /var 118`,
+  `nodejs / 17`, `pytools /opt -`, `docker /var 178`. `df -m` used:
+  `/` 2883, `/opt` 116, `/var` 581, `/home` 3.
+- apt, per transaction (`/var/log/apt/history.log`, Installed-Size): install
+  phase — mandatory 9 MB, webstack 267, devtools 279; first boot —
+  `install_nvim.sh` 230 MB / 377 packages (Debian's `npm` tree), extras 92 MB
+  / 19, pipx 4, docker-ce 339 MB / 5. Manifest corrected in `10717ae`
+  (nvim 382, nvim-extras 92, nodejs 17, webstack /var 118, hellish 1;
+  docker stays at the 3300 build peak). The model now fits an explicit
+  `PROFILE=standard` at 14 GB by under 5% per mount; the automatic threshold
+  stays 15.
+- Layout: every pinned LV matches the recipe to LVM-extent rounding. `/var`
+  is 6128e6 B (5844 MiB) against the recipe's 5371: the recipe sums to
+  15360 partman-MB (10^6 B) while the qcow2 is 15360 MiB, and `/var`
+  absorbs the 746 MB difference. README's "~5.2 GB" shows as 5.6G in `df`.
+- Discard, proven: `allow_discards` on the mapping, `DISC-MAX 2G` down the
+  stack, crypttab `discard`, `fstrim.timer` enabled. qcow2 3914 MB, 5914 MB
+  after a 2000 MB blob (written to `/var/tmp`: `/home` is 974M), 5914 after
+  `rm`, **3918 MB after `fstrim -v /var`** (2.1 GiB trimmed).
+- Inception from the patched tree (`make inception SRC=… VM_NAME=b2r`):
+  pre-flight `/var: 5011 MB free of 5666`, 8 images 534.1 MB, 8 containers
+  healthy, build cache 0 after the prune, `/var` 1.1G used, https 200 from
+  guest and host with a cert for `dlesieur.42.fr`, static site 200. 45 s
+  end to end (images built in 18.9 s).
+- `make verify_guest`: 34/34.
+
+### OPEN (updated)
+
+1. **nvim plugins are not installed.** `nvim --version` works and the
+   kickstart config is in place, but `~/.local/share/nvim/lazy` is empty and
+   `/home` holds 3 MB: `install_nvim.sh` runs with `NVIM_BOOTSTRAP=0` and
+   the extras' bootstrap logged `MISS nvim-treesitter-context` / `module
+   'treesitter-context' not found`. The 700 MB the manifest reserves on
+   `/home` is for this and has not been spent on any build yet.
+2. **Inception Dockerfile fix** is applied but uncommitted in
+   `~/goinfre/Inception` (patch handed to the owner; applies to `9e74aaa` and
+   to main `2e2962b`, which has the same defects). It is lost with the next
+   wipe unless committed there.
+3. `devtools-extra` writes no `features.status` line; `pytools` records `-`.
+4. `select_backend.sh` reports VirtualBox "available" on a host whose user
+   is not in `vboxusers` (check_deps says so), so `BACKEND=auto` without a
+   terminal picks a backend that cannot start a VM here. Pass
+   `BACKEND=qemu`.
+5. The recipe's MiB/MB slack above: benign (`/var` gets it) but the table
+   understates `/var` by 14%.
+6. Old VM in sgoinfre and `make slim COMPACT=1`: unchanged from above.
+
+### hellish differences met today (add to the list at the top)
+
+- An unquoted variable is **not word-split** into a command line:
+  `S="ssh -o X"; $S host` runs a command literally named `ssh -o X`. Use a
+  function. This silently voided two test steps before it was noticed.
+- `${PIPESTATUS[0]}` is empty; capture exit codes without a pipe.
+- An unmatched glob (`--include=*.sh`, `.env.*`) aborts the command as in
+  zsh; quote patterns meant for the program.
