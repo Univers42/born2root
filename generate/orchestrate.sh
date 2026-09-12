@@ -1179,6 +1179,8 @@ ${alias_line}
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
     LogLevel ERROR
+    LocalForward 8420 127.0.0.1:8420
+    LocalForward 8421 127.0.0.1:8421
 
 SSHEOF
     echo "  ✓ Host SSH config updated (~/.ssh/config)"

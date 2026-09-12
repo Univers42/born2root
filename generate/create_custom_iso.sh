@@ -342,6 +342,7 @@ for PROVISIONER in \
     setup/install/ai/install_ai.sh \
     setup/install/nvim/install_nvim.sh \
     setup/install/nvim/install_nvim_extras.sh \
+    setup/install/nvim/install_excalidraw.sh \
     setup/install/hellish/install_hellish_plugins.sh \
     setup/install/hellish/install_hellish_upstream.sh; do
     if [ -f "$PROVISIONER" ]; then

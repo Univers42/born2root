@@ -219,7 +219,7 @@ C_CYAN   := \033[36m
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
-        nvim hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
+        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools ai \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
@@ -805,14 +805,19 @@ verif_access: verify_access
 # is ALREADY built, so the scripts can be iterated on without a 20-minute
 # rebuild, and so a machine that predates them can catch up.
 #
-#   make nvim                      Neovim (latest upstream) + kickstart.nvim
-#   make nvim NVIM_VERSION=latest  ...tracking the newest release
+#   make nvim                      Neovim + kickstart.nvim + the extras + Excalidraw,
+#                                  every plugin installed and verified
+#   make nvim NVIM_VERSION=latest  ...tracking the newest Neovim release
+#   make excalidraw                rebuild just the Excalidraw editor (:Excalidraw)
 #   make hellish_plugins           the hellishrc plugin framework
-#   make provision                 both, then print the health report
+#   make provision                 everything, then print the health report
 #   make nvim_health               just re-print :checkhealth from the VM
 nvim:
 	@VM_PATH="$(VM_PATH)" NVIM_VERSION="$(NVIM_VERSION)" NVIM_USERS="$(NVIM_USERS)" \
 		$(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" nvim
+
+excalidraw:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" excalidraw
 
 hellish_plugins:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" hellish
@@ -840,7 +845,7 @@ nvim_health:
 global_scope:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" global
 
-# Herdr (persistent terminal panes over SSH) + Claude Code.
+# Herdr (persistent terminal panes over SSH) + opencode (the AI coding agent).
 devtools:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
 

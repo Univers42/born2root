@@ -1085,7 +1085,12 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          "    ServerAliveInterval 15", "    ServerAliveCountMax 6",
          "    TCPKeepAlive yes", "    ConnectionAttempts 5", "    ConnectTimeout 15",
          "    StrictHostKeyChecking no", "    UserKnownHostsFile /dev/null",
-         "    LogLevel ERROR", ""]
+         "    LogLevel ERROR",
+         # Neovim's markdown preview (8420) and the Excalidraw editor (8421)
+         # listen on the guest's loopback only; carrying them over the ssh
+         # session makes the URLs Neovim prints work in the host's browser.
+         "    LocalForward 8420 127.0.0.1:8420",
+         "    LocalForward 8421 127.0.0.1:8421", ""]
 text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(block)
 open(path, "w").write(text)
 print("wrote the b2b block for port " + port)
