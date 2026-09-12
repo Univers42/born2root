@@ -176,6 +176,143 @@ make extpack
 It says plainly whose password it wants, asks exactly once, and prints the real
 error if it fails instead of hiding it.
 
+### VirtualBox with no root, and not in `vboxusers`
+
+On a 42 machine you are not root, you cannot insert a kernel module, and you
+are not in the `vboxusers` group. The device the hypervisor needs looks sealed
+shut:
+
+```console
+$ ls -l /dev/vboxdrv
+crw------- 1 root root 10, 123 Aug 13 22:17 /dev/vboxdrv
+$ id
+uid=101889(dlesieur) gid=4224(2024_madrid) groups=4224(2024_madrid),204(_developer)
+$ getent group vboxusers
+vboxusers:x:141:
+```
+
+Mode `0600`, owner `root:root`, and an empty `vboxusers` you are not in. And
+yet `make all BACKEND=virtualbox` builds the VM and boots it. Nothing is
+escalated to get there — the install is a **hardened** one:
+
+```console
+$ ls -l /usr/lib/virtualbox/VBoxHeadless /usr/lib/virtualbox/VirtualBoxVM
+-r-s--x--x 1 root root 141472 May  2  2024 /usr/lib/virtualbox/VBoxHeadless
+-r-s--x--x 1 root root 141472 May  2  2024 /usr/lib/virtualbox/VirtualBoxVM
+```
+
+The `s` in `-r-s--x--x` is the set-uid bit. `VBoxHeadless` starts as you and
+immediately runs as **root**, and it is root that opens `/dev/vboxdrv`. Your
+own user never opens it, so its owner and mode never applied to you.
+
+That is not a loophole; it is the layout `/usr/lib/virtualbox/vboxdrv.sh`
+picks at install time, from whether those binaries are set-uid:
+
+| Build     | `VirtualBoxVM` | Device owner     | Device mode |
+| --------- | -------------- | ---------------- | ----------- |
+| hardened  | set-uid root   | `root:root`      | `0600`      |
+| developer | plain          | `root:vboxusers` | `0660`      |
+
+So on a hardened install `root:root 0600` is the correct, intended ownership
+rather than a broken one, and joining `vboxusers` would have changed nothing.
+On a developer build the group membership really is the fix. The `ls -l` above
+is how you tell which one you have.
+
+`utils/vbox_driver.sh` is written around exactly that distinction:
+
+- `vboxdrv_hardened()` looks for the set-uid bit on `VirtualBoxVM` or
+  `VBoxHeadless`.
+- `vboxdrv_accessible()` demands `-r`/`-w` on the device **only** on a
+  developer build.
+- `vboxdrv_why()` names the real fix for the build you actually have, so it
+  never tells you to join a group that would do nothing.
+
+Requiring user read/write unconditionally is a regression that has already
+happened here once: it declared a perfectly working VirtualBox unusable, and
+`make all` then dropped to the other hypervisor without asking.
+`tests/test_vbox_driver.sh` pins both halves down with fixture directories.
+
+Two things on this path do need root, and both are already done on a machine
+where VirtualBox was installed from a package:
+
+1. **Inserting `vboxdrv`.** Out-of-tree module, so `insmod` needs root. Check
+   with `lsmod | grep vboxdrv`, or `make check_driver`, which reports what is
+   missing and what would fix it.
+2. **The udev rule** that creates the device with the ownership in the table
+   above (`/etc/udev/rules.d/60-vboxdrv.rules`).
+
+Neither is something the build tries to do for you: `make all` refuses to run
+under `sudo` at all (the `no_root` guard), because a build run as root bakes
+root's SSH key into the guest and leaves root-owned files behind.
+
+### One hypervisor at a time — what actually blocks VirtualBox
+
+Permissions are usually not what stops VirtualBox on a machine like this. The
+CPU's virtualization extension is. VT-x (Intel) and AMD-V (AMD) belong to
+**one** hypervisor at a time, and this project can run guests under both:
+
+- Start a VirtualBox VM while a KVM guest runs and VirtualBox reaches the
+  hardware and fails: `VERR_SVM_IN_USE` on AMD,
+  `VERR_VMX_IN_VMX_ROOT_MODE` on Intel.
+- The mirror image is `ioctl(KVM_CREATE_VM) failed: 16 Device or resource
+  busy` — what QEMU prints while a VirtualBox VM holds the extension.
+  `setup/host/kvm_probe.sh` asks KVM for a VM exactly the way QEMU will, so
+  the answer comes from the hardware instead of from a permission bit.
+
+This is why `make all` asks which hypervisor to use, and it is also what once
+stopped it asking: with one of this project's own qemu guests running,
+VirtualBox was recorded as unavailable, that left a single backend standing,
+and the question that only appears when both work never appeared. A guest
+holding the extension is transient and yours to stop, so it is now a third
+state rather than unavailability:
+
+```console
+$ make all
+  Both hypervisors work on this machine. Which should build the VM?
+
+    1) virtualbox  the project's original path; VBoxManage NAT rules,
+                    snapshots, and the tooling most of the docs describe
+                    needs the running KVM guest stopped first
+    2) qemu        KVM accelerated, no kernel module to install;
+                    works as an ordinary user wherever /dev/kvm is readable
+
+  Choice [1]: 1
+
+  These hold the CPU's virtualization extension:
+    qemu-system-x86_64 b2r (pid 1259932)
+
+  Stop them now? [y/N]: y
+  ✓ VT-x/AMD-V is free
+```
+
+Answering `y` hands the guests to `setup/host/stop_kvm_guests.sh`, which stops
+each one through `qemu_vm.sh` when it is one of this project's (the monitor
+`quit` flushes the qcow2, which a kill would not), falls back to `SIGTERM` then
+`SIGKILL` for anything else, and then re-probes until the extension is really
+free rather than assuming the kills did it. It never stops anything unasked:
+with no terminal to ask on it refuses and prints the manual route instead.
+
+The rest of the ways to drive that choice:
+
+```bash
+make backend                      # print the decision and the reasons, build nothing
+make all BACKEND=virtualbox       # refuses early, naming `make qemu_stop VM_NAME=…`
+make all BACKEND=qemu             # skip the question the other way
+make qemu_stop VM_NAME=b2r        # free the extension by hand
+FORCE_BACKEND=1 make all BACKEND=virtualbox   # "I know, try it anyway"
+```
+
+`BACKEND=virtualbox` refusing **before** the ISO build is deliberate: it used
+to warn, scroll past, and then die minutes later inside `VBoxManage startvm`
+with a `VERR_` code that reads like a broken VirtualBox.
+
+Measured on 2026-09-12, on the hardened install above with an empty
+`vboxusers`: with two qemu guests up, `VBoxManage startvm` failed
+`VERR_SVM_IN_USE`; with the extension free the same command reported
+`successfully started`, and `make all` answered `1` ran the whole unattended
+install on VirtualBox through to `B2B-INSTALL-COMPLETE`, LUKS unlock, and
+`ssh b2b`.
+
 ### Why the unlock uses `keyboardputstring`, not `addencpassword`
 
 `VBoxManage controlvm <vm> addencpassword` is the VDI-encryption command: it
@@ -264,6 +401,9 @@ make all
 | `make serial_log`       | Print the serial console log and exit                                       |
 | `make gui_vm`           | Escape hatch: open the VirtualBox window                                    |
 | `make poweroff`         | Shut down the VM                                                            |
+| `make backend`          | Print which hypervisor would be used, and why — builds nothing              |
+| `make check_driver`     | Explain the state of VirtualBox's kernel driver                             |
+| `make qemu_stop`        | Stop the QEMU guest (frees VT-x/AMD-V for VirtualBox)                       |
 | `make deps`             | Install VirtualBox + tools                                                  |
 | `make extpack`          | Install the VirtualBox Extension Pack (optional)                            |
 | `make fix_app_ports`    | Repair VirtualBox NAT forwarding for the osionos/ft_transcendence app ports |
