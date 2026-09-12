@@ -75,4 +75,35 @@ check "pull with real local edits succeeded" "$?" 0
 check "local edit survived the pull" "$(cat "$TMP/work/tracked.txt")" "my real local edit"
 check "upstream commit arrived" "$([ -f "$TMP/work/other.txt" ] && echo yes || echo no)" yes
 
+# ── A pull that changes the Makefile itself must stop the run ───────────────
+# make parsed the OLD Makefile before the pull ran, so every variable the rest
+# of `make all` would use (DISK_SIZE_MB, SPACE_BUDGET_GB, ...) is already
+# expanded from it. Seen in the wild: a checkout several commits behind pulled
+# the SIZE_B2B work and then checked a 14 GB disk against a 15 GB budget with
+# scripts that expected 15 and 16. The recipe must exit 1 and say to run make
+# again -- and the next pull, with nothing left to fetch, must succeed.
+rm -f "$TMP/work/Makefile" # the untracked copy would block a tracked one
+cp "$MAKEFILE" "$TMP/seed/Makefile"
+git_q -C "$TMP/seed" add -A
+git_q -C "$TMP/seed" commit -qm "track the Makefile"
+git_q -C "$TMP/seed" push -q origin main
+git_q -C "$TMP/work" pull -q --autostash --ff-only origin main
+check "work now tracks the Makefile" "$(git_q -C "$TMP/work" ls-files Makefile)" Makefile
+
+printf '# upstream edit\n' >>"$TMP/seed/Makefile"
+git_q -C "$TMP/seed" add -A
+git_q -C "$TMP/seed" commit -qm "Makefile moves"
+git_q -C "$TMP/seed" push -q origin main
+
+# A recipe's `exit 1` surfaces as make's own failure status, which is 2.
+(cd "$TMP/work" && make --no-print-directory pull) >"$TMP/pull3.log" 2>&1
+check "pull that changed the Makefile fails (make exits 2)" "$?" 2
+check "the pull itself still happened" "$(tail -n1 "$TMP/work/Makefile")" "# upstream edit"
+check "it says the Makefile was updated" "$(grep -c 'updated the Makefile' "$TMP/pull3.log")" 1
+check "it says to run make again" "$(grep -c 'Run the same command again' "$TMP/pull3.log")" 1
+
+(cd "$TMP/work" && make --no-print-directory pull) >"$TMP/pull4.log" 2>&1
+check "the next pull, nothing new, succeeds" "$?" 0
+check "local edit still there after both" "$(cat "$TMP/work/tracked.txt")" "my real local edit"
+
 exit "$fail"

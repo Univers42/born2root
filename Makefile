@@ -395,9 +395,17 @@ prepare: deps pull shell
 #
 # git's own --autostash has no such gap: it stashes only when there is something
 # to stash, and restores exactly what it stashed, or nothing at all.
+# A pull that changes the Makefile is a pull that changes the run it is part
+# of: make has already read the old file and expanded its variables, so the
+# rest of `make all` would build with yesterday's defaults against today's
+# scripts. Measured: DISK_SIZE_MB=14336 from the parsed Makefile met the
+# pre-flight from the freshly pulled utils/space_budget.sh, and the numbers
+# on screen matched neither commit. So when the pull moved HEAD and the
+# Makefile is among what moved, this stops and says to run make again.
 pull:
 	@$(SCRIPT_SH) -c '\
 	if [ -d .git ]; then \
+		before=$$(git rev-parse HEAD 2>/dev/null); \
 		printf "$(C_BLUE)▶$(C_RESET) Pulling latest from origin/main...\n"; \
 		if git pull --autostash --ff-only origin main 2>/dev/null; then \
 			printf "$(C_GREEN)✓$(C_RESET) Repository up to date\n"; \
@@ -411,6 +419,15 @@ pull:
 			git diff --name-only --diff-filter=U | sed "s/^/    /"; \
 			printf "    Resolve the conflict markers above, then: git add <files> && make all\n"; \
 			printf "    Your work is still in the stash too: git stash list\n"; \
+			exit 1; \
+		fi; \
+		after=$$(git rev-parse HEAD 2>/dev/null); \
+		if [ -n "$$before" ] && [ "$$before" != "$$after" ] \
+			&& git diff --quiet "$$before" "$$after" -- Makefile 2>/dev/null; then :; \
+		elif [ -n "$$before" ] && [ "$$before" != "$$after" ]; then \
+			printf "$(C_YELLOW)⚠$(C_RESET)  the pull updated the Makefile ($${before:0:7} → $${after:0:7}).\n"; \
+			printf "    This run was parsed from the old one, so its defaults are stale.\n"; \
+			printf "    Run the same command again: $(C_BOLD)make $(MAKECMDGOALS)$(C_RESET)\n"; \
 			exit 1; \
 		fi; \
 	fi'
