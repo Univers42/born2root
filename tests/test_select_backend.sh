@@ -79,6 +79,7 @@ chmod 755 "$TMP/bin/kvm_probe"
 
 # Two stand-ins for stop_kvm_guests.sh: one that clears the way (the user said
 # yes) and one that does not (declined, or no terminal to ask on).
+# shellcheck disable=SC2016  # $FREED expands inside the stub, later
 printf '#!/bin/sh\necho "  stopped" >&2\n: >"$FREED"\nexit 0\n' >"$TMP/bin/stop_free"
 printf '#!/bin/sh\necho "  nothing stopped" >&2\nexit 1\n' >"$TMP/bin/stop_refuse"
 chmod 755 "$TMP/bin/stop_free" "$TMP/bin/stop_refuse"
@@ -97,20 +98,27 @@ printf 'qemu-system-x86_64 debian (pid 2222)\nqemu-system-x86_64 debian (pid 333
 run() {
     want="$1"
     holders="$2"
-    out=$(
-        PATH="$TMP/bin:$PATH" \
-            VBOXDRV_PROC_MODULES="$TMP/modules" \
-            VBOX_LIB_DIR="$TMP/lib" \
-            VBOXDRV_DEV="$TMP/vboxdrv" \
-            KVM_PROBE="$TMP/bin/kvm_probe" \
-            STOP_KVM_GUESTS="${STOP_STUB:-$TMP/bin/stop_refuse}" \
-            HOLDERS="$holders" \
-            FREED="$TMP/freed" \
-            KVM_READY="${KVM_READY:-1}" \
-            FORCE_BACKEND="${FORCE_BACKEND:-0}" \
-            "${SCRIPT_SH:-bash}" "$REPO/setup/host/select_backend.sh" "$want" \
-            2>"$TMP/err" </dev/null
-    ) && rc=0 || rc=$?
+    # The decision goes to a FILE, not straight into `out=$(...)`. Under
+    # hellish a multi-line command substitution reports exit status 0 whatever
+    # the command did (single-line reports it correctly; bash reports it in
+    # both), so an exit-code check written the obvious way passes no matter
+    # what happened. A plain command's $? is reliable in both shells.
+    set +e
+    PATH="$TMP/bin:$PATH" \
+        VBOXDRV_PROC_MODULES="$TMP/modules" \
+        VBOX_LIB_DIR="$TMP/lib" \
+        VBOXDRV_DEV="$TMP/vboxdrv" \
+        KVM_PROBE="$TMP/bin/kvm_probe" \
+        STOP_KVM_GUESTS="${STOP_STUB:-$TMP/bin/stop_refuse}" \
+        HOLDERS="$holders" \
+        FREED="$TMP/freed" \
+        KVM_READY="${KVM_READY:-1}" \
+        FORCE_BACKEND="${FORCE_BACKEND:-0}" \
+        "${SCRIPT_SH:-bash}" "$REPO/setup/host/select_backend.sh" "$want" \
+        >"$TMP/out" 2>"$TMP/err" </dev/null
+    rc=$?
+    set -e
+    out=$(cat "$TMP/out")
     err=$(cat "$TMP/err")
 }
 

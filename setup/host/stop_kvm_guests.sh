@@ -51,6 +51,14 @@ if [ ! -t 2 ] || [ -n "${NO_COLOR:-}" ]; then
 fi
 say() { printf "%b\n" "$*" >&2; }
 
+# Is there a terminal to ask a question on? `[ -r /dev/tty ]` is not the test:
+# the node exists with permissive modes even when the process has no
+# controlling terminal, and the open then fails with ENXIO ("No such device or
+# address") halfway through the prompt. Opening it in a subshell is the only
+# answer that matches what `read </dev/tty` will do, and a subshell keeps a
+# failed redirection from taking the script down with it.
+tty_available() { (: </dev/tty) 2>/dev/null; }
+
 holders() { "${SCRIPT_SH:-bash}" "$KVM_PROBE" users; }
 
 # The VM directory of one of this project's guests. VM_PATH wins when set (the
@@ -106,7 +114,7 @@ printf '%s\n' "$list" | sed '/^$/d; s|^|    |' >&2
 say ""
 
 if [ "$ASSUME_YES" != 1 ]; then
-    if [ ! -r /dev/tty ]; then
+    if ! tty_available; then
         say "  ${C_YELLOW}⚠${C_RESET}  no terminal to confirm on — nothing stopped"
         exit 1
     fi

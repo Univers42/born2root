@@ -30,9 +30,14 @@ check() {
 }
 
 TMP=$(mktemp -d)
+# shellcheck disable=SC2317  # every line below runs from the EXIT trap
 cleanup() {
     # Never leave a stand-in behind, whatever the test did.
-    [ -s "$TMP/pids" ] && while read -r p; do kill -9 "$p" 2>/dev/null || true; done <"$TMP/pids"
+    if [ -s "$TMP/pids" ]; then
+        while read -r p; do
+            kill -9 "$p" 2>/dev/null || true
+        done <"$TMP/pids"
+    fi
     rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -59,6 +64,7 @@ chmod 755 "$TMP/kvm_probe"
 
 # qemu_vm.sh must not be reached: these stand-ins have no VM directory, which
 # is exactly the deleted-image case. If it ever is, the test says so.
+# shellcheck disable=SC2016  # $QEMU_VM_CALLED expands inside the stub, later
 printf '#!/bin/sh\ntouch "$QEMU_VM_CALLED"\nexit 0\n' >"$TMP/qemu_vm"
 chmod 755 "$TMP/qemu_vm"
 
@@ -66,20 +72,27 @@ spawn() {
     : >"$TMP/pids"
     i=0
     while [ "$i" -lt "$1" ]; do
-        sleep 300 &
-        echo "$!" >>"$TMP/pids"
+        # Orphaned on purpose: a stand-in that is this shell's own job gets a
+        # "Killed" notification printed over the test's output when it dies.
+        sh -c 'sleep 300 >/dev/null 2>&1 & echo $!' >>"$TMP/pids"
         i=$((i + 1))
     done
 }
 alive_count() {
     n=0
     while read -r p; do
-        kill -0 "$p" 2>/dev/null && n=$((n + 1))
+        if kill -0 "$p" 2>/dev/null; then n=$((n + 1)); fi
     done <"$TMP/pids"
     echo "$n"
 }
+# Every variable the script reads is passed explicitly. Under hellish an
+# assignment prefix on a FUNCTION call (`STOP_KVM_YES=1 run`) sets a shell
+# variable for the call but does not export it to the commands the function
+# then runs, so relying on inheritance passes under bash and silently tests
+# nothing under the shell this project actually uses.
 run() {
     KVM_PROBE="$TMP/kvm_probe" \
+        STOP_KVM_YES="${STOP_KVM_YES:-0}" \
         QEMU_VM="$TMP/qemu_vm" \
         QEMU_VM_CALLED="$TMP/qemu_vm_called" \
         HOLDER_PIDS="$TMP/pids" \
@@ -115,7 +128,9 @@ case "$err" in
     fail=1
     ;;
 esac
-while read -r p; do kill -9 "$p" 2>/dev/null || true; done <"$TMP/pids"
+while read -r p; do
+    kill -9 "$p" 2>/dev/null || true
+done <"$TMP/pids"
 
 # ── Nothing holds it: says so, exits 0, asks nobody ────────────────────────
 : >"$TMP/pids"
