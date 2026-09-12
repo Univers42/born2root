@@ -119,16 +119,64 @@ phase "First boot"
 phase "Host configuration"
 "${SCRIPT_SH:-bash}" "$QEMU_VM" ssh-config || die "could not write ~/.ssh/config"
 
-if timeout 20 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
-    b2b 'echo ok' >/dev/null 2>&1; then
-    ok "ssh b2b works: $(ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR b2b 'hostname' 2>/dev/null)"
+# ── 6. First boot must have FINISHED, and finished clean ────────────────────
+# The install watcher fails the build on B2B-FEATURE-FAILED, but only while
+# d-i runs. Most of the provisioning happens later, at first boot, from an
+# @reboot crontab entry with no watcher on it: a base feature failing there
+# wrote /etc/b2b/PROVISION_FAILED and flagged the MOTD, and `make all` still
+# exited 0 with "QEMU build finished". A build is not finished until first
+# boot is, so this waits for it and then reads the verdict off the guest.
+#
+# "Finished" is the marker first-boot-setup.sh leaves itself: its last step
+# removes its own @reboot line from /etc/crontab (world-readable, no sudo).
+# /etc/b2b/{PROVISION_FAILED,features.status} are 0644 for the same reason.
+ssh_q() {
+    timeout 25 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
+        b2b "$@" 2>/dev/null
+}
+FIRST_BOOT_TIMEOUT="${FIRST_BOOT_TIMEOUT:-1800}"
+waited=0
+until ssh_q 'echo ok' >/dev/null; do
+    [ "$waited" -ge 300 ] && die "ssh b2b never answered after the unlock. Look: make qemu_screenshot  |  make qemu_console"
+    sleep 10
+    waited=$((waited + 10))
+done
+ok "ssh b2b works: $(ssh_q hostname)"
+
+# shellcheck disable=SC2059
+printf "  ${C_DIM}waiting for first boot to finish (nvim, hellish, then the profile's features)${C_RESET}\n"
+last=""
+until [ "$(ssh_q 'grep -c first-boot-setup /etc/crontab 2>/dev/null || true')" = 0 ]; do
+    [ "$waited" -ge "$FIRST_BOOT_TIMEOUT" ] && die "first boot is still running after $((waited / 60)) min. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
+    sleep 15
+    waited=$((waited + 15))
+    cur=$(ssh_q 'tail -n1 /etc/b2b/features.status 2>/dev/null')
+    if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
+        # shellcheck disable=SC2059
+        printf "  ${C_DIM}  %s${C_RESET}\n" "$cur"
+        last=$cur
+    fi
+done
+ok "first boot finished after $((waited / 60))m$((waited % 60))s"
+
+if failed=$(ssh_q 'cat /etc/b2b/PROVISION_FAILED 2>/dev/null') && [ -n "$failed" ]; then
+    # shellcheck disable=SC2059
+    printf "\n  ${C_RED}✗${C_RESET} provisioning failed inside the guest (/etc/b2b/PROVISION_FAILED):\n" >&2
+    printf '%s\n' "$failed" | sed 's/^/      /' >&2
+    printf "\n    per feature (/etc/b2b/features.status):\n" >&2
+    ssh_q 'cat /etc/b2b/features.status 2>/dev/null' | sed 's/^/      /' >&2
+    die "a required feature did not install at first boot — the profile was checked against the layout, so this is a wrong cost estimate or a network failure. Guest log: /var/log/b2b-provision.log"
+fi
+if bad=$(ssh_q 'grep -E " (failed|no-space) " /etc/b2b/features.status 2>/dev/null') && [ -n "$bad" ]; then
+    printf '%s\n' "$bad" | sed 's/^/      /' >&2
+    die "features.status records a failure — see above. Guest log: /var/log/b2b-provision.log"
+fi
+status=$(ssh_q 'cat /etc/b2b/features.status 2>/dev/null' || true)
+if [ -n "$status" ]; then
+    ok "every feature installed: $(printf '%s\n' "$status" | grep -c ' ok ') ok, $(printf '%s\n' "$status" | grep -c ' off ') off by profile"
 else
-    # shellcheck disable=SC2059
-    printf "  ${C_DIM}ssh b2b is not answering yet — first boot installs Docker and\n"
-    # shellcheck disable=SC2059
-    printf "  WordPress, which takes a few minutes. Watch: make qemu_console${C_RESET}\n"
+    ok "no /etc/b2b/features.status on this guest (built before feature accounting) — nothing to verify"
 fi
 
 # shellcheck disable=SC2059
