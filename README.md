@@ -985,7 +985,7 @@ be turned off. Everything else can be, per feature:
 ```bash
 make all SIZE_B2B=10                        # minimal
 make all SIZE_B2B=10 FEATURES=+docker       # minimal plus Docker — fits, so it builds
-make all SIZE_B2B=14 PROFILE=standard       # refused: "fits from SIZE_B2B=15"
+make all SIZE_B2B=13 PROFILE=standard       # refused: "fits from SIZE_B2B=14"
 make all FEATURES="-pytools -devtools-extra"
 ```
 

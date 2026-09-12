@@ -28,7 +28,7 @@ fits_from() { "$@" 2>&1 | grep -o 'fits from SIZE_B2B=[0-9]*' | head -1; }
 # ── Profiles from size ──────────────────────────────────────────────────────
 check "8 GB → minimal" "$(SIZE_B2B=8 "${FP[@]}" --resolve | sed -n 's/^profile=//p')" minimal
 check "13 GB → minimal" "$(SIZE_B2B=13 "${FP[@]}" --resolve | sed -n 's/^profile=//p')" minimal
-check "14 GB → minimal (standard needs 15 with the base OS counted)" "$(SIZE_B2B=14 "${FP[@]}" --resolve | sed -n 's/^profile=//p')" minimal
+check "14 GB → minimal (auto picks standard from 15; see STANDARD_FROM_GB)" "$(SIZE_B2B=14 "${FP[@]}" --resolve | sed -n 's/^profile=//p')" minimal
 check "15 GB (default) → standard" "$("${FP[@]}" --resolve | sed -n 's/^profile=//p')" standard
 check "30 GB → full" "$(SIZE_B2B=30 "${FP[@]}" --resolve | sed -n 's/^profile=//p')" full
 
@@ -48,8 +48,10 @@ done
 
 # ── Refusals name the size that works ───────────────────────────────────────
 check "13 GB standard: refused" "$(rc_of env SIZE_B2B=13 PROFILE=standard "${FP[@]}" --check)" 1
-check "13 GB standard: names 15" "$(fits_from env SIZE_B2B=13 PROFILE=standard "${FP[@]}" --check)" "fits from SIZE_B2B=15"
-check "14 GB standard: refused" "$(rc_of env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" 1
+check "13 GB standard: names 14" "$(fits_from env SIZE_B2B=13 PROFILE=standard "${FP[@]}" --check)" "fits from SIZE_B2B=14"
+# Explicit PROFILE=standard at 14 passes the fit check since the 2026-09-12
+# calibration (by <5% on every mount); the AUTOMATIC pick stays minimal there.
+check "14 GB standard, explicit: fits" "$(rc_of env SIZE_B2B=14 PROFILE=standard "${FP[@]}" --check)" 0
 check "8 GB full: refused" "$(rc_of env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check)" 1
 check "8 GB full: names a size" "$(fits_from env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check | grep -c .)" 1
 # Docker's /var cost is the measured one (Inception with bonus: 2.35 GB of

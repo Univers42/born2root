@@ -54,16 +54,37 @@ RECIPE="$HERE/partition_recipe.sh"
 # to the MB. The first table had no debian-base row at all, and nvim's space
 # guard tripped on a disk the check had passed. /etc/b2b/features.status on a
 # built guest is where the next correction comes from.
+#
+# Corrected from /etc/b2b/features.status of the 2026-09-12 build (b2r,
+# SIZE_B2B=15, standard, every feature ok), where a measured delta differed
+# from the estimate by more than a third:
+#   nvim      /     350 -> 382   the nvim section's delta was 474, of which the
+#   nvim-extras /     0 -> 92    extras' apt transaction (fzf, bat, lazygit,
+#                                gdb, the shell linter, ...) is 92 MB by
+#                                /var/log/apt/history.log; the rest is install_nvim.sh's own
+#                                apt line -- 230 MB, 377 packages, Debian's npm
+#                                tree -- plus its non-apt installs. Node is paid
+#                                here, by the first section that needs it;
+#   nodejs    /     250 -> 17    ...which leaves the nodejs section only the
+#                                globals (eslint & co.). The trio's total on /
+#                                went from 600 estimated to 491 measured.
+#   webstack  /var  200 -> 118   MariaDB + WordPress + PHP at install time; the
+#                                database grows with use.
+#   hellish   /home  40 -> 1     the binary lives on /, ~/.hellish is tiny.
+# docker's /var figure stays 3300: it is the build PEAK (2.35 GB of build
+# cache measured on the host), not the 178 MB the engine alone costs. nvim's
+# 300 on /home and nvim-extras' 400 are still estimates: the plugin bootstrap
+# left /home at 3 MB on that build, so the cost lands at first launch.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      100   0     0     0      -
 devtools-apt       base      450   0     0     0      -
-nvim               base      350   120   0     300    devtools-apt
-hellish-upstream   base      0     0     0     40     -
-webstack           standard  400   0     200   0      -
-nodejs             standard  250   60    0     0      -
+nvim               base      382   120   0     300    devtools-apt
+hellish-upstream   base      0     0     0     1      -
+webstack           standard  400   0     118   0      -
+nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
-nvim-extras        standard  0     0     0     400    nvim
+nvim-extras        standard  92    0     0     400    nvim
 devtools-extra     standard  0     110   0     0      nodejs
 docker             standard  400   0     3300  0      -
 ai-client          explicit  50    0     0     0      -
@@ -81,8 +102,11 @@ ai_model_mb() {
     else echo 9000; fi # qwen3:14b
 }
 
-# 14 GB cannot hold the standard set with the base OS counted (/ and /home
-# both come up short); 15 can, with margin. Measured, not chosen.
+# With the 2026-09-12 costs the model puts the standard set inside 14 GB, but
+# by under 5% on every mount (/ 2941 of 3069 usable, /home 701 of 731) and
+# with nvim's /home figure still an estimate. The automatic pick therefore
+# stays at 15 -- an explicit PROFILE=standard at 14 passes the fit check and
+# is allowed -- until a 14 GB build confirms the margin. 15 fits with room.
 STANDARD_FROM_GB=15
 FULL_FROM_GB=30
 # Usable fraction of a volume: ext4 shows ~93% of the partman figure, and 20%
