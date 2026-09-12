@@ -33,6 +33,7 @@ WANT="${1:-${BACKEND:-auto}}"
 # machine (guests running or not, KVM reachable or not) while running on one
 # that is none of those. Production callers never set it.
 KVM_PROBE="${KVM_PROBE:-$HERE/kvm_probe.sh}"
+STOP_KVM_GUESTS="${STOP_KVM_GUESTS:-$HERE/stop_kvm_guests.sh}"
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -87,6 +88,17 @@ fi
 # not power off a VM. So it names the command instead -- and it does so BEFORE
 # the ISO build and the 20-minute install, not a minute into VM startup, which
 # is where a warning here used to surface.
+# Someone who has just answered "virtualbox" needs it to work, not homework.
+# So offer to clear the way; stop_kvm_guests.sh names every guest and waits for
+# a y of its own, and refuses when there is no terminal to ask on. Only if that
+# leaves the extension held do we fall back to printing the manual route.
+vbox_try_free() {
+    "${SCRIPT_SH:-bash}" "$STOP_KVM_GUESTS" || return 1
+    vbox_ok=1
+    vbox_why="ready"
+    vbox_holders=""
+}
+
 vbox_blocked_report() {
     local names
     say ""
@@ -133,11 +145,12 @@ virtualbox | vbox)
     # VBoxManage startvm, where the reason is a VERR_ code. Refuse now, unless
     # the caller says they mean it.
     if [ "$vbox_ok" = 2 ]; then
-        if [ "${FORCE_BACKEND:-0}" != "1" ]; then
+        if [ "${FORCE_BACKEND:-0}" = "1" ]; then
+            say "  ${C_YELLOW}⚠${C_RESET}  backend: ${C_BOLD}virtualbox${C_RESET} — FORCE_BACKEND=1 (${vbox_why})"
+        elif ! vbox_try_free; then
             vbox_blocked_report
             exit 1
         fi
-        say "  ${C_YELLOW}⚠${C_RESET}  backend: ${C_BOLD}virtualbox${C_RESET} — FORCE_BACKEND=1 (${vbox_why})"
     fi
     [ "$vbox_ok" = 0 ] && say "  ${C_YELLOW}⚠${C_RESET}  BACKEND=virtualbox but: ${vbox_why}"
     [ "$vbox_ok" = 1 ] && say "  ${C_GREEN}✓${C_RESET} backend: ${C_BOLD}virtualbox${C_RESET} ${C_DIM}(${vbox_why})${C_RESET}"
@@ -228,7 +241,7 @@ case "$ans" in
     printf 'qemu'
     ;;
 *)
-    if [ "$vbox_ok" = 2 ]; then
+    if [ "$vbox_ok" = 2 ] && ! vbox_try_free; then
         vbox_blocked_report
         exit 1
     fi

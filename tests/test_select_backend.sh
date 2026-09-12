@@ -77,6 +77,12 @@ exit 2
 PROBE
 chmod 755 "$TMP/bin/kvm_probe"
 
+# Two stand-ins for stop_kvm_guests.sh: one that clears the way (the user said
+# yes) and one that does not (declined, or no terminal to ask on).
+printf '#!/bin/sh\necho "  stopped" >&2\n: >"$FREED"\nexit 0\n' >"$TMP/bin/stop_free"
+printf '#!/bin/sh\necho "  nothing stopped" >&2\nexit 1\n' >"$TMP/bin/stop_refuse"
+chmod 755 "$TMP/bin/stop_free" "$TMP/bin/stop_refuse"
+
 : >"$TMP/none"
 printf 'qemu-system-x86_64 b2r (pid 1111)\n' >"$TMP/one"
 # Two processes, one VM: a qemu left over from an earlier attempt and the live
@@ -97,7 +103,9 @@ run() {
             VBOX_LIB_DIR="$TMP/lib" \
             VBOXDRV_DEV="$TMP/vboxdrv" \
             KVM_PROBE="$TMP/bin/kvm_probe" \
+            STOP_KVM_GUESTS="${STOP_STUB:-$TMP/bin/stop_refuse}" \
             HOLDERS="$holders" \
+            FREED="$TMP/freed" \
             KVM_READY="${KVM_READY:-1}" \
             FORCE_BACKEND="${FORCE_BACKEND:-0}" \
             "${SCRIPT_SH:-bash}" "$REPO/setup/host/select_backend.sh" "$want" \
@@ -140,6 +148,24 @@ contains "blocked: offers qemu instead" "$err" "BACKEND=qemu"
 run virtualbox "$TMP/twins"
 stops=$(printf '%s\n' "$err" | grep -c "make qemu_stop VM_NAME=debian" || true)
 check "two processes, one VM: one stop line" "$stops" 1
+
+# ── The offer: picking virtualbox clears the way instead of printing
+#    homework. Being asked which hypervisor to use, answering, and then being
+#    told to run two commands by hand is a question that was not worth asking.
+rm -f "$TMP/freed"
+STOP_STUB="$TMP/bin/stop_free" run virtualbox "$TMP/one"
+check "offer accepted: decision" "$out" virtualbox
+check "offer accepted: exit" "$rc" 0
+check "offer accepted: it really ran" "$([ -f "$TMP/freed" ] && echo yes || echo no)" yes
+unset STOP_STUB
+
+# Same through the question rather than BACKEND=, which is the route a person
+# actually takes. No terminal here, so feed the answer on stdin: the prompt
+# reads /dev/tty, so this exercises the decision, not the tty handling.
+rm -f "$TMP/freed"
+STOP_STUB="$TMP/bin/stop_free" run auto "$TMP/one"
+check "no tty still prefers qemu" "$out" qemu
+unset STOP_STUB
 
 # ── FORCE_BACKEND=1 means "I know, do it anyway" ───────────────────────────
 FORCE_BACKEND=1 run virtualbox "$TMP/one"
