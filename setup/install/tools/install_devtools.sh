@@ -1,6 +1,6 @@
 #!/usr/bin/env hellish
 #
-# install_devtools.sh — Herdr and Claude Code.
+# install_devtools.sh — Herdr and opencode.
 #
 # HERDR (https://herdr.dev, github.com/herdrdev/herdr)
 #   A single ~10 MB Rust binary that splits into a persistent background server
@@ -21,22 +21,42 @@
 #   directly instead, the same way setup/fetch_hellish.sh fetches hellish --
 #   which is also how the version ends up pinnable and cacheable.
 #
-# CLAUDE CODE
-#   npm install -g @anthropic-ai/claude-code. Lands in the npm prefix set by
-#   install_global_scope.sh (/opt/npm-global), so it does not consume /.
+# OPENCODE (https://opencode.ai, github.com/anomalyco/opencode)
+#   The AI coding agent in this VM, in place of Claude Code since 2026-09-12:
+#   one static binary that works with any provider -- Anthropic, OpenAI,
+#   GitHub Copilot, or the local Ollama that install_ai.sh sets up and wires
+#   in -- where `npm i -g @anthropic-ai/claude-code` was tied to one vendor
+#   and weighed 414 MB on / (measured: /usr/local/lib/node_modules/@anthropic-ai
+#   on the 2026-09-12 build; the npm prefix never actually moved to /opt).
+#
+#   Fetched as the release tarball, like Herdr, and for the same reasons plus
+#   one: upstream's `curl https://opencode.ai/install | bash` installs into
+#   ~/.opencode/bin, per user, on the /home volume this layout sizes for
+#   Neovim's plugins. The tarball holds exactly one file, 176 MB unpacked
+#   (v1.18.30), so it goes beside herdr in /usr/local/bin, and the manifest
+#   in generate/feature_profile.sh carries it under devtools-extra on /.
+#
+#   First use: `opencode auth login` (or `opencode` then /connect) stores a
+#   provider key under ~/.local/share/opencode; with AI_MODE=local nothing is
+#   needed, install_ai.sh points it at the model on this box.
 #
 # USAGE
 #   sudo ./install_devtools.sh
-#   sudo HERDR_VERSION=v0.8.2 ./install_devtools.sh    # pin instead of latest
-#   sudo INSTALL_HERDR=0 ./install_devtools.sh          # skip one of them
-#   sudo INSTALL_CLAUDE_CODE=0 ./install_devtools.sh
+#   sudo HERDR_VERSION=v0.8.2 ./install_devtools.sh       # pin instead of latest
+#   sudo OPENCODE_VERSION=v1.18.30 ./install_devtools.sh  # same for opencode
+#   sudo INSTALL_HERDR=0 ./install_devtools.sh             # skip one of them
+#   sudo INSTALL_OPENCODE=0 ./install_devtools.sh
+#
+# Exits non-zero when a tool it was asked to install is not on PATH at the
+# end, so first boot records devtools-extra as failed instead of a [WARN]
+# scrolling past in a log nobody reads.
 
 set -u
 
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # The npm prefix is moved to /opt by install_global_scope.sh, and npm's own
 # bin directory is NOT on the default PATH. Without this line a package this
-# script installs itself (tree-sitter, claude) is invisible to the very next
+# script installs itself (tree-sitter, the neovim provider) is invisible to the very next
 # `command -v` that checks for it -- installed, working, and reported missing.
 # Ask npm where it actually is rather than hardcoding the location.
 if command -v npm >/dev/null 2>&1; then
@@ -52,7 +72,10 @@ HERDR_REPO="${HERDR_REPO:-herdrdev/herdr}"
 HERDR_VERSION="${HERDR_VERSION:-}" # empty = resolve the latest release
 HERDR_DEST="${HERDR_DEST:-/usr/local/bin/herdr}"
 INSTALL_HERDR="${INSTALL_HERDR:-1}"
-INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
+OPENCODE_REPO="${OPENCODE_REPO:-anomalyco/opencode}"
+OPENCODE_VERSION="${OPENCODE_VERSION:-}" # empty = latest release, e.g. v1.18.30
+OPENCODE_DEST="${OPENCODE_DEST:-/usr/local/bin/opencode}"
+INSTALL_OPENCODE="${INSTALL_OPENCODE:-1}"
 DEVTOOLS_USERS="${DEVTOOLS_USERS:-dlesieur}"
 
 log() { printf '[devtools] %s\n' "$*"; }
@@ -151,40 +174,90 @@ install_herdr() {
     fi
 }
 
-# ── Claude Code ─────────────────────────────────────────────────────────────
-install_claude_code() {
-    command -v npm >/dev/null 2>&1 || {
-        warn "npm not installed — skipping Claude Code"
-        return 0
-    }
+# ── opencode ────────────────────────────────────────────────────────────────
+# No GitHub API call here, unlike Herdr above: the API allows 60 anonymous
+# requests an hour per address, and a NAT'd VM shares its address with the
+# whole campus. GitHub's /releases/latest/download/<asset> redirect resolves
+# the newest release without it, and a HEAD on /releases/latest names the tag,
+# so a re-run can tell it already has this version and skip a 60 MB download.
+#
+# Upstream ships a "-baseline" x86_64 build for CPUs without AVX2. A QEMU
+# guest started with -cpu qemu64 is one, so the test is done here the same way
+# upstream's installer does it, rather than assuming the host's CPU shows.
+install_opencode() {
+    local asset tag url tmp have
 
-    # Node 18+ is required. Debian 13 ships 20+, but say so plainly rather than
-    # failing later with a syntax error from a modern bundle on an old runtime.
-    local major
-    major=$(node -v 2>/dev/null | sed 's/^v\([0-9]*\).*/\1/')
-    if [ -n "$major" ] && [ "$major" -lt 18 ]; then
-        warn "node ${major} is too old for Claude Code (needs 18+) — skipping"
+    case "$ARCH" in
+    x86_64) asset="opencode-linux-x64" ;;
+    aarch64) asset="opencode-linux-arm64" ;;
+    *)
+        warn "no opencode build for $(uname -m) — skipping"
         return 0
+        ;;
+    esac
+    if [ "$ARCH" = "x86_64" ] && ! grep -q avx2 /proc/cpuinfo 2>/dev/null; then
+        asset="${asset}-baseline"
     fi
 
-    if command -v claude >/dev/null 2>&1; then
-        log "claude already installed: $(claude --version 2>/dev/null | head -n1)"
-        return 0
-    fi
-
-    log "installing Claude Code (npm i -g @anthropic-ai/claude-code)"
-    if npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
-        hash -r 2>/dev/null || true
-        local prefix
-        prefix=$(npm config get prefix --global 2>/dev/null)
-        if [ -x "${prefix}/bin/claude" ] || command -v claude >/dev/null 2>&1; then
-            log "claude installed into ${prefix}/bin"
-        else
-            warn "npm reported success but no claude binary was found"
-        fi
+    if [ -n "$OPENCODE_VERSION" ]; then
+        tag="$OPENCODE_VERSION"
+        url="https://github.com/${OPENCODE_REPO}/releases/download/${tag}/${asset}.tar.gz"
     else
-        warn "npm install of Claude Code failed (network? registry?)"
+        # The redirect target ends in /releases/tag/<tag>.
+        tag=$(curl -fsSIL --max-time 30 "https://github.com/${OPENCODE_REPO}/releases/latest" 2>/dev/null |
+            sed -n 's#^[Ll]ocation: .*/releases/tag/\([^[:space:]]*\).*#\1#p' | tail -n1)
+        url="https://github.com/${OPENCODE_REPO}/releases/latest/download/${asset}.tar.gz"
     fi
+
+    if [ -x "$OPENCODE_DEST" ]; then
+        have=$("$OPENCODE_DEST" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+        if [ -n "$have" ] && [ -z "$tag" ]; then
+            log "opencode ${have} already installed (could not ask GitHub what the latest is — keeping it)"
+            return 0
+        fi
+        if [ -n "$have" ] && [ "v${have}" = "$tag" ]; then
+            log "opencode ${have} already installed"
+            return 0
+        fi
+    fi
+
+    # /var/tmp, not /tmp: the tarball plus the unpacked binary is ~240 MB and
+    # the /tmp volume this layout makes is 0.4 GB at SIZE_B2B=15.
+    tmp=$(mktemp -d /var/tmp/opencode.XXXXXX) || die "mktemp failed"
+    log "downloading opencode ${tag:-latest} (${asset})"
+    if ! curl -fL --retry 3 --retry-delay 2 --max-time 600 -o "${tmp}/opencode.tar.gz" "$url" 2>/dev/null; then
+        warn "download failed: ${url}"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # Upstream publishes no checksum beside the tarball. What a truncated or
+    # rate-limited download really looks like is a broken archive or an HTML
+    # page, so the archive is tested end to end and the binary is RUN before
+    # anything is installed.
+    if ! gzip -t "${tmp}/opencode.tar.gz" 2>/dev/null || ! tar -tzf "${tmp}/opencode.tar.gz" >/dev/null 2>&1; then
+        warn "the opencode download is not a valid tar.gz (truncated?)"
+        rm -rf "$tmp"
+        return 1
+    fi
+    if ! tar -xzf "${tmp}/opencode.tar.gz" -C "$tmp" opencode 2>/dev/null; then
+        warn "the opencode tarball does not contain the expected 'opencode' file"
+        rm -rf "$tmp"
+        return 1
+    fi
+    chmod 755 "${tmp}/opencode"
+    have=$("${tmp}/opencode" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+    if [ -z "$have" ]; then
+        warn "the downloaded opencode binary does not run here"
+        rm -rf "$tmp"
+        return 1
+    fi
+    if ! mv -f "${tmp}/opencode" "$OPENCODE_DEST"; then
+        warn "could not install into ${OPENCODE_DEST}"
+        rm -rf "$tmp"
+        return 1
+    fi
+    rm -rf "$tmp"
+    log "opencode ${have} installed at ${OPENCODE_DEST}"
 }
 
 # ── Make sessions actually persistent ───────────────────────────────────────
@@ -278,13 +351,13 @@ write_motd_hint() {
 # Added by born2root setup/install/tools/install_devtools.sh
 printf '\n  herdr        persistent terminal panes (survives an SSH drop)\n'
 printf '  vw           open a saved Neovim session\n'
-command -v claude >/dev/null 2>&1 && printf '  claude       Claude Code\n'
+command -v opencode >/dev/null 2>&1 && printf '  opencode     AI coding agent — first time: opencode auth login\n'
 printf '\n'
 MOTDEOF
     chmod 755 /etc/update-motd.d/50-b2b-devtools 2>/dev/null || true
 }
 
-log "=== devtools: herdr + claude code ==="
+log "=== devtools: herdr + opencode ==="
 # if/else, not `cond && fn || log`: that idiom runs the log branch whenever the
 # FUNCTION returns non-zero too, so a failed install would report itself as
 # "skipped by configuration" — the wrong message for the wrong reason.
@@ -293,11 +366,23 @@ if [ "$INSTALL_HERDR" = "1" ]; then
 else
     log "INSTALL_HERDR=0 — skipping Herdr"
 fi
-if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
-    install_claude_code
+if [ "$INSTALL_OPENCODE" = "1" ]; then
+    install_opencode
 else
-    log "INSTALL_CLAUDE_CODE=0 — skipping Claude Code"
+    log "INSTALL_OPENCODE=0 — skipping opencode"
 fi
 setup_herdr_service
 write_motd_hint
-log "=== done ==="
+
+# The verdict: what was asked for and is not on PATH is a failed feature.
+rc=0
+if [ "$INSTALL_HERDR" = "1" ] && ! command -v herdr >/dev/null 2>&1; then
+    warn "herdr was requested and is not installed"
+    rc=1
+fi
+if [ "$INSTALL_OPENCODE" = "1" ] && [ ! -x "$OPENCODE_DEST" ]; then
+    warn "opencode was requested and is not installed"
+    rc=1
+fi
+log "=== done (herdr: $(command -v herdr >/dev/null 2>&1 && herdr --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo none), opencode: $([ -x "$OPENCODE_DEST" ] && "$OPENCODE_DEST" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || echo none)) ==="
+exit "$rc"

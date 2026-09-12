@@ -137,7 +137,7 @@ setup_profile() {
 # Machine-wide tooling lives on ${GLOBAL_PREFIX} (its own LVM volume) instead of
 # / or /home. See that script's header for why.
 
-# npm globals: claude, tree-sitter, the neovim provider.
+# npm globals: tree-sitter, the neovim provider, markdownlint-cli2.
 case ":\$PATH:" in
 	*":${NPM_PREFIX}/bin:"*) ;;
 	*) PATH="${NPM_PREFIX}/bin:\$PATH" ;;
@@ -152,8 +152,8 @@ PROFEOF
     log "wrote /etc/profile.d/b2b-global.sh"
 
     # sudo resets PATH to secure_path, so a root shell would not see the npm
-    # bin dir at all without this — `sudo claude` would be "command not found"
-    # while `claude` worked.
+    # bin dir at all without this — `sudo tree-sitter` would be "command not
+    # found" while `tree-sitter` worked.
     if [ -f /etc/sudoers ] && grep -q '^Defaults.*secure_path' /etc/sudoers; then
         if ! grep -q "secure_path.*${NPM_PREFIX}/bin" /etc/sudoers; then
             cp /etc/sudoers /etc/sudoers.b2b-bak

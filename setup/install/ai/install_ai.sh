@@ -8,7 +8,9 @@
 #   client   the Ollama CLI only, pointed at an endpoint somewhere else
 #            (default 10.0.2.2 — under VirtualBox NAT that is the HOST). No
 #            model data in the VM at all.
-#   local    Ollama server + a model stored on the shared /opt volume.
+#   local    Ollama server + a model stored on the shared /opt volume, and
+#            opencode (install_devtools.sh) pointed at that model, so the
+#            coding agent works offline with no account.
 #
 # WHY MODEL CHOICE IS COMPUTED, NOT CONFIGURED
 # --------------------------------------------
@@ -33,7 +35,7 @@ set -u
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # The npm prefix is moved to /opt by install_global_scope.sh, and npm's own
 # bin directory is NOT on the default PATH. Without this line a package this
-# script installs itself (tree-sitter, claude) is invisible to the very next
+# script installs itself (tree-sitter, the neovim provider) is invisible to the very next
 # `command -v` that checks for it -- installed, working, and reported missing.
 # Ask npm where it actually is rather than hardcoding the location.
 if command -v npm >/dev/null 2>&1; then
@@ -193,6 +195,50 @@ PROFEOF
     fi
 }
 
+# ── opencode ↔ the local model ──────────────────────────────────────────────
+# install_devtools.sh puts the opencode binary on the box; this makes it useful
+# without an account. opencode reads ~/.config/opencode/opencode.json, and
+# Ollama speaks the OpenAI API on /v1, which is what its openai-compatible
+# provider expects (opencode.ai/docs/providers, "Ollama"). Only local mode is
+# wired: in client mode the model list lives on another machine and cannot be
+# known here.
+#
+# A config the user has since edited is left alone: the marker is the provider
+# name this function writes, and a file without it is theirs.
+configure_opencode() {
+    local endpoint="$1" model="$2" user home group cfg
+    for user in $AI_USERS; do
+        home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+        if [ -z "$home" ] || [ ! -d "$home" ]; then
+            continue
+        fi
+        cfg="${home}/.config/opencode/opencode.json"
+        if [ -f "$cfg" ] && ! grep -q 'Ollama (local, born2root)' "$cfg"; then
+            log "${user}: ${cfg} is not ours — leaving it; add the ollama provider yourself"
+            continue
+        fi
+        mkdir -p "${home}/.config/opencode"
+        cat >"$cfg" <<CFGEOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "model": "ollama/${model}",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local, born2root)",
+      "options": { "baseURL": "http://${endpoint}/v1" },
+      "models": { "${model}": { "name": "${model}" } }
+    }
+  }
+}
+CFGEOF
+        group=$(id -gn "$user" 2>/dev/null || echo "$user")
+        chown -R "${user}:${group}" "${home}/.config/opencode" 2>/dev/null || true
+        chmod 644 "$cfg"
+        log "${user}: opencode uses ollama/${model} at ${endpoint} (${cfg})"
+    done
+}
+
 # ── local mode ──────────────────────────────────────────────────────────────
 setup_local() {
     local total usable model
@@ -236,6 +282,7 @@ setup_local() {
     else
         warn "pull of ${model} failed — the server is installed, retry with: ollama pull ${model}"
     fi
+    configure_opencode "127.0.0.1:11434" "$model"
 
     cat >/etc/profile.d/b2b-ai.sh <<PROFEOF
 # Added by born2root setup/install/ai/install_ai.sh (AI_MODE=local)
