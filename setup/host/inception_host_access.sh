@@ -437,7 +437,7 @@ warn_if_firefox_running() {
     # shellcheck disable=SC2059
     printf "\n  ${C_YELLOW}${C_BOLD}Firefox is running and will NOT pick this up yet.${C_RESET}\n"
     # shellcheck disable=SC2059
-    printf "  ${C_DIM}user.js is only read -r when a profile starts, so the pref is inert${C_RESET}\n"
+    printf "  ${C_DIM}user.js is only read when a profile starts, so the pref is inert${C_RESET}\n"
     # shellcheck disable=SC2059
     printf "  ${C_DIM}until it restarts, and that now covers the proxy settings too,${C_RESET}\n"
     # shellcheck disable=SC2059
@@ -745,7 +745,7 @@ if have_vm; then
 elif [ "$(vm_backend)" = "qemu" ]; then
     # A QEMU VM forwards with -netdev hostfwd=, decided when it was launched.
     # There is nothing to create here and nothing that could be changed now, so
-    # just read -r the map qemu_vm.sh published and use it.
+    # just read the map qemu_vm.sh published and use it.
     P_HTTPS=$(vm_forward_port https) || P_HTTPS="$PREF_HTTPS_PORT"
     P_STATIC=$(vm_forward_port inception-static) || P_STATIC="$PREF_STATIC_PORT"
     P_HTTP=$(vm_forward_port http) || P_HTTP="$PREF_HTTP_PORT"

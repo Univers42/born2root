@@ -122,7 +122,7 @@ restart_chrome() {
 # shellcheck disable=SC2059
 printf "\n  ${C_BOLD}Applying the configuration to the running browsers${C_RESET}\n"
 # shellcheck disable=SC2059
-printf "  ${C_DIM}They only read -r it at startup, so they are restarted here.${C_RESET}\n"
+printf "  ${C_DIM}They only read it at startup, so they are restarted here.${C_RESET}\n"
 # shellcheck disable=SC2059
 printf "  ${C_DIM}Skip with INCEPTION_NO_BROWSER_RESTART=1.${C_RESET}\n"
 restart_firefox
