@@ -883,17 +883,17 @@ The layout is not scaled proportionally — that gives a 100 GB `/tmp` on a
 because Docker is the thing that actually grows. Below 8 GB the build is
 refused with the size that would work. The default, 15 GB:
 
-| Mount      | Size    | Holds                                      |
-| ---------- | ------- | ------------------------------------------ |
-| `/boot`    | 500 MB  | kernel, unencrypted (required)             |
-| `/`        | 4.3 GB  | Debian (~1.1 GB), apt packages, Docker + node binaries |
-| swap       | 2 GB    | follows RAM (1–4 GB), mounted with `discard` |
+| Mount      | Size    | Holds                                                    |
+| ---------- | ------- | -------------------------------------------------------- |
+| `/boot`    | 500 MB  | kernel, unencrypted (required)                           |
+| `/`        | 4.3 GB  | Debian (~1.1 GB), apt packages, Docker + node binaries   |
+| swap       | 2 GB    | follows RAM (1–4 GB), mounted with `discard`             |
 | `/home`    | 1.1 GB  | nvim plugins/parsers, hellish (sources stay on the host) |
-| `/opt`     | 570 MB  | **machine-wide scope** — see below         |
-| `/srv`     | 380 MB  | service data (lighttpd)                    |
-| `/tmp`     | 440 MB  | build artefacts                            |
-| `/var/log` | 570 MB  | system + Docker logs                       |
-| `/var`     | ~5.2 GB | Docker images, containers, build cache, WordPress |
+| `/opt`     | 570 MB  | **machine-wide scope** — see below                       |
+| `/srv`     | 380 MB  | service data (lighttpd)                                  |
+| `/tmp`     | 440 MB  | build artefacts                                          |
+| `/var/log` | 570 MB  | system + Docker logs                                     |
+| `/var`     | ~5.2 GB | Docker images, containers, build cache, WordPress        |
 
 These were **calibrated on a real build**: the first cut gave `/` 3.3 GB and
 left no room for nvim, because the Debian base system (~1.1 GB) was not in
@@ -973,11 +973,11 @@ decided at runtime, inside the guest, by free-space guards that printed
 `[SKIP]` and carried on — so a small disk produced no error, just a VM quietly
 missing things, and Docker could run before nvim and starve it.
 
-| Profile      | `SIZE_B2B` | Installs                                                                 |
-| ------------ | ---------- | ------------------------------------------------------------------------ |
-| **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish** |
+| Profile      | `SIZE_B2B` | Installs                                                                                                                                |
+| ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish**                                         |
 | **standard** | 15–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer, Herdr + Claude Code |
-| **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow) |
+| **full**     | 30+        | every non-explicit feature (today the same set as standard; the name is stable so it can grow)                                          |
 
 AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
 be turned off. Everything else can be, per feature:

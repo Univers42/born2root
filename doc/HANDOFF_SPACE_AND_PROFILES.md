@@ -32,7 +32,7 @@ that remains.
 ## State on 2026-09-12
 
 | Thing | State |
-|---|---|
+| --- | --- |
 | `~/goinfre/born2root` | fresh clone of `origin/main` at `6f019e6`, clean |
 | ISOs, `disk_images/b2r` | gone (wiped) — nothing built yet on this tree |
 | `/sgoinfre/students/dlesieur/born2root` | same commit, plus untracked `42ctl/ evals42/ vault42/`; 46 GB, old VM inside, stopped, untouched |
