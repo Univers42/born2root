@@ -193,45 +193,90 @@ PROFEOF
         warn "On the host run:  OLLAMA_HOST=0.0.0.0 ollama serve"
         warn "(the default binds 127.0.0.1, which the VM cannot reach)"
     fi
+
+    # Configure the editor either way: an endpoint that is not up yet is a
+    # reason to write the config, not to skip it.
+    configure_opencode "$AI_ENDPOINT" "${AI_MODEL:-qwen3:4b}"
 }
 
 # ── opencode ↔ the local model ──────────────────────────────────────────────
 # install_devtools.sh puts the opencode binary on the box; this makes it useful
 # without an account. opencode reads ~/.config/opencode/opencode.json, and
 # Ollama speaks the OpenAI API on /v1, which is what its openai-compatible
-# provider expects (opencode.ai/docs/providers, "Ollama"). Only local mode is
-# wired: in client mode the model list lives on another machine and cannot be
-# known here.
+# provider expects (opencode.ai/docs/providers, "Ollama").
+#
+# Client mode is wired too. The model list does live on another machine, but
+# that machine will tell us: /api/tags is the endpoint the health check above
+# already calls. When it answers, every model it reports goes into the config
+# and the first becomes the default; when it does not, the provider is still
+# written so the config is right the moment the host starts serving. Leaving
+# client mode unconfigured meant AI_MODE=client installed nothing an editor
+# could actually use.
 #
 # A config the user has since edited is left alone: the marker is the provider
 # name this function writes, and a file without it is theirs.
+# models_at <endpoint>: the model names /api/tags reports, one per line, or
+# nothing at all. jq is not a dependency here, so the names come out with sed:
+# the field is a flat string inside a flat array of objects.
+models_at() {
+    curl -fsS --max-time 5 "http://$1/api/tags" 2>/dev/null |
+        tr ',' '\n' | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+# A config carrying either born2root marker may be rewritten -- this one's own,
+# or the baseline install_devtools.sh writes. Anything else is the user's.
+opencode_cfg_is_ours() {
+    [ -f "$1" ] || return 0
+    grep -q 'Ollama (local, born2root)' "$1" 2>/dev/null && return 0
+    grep -q 'born2root baseline' "$1" 2>/dev/null && return 0
+    return 1
+}
+
 configure_opencode() {
-    local endpoint="$1" model="$2" user home group cfg
+    local endpoint="$1" model="$2" user home group cfg dir models
+    # What the endpoint really has beats the guess, and its first model becomes
+    # the default so plain `opencode` works with no arguments.
+    models=$(models_at "$endpoint")
+    if [ -n "$models" ]; then
+        log "${endpoint} reports: $(printf '%s\n' "$models" | tr '\n' ' ')"
+        model=$(printf '%s\n' "$models" | head -n1)
+    else
+        log "${endpoint} listed no models — writing the provider for ${model} anyway"
+        models="$model"
+    fi
     for user in $AI_USERS; do
         home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
         if [ -z "$home" ] || [ ! -d "$home" ]; then
             continue
         fi
         cfg="${home}/.config/opencode/opencode.json"
-        if [ -f "$cfg" ] && ! grep -q 'Ollama (local, born2root)' "$cfg"; then
+        if ! opencode_cfg_is_ours "$cfg"; then
             log "${user}: ${cfg} is not ours — leaving it; add the ollama provider yourself"
             continue
         fi
-        mkdir -p "${home}/.config/opencode"
-        cat >"$cfg" <<CFGEOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "model": "ollama/${model}",
-  "provider": {
-    "ollama": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Ollama (local, born2root)",
-      "options": { "baseURL": "http://${endpoint}/v1" },
-      "models": { "${model}": { "name": "${model}" } }
-    }
-  }
-}
-CFGEOF
+        dir="${home}/.config/opencode"
+        mkdir -p "$dir"
+        {
+            printf '{\n'
+            # shellcheck disable=SC2016  # "$schema" is a literal JSON key
+            printf '  "$schema": "https://opencode.ai/config.json",\n'
+            printf '  "model": "ollama/%s",\n' "$model"
+            printf '  "provider": {\n    "ollama": {\n'
+            printf '      "npm": "@ai-sdk/openai-compatible",\n'
+            printf '      "name": "Ollama (local, born2root)",\n'
+            printf '      "options": { "baseURL": "http://%s/v1" },\n' "$endpoint"
+            printf '      "models": {\n'
+            # Every model the endpoint has, so /models can switch between them.
+            printf '%s\n' "$models" | awk 'NF {
+                printf "%s        \"%s\": { \"name\": \"%s\" }", (n++ ? ",\n" : ""), $1, $1
+            } END { if (n) printf "\n" }'
+            printf '      }\n    }\n  }\n}\n'
+        } >"$cfg"
+        # opencode reads opencode.jsonc as well; its own provider-less stub
+        # would make which file wins a coin toss (see install_devtools.sh).
+        if [ -f "${dir}/opencode.jsonc" ] && ! grep -q '"provider"' "${dir}/opencode.jsonc" 2>/dev/null; then
+            rm -f "${dir}/opencode.jsonc"
+        fi
         group=$(id -gn "$user" 2>/dev/null || echo "$user")
         chown -R "${user}:${group}" "${home}/.config/opencode" 2>/dev/null || true
         chmod 644 "$cfg"

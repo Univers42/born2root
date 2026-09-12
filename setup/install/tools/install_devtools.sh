@@ -174,6 +174,91 @@ install_herdr() {
     fi
 }
 
+# ── opencode's baseline configuration ───────────────────────────────────────
+# Installing the binary is not the same as making it usable. Out of the box
+# opencode writes itself a config holding nothing but a $schema line and then
+# has no provider at all, so it cannot talk to any model -- and install_ai.sh,
+# which DOES write a real provider, only runs when the ai-client or ai-local
+# feature is on. With the default AI_MODE=off (as on the 2026-09-12 build)
+# nobody ever configured it, and `opencode` was a 100 MB binary that could not
+# answer a question.
+#
+# So point it at the host by default. In both backends the guest reaches the
+# host at the NAT gateway 10.0.2.2, and Ollama speaks the OpenAI API on /v1,
+# which is exactly what opencode's openai-compatible provider wants
+# (opencode.ai/docs/providers). Nothing is downloaded and no model is assumed
+# to exist: this is the one edit away from working, and the MOTD hint says
+# which edit. Serve a model on the host and it works as it stands:
+#
+#     OLLAMA_HOST=0.0.0.0 ollama serve        # the default binds 127.0.0.1,
+#                                             # which the VM cannot reach
+#
+# install_ai.sh overwrites this with the real endpoint and the real model list
+# when AI_MODE is set, and both recognise the same marker, so a file the user
+# has edited themselves is left alone by both.
+OPENCODE_MARKER='born2root baseline'
+OPENCODE_HOST_ENDPOINT="${OPENCODE_HOST_ENDPOINT:-10.0.2.2:11434}"
+OPENCODE_DEFAULT_MODEL="${OPENCODE_DEFAULT_MODEL:-qwen3:4b}"
+
+# Ours, opencode's own stub, or something the user wrote? Only the first two
+# may be replaced. install_ai.sh's marker counts as ours as well: that is the
+# better config, and this one must never downgrade it.
+opencode_cfg_is_ours() {
+    [ -f "$1" ] || return 0
+    grep -q "$OPENCODE_MARKER" "$1" 2>/dev/null && return 0
+    grep -q 'Ollama (local, born2root)' "$1" 2>/dev/null && return 0
+    return 1
+}
+
+configure_opencode_baseline() {
+    local user home group dir cfg
+    [ -x "$OPENCODE_DEST" ] || return 0
+    for user in $DEVTOOLS_USERS; do
+        home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
+        if [ -z "$home" ] || [ ! -d "$home" ]; then
+            continue
+        fi
+        dir="${home}/.config/opencode"
+        cfg="${dir}/opencode.json"
+
+        if ! opencode_cfg_is_ours "$cfg"; then
+            log "${user}: ${cfg} is not ours — leaving it alone"
+            continue
+        fi
+        if [ -f "$cfg" ] && grep -q 'Ollama (local, born2root)' "$cfg" 2>/dev/null; then
+            log "${user}: install_ai.sh already configured opencode — leaving it"
+            continue
+        fi
+
+        mkdir -p "$dir"
+        cat >"$cfg" <<CFGEOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "model": "ollama/${OPENCODE_DEFAULT_MODEL}",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (${OPENCODE_MARKER})",
+      "options": { "baseURL": "http://${OPENCODE_HOST_ENDPOINT}/v1" },
+      "models": { "${OPENCODE_DEFAULT_MODEL}": { "name": "${OPENCODE_DEFAULT_MODEL}" } }
+    }
+  }
+}
+CFGEOF
+        # opencode reads opencode.jsonc as well as opencode.json. Its own stub
+        # is the .jsonc one, and leaving both would make which config wins a
+        # coin toss -- so a stub with no provider in it goes.
+        if [ -f "${dir}/opencode.jsonc" ] && ! grep -q '"provider"' "${dir}/opencode.jsonc" 2>/dev/null; then
+            rm -f "${dir}/opencode.jsonc"
+            log "${user}: removed opencode's provider-less opencode.jsonc stub"
+        fi
+        group=$(id -gn "$user" 2>/dev/null || echo "$user")
+        chown -R "${user}:${group}" "$dir" 2>/dev/null || true
+        chmod 644 "$cfg"
+        log "${user}: opencode -> ollama/${OPENCODE_DEFAULT_MODEL} at ${OPENCODE_HOST_ENDPOINT} (${cfg})"
+    done
+}
+
 # ── opencode ────────────────────────────────────────────────────────────────
 # No GitHub API call here, unlike Herdr above: the API allows 60 anonymous
 # requests an hour per address, and a NAT'd VM shares its address with the
@@ -371,6 +456,7 @@ if [ "$INSTALL_OPENCODE" = "1" ]; then
 else
     log "INSTALL_OPENCODE=0 — skipping opencode"
 fi
+configure_opencode_baseline
 setup_herdr_service
 write_motd_hint
 
