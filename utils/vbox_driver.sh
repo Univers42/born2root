@@ -18,7 +18,13 @@
 # of the real kernel state; production callers never set it.
 VBOXDRV_PROC_MODULES="${VBOXDRV_PROC_MODULES:-/proc/modules}"
 
-vboxdrv_device_exists() { [ -c /dev/vboxdrv ]; }
+# The device node, overridable for the same reason as VBOXDRV_PROC_MODULES:
+# tests/test_select_backend.sh has to describe a machine with a working
+# VirtualBox while running on one that may have none. `-e`, not `-c`, so a
+# fixture can be an ordinary file; production points at the real char device.
+VBOXDRV_DEV="${VBOXDRV_DEV:-/dev/vboxdrv}"
+
+vboxdrv_device_exists() { [ -c "$VBOXDRV_DEV" ] || [ -f "$VBOXDRV_DEV" ]; }
 
 # Read /proc/modules directly rather than piping `lsmod` through `grep -q`:
 # under `set -o pipefail`, grep -q closes its end of the pipe the instant it
@@ -57,7 +63,7 @@ vboxdrv_hardened() {
 
 vboxdrv_accessible() {
     vboxdrv_hardened && return 0
-    [ -r /dev/vboxdrv ] && [ -w /dev/vboxdrv ]
+    [ -r "$VBOXDRV_DEV" ] && [ -w "$VBOXDRV_DEV" ]
 }
 
 vboxdrv_ok() {
