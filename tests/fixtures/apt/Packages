@@ -1,0 +1,94 @@
+Package: base-files
+Priority: required
+Essential: yes
+Installed-Size: 400
+Size: 70000
+
+Package: libc6
+Priority: required
+Installed-Size: 12000
+Size: 2800000
+
+Package: mawk
+Priority: required
+Provides: awk
+Installed-Size: 250
+Size: 140000
+
+Package: gawk
+Priority: optional
+Provides: awk
+Depends: libc6 (>= 2.36)
+Installed-Size: 2800
+Size: 1000000
+
+Package: perl
+Priority: standard
+Depends: libc6
+Installed-Size: 700
+Size: 230000
+
+Package: htop
+Priority: optional
+Depends: libc6
+Installed-Size: 400
+Size: 160000
+
+Package: cowsay
+Priority: optional
+Depends: perl:any, libtext-charwidth-perl | libtext-charwidth-perl-alt
+Installed-Size: 100
+Size: 20000
+
+Package: libtext-charwidth-perl
+Priority: optional
+Depends: perl,
+ libc6
+Installed-Size: 30
+Size: 10000
+
+Package: libtext-charwidth-perl-alt
+Priority: optional
+Installed-Size: 50
+Size: 12000
+
+Package: postgresql
+Priority: optional
+Depends: postgresql-17
+Installed-Size: 70
+Size: 5000
+
+Package: postgresql-17
+Priority: optional
+Pre-Depends: postgresql-common (>= 1)
+Depends: libc6 (>= 2.36), libpq5 [amd64]
+Installed-Size: 60000
+Size: 18000000
+
+Package: postgresql-common
+Priority: optional
+Installed-Size: 700
+Size: 1000000
+
+Package: libpq5
+Priority: optional
+Installed-Size: 1000
+Size: 300000
+
+Package: exim4-daemon-light
+Priority: optional
+Provides: mail-transport-agent
+Installed-Size: 1500
+Size: 600000
+
+Package: postfix
+Priority: optional
+Provides: mail-transport-agent
+Installed-Size: 4000
+Size: 1500000
+
+Package: pinentry-curses
+Priority: optional
+Provides: pinentry
+Installed-Size: 2048
+Size: 70000

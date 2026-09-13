@@ -429,6 +429,26 @@ else
     feature_fail hellish "/usr/bin/hellish is not executable after first boot — see /var/log/b2b-hellish-install.log"
     feature_end hellish failed
 fi
+
+### ─── The packages born2root.toml asks for ([packages] apt) ────────────────
+# Resolved on the host against the same Debian index (utils/b2b_apt.py), so a
+# name here exists and is unambiguous, and its size was part of the fit check.
+# Required like a base feature: a package that fails to install fails the
+# build, rather than being a surprise at first login. Recommends stay out, as
+# the host's estimate assumed.
+if [ -s /etc/b2b/apt-packages ]; then
+    feature_begin apt-packages / /var
+    echo "--- Installing $(grep -c . /etc/b2b/apt-packages) package(s) from born2root.toml ---"
+    if run_logged /var/log/b2b-apt-packages.log \
+        env DEBIAN_FRONTEND=noninteractive xargs -a /etc/b2b/apt-packages \
+        apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold; then
+        echo "[OK] born2root.toml packages installed: $(tr '\n' ' ' </etc/b2b/apt-packages)"
+    else
+        feature_fail apt-packages "apt-get install failed for [packages] apt — see /var/log/b2b-apt-packages.log"
+    fi
+    apt-get clean >/dev/null 2>&1 || true
+    feature_end apt-packages ok
+fi
 if ! feature_on webstack; then
     feature_off webstack
 else

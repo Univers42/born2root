@@ -72,6 +72,27 @@ if ! b2b_check >/dev/null; then
     exit 1
 fi
 
+# ── [packages] apt, checked against Debian's index before the ISO download ──
+# A typo or an ambiguous virtual name refuses here in seconds instead of
+# failing first boot 25 minutes in; the closure's size is exported so the fit
+# check below charges it to / and /var like any feature (utils/b2b_apt.py).
+# Only when the list is non-empty: a default build makes no extra request.
+B2B_APT_PACKAGES=$(b2b_get B2B_APT_PACKAGES)
+APT_TARGETS=""
+if [ -n "$B2B_APT_PACKAGES" ]; then
+    echo "Resolving [packages] apt against the Debian index..."
+    # shellcheck disable=SC2086 # one argument per package
+    if ! APT_RESOLVED=$(env B2B_APT_MIRROR="$(b2b_get B2B_MIRROR)" python3 "$REPO_ROOT/utils/b2b_apt.py" resolve $B2B_APT_PACKAGES); then
+        echo "Error: [packages] apt in born2root.toml cannot be installed as written (see above) — nothing was downloaded" >&2
+        exit 1
+    fi
+    APT_TARGETS=$(printf '%s\n' "$APT_RESOLVED" | awk '$1 == "package" { print $2 }')
+    B2B_APT_ROOT_MB=$(printf '%s\n' "$APT_RESOLVED" | awk '$1 == "root_mb" { print $2 }')
+    B2B_APT_VAR_MB=$(printf '%s\n' "$APT_RESOLVED" | awk '$1 == "var_mb" { print $2 }')
+    export B2B_APT_PACKAGES B2B_APT_ROOT_MB B2B_APT_VAR_MB
+    echo "  ✓ $(printf '%s\n' "$APT_TARGETS" | grep -c .) package(s), $(printf '%s\n' "$APT_RESOLVED" | awk '$1 == "closure" { print $2 }') to install with their dependencies: ${B2B_APT_ROOT_MB} MB on /, ${B2B_APT_VAR_MB} MB downloaded through /var"
+fi
+
 # ── Portable downloader (curl preferred, wget fallback) ──────────────────────
 download() {
     local url="$1" dest="$2"
@@ -363,6 +384,7 @@ echo "  ✓ partition recipe sized for SIZE_B2B=$((${DISK_SIZE_MB:-$((${SIZE_B2B
 echo "Resolving the install profile..."
 feature_env() {
     env SIZE_B2B="${SIZE_B2B:-15}" DISK_SIZE_MB="${DISK_SIZE_MB:-}" VM_RAM_MB="${VM_RAM_MB:-2048}" \
+        B2B_APT_PACKAGES="${B2B_APT_PACKAGES:-}" B2B_APT_ROOT_MB="${B2B_APT_ROOT_MB:-}" B2B_APT_VAR_MB="${B2B_APT_VAR_MB:-}" \
         PROFILE="${PROFILE:-auto}" FEATURES="${FEATURES:-}" AI_MODE="${AI_MODE:-off}" \
         "${SCRIPT_SH:-bash}" "$REPO_ROOT/generate/feature_profile.sh" "$@"
 }
@@ -416,7 +438,11 @@ echo "  ✓ users staged — $(wc -l <"$ISO_DIR/users") account(s), full names a
 # Per-account keys from born2root.toml. The host's own key still travels as
 # host_ssh_pubkey and still goes to the first account: that is what makes
 # `ssh b2b` work without a password on the machine that built the VM.
-rm -f "$ISO_DIR/ssh_keys"
+rm -f "$ISO_DIR/ssh_keys" "$ISO_DIR/apt-packages"
+if [ -n "$APT_TARGETS" ]; then
+    printf '%s\n' "$APT_TARGETS" >"$ISO_DIR/apt-packages"
+    echo "  ✓ apt-packages staged — $(wc -l <"$ISO_DIR/apt-packages") package(s) for first boot"
+fi
 if [ -s "$ISO_DIR/users" ] && KEYS=$(b2b_ssh_keys) && [ -n "$KEYS" ]; then
     printf '%s\n' "$KEYS" >"$ISO_DIR/ssh_keys"
     echo "  ✓ ssh_keys staged — $(wc -l <"$ISO_DIR/ssh_keys") key(s) from born2root.toml"

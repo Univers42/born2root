@@ -334,6 +334,7 @@ d-i preseed/late_command string \
 	mkdir -p /target/etc/b2b ; cp /cdrom/features.conf /target/etc/b2b/features.conf 2>/dev/null || true ; cp /cdrom/build.conf /target/etc/b2b/build.conf 2>/dev/null || true ; \
 	cp /cdrom/users /target/etc/b2b/users 2>/dev/null || echo "B2B-MISSING users" >/dev/ttyS0 ; \
 	cp /cdrom/ssh_keys /target/etc/b2b/ssh_keys 2>/dev/null || true ; \
+	cp /cdrom/apt-packages /target/etc/b2b/apt-packages 2>/dev/null || true ; \
 	in-target /bin/bash /tmp/b2b-setup.sh || true ; \
 	in-target /bin/bash -c "dpkg --configure -a" || true ; \
 	in-target /bin/bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -y -f" || true ; \

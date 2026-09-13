@@ -211,6 +211,26 @@ NOT_INSTALLED='vscode-remote inception-data npm-cache'
 # per account (nvim 143 + extras 260), which these three rows (405) cover.
 # feature_select.sh reads this line with sed, like NOT_INSTALLED.
 PER_USER_HOME='nvim nvim-extras npm-cache'
+# [packages] apt in born2root.toml, priced by utils/b2b_apt.py from Debian's
+# index: its closure lands on / and its downloads pass through /var. The ISO
+# build resolves the list against the mirror and exports the two figures; any
+# other run reuses that last answer from the cache, and a list never resolved
+# yet counts as 0 here -- `make gen_iso` refuses it before downloading if it
+# does not fit. It is a base row: first boot installs it whatever the profile.
+APT_PACKAGES="${B2B_APT_PACKAGES-$("${SCRIPT_SH:-bash}" "$HERE/../utils/b2b_config.sh" get B2B_APT_PACKAGES)}"
+if [ -n "$APT_PACKAGES" ]; then
+    if [ -z "${B2B_APT_ROOT_MB:-}" ]; then
+        # shellcheck disable=SC2086 # one argument per package
+        APT_CACHED=$(python3 "$HERE/../utils/b2b_apt.py" cached $APT_PACKAGES 2>/dev/null)
+        B2B_APT_ROOT_MB=$(printf '%s\n' "$APT_CACHED" | awk '$1 == "root_mb" { print $2 }')
+        B2B_APT_VAR_MB=$(printf '%s\n' "$APT_CACHED" | awk '$1 == "var_mb" { print $2 }')
+    fi
+    APT_ROW="apt-packages       base      ${B2B_APT_ROOT_MB:-0}  0  ${B2B_APT_VAR_MB:-0}  0  -"
+else
+    APT_ROW=""
+fi
+MANIFEST="$MANIFEST$APT_ROW
+"
 # B2B_NVIM_USER_COUNT is for tests; the build asks the config.
 EDITOR_COUNT="${B2B_NVIM_USER_COUNT:-$("${SCRIPT_SH:-bash}" "$HERE/../utils/b2b_config.sh" get B2B_NVIM_USERS | wc -w)}"
 case "$EDITOR_COUNT" in '' | *[!0-9]* | 0) EDITOR_COUNT=1 ;; esac

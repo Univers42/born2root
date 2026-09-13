@@ -828,6 +828,14 @@ space:
 config:
 	@$(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh --show
 	@$(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh --check
+	@# [packages] apt, resolved against the mirror's index (cached a day), so a
+	@# typo shows up here too and the size the ISO build will charge is visible.
+	@pkgs=$$($(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh get B2B_APT_PACKAGES); \
+	if [ -n "$$pkgs" ]; then \
+		printf '\n[packages] apt:\n'; \
+		env B2B_APT_MIRROR="$$($(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh get B2B_MIRROR)" \
+			python3 utils/b2b_apt.py resolve $$pkgs | sed 's/^/    /'; \
+	fi
 
 # What the guest's disk will look like for this SIZE_B2B, without building.
 partitions:
