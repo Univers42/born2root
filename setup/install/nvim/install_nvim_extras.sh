@@ -2060,7 +2060,7 @@ nvim_jobs_left() {
     ps -u "$user" -o pid=,args= 2>/dev/null | while read -r pid args; do
         cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null) || cwd=""
         case "${cwd}/ ${args}" in
-        *"${home}/.cache/nvim/"* | *"${home}/.local/share/nvim/"*)
+        *"${home}/.cache/nvim/"* | *"${home}/.local/share/nvim/mason/staging/"*)
             printf '%s %s\n' "$pid" "$args"
             break
             ;;

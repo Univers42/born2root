@@ -430,15 +430,19 @@ setup_user_config() {
 #
 # So every run waits for that work to end. It is found by where it points:
 # nvim-treesitter runs tar and `tree-sitter build` FROM ~/.cache/nvim/..., and
-# curl (no cwd of its own) with an --output path in there; Mason stages under
-# ~/.local/share/nvim. A process of this user whose cwd or arguments lead into
-# either is still working for a Neovim that has gone.
+# curl (no cwd of its own) with an --output path in there; Mason installs in
+# ~/.local/share/nvim/mason/staging/<package> before moving the result into
+# packages/. A process of this user whose cwd or arguments lead into either is
+# still installing for a Neovim that has gone. Not all of ~/.local/share/nvim:
+# a language server or the markdown-preview server a user's own open Neovim is
+# running lives there too, and `make nvim` beside that session would then sit
+# out NVIM_JOBS_WAIT on every run.
 nvim_jobs_left() {
     local user="$1" home="$2" pid args cwd
     ps -u "$user" -o pid=,args= 2>/dev/null | while read -r pid args; do
         cwd=$(readlink "/proc/${pid}/cwd" 2>/dev/null) || cwd=""
         case "${cwd}/ ${args}" in
-        *"${home}/.cache/nvim/"* | *"${home}/.local/share/nvim/"*)
+        *"${home}/.cache/nvim/"* | *"${home}/.local/share/nvim/mason/staging/"*)
             printf '%s %s\n' "$pid" "$args"
             break
             ;;

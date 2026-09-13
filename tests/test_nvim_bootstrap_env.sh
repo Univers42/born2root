@@ -185,11 +185,22 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     wait_nvim_jobs "$me" "$TMP/home/alice"
     check "$name: waits out a job by its cwd" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
 
-    sh -c 'sleep 3' "$TMP/home/alice/.local/share/nvim/mason/staging" &
+    # curl's shape: no cwd of its own, an --output path in ~/.cache/nvim.
+    sh -c 'sleep 3' --output "$TMP/home/alice/.cache/nvim/tree-sitter-c.tar.gz" &
     sleep 0.3
     t0=$(date +%s)
     wait_nvim_jobs "$me" "$TMP/home/alice"
     check "$name: waits out a job by its argument" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
+
+    # A language server an open Neovim is running is not left-behind work.
+    sh -c 'sleep 4' "$TMP/home/alice/.local/share/nvim/mason/packages/lua-language-server/bin" &
+    lsp=$!
+    sleep 0.3
+    t0=$(date +%s)
+    wait_nvim_jobs "$me" "$TMP/home/alice"
+    check "$name: a running language server is not waited for" "$([ $(($(date +%s) - t0)) -le 1 ] && echo prompt)" "prompt"
+    kill "$lsp" 2>/dev/null || true
+    wait "$lsp" 2>/dev/null || true
 
     (cd "$TMP/home/alice/.cache/nvim" && exec sleep 6) &
     job=$!
