@@ -10,7 +10,8 @@
 # all along.
 #
 # 1. create_custom_iso.sh's resolve_nerd_font: auto follows the host's
-#    fontconfig, on/off override it, anything else refuses the build.
+#    fontconfig, NVIM_NERD_FONT overrides it (never a shell's own NERD_FONT),
+#    anything that is not a yes/no spelling refuses the build before downloading.
 # 2. install_nvim.sh's set_nerd_font: rewrites only kickstart's assignment, in
 #    both directions, idempotently, and leaves the config alone when nothing
 #    was recorded (a guest built before the key existed).
@@ -62,7 +63,35 @@ else
     rc=0
     resolve_nerd_font maybe >/dev/null || rc=$?
     check "a value that is not auto/on/off is refused" "$rc" "1"
+    for v in 1 TRUE yes; do
+        check "'$v' means on" "$(resolve_nerd_font "$v")" "on"
+    done
+    for v in 0 False no; do
+        check "'$v' means off" "$(resolve_nerd_font "$v")" "off"
+    done
 fi
+
+# The bug that followed: the switch was first read from NERD_FONT, and the
+# owner's ~/.hellishrc exports NERD_FONT=0 for its prompt theme, so every build
+# from that shell died -- after the ISO download, after `make re` had deleted
+# the old VM. The early block as the script runs it, in a shell that exports a
+# prompt's NERD_FONT, must neither fail nor listen to it.
+awk '/^resolve_nerd_font\(\) \{/ { on = 1 } on { print } on && /NERD_FONT_RESOLVED=/ { seen = 1 } seen && /^fi$/ { exit }' \
+    "$REPO/generate/create_custom_iso.sh" >"$TMP/early.sh"
+# shellcheck disable=SC2016 # expanded by the extracted script, not here
+printf 'printf "%%s" "$NERD_FONT_RESOLVED"\n' >>"$TMP/early.sh"
+check "the block runs before any download" \
+    "$(awk '/NERD_FONT_RESOLVED=/ { print NR; exit }' "$REPO/generate/create_custom_iso.sh")" \
+    "$(awk '/^download\(\) \{/ { d = NR } /NERD_FONT_RESOLVED=/ && !r { r = NR } END { print (r < d ? r : "after download") }' "$REPO/generate/create_custom_iso.sh")"
+check "a prompt's NERD_FONT=0 is ignored (auto, font present)" \
+    "$(env -u NVIM_NERD_FONT NERD_FONT=0 PATH="$TMP/with:$PATH" bash "$TMP/early.sh" 2>&1)" "on"
+check "a prompt's NERD_FONT=garbage does not fail the build" \
+    "$(env -u NVIM_NERD_FONT NERD_FONT=garbage PATH="$TMP/without:$PATH" bash "$TMP/early.sh" 2>&1)" "off"
+check "NVIM_NERD_FONT=off is the switch that is read" \
+    "$(env NVIM_NERD_FONT=off NERD_FONT=1 PATH="$TMP/with:$PATH" bash "$TMP/early.sh" 2>&1)" "off"
+rc=0
+env NVIM_NERD_FONT=maybe bash "$TMP/early.sh" >/dev/null 2>&1 || rc=$?
+check "NVIM_NERD_FONT=maybe refuses the build" "$rc" "1"
 
 # ── 2. the guest's config ───────────────────────────────────────────────────
 # shellcheck disable=SC2317 # called by the functions eval'd below

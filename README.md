@@ -1218,7 +1218,7 @@ make all SIZE_B2B=10                        # minimal
 make all SIZE_B2B=10 FEATURES=+docker       # minimal plus Docker — fits, so it builds
 make all SIZE_B2B=13 PROFILE=standard       # refused: "fits from SIZE_B2B=14"
 make all FEATURES="-pytools -devtools-extra"
-make all NERD_FONT=off                      # plain-text icons in Neovim (default: auto)
+make all NVIM_NERD_FONT=off                 # plain-text icons in Neovim (default: auto)
 ```
 
 A set that does not fit **fails the ISO build** naming the mount and the
