@@ -25,6 +25,10 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Force a hypervisor / see which one would be picked and why | `BACKEND=qemu make all`, `make backend` |
 | Build only the preseeded ISO (this is what CI does) | `make gen_iso` |
 | Preview layout / feature set for a size, without building | `make partitions SIZE_B2B=50`, `make features SIZE_B2B=50` |
+| Tick features instead of the size default (see `.b2b-features`) | `make features_select`, `ARGS=--show` or `ARGS=--clear` |
+| Reclaim ISOs, apt cache and untrimmed blocks | `make slim` (`COMPACT=1` rewrites a stopped qcow2) |
+| One command in a QEMU guest / guest parity check | `make qemu_ssh CMD="uname -a"`, `make verify_guest` |
+| Deploy Inception into a built VM, then prove it from the host | `make inception` (`SRC=` pushes a local tree), `make verify_access` |
 | Project footprint against the quota (fails when over) | `make space` |
 | Status dashboard / follow the headless serial console | `make status`, `make console` |
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
@@ -34,7 +38,10 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 `make all` runs `prepare` first: `make deps`, then
 `git pull --autostash --ff-only origin main`, then downloads the hellish
 release binary to `dist/hellish` (`make shell`). Pin it with
-`HELLISH_VERSION=v2.7.6`.
+`HELLISH_VERSION=v2.7.6`. Because of that pull, commit before `make all` and
+do not edit files a running build reads: the autostash can re-apply as
+conflict markers, and a pull that changes the Makefile stops the run with
+"run the same command again" (make already parsed the old file).
 
 ### Tests
 
@@ -52,9 +59,22 @@ All `tests/test_*.sh` are host-side regression tests that need no VM: the
 stand-in `VBoxManage`) exactly for this. Each header names the real bug it pins
 down; read it before changing the code under test. `tests/wp_apparmor_test.sh`,
 `wordpress_attack_defense.sh` and `wordpress_apparmor_fix_demo.sh` run inside
-the guest.
+the guest. `test_excalidraw_server.sh` (node 18+) and `test_mermaid_render.sh`
+(nvim 0.10+) print `skip` rather than fail when the tool is missing.
 
-### Lint (what CI enforces, in this order, fail-fast)
+Several tests do not source the script under test; they cut code out of it
+with awk and `eval` it: a function from its `^name() {` line to the next `^}`,
+or a heredoc by its exact `cat >…<<'JSEOF'` / `LUAEOF` line
+(`test_nerd_font.sh`, `test_nvim_bootstrap_env.sh`,
+`test_excalidraw_server.sh`, `test_mermaid_render.sh`). Renaming such a
+function, indenting its closing brace or changing a heredoc marker breaks the
+extraction, not the behaviour, so rerun the matching test.
+
+### Lint (what CI enforces)
+
+CI runs all four linters even when an earlier one fails (`if: always()`),
+then a separate job runs `make --dry-run all`, `CI=true make deps` and
+`make gen_iso`.
 
 ```bash
 find . -type f -name "*.sh" -print0 | xargs -0 shellcheck -e SC1091
@@ -65,8 +85,49 @@ make --dry-run all
 ```
 
 Shell scripts are indented with 4 spaces (CI's `shfmt -i 4` wins over the tab
-setting in `.editorconfig`); the Makefile uses tabs. `.shellcheckrc` disables
-SC1008 because of the non-standard shebang.
+setting in `.editorconfig`, and any flag on the command line makes shfmt
+ignore that file's `-bn -ci -sr` too); the Makefile uses tabs. `.shellcheckrc`
+disables SC1008 because of the non-standard shebang. None of the linters parse
+with hellish, so also check an edited script with `hellish -n` as well as
+`bash -n` (`doc/HANDOFF_SPACE_AND_PROFILES.md` lists the known differences,
+e.g. a one-line `case … esac; }` that shfmt collapses into something hellish
+cannot parse).
+
+## born2root.conf: the one file people personalise
+
+`born2root.conf` at the repo root holds everything about the guest a user may
+change: login, host name, the three passwords, extra users, locale, keymap,
+timezone, mirror, the `B2B_VOLUME` table, swap, and the Makefile knobs
+(`B2B_SIZE_GB`, `B2B_VM_NAME`, `B2B_BACKEND`, `B2B_PROFILE`, `B2B_FEATURES`,
+`B2B_AI_MODE`, `B2B_VM_RAM_MB`). It is tracked and edited in place.
+`utils/b2b_config.sh` is its only reader, and nothing sources the file:
+
+- `get KEY` never fails and never prints to stderr, because the Makefile calls
+  it at parse time for every target. The Makefile reads a knob from the file
+  only when its `origin` is `undefined`, so the command line and the
+  environment still win. `B2B_CONFIG=path` points every reader at another file.
+- `--check` refuses unknown, missing or duplicate keys and invalid values,
+  naming each one (`make config`, and `create_custom_iso.sh` before any
+  download). `--render` fills `@B2B_*@` placeholders with an awk
+  `index`/`substr` scan over `ENVIRON`: no regex and no `-v`, so `$ & \ /` in a
+  value or a crypt hash pass through untouched. A leftover placeholder is an
+  error.
+- Anything that needs the login, a password or the layout calls this library.
+  A literal `dlesieur`, `temp*123` or `vm_pass.txt` in non-comment code fails
+  `tests/test_b2b_config.sh`.
+- Tests must not assert against `born2root.conf`: it is personalised. They pin
+  `tests/fixtures/default.conf`, the shipped defaults without comments; change
+  a default in both files.
+- The guest never sees the file. It gets `/etc/b2b/build.conf` (`--guest`: no
+  passwords), which `b2b-setup.sh`, `first-boot-setup.sh` and the provisioners
+  read the login and accounts from. Extra users' passwords travel as
+  `extra_users.shadow` (SHA-512) and are deleted after `useradd -p`.
+- Deliberately not configurable: SSH port 4242, groups `user42`/`sudo`, VG
+  `LVMGroup`, `/boot`, LUKS, and the shell. hellish is every account's login
+  shell. `create_custom_iso.sh` refuses an empty or non-hellish
+  `CUSTOM_SHELL_PATH`, a guest without it fails the build, it is no longer a
+  feature row, and the guest's sshd watchdog puts a changed login shell back.
+  Do not add an opt-out.
 
 ## The shell every script runs under
 
@@ -95,26 +156,35 @@ hardcoded `bash`.
 
 ### `make all`, end to end
 
-1. Guards, before anything expensive: `no_root` (refuses `sudo make all`, which
-   would bake root's SSH key and leave root-owned files), the LUKS banner,
-   `utils/space_budget.sh --preflight`, `setup/host/select_backend.sh`
-   (VirtualBox vs QEMU; decision on stdout, reasons on stderr), and
-   `utils/vm_path.sh` (is `$VM_PATH/$VM_NAME` writable, and if not, why).
-2. `make gen_iso` runs `generate/create_custom_iso.sh`: downloads the current
-   netinst from cdimage.debian.org, extracts it with xorriso, stages
-   `preseed.cfg` (see the marker blocks below), the three `preseeds/*.sh`, the
-   provisioners, `features.conf`, `dist/hellish` as `custom_shell.bin` and your
-   `~/.ssh/id_*.pub`, appends `preseed.cfg` to `initrd.gz` as a second cpio
-   archive, and rebuilds the ISO. The output name carries a LUKS suffix so
-   `LUKS=ON` and `LUKS=OFF` ISOs are never confused. `.gen_iso.lock` serialises
-   concurrent builds.
+1. `all` is two make runs. The outer one does `no_root` (refuses
+   `sudo make all`, which would bake root's SSH key and leave root-owned
+   files), `prepare`, the LUKS banner and the feature picker
+   (`generate/feature_select.sh`, below), then calls
+   `make _build SIZE_B2B=<size> B2B_NO_SELECT=1`. The size has to be passed to
+   a fresh make because `DISK_SIZE_MB` and `SPACE_BUDGET_GB` are derived from
+   `SIZE_B2B` at parse time. `_build` runs the remaining guards before
+   anything expensive: `utils/space_budget.sh --preflight`,
+   `setup/host/select_backend.sh` (VirtualBox vs QEMU; decision on stdout,
+   reasons on stderr), and `utils/vm_path.sh` (is `$VM_PATH/$VM_NAME`
+   writable, and if not, why).
+2. `make gen_iso` runs `generate/create_custom_iso.sh`: validates
+   `born2root.conf`, downloads the current netinst from cdimage.debian.org,
+   extracts it with xorriso, renders `preseeds/preseed.cfg.in` into
+   `preseed.cfg` (see the marker blocks below), stages the three
+   `preseeds/*.sh`, the provisioners, `features.conf`, `build.conf`,
+   `dist/hellish` as `custom_shell.bin` and your `~/.ssh/id_*.pub`, appends
+   `preseed.cfg` to `initrd.gz` as a second cpio archive, and rebuilds the
+   ISO. The output name carries a LUKS suffix so `LUKS=ON` and `LUKS=OFF`
+   ISOs are never confused. `.gen_iso.lock` serialises concurrent builds.
 3. Disk, unattended install, first boot, host config: `generate/orchestrate.sh`
    (VirtualBox, live TUI dashboard) or `setup/host/qemu_pipeline.sh` calling
    `setup/host/qemu_vm.sh` (QEMU). Same five phases, byte-identical ISO, same
    guest. Only the hypervisor differs.
 4. `setup/host/inception_host_access.sh` teaches the host browsers to resolve
    `<login>.42.fr` without root (Firefox `network.dns.localDomains`, Chromium
-   `--host-resolver-rules`).
+   `--host-resolver-rules`). Once the guest's CA is trusted (after
+   `make inception`) it restarts the host's browsers;
+   `INCEPTION_NO_BROWSER_RESTART=1` skips that.
 
 The pipeline is headless. The VM's COM1 is a file, the guest boots with
 `console=ttyS0`, and the orchestrator reads installer progress from it. LUKS is
@@ -125,7 +195,7 @@ NAT accepts connections whether or not the guest is listening.
 
 ### Inside the guest
 
-`preseed.cfg`'s `late_command` copies the scripts into `/target` and runs
+The rendered preseed's `late_command` copies the scripts into `/target` and runs
 `b2b-setup.sh` via `in-target`. That is a chroot with no systemd and limited
 network, so it does every mandatory Born2beRoot setting (SSH on 4242, UFW,
 sudo, pwquality, AppArmor, cron monitoring, TRIM via crypttab, `lvm.conf` and
@@ -139,6 +209,13 @@ serial console, which fails `make all`, and records why in
 `/etc/b2b/PROVISION_FAILED`. Provisioners are run through `run_logged`, never
 `provisioner | tee log`: without `pipefail` a pipeline's status is `tee`'s, so
 every provisioner used to report success whatever it did.
+
+A new provisioner has to be named in three places that nothing but
+`tests/test_late_command.sh` holds together: the `/root/install_*.sh` call in
+`first-boot-setup.sh`, the `for PROVISIONER in` loop in
+`create_custom_iso.sh`, and a `cp /cdrom/install_x.sh /target/root/…` line in
+`preseed.cfg.in`'s `late_command`. Those copies end in `2>/dev/null || true`, so
+a missing one only shows up at first boot, 25 minutes in.
 
 Everything the editor needs is installed **at build time and then verified**:
 `install_nvim.sh` and `install_nvim_extras.sh` retry the `vim.pack` download up
@@ -159,9 +236,13 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
   whatever the picker grows the disk to. Leftover VM disks stay outside it on
   purpose: they are the one reclaimable line, and `utils/space_budget.sh`
   names them with the exact `rm -rf` rather than absorbing them into the cap.
-- The partition layout, from `generate/partition_recipe.sh`: every volume has a
-  floor, a weighted share and a cap, `/var` is declared last with `-1` so
-  partman's remainder lands where Docker grows. Below 8 GB it refuses.
+- The partition layout, from `generate/partition_recipe.sh` and the
+  `B2B_VOLUME` table: every volume has a floor, a weighted share and a cap. The
+  volume with share `rest` (`/var`) is declared last with `-1`, so partman's
+  remainder lands where Docker grows. Below 8 GB it refuses. The script names
+  no volume. `--sizes` ends with `holder:<mount>=<volume>` lines. When the table
+  has no volume for `/opt`, `/var` or `/home`, `feature_profile.sh` and the
+  picker charge that column to `/` (reported as `/+/opt`).
 - What gets installed, from `generate/feature_profile.sh`: minimal 8–14,
   standard 15–29, full 30+, overridable with `PROFILE=` and
   `FEATURES="+docker -pytools"`, checked mount by mount against that layout
@@ -170,14 +251,27 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
   is what claude-code lives in. Its 320 MB fits beside the standard set at
   15 GB with only 144 MB to spare on `/`, so below 30 GB it is opt-in
   (`FEATURES="+claude-code"`).
+- The picker, `generate/feature_select.sh`, inverts that default: only the
+  base tier is on, you tick the rest, and the disk grows to the smallest size
+  that holds the set (`g` pins it instead). It runs only with a terminal and
+  with `FEATURES`, `PROFILE` and `B2B_NO_SELECT` unset, and writes the
+  gitignored `.b2b-features`. That file outlives the session. The Makefile
+  builds at its `B2B_SELECT_SIZE_GB` even when `SIZE_B2B=` is on the command
+  line and no picker ran. `feature_profile.sh` uses its feature list only when
+  `FEATURES` is empty, `PROFILE=auto` and the saved size equals `SIZE_B2B`.
+  When a build comes out at an unexpected size or feature set, run
+  `make features_select ARGS=--show` first.
 
-Two marker contracts in `preseeds/preseed.cfg` matter when editing it. The
-`RECIPE-BEGIN`/`RECIPE-END` block is the generator's output for the default size
-and is regenerated at ISO build time; after changing `partition_recipe.sh`,
-paste `bash generate/partition_recipe.sh --recipe` back into it or
-`tests/test_partition_recipe.sh` fails. The `LUKS-BEGIN`/`LUKS-END` block is
-what `LUKS=OFF` rewrites. Feature cost estimates in `feature_profile.sh` are
-meant to be corrected from a built guest's `features.status`.
+`preseeds/preseed.cfg.in` is a template, not a valid preseed: preview it with
+`utils/b2b_config.sh --render preseeds/preseed.cfg.in`. Two marker contracts
+matter when editing it. The `RECIPE-BEGIN`/`RECIPE-END` block is the generator's
+output for the shipped defaults and is regenerated at ISO build time. After
+changing `partition_recipe.sh` or the default table, paste
+`B2B_CONFIG=tests/fixtures/default.conf bash generate/partition_recipe.sh
+--recipe` back into it, or `tests/test_partition_recipe.sh` fails. The
+`LUKS-BEGIN`/`LUKS-END` block is what `LUKS=OFF` rewrites. Feature cost
+estimates in `feature_profile.sh` are meant to be corrected from a built guest's
+`features.status`.
 
 ### Two backends, one guest
 
@@ -216,8 +310,15 @@ use, so never assume 4242: read the port back the way `orchestrate.sh` and
 - Host scripts must not assume a distro or root. sudo is offered only when a
   terminal is attached and only for the exact step that needs it.
 - Idempotency: `make all` on an already-built machine must boot it, not fail.
-- Credentials are the temporary defaults listed in the README. The LUKS
-  passphrase comes from `VM_PASS` or `vm_pass.txt`. Add no hardcoded secrets.
+- make hands its environment to every script, so a new build or provisioner
+  switch takes a project prefix (`NVIM_`, `B2B_`, `INCEPTION_`) and is
+  validated before any download or destructive step. A switch once named
+  `NERD_FONT` read a shell prompt theme's exported `NERD_FONT=0` and stopped
+  builds after `make re` had already deleted the VM (now `NVIM_NERD_FONT`).
+- Credentials are the temporary defaults in `born2root.conf`. The LUKS
+  passphrase is `VM_PASS`, else `B2B_LUKS_PASSPHRASE`, for the preseed and the
+  unlock alike. Add no hardcoded secrets.
 - `doc/` holds deep dives (CI architecture, port forwarding, host domain
-  access, the VS Code SSH timeout fix). `doc/README.md` is a Born2beRoot
-  command cheat sheet, not an index.
+  access, the VS Code SSH timeout fix). `doc/HANDOFF_SPACE_AND_PROFILES.md` is
+  the measured record behind the sizing model and the feature costs.
+  `doc/README.md` is a Born2beRoot command cheat sheet, not an index.

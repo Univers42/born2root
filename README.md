@@ -19,6 +19,7 @@ accident.
 
 - [What Is This](#what-is-this)
 - [Quick Start](#quick-start)
+- [Make It Yours: `born2root.conf`](#make-it-yours-born2rootconf)
 - [What `make all` Does (Step by Step)](#what-make-all-does-step-by-step)
 - [Makefile Commands](#makefile-commands)
 - [Connecting with VS Code Remote SSH](#connecting-with-vs-code-remote-ssh)
@@ -75,6 +76,8 @@ Everything is scripted. `make re` destroys everything and rebuilds from scratch.
 ```bash
 git clone https://github.com/LESdylan/setup_arch_linux.git
 cd setup_arch_linux
+$EDITOR born2root.conf    # your login, passwords, keymap... (see below)
+make config               # what it resolves to, and whether it is valid
 make all
 ```
 
@@ -98,9 +101,10 @@ To boot it yourself later:
 1. Start the VM: `make start_vm` (headless, unlocks the disk for you)
 2. Connect: `ssh b2b`
 
-The disk passphrase is `tempencrypt123` (see `vm_pass.txt`, or set `VM_PASS` to
-keep it out of the repo). You only type it by hand if you deliberately open the
-console with `make gui_vm`.
+The disk passphrase is `B2B_LUKS_PASSPHRASE` in `born2root.conf` (`tempencrypt123`
+by default; set `VM_PASS` to keep yours out of the repo — it overrides the file
+for the ISO and for the unlock alike). You only type it by hand if you
+deliberately open the console with `make gui_vm`.
 
 ### Watching a headless VM
 
@@ -346,6 +350,66 @@ headless. Two details it gets right and that are easy to get wrong:
 
 ---
 
+## Make It Yours: `born2root.conf`
+
+Everything a classmate changes lives in **one file at the repo root**,
+prefilled with the values this VM has always had. Edit it, run `make config`,
+then `make all`. Nothing else needs touching: the preseed is a template
+(`preseeds/preseed.cfg.in`) rendered from it when the ISO is built, and every
+script that needs the login, a password or the layout reads it through
+`utils/b2b_config.sh`.
+
+| Key                   | Default          | What it does                                             |
+| --------------------- | ---------------- | -------------------------------------------------------- |
+| `B2B_LOGIN`           | `dlesieur`       | the sudo user; also `ssh b2b`'s user and `<login>.42.fr` |
+| `B2B_HOSTNAME`        | empty            | empty = `<login>42`, what the subject wants              |
+| `B2B_USER_PASSWORD`   | `tempuser123`    | shipped as a SHA-512 hash, never in clear                |
+| `B2B_ROOT_PASSWORD`   | `temproot123`    | same                                                     |
+| `B2B_LUKS_PASSPHRASE` | `tempencrypt123` | typed by the host at every boot (`VM_PASS` overrides)    |
+| `B2B_EXTRA_USERS`     | empty            | `alice:Passw0rd bob:Secret:sudo` — more accounts         |
+| `B2B_LOCALE`          | `en_US.UTF-8`    |                                                          |
+| `B2B_KEYMAP`          | `es`             | console keymap: `us`, `fr`, `de`, …                      |
+| `B2B_TIMEZONE`        | `Europe/Madrid`  |                                                          |
+| `B2B_MIRROR`          | `deb.debian.org` | Debian mirror host                                       |
+| `B2B_VOLUME` lines    | the 7 below      | which logical volumes exist, and how they are sized      |
+| `B2B_SWAP_MB`         | `auto`           | follows RAM, or a fixed size                             |
+
+The Build section holds the Makefile defaults too: `B2B_SIZE_GB`,
+`B2B_VM_RAM_MB`, `B2B_VM_NAME`, `B2B_BACKEND`, `B2B_PROFILE`, `B2B_FEATURES`
+and `B2B_AI_MODE` (for `SIZE_B2B`, `VM_RAM_MB`, and so on).
+
+```text
+B2B_VOLUME  root     /          2816   25    30720
+B2B_VOLUME  home     /home       512   18   102400
+B2B_VOLUME  opt      /opt        256    5    20480
+...
+B2B_VOLUME  var      /var       2048  rest        -
+```
+
+A volume row is `name mount floor-MB share-% cap-MB`: every volume gets its
+floor, plus its share of what is left, up to its cap, and the one row marked
+`rest` takes the remainder. **Delete a row** and that mount becomes a directory
+of `/` — the fit check then charges its costs to `/`, and `make features` says
+so. **Add a row** (`B2B_VOLUME www /var/www 256 2 10240`) to carve out another
+mount. `make partitions` previews the result for the disk size.
+
+Extra users land in `user42` (and `sudo` with `:sudo`), with hellish and its
+configuration as their login shell. Password aging (30 days, 2 minimum,
+warned 7 before) is applied to every account, root included.
+
+Some things are **not** in the file, on purpose: SSH on port 4242, the `user42`
+and `sudo` groups, the `LVMGroup` volume group, a 500 MB `/boot`, LUKS, and the
+shell. **hellish is the login shell of every account in every build** — there
+is no switch, the build fails without it, and a `chsh` back to bash inside the
+guest is undone by the sshd watchdog within 15 seconds.
+
+The command line and the environment still win for a single run
+(`make all SIZE_B2B=30`), a key nobody knows is an error, and an invalid value
+stops the build **before** the ISO download, naming the key to fix.
+`B2B_CONFIG=path` reads another file.
+
+---
+
 ## What `make all` Does (Step by Step)
 
 ```text
@@ -357,7 +421,7 @@ make all
   │     └─ Automatically detects the latest version from cdimage.debian.org
   │
   ├─ 3. Build custom ISO
-  │     ├─ Inject preseed.cfg into initrd (fully automated install)
+  │     ├─ Render preseed.cfg.in from born2root.conf, inject it into initrd
   │     ├─ Copy b2b-setup.sh (SSH, UFW, sudo, password policy, AppArmor, etc.)
   │     ├─ Copy monitoring.sh (Born2beRoot monitoring script)
   │     ├─ Copy first-boot-setup.sh (Docker + WordPress on first real boot)
@@ -374,7 +438,7 @@ make all
   │     └─ Attach the custom ISO
   │
   ├─ 5. Boot and install (unattended)
-  │     ├─ Debian installer runs preseed.cfg
+  │     ├─ Debian installer runs the rendered preseed.cfg
   │     ├─ LUKS + LVM partitions created automatically
   │     ├─ b2b-setup.sh runs in chroot (16 configuration sections)
   │     └─ VM powers off when done
@@ -643,12 +707,15 @@ docker run --rm hello-world
 
 ## Credentials
 
-| What                 | Value            |
-| -------------------- | ---------------- |
-| Root password        | `temproot123`    |
-| User (dlesieur)      | `tempuser123`    |
-| LUKS disk encryption | `tempencrypt123` |
-| SSH port             | `4242`           |
+The defaults of [`born2root.conf`](#make-it-yours-born2rootconf); change them
+there before building, and `make all` prints the ones it used.
+
+| What                         | Key                   | Default          |
+| ---------------------------- | --------------------- | ---------------- |
+| Root password                | `B2B_ROOT_PASSWORD`   | `temproot123`    |
+| User (`B2B_LOGIN`, dlesieur) | `B2B_USER_PASSWORD`   | `tempuser123`    |
+| LUKS disk encryption         | `B2B_LUKS_PASSPHRASE` | `tempencrypt123` |
+| SSH port                     | (fixed)               | `4242`           |
 
 > ⚠️ Change these passwords after setup if you're doing the real Born2beRoot
 > evaluation.
@@ -668,7 +735,8 @@ docker run --rm hello-world
 - ✅ Password policy (min 10 chars, uppercase, lowercase, digit, max 3 repeats)
 - ✅ AppArmor enabled at boot
 - ✅ Monitoring script via cron (every 10 minutes, wall broadcast)
-- ✅ Hostname: `dlesieur42`
+- ✅ Hostname: `<login>42` (`B2B_HOSTNAME` in `born2root.conf`)
+- ✅ Password aging 30/2/7 on every account, root included
 
 ### Born2beRoot Bonus Part
 
@@ -694,17 +762,21 @@ docker run --rm hello-world
 
 ```text
 sda
-├── sda1          500 MB   /boot        (ext2, unencrypted)
-└── sda5          ~31 GB   LUKS encrypted
-    └── LVM
-        ├── root      5.0 GB   /
-        ├── swap      1.0 GB   [SWAP]
-        ├── home      5.0 GB   /home
-        ├── var      12.0 GB   /var
-        ├── srv       1.0 GB   /srv
-        ├── tmp       1.5 GB   /tmp
-        └── var-log   ~5 GB    /var/log   (fills remaining space)
+├── sda1            1 MB   bios_boot
+├── sda2          500 MB   /boot        (ext4, unencrypted)
+└── sda5       ~14.5 GB   LUKS encrypted
+    └── LVM (LVMGroup)    — born2root.conf's B2B_VOLUME table, at 15 GB:
+        ├── root      4.0 GiB  /
+        ├── swap      1.9 GiB  [SWAP]
+        ├── home      1.5 GiB  /home
+        ├── opt       0.5 GiB  /opt
+        ├── srv       0.2 GiB  /srv
+        ├── tmp       0.4 GiB  /tmp
+        ├── var-log   0.5 GiB  /var/log
+        └── var       4.5 GiB  /var       (the remainder)
 ```
+
+See [Disk Layout & Growing a Partition](#disk-layout--growing-a-partition).
 
 ### Port Forwarding (NAT)
 
@@ -1112,19 +1184,21 @@ The layout is not scaled proportionally — that gives a 100 GB `/tmp` on a
 (a working Debian fits on 8 GB), a **weighted share** of what is left, and a
 **cap** (nothing is gained past 30 GB of `/`); `/var` takes the remainder,
 because Docker is the thing that actually grows. Below 8 GB the build is
-refused with the size that would work. The default, 15 GB:
+refused with the size that would work. Which volumes exist and those three
+numbers are the `B2B_VOLUME` table in
+[`born2root.conf`](#make-it-yours-born2rootconf). The default, 15 GB:
 
-| Mount      | Size    | Holds                                                    |
-| ---------- | ------- | -------------------------------------------------------- |
-| `/boot`    | 500 MB  | kernel, unencrypted (required)                           |
-| `/`        | 4.3 GB  | Debian (~1.1 GB), apt packages, Docker + node binaries   |
-| swap       | 2 GB    | follows RAM (1–4 GB), mounted with `discard`             |
-| `/home`    | 1.1 GB  | nvim plugins/parsers, hellish (sources stay on the host) |
-| `/opt`     | 570 MB  | **machine-wide scope** — see below                       |
-| `/srv`     | 380 MB  | service data (lighttpd)                                  |
-| `/tmp`     | 440 MB  | build artefacts                                          |
-| `/var/log` | 570 MB  | system + Docker logs                                     |
-| `/var`     | ~5.2 GB | Docker images, containers, build cache, WordPress        |
+| Mount      | Size    | Holds                                                         |
+| ---------- | ------- | ------------------------------------------------------------- |
+| `/boot`    | 500 MB  | kernel, unencrypted (required)                                |
+| `/`        | 4.4 GB  | Debian (~1.1 GB), apt packages, Docker + node binaries        |
+| swap       | 2 GB    | follows RAM (1–4 GB), mounted with `discard`                  |
+| `/home`    | 1.6 GB  | nvim plugins/parsers, hellish, VS Code server, Inception data |
+| `/opt`     | 570 MB  | **machine-wide scope** — see below                            |
+| `/srv`     | 256 MB  | service data (lighttpd)                                       |
+| `/tmp`     | 440 MB  | build artefacts                                               |
+| `/var/log` | 570 MB  | system + Docker logs                                          |
+| `/var`     | ~4.9 GB | Docker images, containers, build cache, WordPress             |
 
 These were **calibrated on a real build**: the first cut gave `/` 3.3 GB and
 left no room for nvim, because the Debian base system (~1.1 GB) was not in
@@ -1132,9 +1206,10 @@ the cost table at all. `/etc/b2b/features.status` on a built guest records
 what each feature actually took; that is where the next correction comes
 from.
 
-`generate/partition_recipe.sh` computes it; the copy in `preseeds/preseed.cfg`
-is its output for the default and `tests/test_partition_recipe.sh` fails if the
-two drift.
+`generate/partition_recipe.sh` computes it from `born2root.conf`; the copy in
+`preseeds/preseed.cfg.in` is its output for the shipped defaults
+(`tests/fixtures/default.conf`) and `tests/test_partition_recipe.sh` fails if
+the two drift.
 
 ### Why it is this small, and why that took a fix
 
@@ -1211,7 +1286,9 @@ missing things, and Docker could run before nvim and starve it.
 | **full**     | 30+        | + **Claude Code** (320 MB on `/`); it fits the 15 GB quota beside everything else, 144 MB to spare, so below 30 GB it is opt-in                   |
 
 AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
-be turned off. Everything else can be, per feature:
+be turned off, and hellish is not a feature at all: it is the login shell of
+every build. Everything else can be, per feature (or with `B2B_FEATURES` in
+`born2root.conf`):
 
 ```bash
 make all SIZE_B2B=10                        # minimal
@@ -1382,10 +1459,11 @@ Raise `VM_RAM_MB` first.
 ```text
 .
 ├── Makefile                    # Entry point — all commands start here
+├── born2root.conf              # The one file to personalise the VM
 ├── README.md                   # This file
 │
 ├── preseeds/
-│   ├── preseed.cfg             # Debian preseed — fully automated install
+│   ├── preseed.cfg.in          # Debian preseed template, filled from born2root.conf
 │   ├── b2b-setup.sh            # Main post-install script (SSH, UFW, sudo, etc.)
 │   ├── first-boot-setup.sh     # Docker + WordPress install (runs on first boot)
 │   └── monitoring.sh           # Born2beRoot monitoring script
@@ -1486,8 +1564,8 @@ Your SSH key wasn't injected during install (ISO build issue). Fix it manually:
 ```bash
 ## Copy your key to the VM (will ask for password ONE time)
 SSH_PORT=$(ssh -G b2b 2>/dev/null | awk '$1 == "port" { print $2; exit }')
-ssh-copy-id -p "$SSH_PORT" dlesieur@127.0.0.1
-## Password: tempuser123
+ssh-copy-id -p "$SSH_PORT" "$(utils/b2b_config.sh get B2B_LOGIN)@127.0.0.1"
+## Password: B2B_USER_PASSWORD from born2root.conf
 
 ## Verify — should NOT ask for password
 ssh b2b echo "Key auth works"

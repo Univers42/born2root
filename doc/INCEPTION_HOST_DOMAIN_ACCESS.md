@@ -227,11 +227,11 @@ assertion that something _should_ work.
 - **Guest sudo requires a TTY.** `deploy_inception.sh` uses `ssh -tt` for the
   one `sudo` it needs (the guest's `/etc/hosts` line); without it sudo refuses
   with _"you must have a tty"_ no matter what is piped at it.
-- **Two different passwords.** `vm_pass.txt` holds the LUKS passphrase; the
-  `dlesieur` account password used by `sudo` comes from `preseeds/preseed.cfg`.
-  Both are throwaway lab credentials, but both sit in plaintext in a public
-  repository — worth rotating if this VM is ever reachable from anywhere but
-  this host.
+- **Two different passwords.** `B2B_LUKS_PASSPHRASE` unlocks the disk; the
+  account password `sudo` wants is `B2B_USER_PASSWORD`. Both live in
+  `born2root.conf` (the defaults are throwaway lab credentials sitting in a
+  public repository) — set your own there, or `VM_PASS` / `GUEST_PASS` for a
+  single run, if this VM is ever reachable from anywhere but this host.
 - **The port-80 `lighttpd`** inside the VM is this repo's own bonus web server,
   not an Inception component. It is the reason Inception's compliance suite
   reports "port 80 answered". Harmless.
