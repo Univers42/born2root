@@ -290,11 +290,11 @@ if [ -f /root/install_nvim.sh ]; then
     # never once said "no space". Mason's downloads came back as curl(23) and
     # git could not even write a ref lock. 400 MB is nvim + nvim-extras from
     # the manifest (200 + 150) with a little room over.
-    # Every account with `nvim = true` in born2root.toml gets the setup, in
-    # its own home -- so /home pays once per editor user, not once.
-    EDITOR_USERS="${B2B_NVIM_USERS:-$B2B_LOGIN}"
-    EDITOR_COUNT=$(printf '%s' "$EDITOR_USERS" | tr ' ' '\n' | grep -c .)
-    if check_disk_space / 1000 && check_disk_space /home $((400 * EDITOR_COUNT)); then
+    # The installers run for the login only. Every other account with
+    # `nvim = true` in born2root.toml is wired to the same plugins afterwards
+    # (share_editor_setup, after the extras), which costs it ~10 MB of /home
+    # instead of the ~400 MB a second full install measured.
+    if check_disk_space / 1000 && check_disk_space /home 400; then
         chmod +x /root/install_nvim.sh 2>/dev/null || true
         # NVIM_BOOTSTRAP=1: kickstart's plugins, tree-sitter parsers and
         # language servers are installed NOW, at build time, and the script
@@ -303,7 +303,7 @@ if [ -f /root/install_nvim.sh ]; then
         # to the user's first interactive start: minutes of cloning behind a
         # blank editor, on a VM whose point is to arrive finished.
         if run_logged /var/log/b2b-nvim-install.log \
-            env NVIM_USERS="$EDITOR_USERS" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
+            env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
             echo "[OK] Neovim + kickstart installed, plugins included (log: /var/log/b2b-nvim-install.log)"
         else
             feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
@@ -333,13 +333,13 @@ else
     echo "--- Installing the Neovim extras layer ---"
     # Same guard as the nvim section above, for the same reason: this layer's
     # plugins go to /home, and a full /home fails it invisibly.
-    if ! check_disk_space /home $((200 * EDITOR_COUNT)); then
-        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs $((200 * EDITOR_COUNT)) for $EDITOR_COUNT editor user(s))"
+    if ! check_disk_space /home 200; then
+        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
         NVIM_EXTRAS_STATUS=failed
     fi
     chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
     if run_logged /var/log/b2b-nvim-install.log \
-        env NVIM_USERS="$EDITOR_USERS" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
+        env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
         echo "[OK] Neovim extras installed (log: /var/log/b2b-nvim-install.log)"
     else
         echo "[FAIL] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
@@ -351,7 +351,7 @@ else
     if [ -f /root/install_excalidraw.sh ]; then
         chmod +x /root/install_excalidraw.sh 2>/dev/null || true
         if run_logged /var/log/b2b-nvim-install.log \
-            env EXCALIDRAW_USERS="$EDITOR_USERS" "$B2B_SH" /root/install_excalidraw.sh; then
+            env EXCALIDRAW_USERS="$B2B_LOGIN" "$B2B_SH" /root/install_excalidraw.sh; then
             echo "[OK] Excalidraw editor built (log: /var/log/b2b-nvim-install.log)"
         else
             echo "[FAIL] Excalidraw build reported errors — see /var/log/b2b-nvim-install.log"
@@ -362,6 +362,81 @@ else
         NVIM_EXTRAS_STATUS=failed
     fi
     feature_end nvim-extras "$NVIM_EXTRAS_STATUS"
+fi
+
+### ─── The editor for the other `nvim = true` accounts ──────────────────────
+# A full install per account measured 404 MB of /home each (2026-09-13): 226
+# MB of plugins and parsers, 103 MB of kulala's binaries, 32 MB of mason's
+# language servers -- identical bytes in every home. So the login's copy moves
+# to /home/.b2b-editor (same volume: a rename, no copy, no extra space), owned
+# by the login so its :lua vim.pack.update() and :Mason keep working, readable
+# by everyone, and every editor account links to it. The login's own home
+# stays 0700. What is personal stays personal: config, state, cache, sessions.
+# Another account cannot update the shared plugins; that is the price, and it
+# is the login's machine.
+#
+# Each account is then proven the way install_nvim.sh proves the login: the
+# plugin verifier runs headless AS that account, and a failure is a base
+# feature failure like any other.
+B2B_EDITOR_SHARED=/home/.b2b-editor
+share_editor_setup() {
+    local owner="$1" user="$2" owner_home home dir
+    owner_home=$(getent passwd "$owner" | cut -d: -f6)
+    home=$(getent passwd "$user" | cut -d: -f6)
+    [ -d "$owner_home/.config/nvim" ] || {
+        feature_fail nvim-shared "$user: $owner has no Neovim config to share"
+        return 1
+    }
+    [ -n "$home" ] && [ -d "$home" ] || {
+        feature_fail nvim-shared "$user: no home directory"
+        return 1
+    }
+    mkdir -p "$B2B_EDITOR_SHARED"
+    chown "$owner:$owner" "$B2B_EDITOR_SHARED"
+    chmod 755 "$B2B_EDITOR_SHARED"
+    for dir in site mason kulala.nvim; do
+        if [ -d "$owner_home/.local/share/nvim/$dir" ] && [ ! -L "$owner_home/.local/share/nvim/$dir" ]; then
+            rm -rf "${B2B_EDITOR_SHARED:?}/$dir"
+            mv "$owner_home/.local/share/nvim/$dir" "$B2B_EDITOR_SHARED/$dir"
+            ln -s "$B2B_EDITOR_SHARED/$dir" "$owner_home/.local/share/nvim/$dir"
+            chown -h "$owner:$owner" "$owner_home/.local/share/nvim/$dir"
+        fi
+    done
+    chmod -R a+rX "$B2B_EDITOR_SHARED"
+    mkdir -p "$home/.config" "$home/.local/share/nvim" "$home/.local/state/nvim" "$home/.cache"
+    rm -rf "$home/.config/nvim"
+    cp -a "$owner_home/.config/nvim" "$home/.config/nvim"
+    # The extras write the login's home into the config as a literal (the
+    # sessions directory, for one): re-point it, or bob's sessions land in a
+    # directory bob cannot write.
+    grep -rlFZ "$owner_home/" "$home/.config/nvim" 2>/dev/null |
+        xargs -0 -r sed -i "s#$owner_home/#$home/#g"
+    mkdir -p "$home/.nvim-sessions"
+    for dir in site mason kulala.nvim; do
+        [ -e "$B2B_EDITOR_SHARED/$dir" ] || continue
+        rm -rf "${home:?}/.local/share/nvim/$dir"
+        ln -s "$B2B_EDITOR_SHARED/$dir" "$home/.local/share/nvim/$dir"
+    done
+    [ -f "$home/.tmux.conf" ] || { [ -f "$owner_home/.tmux.conf" ] && cp "$owner_home/.tmux.conf" "$home/.tmux.conf"; }
+    chown -R "$user:$user" "$home/.config" "$home/.local" "$home/.cache" "$home/.nvim-sessions"
+    [ -f "$home/.tmux.conf" ] && chown "$user:$user" "$home/.tmux.conf"
+    if timeout 300 runuser -u "$user" -- env HOME="$home" USER="$user" LOGNAME="$user" \
+        /usr/local/bin/nvim --headless -c 'lua vim.g.b2b_verify_mode = "plugins"' \
+        -c "luafile /usr/local/lib/b2b/nvim-verify.lua" >>/var/log/b2b-nvim-install.log 2>&1; then
+        echo "[OK] $user: Neovim shares $owner's plugins ($(du -xsm "$home/.config" "$home/.local" "$home/.cache" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }') MB of its own)"
+    else
+        feature_fail nvim-shared "$user: the plugin verifier failed as $user — see /var/log/b2b-nvim-install.log"
+        return 1
+    fi
+}
+EDITOR_OTHERS=$(printf '%s' "${B2B_NVIM_USERS:-}" | tr ' ' '\n' | grep -vx "$B2B_LOGIN" | grep . || true)
+if [ -n "$EDITOR_OTHERS" ]; then
+    feature_begin nvim-shared /home
+    NVIM_SHARED_STATUS=ok
+    for u in $EDITOR_OTHERS; do
+        share_editor_setup "$B2B_LOGIN" "$u" || NVIM_SHARED_STATUS=failed
+    done
+    feature_end nvim-shared "$NVIM_SHARED_STATUS"
 fi
 feature_begin hellish /home
 ### ─── The login shell, from upstream, and its configuration for everyone ────

@@ -389,7 +389,7 @@ password = ""                # locked until `sudo passwd bob` in the guest
 fullname = "Bob from cluster 3"
 groups   = ["docker"]        # a group that does not exist is created
 ssh_keys = ["~/.ssh/bob.pub"] # a pasted key or a path on this machine
-nvim     = false             # true gives bob the editor, ~400 MB of /home
+nvim     = true              # the editor, sharing your plugins: ~16 MB
 ```
 
 Packages are checked against Debian's own index **before** the ISO download:

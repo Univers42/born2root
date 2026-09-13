@@ -75,10 +75,11 @@ luks_passphrase = "tempencrypt123"
 #              ~/.ssh/id_ed25519.pub (or id_rsa.pub) is added to your account
 #              in any case, which is what makes `ssh b2b` work without typing
 #              a password.
-#   nvim       the full Neovim setup for that account. Yours is always true;
-#              for anyone else it costs ~400 MB of /home, so it is false
-#              unless you ask. If the disk check then refuses, raise /home's
-#              share in [disk] below rather than the disk size.
+#   nvim       the full Neovim setup for that account. Yours is always true.
+#              Anyone else shares your plugins and language servers (they
+#              live once, in /home/.b2b-editor) and keeps their own config:
+#              ~16 MB of /home each. They cannot update the shared plugins;
+#              you can. false unless you ask.
 [users.dlesieur]
 password = "tempuser123"
 fullname = ""

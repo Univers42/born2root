@@ -163,18 +163,22 @@ need_noopt=$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | awk '/^ *n
 check "no /opt: / needs what / and /opt needed together" "$need_noopt" "$need_default"
 check "no /opt: the table says / pays for /opt" "$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | grep -c '/opt: no volume in born2root.toml, counted against /')" 1
 
-# ── One /home charge per editor user ────────────────────────────────────────
-# born2root.toml can give the editor setup to more than one account, and each
-# gets its own copy in its own home: 404 MB of /home each, measured. The
-# shipped 15 GB layout holds one; the model has to see the second.
+# ── Extra editor accounts share the login's plugins ─────────────────────────
+# born2root.toml can give the editor setup to more than one account. A full
+# install per account measured 404 MB of /home each, which made a second
+# editor account need 18 GB; first boot now installs once and links every other
+# account to /home/.b2b-editor, 6 MB of its own measured. The model charges
+# that as the nvim-shared base row, never the full install again.
 home_need() { env B2B_NVIM_USER_COUNT="$1" SIZE_B2B="$2" "${FP[@]}" --table 2>/dev/null | awk '/^ *needed/ { print $NF }'; }
-check "one editor user: the default set fits 15 GB" "$(rc_of env B2B_NVIM_USER_COUNT=1 SIZE_B2B=15 "${FP[@]}" --check)" 0
-check "two editor users: /home grows by the three per-user rows" \
-    "$(($(home_need 2 15) - $(home_need 1 15)))" 405
-check "two editor users at 15 GB: refused" "$(rc_of env B2B_NVIM_USER_COUNT=2 SIZE_B2B=15 "${FP[@]}" --check)" 1
-check "two editor users: the refusal says what to change in the config" \
-    "$(env B2B_NVIM_USER_COUNT=2 SIZE_B2B=15 "${FP[@]}" --check 2>&1 | grep -c 'nvim = false on someone')" 1
-check "two editor users: fits at the size it names" "$(rc_of env B2B_NVIM_USER_COUNT=2 SIZE_B2B=18 "${FP[@]}" --check)" 0
-check "the picker reads the per-user rows" "$(grep -c "^PER_USER_HOME=" generate/feature_profile.sh)" 1
+check "one editor account: no nvim-shared row" \
+    "$(env B2B_NVIM_USER_COUNT=1 SIZE_B2B=15 "${FP[@]}" --table 2>/dev/null | grep -c '^ *nvim-shared' || true)" 0
+check "two editor accounts: /home grows by the shared row, not a second install" \
+    "$(($(home_need 2 15) - $(home_need 1 15)))" 16
+check "five editor accounts: four shared rows" "$(($(home_need 5 15) - $(home_need 1 15)))" 64
+check "two editor accounts fit the 15 GB quota" "$(rc_of env B2B_NVIM_USER_COUNT=2 SIZE_B2B=15 "${FP[@]}" --check)" 0
+check "nvim-shared is a base row FEATURES cannot drop" \
+    "$(env B2B_NVIM_USER_COUNT=2 FEATURES=-nvim-shared "${FP[@]}" --resolve 2>&1 | grep -c 'base feature')" 1
+check "the picker reads the shared cost from feature_profile.sh" \
+    "$(grep -c '^EDITOR_SHARED_HOME_MB=' generate/feature_profile.sh)" 1
 
 exit "$fail"

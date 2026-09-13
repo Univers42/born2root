@@ -205,12 +205,13 @@ ai-local           explicit  0     1000  0     0      -
 # documented workflow fills is not a disk that fits. Keeping them out is what
 # let a 974 MB /home pass the check and then fill up completely.
 NOT_INSTALLED='vscode-remote inception-data npm-cache'
-# nvim, its extras and npm's cache live in the HOME of each account that has
-# the editor setup (`nvim = true` in born2root.toml), so their /home column is
-# paid once per editor user. Measured on the 2026-09-13 build: 404 MB of /home
-# per account (nvim 143 + extras 260), which these three rows (405) cover.
+# Every other account with `nvim = true` in born2root.toml shares the login's
+# plugins, parsers and language servers (first-boot-setup.sh moves them to
+# /home/.b2b-editor) and keeps only its config, state and cache: 6 MB measured
+# on 2026-09-13, against 404 MB for a second full install. Charged as a base
+# row, nvim-shared, the name first boot measures it under.
 # feature_select.sh reads this line with sed, like NOT_INSTALLED.
-PER_USER_HOME='nvim nvim-extras npm-cache'
+EDITOR_SHARED_HOME_MB=16
 # [packages] apt in born2root.toml, priced by utils/b2b_apt.py from Debian's
 # index: its closure lands on / and its downloads pass through /var. The ISO
 # build resolves the list against the mirror and exports the two figures; any
@@ -229,11 +230,16 @@ if [ -n "$APT_PACKAGES" ]; then
 else
     APT_ROW=""
 fi
-MANIFEST="$MANIFEST$APT_ROW
-"
 # B2B_NVIM_USER_COUNT is for tests; the build asks the config.
 EDITOR_COUNT="${B2B_NVIM_USER_COUNT:-$("${SCRIPT_SH:-bash}" "$HERE/../utils/b2b_config.sh" get B2B_NVIM_USERS | wc -w)}"
 case "$EDITOR_COUNT" in '' | *[!0-9]* | 0) EDITOR_COUNT=1 ;; esac
+SHARED_ROW=""
+if [ "$EDITOR_COUNT" -gt 1 ]; then
+    SHARED_ROW="nvim-shared        base      0  0  0  $((EDITOR_SHARED_HOME_MB * (EDITOR_COUNT - 1)))  nvim"
+fi
+MANIFEST="$MANIFEST$APT_ROW
+$SHARED_ROW
+"
 # ai-local's /opt cost is Ollama (~1 GB) plus the model install_ai.sh will pick
 # for this much RAM. Its thresholds, mirrored here so the fit check agrees:
 ai_model_mb() {
@@ -384,9 +390,6 @@ done
 # Costs per mount for the chosen set. ai-local's /opt figure depends on RAM.
 cost_of() { # $1 feature  $2 column (3=/ 4=/opt 5=/var 6=/home)
     c=$(field "$1" "$2")
-    if [ "$2" = 6 ]; then
-        case " $PER_USER_HOME " in *" $1 "*) c=$((c * EDITOR_COUNT)) ;; esac
-    fi
     if [ "$1" = ai-local ] && [ "$2" = 4 ]; then
         c=$((c + $(ai_model_mb "$VM_RAM_MB")))
     fi
@@ -540,10 +543,6 @@ emit_table() {
         done
         g=$(smallest_fit_gb) && printf '\n    This set fits from SIZE_B2B=%s   (make all SIZE_B2B=%s)\n' "$g" "$g"
         printf '    Or drop a feature: FEATURES="-docker"   Or a smaller profile: PROFILE=minimal\n\n'
-        if [ "$EDITOR_COUNT" -gt 1 ] && printf '%s\n' "$OVERFLOW" | grep -q '/home'; then
-            printf '    /home pays the editor setup %s times (nvim = true on %s accounts): give\n' "$EDITOR_COUNT" "$EDITOR_COUNT"
-            printf '    /home a bigger share in [disk] volumes, or set nvim = false on someone\n\n'
-        fi
     fi
 }
 

@@ -150,10 +150,14 @@ fi
 
 # ── Everything below comes out of feature_profile.sh ────────────────────────
 NOT_INSTALLED=$(sed -n "s/^NOT_INSTALLED='\(.*\)'/\1/p" "$FP")
-PER_USER_HOME=$(sed -n "s/^PER_USER_HOME='\(.*\)'/\1/p" "$FP")
-# Same count feature_profile.sh uses: one /home charge per editor user.
+EDITOR_SHARED_HOME_MB=$(sed -n 's/^EDITOR_SHARED_HOME_MB=\([0-9]*\).*/\1/p' "$FP" | head -n1)
+# The same nvim-shared row feature_profile.sh adds for each extra editor account.
 EDITOR_COUNT="${B2B_NVIM_USER_COUNT:-$("${SCRIPT_SH:-bash}" "$HERE/../utils/b2b_config.sh" get B2B_NVIM_USERS | wc -w)}"
 case "$EDITOR_COUNT" in '' | *[!0-9]* | 0) EDITOR_COUNT=1 ;; esac
+SHARED_ROW=""
+if [ "$EDITOR_COUNT" -gt 1 ]; then
+    SHARED_ROW="nvim-shared        base      0  0  0  $((${EDITOR_SHARED_HOME_MB:-16} * (EDITOR_COUNT - 1)))  nvim"
+fi
 # [packages] apt in born2root.toml, priced by utils/b2b_apt.py from Debian's
 # index: its closure lands on / and its downloads pass through /var. The ISO
 # build resolves the list against the mirror and exports the two figures; any
@@ -187,7 +191,6 @@ OPT_KEYS=""
 while read -r n tier c1 c2 c3 c4 req; do
     case "$n" in '' | ai-*) continue ;; esac
     k=${n//-/_}
-    case " $PER_USER_HOME " in *" $n "*) c4=$((c4 * EDITOR_COUNT)) ;; esac
     eval "NAME_${k}=\$n TIER_${k}=\$tier REQ_${k}=\$req COST_${k}=\"\$c1 \$c2 \$c3 \$c4\""
     ALL_KEYS="${ALL_KEYS}${ALL_KEYS:+ }$k"
     case "$tier" in base) continue ;; esac
@@ -197,6 +200,7 @@ while read -r n tier c1 c2 c3 c4 req; do
 done <<MANIEOF
 $(sed -n "/^MANIFEST='/,/^'/p" "$FP" | awk 'NF == 7')
 $APT_ROW
+$SHARED_ROW
 MANIEOF
 [ -n "$OPT_KEYS" ] || exit 0
 
