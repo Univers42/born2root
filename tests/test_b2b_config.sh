@@ -309,7 +309,9 @@ check "--volumes refuses a table the installer could not create" \
 GUEST=$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --guest)
 check "--guest records no password" \
     "$(printf '%s\n' "$GUEST" | grep -v '^#' |
-        grep -ciE 'password|passphrase|tempuser|temproot|tempencrypt')" 0
+        grep -cE '_PASSWORD=|_PASSWORD_HASH=|PASSPHRASE|tempuser|temproot|tempencrypt|[$]6[$]')" 0
+# ...while the policy's non-secret values that merely say "password" are there.
+contains "--guest carries the ssh password-login switch" "$GUEST" "B2B_SSH_PASSWORD_LOGIN=yes"
 contains "--guest names the login" "$GUEST" "B2B_LOGIN=dlesieur"
 contains "--guest names the hostname" "$GUEST" "B2B_HOSTNAME=dlesieur42"
 contains "--guest quotes the volume list" "$GUEST" 'B2B_VOLUMES="root:/ home:/home'

@@ -1036,6 +1036,12 @@ LEGACY = {
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
+    "B2B_PASS_MIN_LENGTH": lambda c: c.policy["password"]["min_length"],
+    "B2B_PASS_MIN_UPPER": lambda c: c.policy["password"]["min_upper"],
+    "B2B_PASS_MIN_LOWER": lambda c: c.policy["password"]["min_lower"],
+    "B2B_PASS_MIN_DIGIT": lambda c: c.policy["password"]["min_digit"],
+    "B2B_PASS_MAX_REPEAT": lambda c: c.policy["password"]["max_repeat"],
+    "B2B_PASS_MIN_CHANGED": lambda c: c.policy["password"]["min_changed"],
     "B2B_PW_MIN_LENGTH": lambda c: c.policy["password"]["min_length"],
     "B2B_PW_MIN_UPPER": lambda c: c.policy["password"]["min_upper"],
     "B2B_PW_MIN_LOWER": lambda c: c.policy["password"]["min_lower"],
@@ -1139,6 +1145,22 @@ def guest_view(config):
         "B2B_EXTRA_USERS",
         "B2B_NVIM_USERS",
         "B2B_VOLUMES",
+        # [policy.*]: numbers, yes/no, an absolute path, and a sudo message
+        # --check keeps free of ' " \ ` $ and newlines, so double quotes hold it.
+        "B2B_PASS_MAX_DAYS",
+        "B2B_PASS_MIN_DAYS",
+        "B2B_PASS_WARN_AGE",
+        "B2B_PASS_MIN_LENGTH",
+        "B2B_PASS_MIN_UPPER",
+        "B2B_PASS_MIN_LOWER",
+        "B2B_PASS_MIN_DIGIT",
+        "B2B_PASS_MAX_REPEAT",
+        "B2B_PASS_MIN_CHANGED",
+        "B2B_SUDO_TRIES",
+        "B2B_SUDO_BADPASS",
+        "B2B_SUDO_LOG_DIR",
+        "B2B_SSH_PASSWORD_LOGIN",
+        "B2B_MONITOR_INTERVAL",
     )
     for key in keys:
         if key == "B2B_VOLUMES":
@@ -1147,7 +1169,13 @@ def guest_view(config):
             )
         else:
             value = get(config, key)
-        if key in ("B2B_USERS", "B2B_EXTRA_USERS", "B2B_NVIM_USERS", "B2B_VOLUMES"):
+        if key in (
+            "B2B_USERS",
+            "B2B_EXTRA_USERS",
+            "B2B_NVIM_USERS",
+            "B2B_VOLUMES",
+            "B2B_SUDO_BADPASS",
+        ):
             lines.append('%s="%s"' % (key, value))
         else:
             lines.append("%s=%s" % (key, value))

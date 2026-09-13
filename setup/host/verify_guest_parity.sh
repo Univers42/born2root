@@ -131,10 +131,41 @@ row "root ssh" "$(g 'grep -iE "^permitrootlogin" /etc/ssh/sshd_config* 2>/dev/nu
 row "ufw" "$(groot '/usr/sbin/ufw status' | grep -m1 'Status:')" "active"
 row "ufw 4242" "$(groot '/usr/sbin/ufw status' | grep -c '4242' | awk '{print ($1>0)?"allowed":"MISSING"}')" "allowed"
 row "apparmor" "$(g 'systemctl is-active apparmor')" "active"
-row "sudo tries" "$(groot 'grep -rh passwd_tries /etc/sudoers /etc/sudoers.d/ 2>/dev/null' | head -1 | tr -d ' ')" "passwd_tries=3"
-row "pwd minlen" "$(g 'grep -h minlen /etc/security/pwquality.conf 2>/dev/null | head -1' | tr -d ' ')" "minlen=10"
+# The policy rows expect what born2root.toml asked for, not the subject's
+# literals: a stricter minlen = 12 is a pass, and must not read as a failure.
+row "sudo tries" "$(groot 'grep -rh passwd_tries /etc/sudoers /etc/sudoers.d/ 2>/dev/null' | head -1 | tr -d ' \t' | sed 's/^Defaults//')" "passwd_tries=$(b2b_get B2B_SUDO_TRIES)"
+row "sudo io log" "$(groot 'grep -rh iolog_dir /etc/sudoers.d/ 2>/dev/null' | head -1 | tr -d ' \t"' | sed 's/^Defaults//')" "iolog_dir=$(b2b_get B2B_SUDO_LOG_DIR)"
+row "pwd minlen" "$(g 'grep -h "^minlen" /etc/security/pwquality.conf 2>/dev/null | head -1' | tr -d ' ')" "minlen=$(b2b_get B2B_PASS_MIN_LENGTH)"
+row "pwd max days" "$(groot "chage -l $B2B_LOGIN" | sed -n 's/^Maximum number of days.*: *//p')" "$(b2b_get B2B_PASS_MAX_DAYS)"
+row "ssh passwords" "$(g 'grep -h "^PasswordAuthentication" /etc/ssh/sshd_config 2>/dev/null | head -1' | awk '{print $NF}')" "$(b2b_get B2B_SSH_PASSWORD_LOGIN)"
 row "monitoring" "$(g 'ls /usr/local/bin/monitoring.sh 2>/dev/null')" "monitoring.sh"
-row "cron entry" "$(groot 'grep -rh monitoring /etc/crontab /etc/cron.d/ /var/spool/cron/crontabs/ 2>/dev/null' | grep -c . | awk '{print ($1>0)?"scheduled":"MISSING"}')" "scheduled"
+row "cron entry" "$(groot 'grep -h monitoring.sh /etc/crontab 2>/dev/null' | awk '{print $1}' | head -1)" "*/$(b2b_get B2B_MONITOR_INTERVAL)"
+
+# shellcheck disable=SC2059
+printf "\n${C_BOLD}Accounts (born2root.toml)${C_RESET}\n"
+while IFS=: read -r name fullname groups; do
+    [ -n "$name" ] || continue
+    entry=$(g "getent passwd $name")
+    row "$name exists" "${entry%%:*}" "$name"
+    row "$name full name" "$(printf '%s' "$entry" | cut -d: -f5 | cut -d, -f1)" "$fullname"
+    row "$name shell" "$(printf '%s' "$entry" | cut -d: -f7)" "/usr/bin/hellish"
+    have=" $(g "id -nG $name") "
+    missing=""
+    for group in $(printf '%s' "$groups" | tr ',' ' '); do
+        case "$have" in *" $group "*) ;; *) missing="$missing $group" ;; esac
+    done
+    row "$name groups" "${missing:+missing:}${missing:-all of $groups}" "all of $groups"
+done <<USERSEOF
+$(b2b_users 2>/dev/null)
+USERSEOF
+# An account born2root.toml gave no password is locked (passwd -S says L)
+# until someone sets one in the guest. Asked per name, so no password is
+# hashed or printed just to find the empty ones.
+for name in $(b2b_get B2B_USERS); do
+    [ "$name" != "$B2B_LOGIN" ] || continue
+    [ -z "$(b2b_get "users.$name.password")" ] || continue
+    row "$name locked" "$(groot "passwd -S $name" | awk '{print $2}')" "L"
+done
 
 # shellcheck disable=SC2059
 printf "\n${C_BOLD}Login shell (installed from upstream on first boot)${C_RESET}\n"

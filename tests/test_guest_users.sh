@@ -94,6 +94,12 @@ check "none asked for: no useradd" "$(grep -c '^useradd ' "$TMP/calls")" 0
 check "none asked for: aging for root and the login only" \
     "$(grep '^chage ' "$TMP/calls" | awk '{ print $NF }' | tr '\n' ' ')" "root alice42login "
 
+# ── A stricter [policy.password] reaches chage ─────────────────────────────
+export B2B_PASS_MAX_DAYS=20 B2B_PASS_MIN_DAYS=3 B2B_PASS_WARN_AGE=10
+run ""
+unset B2B_PASS_MAX_DAYS B2B_PASS_MIN_DAYS B2B_PASS_WARN_AGE
+check "aging from born2root.toml: 20 days max, 3 min, warned 10 before" "$(grep -c '^chage -M 20 -m 3 -W 10 ' "$TMP/calls")" 2
+
 # ── A missing hash is a failure, not a password-less account ────────────────
 printf 'alice:$6$salta$hashA\n' >"$TMP/shadow"
 run "alice:user42 carol:user42"

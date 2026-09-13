@@ -396,6 +396,7 @@ set_step() {
 # unlock_vm.sh has just sourced.
 GUEST_LOGIN=$(b2b_get B2B_LOGIN)
 GUEST_ROOT_PASS=$(b2b_get B2B_ROOT_PASSWORD)
+MONITOR_EVERY=$(b2b_get B2B_MONITOR_INTERVAL)
 GUEST_USER_PASS=$(b2b_user_password)
 GUEST_LUKS_PASS=$(b2b_luks_passphrase)
 
@@ -1267,7 +1268,7 @@ _auto_width \
     "    VS Code    Host: 127.0.0.1  Port: ${P_SSH}  User: ${GUEST_LOGIN}" \
     "    lighttpd :80  ·  MariaDB :3306  ·  PHP-FPM" \
     "    AppArmor: enforced  ·  UFW: active" \
-    "    Docker :2375  ·  SSH :4242  ·  Monitoring: cron/10m" \
+    "    Docker :2375  ·  SSH :4242  ·  Monitoring: cron/${MONITOR_EVERY:-10}m" \
     "    If SSH drops, just reconnect — your session is still there" \
     "    Detach:  Ctrl+B d     Reattach:  ssh b2b  (automatic)" \
     "    Dashboard   http://127.0.0.1:${P_HTTP}/wordpress/wp-admin/" \
@@ -1380,7 +1381,7 @@ mid
 row "  ${BLD}${WHT}▸ Services Inside VM${RST}"
 row "    lighttpd ${DIM}:80${RST}  ·  MariaDB ${DIM}:3306${RST}  ·  PHP-FPM"
 row "    AppArmor: ${GRN}enforced${RST}  ·  UFW: ${GRN}active${RST}"
-row "    Docker ${DIM}:2375${RST}  ·  SSH ${DIM}:4242${RST}  ·  Monitoring: ${DIM}cron/10m${RST}"
+row "    Docker ${DIM}:2375${RST}  ·  SSH ${DIM}:4242${RST}  ·  Monitoring: ${DIM}cron/${MONITOR_EVERY:-10}m${RST}"
 blank
 mid
 row "  ${BLD}${WHT}▸ tmux — Session Persistence${RST}"

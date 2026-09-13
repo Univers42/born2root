@@ -413,7 +413,13 @@ create_extra_users
 sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
 grep -q "^Port 4242" /etc/ssh/sshd_config || echo "Port 4242" >>/etc/ssh/sshd_config
 sed -i 's/^#*PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+# [policy.ssh] password_login: "no" is keys only. --check refuses it unless the
+# first account has a key (the building machine's, or ssh_keys), so nobody is
+# locked out; the host then connects with the key it baked in.
+SSH_PASSWORD_LOGIN="${B2B_SSH_PASSWORD_LOGIN:-yes}"
+sed -i "s/^#*PasswordAuthentication .*/PasswordAuthentication $SSH_PASSWORD_LOGIN/" /etc/ssh/sshd_config
+grep -q '^PasswordAuthentication' /etc/ssh/sshd_config ||
+    echo "PasswordAuthentication $SSH_PASSWORD_LOGIN" >>/etc/ssh/sshd_config
 
 # ── SSH keepalive + VS Code Remote SSH settings ────────────────────────────
 # VirtualBox NAT drops idle TCP mappings after ~5-15 min. We need aggressive
@@ -647,36 +653,65 @@ echo y | ufw enable
 echo "[OK] UFW firewall active"
 
 ### ─── 7. Sudo — strict rules per subject ───────────────────────────────────
-mkdir -p /var/log/sudo
-chmod 700 /var/log/sudo
-
-cat >/etc/sudoers.d/sudo_config <<'SUDOEOF'
-Defaults	passwd_tries=3
-Defaults	badpass_message="Wrong password. Access denied!"
-Defaults	logfile="/var/log/sudo/sudo.log"
-Defaults	log_input,log_output
-Defaults	iolog_dir="/var/log/sudo"
-Defaults	requiretty
-Defaults	secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
-SUDOEOF
+# [policy.sudo] in born2root.toml; the subject's values when build.conf is
+# missing. --check on the host has already refused more than 3 tries, a
+# relative log dir and a message holding ' " \ ` $ or a newline.
+#
+# A broken sudoers.d file does not just lose the policy, it locks sudo for
+# everyone -- so the file is written with printf (no heredoc to expand), to a
+# temporary name visudo ignores, and moved in only once `visudo -cf` accepts
+# it. Anything else puts the subject's own policy there instead, which still
+# satisfies the evaluation, and says so.
+write_sudo_policy() { # <tries> <message> <log dir> <file>
+    printf 'Defaults\tpasswd_tries=%s\n' "$1"
+    printf 'Defaults\tbadpass_message="%s"\n' "$2"
+    printf 'Defaults\tlogfile="%s/sudo.log"\n' "$3"
+    printf 'Defaults\tlog_input,log_output\n'
+    printf 'Defaults\tiolog_dir="%s"\n' "$3"
+    printf 'Defaults\trequiretty\n'
+    printf 'Defaults\tsecure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"\n'
+}
+SUDO_TRIES="${B2B_SUDO_TRIES:-3}"
+SUDO_BADPASS="${B2B_SUDO_BADPASS:-Wrong password. Access denied!}"
+SUDO_LOG_DIR="${B2B_SUDO_LOG_DIR:-/var/log/sudo}"
+write_sudo_policy "$SUDO_TRIES" "$SUDO_BADPASS" "$SUDO_LOG_DIR" >/etc/sudoers.d/.sudo_config.new
+chmod 440 /etc/sudoers.d/.sudo_config.new
+if ! command -v visudo >/dev/null 2>&1 || visudo -cf /etc/sudoers.d/.sudo_config.new >/dev/null 2>&1; then
+    mv /etc/sudoers.d/.sudo_config.new /etc/sudoers.d/sudo_config
+else
+    echo "[WARN] the sudo policy from born2root.toml does not pass visudo — using the subject's defaults"
+    SUDO_TRIES=3
+    SUDO_BADPASS="Wrong password. Access denied!"
+    SUDO_LOG_DIR=/var/log/sudo
+    write_sudo_policy "$SUDO_TRIES" "$SUDO_BADPASS" "$SUDO_LOG_DIR" >/etc/sudoers.d/sudo_config
+    rm -f /etc/sudoers.d/.sudo_config.new
+fi
 chmod 440 /etc/sudoers.d/sudo_config
-echo "[OK] Sudo configured"
+mkdir -p "$SUDO_LOG_DIR"
+chmod 700 "$SUDO_LOG_DIR"
+echo "[OK] Sudo configured ($SUDO_TRIES tries, logs in $SUDO_LOG_DIR)"
 
 ### ─── 8. Password policy ───────────────────────────────────────────────────
 # login.defs — password aging
-sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS\t30/' /etc/login.defs
-sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS\t2/' /etc/login.defs
-sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE\t7/' /etc/login.defs
+# [policy.password] in born2root.toml, never weaker than the subject (--check
+# refuses that on the host); the subject's values when build.conf is missing.
+PASS_MAX="${B2B_PASS_MAX_DAYS:-30}"
+PASS_MIN="${B2B_PASS_MIN_DAYS:-2}"
+PASS_WARN="${B2B_PASS_WARN_AGE:-7}"
+sed -i "s/^PASS_MAX_DAYS.*/PASS_MAX_DAYS\t$PASS_MAX/" /etc/login.defs
+sed -i "s/^PASS_MIN_DAYS.*/PASS_MIN_DAYS\t$PASS_MIN/" /etc/login.defs
+sed -i "s/^PASS_WARN_AGE.*/PASS_WARN_AGE\t$PASS_WARN/" /etc/login.defs
 
-# pwquality.conf — complexity (use robust sed + fallback append)
+# pwquality.conf — complexity (use robust sed + fallback append). A negative
+# credit is pwquality's "at least this many", so min_upper = 2 is ucredit = -2.
 for setting in \
-    "minlen = 10" \
-    "dcredit = -1" \
-    "ucredit = -1" \
-    "lcredit = -1" \
-    "maxrepeat = 3" \
+    "minlen = ${B2B_PASS_MIN_LENGTH:-10}" \
+    "dcredit = -${B2B_PASS_MIN_DIGIT:-1}" \
+    "ucredit = -${B2B_PASS_MIN_UPPER:-1}" \
+    "lcredit = -${B2B_PASS_MIN_LOWER:-1}" \
+    "maxrepeat = ${B2B_PASS_MAX_REPEAT:-3}" \
     "usercheck = 1" \
-    "difok = 7" \
+    "difok = ${B2B_PASS_MIN_CHANGED:-7}" \
     "enforce_for_root"; do
     key=$(echo "$setting" | cut -d= -f1 | xargs)
     if grep -q "^#* *${key}" /etc/security/pwquality.conf 2>/dev/null; then
@@ -693,8 +728,8 @@ apply_password_aging() {
     local U
     while read -r U; do
         [ -n "$U" ] || continue
-        if chage -M 30 -m 2 -W 7 "$U" 2>/dev/null; then
-            echo "[OK] $U: password expires every 30 days (min 2, warned 7 before)"
+        if chage -M "${B2B_PASS_MAX_DAYS:-30}" -m "${B2B_PASS_MIN_DAYS:-2}" -W "${B2B_PASS_WARN_AGE:-7}" "$U" 2>/dev/null; then
+            echo "[OK] $U: password expires every ${B2B_PASS_MAX_DAYS:-30} days (min ${B2B_PASS_MIN_DAYS:-2}, warned ${B2B_PASS_WARN_AGE:-7} before)"
         else
             echo "[WARN] chage failed for $U"
         fi
@@ -808,14 +843,16 @@ echo "[OK] Git configured"
 chmod +x /usr/local/bin/monitoring.sh 2>/dev/null || true
 pin_shebang /usr/local/bin/monitoring.sh
 
-# Crontab: every 10 minutes, broadcast to all terminals. cron runs every
+# Crontab: every [policy.monitoring] interval_min minutes (the subject's 10
+# unless born2root.toml says otherwise), broadcast to all terminals. cron runs every
 # line as `$SHELL -c '<line>'`, and Debian's crontab says SHELL=/bin/sh: that
 # is dash, started for each job before the script's own shebang is read. The
 # guest shell takes that seat too, so nothing the guest starts itself passes
 # through another shell -- first boot's @reboot line included.
 sed -i "s|^SHELL=.*|SHELL=$B2B_GUEST_SH|" /etc/crontab
 grep -q '^SHELL=' /etc/crontab || sed -i "1i SHELL=$B2B_GUEST_SH" /etc/crontab
-echo "*/10 * * * * root /usr/local/bin/monitoring.sh" >>/etc/crontab
+MONITOR_INTERVAL="${B2B_MONITOR_INTERVAL:-10}"
+echo "*/$MONITOR_INTERVAL * * * * root /usr/local/bin/monitoring.sh" >>/etc/crontab
 echo "[OK] Monitoring cron set (SHELL=$B2B_GUEST_SH)"
 
 ### ─── 12. Lighttpd + PHP-FPM + WordPress routing ────────────────────────────
@@ -929,7 +966,7 @@ cat >/etc/motd <<'MOTDEOF'
   ╠═══════════════════════════════════════════════════════╣
 @B2B_MOTD_HOST@
   ║  Firewall:   Active (UFW)    AppArmor: Enforced       ║
-  ║  Monitoring: Every 10 min    Sudo log: /var/log/sudo/ ║
+@B2B_MOTD_POLICY@
   ╠═══════════════════════════════════════════════════════╣
   ║  🔒 tmux auto-attach is ON                            ║
   ║                                                       ║
@@ -954,6 +991,10 @@ MOTDEOF
 # lines up exactly as the old literal did; a longer one pushes the border).
 MOTD_ROW=$(printf '  ║%-55s║' "$(printf '  Hostname:   %-15s SSH Port: 4242' "$B2B_HOSTNAME")")
 sed -i "s|^@B2B_MOTD_HOST@\$|$MOTD_ROW|" /etc/motd
+# Same for the policy row: the interval and the sudo log dir come from
+# born2root.toml. A long log dir pushes the border rather than being cut.
+MOTD_ROW=$(printf '  ║%-55s║' "$(printf '  Monitoring: Every %-2s min    Sudo log: %s/' "${MONITOR_INTERVAL:-10}" "${SUDO_LOG_DIR:-/var/log/sudo}")")
+sed -i "s|^@B2B_MOTD_POLICY@\$|$MOTD_ROW|" /etc/motd
 # Below the box: the layout this guest was built with, so the numbers are one
 # login away. Written after the layout file exists (see the block further
 # down), which is why this is a hook rather than static text.
