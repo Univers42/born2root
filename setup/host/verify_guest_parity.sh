@@ -48,7 +48,10 @@ fi
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10)
 # shellcheck disable=SC2029
-g() { ssh "${SSH_OPTS[@]}" "$ALIAS" "$@" 2>/dev/null; }
+# -n: ssh must not read stdin. A row inside a `while read` loop would otherwise
+# hand the rest of the loop's input to the guest -- the account rows checked
+# the first account and silently skipped every other one.
+g() { ssh -n "${SSH_OPTS[@]}" "$ALIAS" "$@" 2>/dev/null; }
 
 guest_pass() {
     [ -n "${GUEST_PASS:-}" ] && {
