@@ -313,6 +313,36 @@ feature_env --conf >"$ISO_DIR/features.conf" ||
 feature_env --resolve | sed 's/^/    /'
 echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") feature(s) on"
 
+# Nerd Font icons in the guest's Neovim. Everything in the editor keys off
+# kickstart's vim.g.have_nerd_font, which ships false -- and render-markdown
+# then "renders" a heading as the icon `## ` and a checkbox as `[ ] `, so a
+# rendered buffer looks almost exactly like the raw file (reported 2026-09-13:
+# "I don't see it rendered inside nvim"). The glyphs are drawn by the terminal
+# on the machine you ssh FROM, so the build asks that machine: a Nerd Font in
+# fontconfig means on. It cannot tell whether your terminal actually uses it,
+# hence NERD_FONT=on|off to say so. Appended after the feature count above,
+# which counts =on lines. install_nvim.sh reads it back as B2B_NERD_FONT.
+resolve_nerd_font() {
+    case "${1:-auto}" in
+    on | off) printf '%s' "$1" ;;
+    auto)
+        if command -v fc-list >/dev/null 2>&1 &&
+            fc-list : family 2>/dev/null | grep -qi 'nerd font'; then
+            printf 'on'
+        else
+            printf 'off'
+        fi
+        ;;
+    *) return 1 ;;
+    esac
+}
+if ! NERD_FONT_RESOLVED=$(resolve_nerd_font "${NERD_FONT:-auto}"); then
+    echo "Error: NERD_FONT must be auto, on or off (got '${NERD_FONT}')" >&2
+    exit 1
+fi
+printf 'B2B_NERD_FONT=%s\n' "$NERD_FONT_RESOLVED" >>"$ISO_DIR/features.conf"
+echo "  ✓ Nerd Font icons in Neovim: ${NERD_FONT_RESOLVED} (NERD_FONT=${NERD_FONT:-auto})"
+
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)
 echo "Copying setup scripts to ISO root..."
 for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do

@@ -80,6 +80,13 @@ NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-900}"
 # Where the two Lua helpers the bootstrap runs inside Neovim are installed.
 # install_nvim_extras.sh runs the same two after its own plugin layer.
 B2B_LIB_DIR="${B2B_LIB_DIR:-/usr/local/lib/b2b}"
+# on | off: kickstart's vim.g.have_nerd_font, which every icon in the editor
+# and render-markdown's whole look key off (see set_nerd_font). Unset, it is
+# read from the build's features.conf, where create_custom_iso.sh recorded
+# whether the building machine has a Nerd Font; a guest built before that key
+# existed has neither, and then the config is left as it is.
+NVIM_NERD_FONT="${NVIM_NERD_FONT:-}"
+B2B_FEATURES_CONF="${B2B_FEATURES_CONF:-/etc/b2b/features.conf}"
 
 log() { printf '[nvim] %s\n' "$*"; }
 warn() { printf '[nvim] WARN: %s\n' "$*" >&2; }
@@ -353,6 +360,39 @@ LOCALEOF
     chmod 644 "${cfg}/${LOCAL_PLUGIN_REL}"
 }
 
+# kickstart's switch for icons, applied where kickstart reads it. Its init.lua
+# assigns `vim.g.have_nerd_font = false` unconditionally near the top and uses
+# it right there (which-key's icons, mini.statusline), so a drop-in in plugin/
+# -- sourced after init.lua -- would come too late for half of the editor. The
+# line is kickstart's documented customization point ("Set to true if you have
+# a Nerd Font installed and selected in the terminal"), so it is edited in
+# place: this is the one change the checkout carries. `on`/`off` are applied
+# whatever the line says, so a rebuild converges; unresolved leaves it alone,
+# so a hand-edited config is not reverted by a guest that never recorded a
+# choice.
+resolve_nerd_font_setting() {
+    local v="$NVIM_NERD_FONT"
+    if [ -z "$v" ] && [ -r "$B2B_FEATURES_CONF" ]; then
+        v=$(sed -n 's/^B2B_NERD_FONT=//p' "$B2B_FEATURES_CONF" | head -n1)
+    fi
+    case "$v" in
+    on | 1 | true | yes) printf 'true' ;;
+    off | 0 | false | no) printf 'false' ;;
+    esac
+}
+set_nerd_font() {
+    local user="$1" init="$2/init.lua" want
+    want=$(resolve_nerd_font_setting)
+    [ -n "$want" ] || return 0
+    [ -f "$init" ] || return 0
+    if grep -qE '^[[:space:]]*vim\.g\.have_nerd_font = (true|false)[[:space:]]*$' "$init"; then
+        sed -i -E "s/^([[:space:]]*vim\.g\.have_nerd_font = )(true|false)[[:space:]]*$/\1${want}/" "$init"
+        log "${user}: vim.g.have_nerd_font = ${want}"
+    else
+        warn "${user}: ${init} no longer assigns vim.g.have_nerd_font — icons left as kickstart set them"
+    fi
+}
+
 setup_user_config() {
     local user="$1" home cfg
     home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6)
@@ -383,6 +423,7 @@ setup_user_config() {
     fi
 
     write_local_plugin "$cfg"
+    set_nerd_font "$user" "$cfg"
 
     # Keep the drop-in out of `git status` without touching .gitignore, which
     # belongs to upstream.
