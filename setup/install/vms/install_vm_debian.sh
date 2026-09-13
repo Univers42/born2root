@@ -40,7 +40,7 @@ VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
 # default to 122880 (120 GB) on the theory that an unused disk costs nothing,
 # and the QEMU image built from the same recipe reached 42.7 GB on the host
 # because nothing in the guest ever handed freed blocks back. See the comment
-# in preseeds/preseed.cfg for the full measurement.
+# in preseeds/preseed.cfg.in for the full measurement.
 #
 # The Makefile derives this from SIZE_B2B (default 15 GB, the school quota);
 # `make space` reports the footprint and fails a build that would exceed it.
@@ -151,6 +151,8 @@ VAULT_PORT=18200
 
 # ── Dynamic port allocation (find free host ports) ───────────────────────────
 . "$SCRIPT_DIR/utils/host_ports.sh"
+# The login to show in the ssh hint below (born2root.conf).
+. "$SCRIPT_DIR/utils/b2b_config.sh"
 
 # Resolve the actual host ports (they differ from the defaults when a port is
 # already taken on this host). resolve_host_port assigns into the named variable
@@ -492,7 +494,7 @@ echo "  1. Start the VM:"
 echo "     VBoxManage startvm \"$VM_NAME\" --type headless"
 echo ""
 echo "  2. SSH into your VM from host:"
-echo "     ssh -p ${HOST_SSH_PORT} dlesieur@127.0.0.1"
+echo "     ssh -p ${HOST_SSH_PORT} $(b2b_get B2B_LOGIN)@127.0.0.1"
 echo ""
 echo "  3. Access Vite Gourmand from host:"
 echo "     Frontend:  http://127.0.0.1:${HOST_FRONTEND_PORT}"

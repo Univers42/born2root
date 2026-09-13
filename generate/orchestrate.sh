@@ -381,17 +381,6 @@ set_step() {
     draw_dashboard
 }
 
-# ── Detect host IP (cross-platform) ─────────────────────────────────────────
-get_host_ip() {
-    if command -v ip >/dev/null 2>&1; then
-        ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1
-    elif command -v hostname >/dev/null 2>&1; then
-        hostname -I 2>/dev/null | awk '{print $1}'
-    else
-        echo "127.0.0.1"
-    fi
-}
-
 # Host port allocation (detects local listeners, including loopback-only ones
 # such as the 42 ftpkg service on 127.0.0.1:4242). Shared with the VM installer
 # so both agree on which host ports are free and never hand out one twice.
@@ -402,6 +391,13 @@ get_host_ip() {
 # LUKS unlock helpers (resolve_passphrase / send_passphrase / wait_for_ssh).
 # Sourcing defines functions only, so this starts nothing.
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/../unlock_vm.sh"
+# Who the guest was built for and with which temporary passwords -- the
+# summary and the ssh config block name them. born2root.conf, via the reader
+# unlock_vm.sh has just sourced.
+GUEST_LOGIN=$(b2b_get B2B_LOGIN)
+GUEST_ROOT_PASS=$(b2b_get B2B_ROOT_PASSWORD)
+GUEST_USER_PASS=$(b2b_user_password)
+GUEST_LUKS_PASS=$(b2b_luks_passphrase)
 
 # The VM disk and its "this install finished" stamp (vdi_bytes / install_finished
 # / mark_install_finished). Sourced up here so Step 4 below cannot call them
@@ -687,7 +683,7 @@ SERIAL_LOG=$(get_serial_log)
 # the caller falls back to elapsed time, which is at least true.
 install_stage() {
     [ -n "$SERIAL_LOG" ] && [ -r "$SERIAL_LOG" ] || return 1
-    # First choice: the installer's own stage, which preseed.cfg's early_command
+    # First choice: the installer's own stage, which preseed.cfg.in's early_command
     # streams off d-i's syslog (setup/host/di_progress.sh). That works on the
     # VGA path that ships; the percentage lines below only exist with
     # SERIAL_CONSOLE=1.
@@ -751,7 +747,7 @@ vm_running_seconds() {
 # minutes", which cannot fire before the 10-minute mark and cannot tell a halted
 # VM from a stalled one. The serial console says it outright, so ask it first.
 # The preseed's finish-install hook writes this to the serial port once the
-# install is genuinely finished (see preseeds/preseed.cfg). Unlike the kernel
+# install is genuinely finished (see preseeds/preseed.cfg.in). Unlike the kernel
 # messages install_halted() looks for, it arrives even though d-i is NOT booted
 # with console=ttyS0 — which stays off because it makes d-i wrap itself in GNU
 # screen and stall (generate/create_custom_iso.sh explains at length).
@@ -1141,7 +1137,7 @@ SSHEOF
     # Every rebuild gives the VM a new host key on the same 127.0.0.1:<port>,
     # so ssh refuses to connect with REMOTE HOST IDENTIFICATION HAS CHANGED.
     # The `b2b` alias below dodges it via UserKnownHostsFile=/dev/null, but a
-    # direct `ssh -p <port> dlesieur@127.0.0.1` — and scp, and VS Code — still
+    # direct `ssh -p <port> <login>@127.0.0.1` — and scp, and VS Code — still
     # trip over the stale entry. Drop it here instead of making the user run
     # ssh-keygen -R by hand after every `make re`.
     if [ -f "$ssh_dir/known_hosts" ]; then
@@ -1170,7 +1166,7 @@ ${marker}
 ${alias_line}
     HostName 127.0.0.1
     Port ${P_SSH}
-    User dlesieur
+    User ${GUEST_LOGIN}
     ServerAliveInterval 15
     ServerAliveCountMax 6
     TCPKeepAlive yes
@@ -1249,7 +1245,6 @@ setup_vscode_remote_ssh 2>/dev/null || true
 setup_ssh_key_auth 2>/dev/null || true
 
 # ── Summary ──────────────────────────────────────────────────────────────────
-HOST_IP=$(get_host_ip)
 # shellcheck disable=SC2059
 printf "${SHOW_CUR}\n"
 
@@ -1262,14 +1257,14 @@ _auto_width \
     "    The run did not finish cleanly — see the step marked above." \
     "    The details below are reference, not a report of what happened." \
     "    Look at the VM with  make console  ·  state: make status" \
-    "    root password      temproot123" \
-    "    user (dlesieur)    tempuser123" \
-    "    disk encryption    tempencrypt123" \
+    "    root password      ${GUEST_ROOT_PASS}" \
+    "    user (${GUEST_LOGIN})    ${GUEST_USER_PASS}" \
+    "    disk encryption    ${GUEST_LUKS_PASS}" \
     "    1. make start_vm  — headless, types the passphrase for you" \
     "    SSH        ssh b2b   (shortcut — auto-configured)" \
-    "    or         ssh -p ${P_SSH} dlesieur@127.0.0.1" \
+    "    or         ssh -p ${P_SSH} ${GUEST_LOGIN}@127.0.0.1" \
     "    WordPress  http://127.0.0.1:${P_HTTP}/wordpress" \
-    "    VS Code    Host: 127.0.0.1  Port: ${P_SSH}  User: dlesieur" \
+    "    VS Code    Host: 127.0.0.1  Port: ${P_SSH}  User: ${GUEST_LOGIN}" \
     "    lighttpd :80  ·  MariaDB :3306  ·  PHP-FPM" \
     "    AppArmor: enforced  ·  UFW: active" \
     "    Docker :2375  ·  SSH :4242  ·  Monitoring: cron/10m" \
@@ -1294,10 +1289,6 @@ _auto_width \
     "    Mail bridge         https://127.0.0.1:${P_MAIL_BRIDGE}" \
     "    osionos Calendar    https://127.0.0.1:${P_OSIONOS_CALENDAR}" \
     "    Calendar bridge     https://127.0.0.1:${P_CALENDAR_BRIDGE}" \
-    "    Host LAN IP:   ${HOST_IP}" \
-    "    NAT gateway:   10.0.2.2  (host seen from VM)" \
-    "      cd preseeds && python3 -m http.server ${P_PRESEED}" \
-    "      http://10.0.2.2:${P_PRESEED}/preseed.cfg" \
     "    SSH      :${P_SSH}    HTTP     :${P_HTTP}    HTTPS    :${P_HTTPS}" \
     "    Frontend :${P_FRONTEND}  Backend  :${P_BACKEND}  Docker   :${P_DOCKER}" \
     "    Website  :${P_WEBSITE}  App      :${P_OSIONOS_APP}  Auth     :${P_AUTH_GATEWAY}" \
@@ -1345,13 +1336,13 @@ fi
 blank
 mid
 row "  ${BLD}${WHT}▸ Credentials${RST}"
-row "    ${DIM}root password${RST}      ${GRN}temproot123${RST}"
-row "    ${DIM}user (dlesieur)${RST}    ${GRN}tempuser123${RST}"
+row "    ${DIM}root password${RST}      ${GRN}${GUEST_ROOT_PASS}${RST}"
+row "    ${DIM}user (${GUEST_LOGIN})${RST}    ${GRN}${GUEST_USER_PASS}${RST}"
 # Only claim a passphrase when there is a volume to unlock. Printing one for
 # an unencrypted build would be the friendliest possible way to hand in a VM
 # that fails the mandatory requirement.
 if luks_enabled "$LUKS"; then
-    row "    ${DIM}disk encryption${RST}    ${GRN}tempencrypt123${RST}"
+    row "    ${DIM}disk encryption${RST}    ${GRN}${GUEST_LUKS_PASS}${RST}"
 else
     row "    ${DIM}disk encryption${RST}    ${YLW}none — built with LUKS=OFF${RST}"
     row "    ${YLW}This VM is NOT encrypted and FAILS the born2root evaluation.${RST}"
@@ -1364,14 +1355,14 @@ if luks_enabled "$LUKS"; then
 else
     row "    ${YLW}1.${RST} ${BLD}make start_vm${RST}  ${DIM}— headless; no passphrase to type${RST}"
 fi
-row "    ${YLW}2.${RST} Log in:  ${GRN}dlesieur${RST} / ${GRN}tempuser123${RST}"
+row "    ${YLW}2.${RST} Log in:  ${GRN}${GUEST_LOGIN}${RST} / ${GRN}${GUEST_USER_PASS}${RST}"
 blank
 mid
 row "  ${BLD}${WHT}▸ Connect from Host${RST}"
 row "    ${DIM}SSH${RST}        ${BLD}ssh b2b${RST}   ${DIM}(shortcut — auto-configured)${RST}"
-row "    ${DIM}or${RST}         ${BLD}ssh -p ${P_SSH} dlesieur@127.0.0.1${RST}"
+row "    ${DIM}or${RST}         ${BLD}ssh -p ${P_SSH} ${GUEST_LOGIN}@127.0.0.1${RST}"
 row "    ${DIM}WordPress${RST}  ${BLD}http://127.0.0.1:${P_HTTP}/wordpress${RST}"
-row "    ${DIM}VS Code${RST}    ${BLD}Host: 127.0.0.1  Port: ${P_SSH}  User: dlesieur${RST}"
+row "    ${DIM}VS Code${RST}    ${BLD}Host: 127.0.0.1  Port: ${P_SSH}  User: ${GUEST_LOGIN}${RST}"
 blank
 mid
 row "  ${BLD}${WHT}▸ WordPress Dashboard${RST}  ${GRN}(auto-installed + ready)${RST}"
@@ -1418,17 +1409,6 @@ row "    ${DIM}osionos Mail${RST}        ${BLD}https://127.0.0.1:${P_OSIONOS_MAI
 row "    ${DIM}Mail bridge${RST}         ${BLD}https://127.0.0.1:${P_MAIL_BRIDGE}${RST}"
 row "    ${DIM}osionos Calendar${RST}    ${BLD}https://127.0.0.1:${P_OSIONOS_CALENDAR}${RST}"
 row "    ${DIM}Calendar bridge${RST}     ${BLD}https://127.0.0.1:${P_CALENDAR_BRIDGE}${RST}"
-blank
-mid
-row "  ${BLD}${WHT}▸ Preseed via HTTP (alternative)${RST}"
-row "    ${DIM}Host LAN IP:${RST}   ${GRN}${HOST_IP}${RST}"
-row "    ${DIM}NAT gateway:${RST}   ${GRN}10.0.2.2${RST}  ${DIM}(host seen from VM)${RST}"
-blank
-row "    ${DIM}Serve preseed on your host:${RST}"
-row "      ${BLD}cd preseeds && python3 -m http.server ${P_PRESEED}${RST}"
-blank
-row "    ${DIM}Use this URL in the Debian installer:${RST}"
-row "      ${BLD}http://10.0.2.2:${P_PRESEED}/preseed.cfg${RST}"
 blank
 mid
 row "  ${BLD}${WHT}▸ Port Forwarding (VM NAT)${RST}"

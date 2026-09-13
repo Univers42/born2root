@@ -84,8 +84,8 @@
 # itself, slowly, on your first start.
 #
 # USAGE
-#   sudo ./install_nvim_extras.sh                     # default: user dlesieur
-#   sudo NVIM_USERS="dlesieur root" ./install_nvim_extras.sh
+#   sudo ./install_nvim_extras.sh                     # default: the login in /etc/b2b/build.conf
+#   sudo NVIM_USERS="<login> root" ./install_nvim_extras.sh
 #   sudo NVIM_BOOTSTRAP=0 ./install_nvim_extras.sh    # write config, skip the download
 
 set -u
@@ -112,7 +112,14 @@ export PATH
 
 NVIM_BIN="${NVIM_BIN:-/usr/local/bin/nvim}"
 
-NVIM_USERS="${NVIM_USERS:-dlesieur}"
+# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# written by utils/b2b_config.sh --guest). Unset NVIM_USERS defaults to it.
+B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
+NVIM_USERS="${NVIM_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"
+if [ -z "${NVIM_USERS}" ]; then
+    printf '[nvim-extras] ERROR: NVIM_USERS is empty and %s names no B2B_LOGIN\n' "$B2B_BUILD_CONF" >&2
+    exit 1
+fi
 NVIM_BOOTSTRAP="${NVIM_BOOTSTRAP:-1}"
 NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-1200}"
 NVIM_SESSION_DIR_NAME="${NVIM_SESSION_DIR_NAME:-.nvim-sessions}"
@@ -1703,7 +1710,7 @@ vim.api.nvim_create_user_command('B2BMarkdown', function()
     'connected with `ssh b2b`, the URL <leader>mp echoes opens in your host browser',
     'as it is. From any other ssh session, tunnel it yourself first:',
     '',
-    '  ssh -p ' .. SSH_PORT .. ' -L ' .. PORT .. ':127.0.0.1:' .. PORT .. ' ' .. (vim.env.USER or 'dlesieur') .. '@127.0.0.1',
+    '  ssh -p ' .. SSH_PORT .. ' -L ' .. PORT .. ':127.0.0.1:' .. PORT .. ' ' .. (vim.env.USER or '<login>') .. '@127.0.0.1',
     '',
     'Mermaid: a ```mermaid block is drawn right under itself in this buffer (flowcharts',
     'and sequence diagrams; <leader>mm toggles), and as a full diagram in the preview.',

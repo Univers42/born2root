@@ -1,7 +1,7 @@
 #!/usr/bin/env hellish
 # Start the VM headless and answer the guest's LUKS prompt from the host.
 #
-# The guest's LVM lives inside a LUKS container (preseeds/preseed.cfg sets
+# The guest's LVM lives inside a LUKS container (preseeds/preseed.cfg.in sets
 # partman-auto/method=crypto), so the initramfs stops for a passphrase long before
 # networking or SSH exist. Typing into the VM's virtual keyboard is the only host
 # channel that reaches that prompt, which is what lets the VM run headless.
@@ -14,7 +14,10 @@
 # Sourcing this file only defines functions; it starts nothing.
 
 VM_NAME="${VM_NAME:-debian}"
-VM_PASS_FILE="${VM_PASS_FILE:-vm_pass.txt}"
+# The passphrase lives in born2root.conf (B2B_LUKS_PASSPHRASE), the same value
+# the preseed was rendered with, so the two cannot disagree. Located from this
+# file, not the working directory: orchestrate.sh sources this from elsewhere.
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/utils/b2b_config.sh"
 # Measured on this VM (VBoxManage screenshotpng, boot from disk):
 #   t=3-13s   GRUB menu, 5s countdown
 #   t=16-26s  kernel + initramfs, blank screen
@@ -26,19 +29,18 @@ VM_UNLOCK_DELAY="${VM_UNLOCK_DELAY:-30}"   # first send, safely past GRUB
 VM_UNLOCK_RESEND="${VM_UNLOCK_RESEND:-15}" # re-send interval if it did not land
 VM_UNLOCK_TIMEOUT="${VM_UNLOCK_TIMEOUT:-240}"
 
-# Prefer an explicit VM_PASS so the passphrase can be kept out of the repo;
-# vm_pass.txt is the committed default. First line only, newline stripped: the
-# guest would otherwise receive a stray Enter mid-passphrase.
+# VM_PASS wins, so the passphrase can be kept out of the repo; otherwise
+# born2root.conf's B2B_LUKS_PASSPHRASE (it used to be a vm_pass.txt that
+# nothing kept in step with the preseed). One line, CR stripped: the guest
+# would otherwise receive a stray Enter mid-passphrase.
 resolve_passphrase() {
-    if [ -n "${VM_PASS:-}" ]; then
-        printf '%s' "$VM_PASS"
+    local p
+    p=$(b2b_luks_passphrase 2>/dev/null)
+    if [ -n "$p" ]; then
+        printf '%s' "$p"
         return 0
     fi
-    if [ -r "$VM_PASS_FILE" ]; then
-        head -n1 "$VM_PASS_FILE" | tr -d '\r\n'
-        return 0
-    fi
-    echo "No passphrase: set VM_PASS or create $VM_PASS_FILE" >&2
+    echo "No passphrase: set B2B_LUKS_PASSPHRASE in born2root.conf, or VM_PASS" >&2
     return 1
 }
 

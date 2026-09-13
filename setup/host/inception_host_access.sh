@@ -51,8 +51,10 @@ set -uo pipefail
 # launcher's PATH need not include ~/.local/bin.
 HOST_SH="${SCRIPT_SH:-$(readlink /proc/$$/exe 2>/dev/null || command -v bash)}"
 
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)/utils/b2b_config.sh"
 VM_NAME="${VM_NAME:-debian}"
-DOMAIN="${INCEPTION_DOMAIN:-${USER:-dlesieur}.42.fr}"
+# The subject's <login>.42.fr, with the login born2root.conf gave the guest.
+DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
 
 # Preferred host ports. Only used when the VM has no rule yet; an existing rule
 # always wins, so a port moved to dodge a clash is respected.

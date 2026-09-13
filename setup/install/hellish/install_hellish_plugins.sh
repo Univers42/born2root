@@ -23,8 +23,8 @@
 # asserts on (original-hellishrc.snapshot).
 #
 # USAGE
-#   sudo ./install_hellish_plugins.sh                      # default: user dlesieur
-#   sudo HELLISH_USERS="dlesieur root" ./install_hellish_plugins.sh
+#   sudo ./install_hellish_plugins.sh                      # default: the login in /etc/b2b/build.conf
+#   sudo HELLISH_USERS="<login> root" ./install_hellish_plugins.sh
 #   sudo HELLISH_PLUGINS_REF=main ./install_hellish_plugins.sh
 #   sudo HELLISH_PLUGINS_SRC=/path/to/checkout ./install_hellish_plugins.sh   # no network
 
@@ -33,7 +33,14 @@ set -u
 HELLISH_PLUGINS_REPO="${HELLISH_PLUGINS_REPO:-https://github.com/Univers42/hellishrc_plugins.git}"
 HELLISH_PLUGINS_REF="${HELLISH_PLUGINS_REF:-}" # empty = the repo's default branch
 HELLISH_PLUGINS_SRC="${HELLISH_PLUGINS_SRC:-}" # a local checkout to install from instead
-HELLISH_USERS="${HELLISH_USERS:-dlesieur}"
+# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# written by utils/b2b_config.sh --guest). Unset HELLISH_USERS defaults to it.
+B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
+HELLISH_USERS="${HELLISH_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"
+if [ -z "${HELLISH_USERS}" ]; then
+    printf '[hellishrc] ERROR: HELLISH_USERS is empty and %s names no B2B_LOGIN\n' "$B2B_BUILD_CONF" >&2
+    exit 1
+fi
 
 log() { printf '[hellishrc] %s\n' "$*"; }
 warn() { printf '[hellishrc] WARN: %s\n' "$*" >&2; }

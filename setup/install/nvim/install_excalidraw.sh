@@ -51,8 +51,8 @@
 # Neovim, through that user's SSH session.
 #
 # USAGE
-#   sudo ./install_excalidraw.sh                        # default: user dlesieur
-#   sudo EXCALIDRAW_USERS="dlesieur root" ./install_excalidraw.sh
+#   sudo ./install_excalidraw.sh                        # default: the login in /etc/b2b/build.conf
+#   sudo EXCALIDRAW_USERS="<login> root" ./install_excalidraw.sh
 #   sudo EXCALIDRAW_VERSION=0.18.1 ./install_excalidraw.sh   # npm version (pinned by default)
 #   sudo EXCALIDRAW_FORCE=1 ./install_excalidraw.sh           # rebuild an existing install
 
@@ -69,7 +69,14 @@ REACT_VERSION="${REACT_VERSION:-19.3.0}"
 ESBUILD_VERSION="${ESBUILD_VERSION:-0.28.2}"
 EXCALIDRAW_PORT="${EXCALIDRAW_PORT:-8421}"
 EXCALIDRAW_DIR="${EXCALIDRAW_DIR:-/opt/excalidraw}"
-EXCALIDRAW_USERS="${EXCALIDRAW_USERS:-dlesieur}"
+# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# written by utils/b2b_config.sh --guest). Unset EXCALIDRAW_USERS defaults to it.
+B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
+EXCALIDRAW_USERS="${EXCALIDRAW_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"
+if [ -z "${EXCALIDRAW_USERS}" ]; then
+    printf '[excalidraw] ERROR: EXCALIDRAW_USERS is empty and %s names no B2B_LOGIN\n' "$B2B_BUILD_CONF" >&2
+    exit 1
+fi
 EXCALIDRAW_FORCE="${EXCALIDRAW_FORCE:-0}"
 EXCALIDRAW_BIN="${EXCALIDRAW_BIN:-/usr/local/bin/excalidraw}"
 

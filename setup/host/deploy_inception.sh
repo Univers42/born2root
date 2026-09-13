@@ -25,9 +25,11 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
+# The guest account and the subject's <login>.42.fr come from born2root.conf.
+. "$REPO_ROOT/utils/b2b_config.sh"
 VM_NAME="${VM_NAME:-debian}"
-DOMAIN="${INCEPTION_DOMAIN:-dlesieur.42.fr}"
-GUEST_USER="${GUEST_USER:-dlesieur}"
+DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
+GUEST_USER="${GUEST_USER:-$(b2b_get B2B_LOGIN)}"
 GUEST_DIR="${INCEPTION_DIR:-/home/${GUEST_USER}/Documents/inception}"
 REPO_URL="${INCEPTION_REPO:-https://github.com/Univers42/Inception.git}"
 BRANCH="${INCEPTION_BRANCH:-main}"
@@ -65,29 +67,19 @@ die() {
 vm_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$@"; }
 
 # ── The guest sudo password ─────────────────────────────────────────────────
-# NOT the same secret as vm_pass.txt: that one is the LUKS passphrase typed at
-# boot, while sudo wants the dlesieur account password the installer set from
-# preseeds/preseed.cfg. Reading it back out of the preseed keeps the two in
-# step if either is ever changed.
-PRESEED_FILE="${PRESEED_FILE:-$REPO_ROOT/preseeds/preseed.cfg}"
+# The account password the preseed was rendered with: born2root.conf's
+# B2B_USER_PASSWORD (GUEST_PASS overrides it for a guest whose password has
+# since been changed). NOT the disk passphrase, which this used to fall back
+# to -- a different secret that could only ever fail.
 resolve_pass() {
     local p
     if [ -n "${GUEST_PASS:-}" ]; then
         printf '%s' "$GUEST_PASS"
         return 0
     fi
-    if [ -r "$PRESEED_FILE" ]; then
-        p=$(awk '$1 == "d-i" && $2 == "passwd/user-password" { print $4; exit }' "$PRESEED_FILE")
-        [ -n "$p" ] && {
-            printf '%s' "$p"
-            return 0
-        }
-    fi
-    if [ -r "$REPO_ROOT/vm_pass.txt" ]; then
-        head -n1 "$REPO_ROOT/vm_pass.txt" | tr -d '\r\n'
-        return 0
-    fi
-    return 1
+    p=$(b2b_user_password 2>/dev/null)
+    [ -n "$p" ] || return 1
+    printf '%s' "$p"
 }
 
 # ── 1. Wait until the guest answers ─────────────────────────────────────────

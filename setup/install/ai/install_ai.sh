@@ -52,7 +52,14 @@ AI_ROOT="${AI_ROOT:-/opt/ai}"
 AI_MODELS_DIR="${AI_MODELS_DIR:-${AI_ROOT}/models}"
 AI_ENDPOINT="${AI_ENDPOINT:-10.0.2.2:11434}"
 AI_MODEL="${AI_MODEL:-}" # empty = choose from RAM
-AI_USERS="${AI_USERS:-dlesieur}"
+# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# written by utils/b2b_config.sh --guest). Unset AI_USERS defaults to it.
+B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
+AI_USERS="${AI_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"
+if [ -z "${AI_USERS}" ]; then
+    printf '[ai] ERROR: AI_USERS is empty and %s names no B2B_LOGIN\n' "$B2B_BUILD_CONF" >&2
+    exit 1
+fi
 # Headroom left for the OS, Docker, MariaDB and an editor. Subtracted from
 # total RAM before choosing, because "free right now" is not what matters --
 # the model has to coexist with the services, not with an idle box.

@@ -33,8 +33,36 @@ cd "$REPO_ROOT" || exit 1
 
 VM_NAME="${1:-debian}"
 ACTION="${2:-all}"
-VM_USER="${VM_USER:-dlesieur}"
-VM_PASS_FILE="${VM_PASS_FILE:-vm_pass.txt}"
+# Who to log in as, and which account the provisioners set up: the login in
+# born2root.conf, unless VM_USER says otherwise. Each provisioner's *_USERS
+# follows it, so `make nvim` configures the same account the build did.
+. "$REPO_ROOT/utils/b2b_config.sh"
+VM_USER="${VM_USER:-$(b2b_get B2B_LOGIN)}"
+[ -n "$VM_USER" ] || VM_USER=$(id -un)
+NVIM_USERS="${NVIM_USERS:-$VM_USER}"
+EXCALIDRAW_USERS="${EXCALIDRAW_USERS:-$VM_USER}"
+HELLISH_USER="${HELLISH_USER:-$VM_USER}"
+HELLISH_USERS="${HELLISH_USERS:-$VM_USER}"
+DEVTOOLS_USERS="${DEVTOOLS_USERS:-$VM_USER}"
+CLAUDE_CODE_USERS="${CLAUDE_CODE_USERS:-$VM_USER}"
+AI_USERS="${AI_USERS:-$VM_USER}"
+
+# ── The account password ────────────────────────────────────────────────────
+# What the build set for VM_USER: born2root.conf's B2B_USER_PASSWORD, the same
+# value the preseed was rendered with. NOT the disk passphrase, which is a
+# different secret. VM_SUDO_PASS / VM_SUDO_PASS_FILE override it for a guest
+# whose password has since been changed (as the evaluation expects).
+resolve_sudo_pass() {
+    if [ -n "${VM_SUDO_PASS:-}" ]; then
+        printf '%s' "$VM_SUDO_PASS"
+        return 0
+    fi
+    if [ -n "${VM_SUDO_PASS_FILE:-}" ] && [ -f "$VM_SUDO_PASS_FILE" ]; then
+        head -n1 "$VM_SUDO_PASS_FILE" | tr -d '\r\n'
+        return 0
+    fi
+    b2b_user_password
+}
 
 C_R='\033[0m'
 C_B='\033[1m'
@@ -78,14 +106,18 @@ SCP_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 
 # The build bakes the host's public key into the VM, so key auth is the normal
 # path. sshpass is only a fallback for a VM built before that, or one whose key
-# was rotated; it reads the same vm_pass.txt the rest of the project uses.
+# was rotated. It sends the ACCOUNT password (B2B_USER_PASSWORD, or
+# VM_SUDO_PASS); it used to send vm_pass.txt, which is the disk passphrase and
+# was never going to log anyone in. Through the environment (-e), so the
+# password is not on sshpass's command line.
 SSH_PREFIX=()
 if ! ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${VM_USER}@127.0.0.1" true 2>/dev/null; then
-    if command -v sshpass >/dev/null 2>&1 && [ -f "$VM_PASS_FILE" ]; then
-        warn "key auth failed — falling back to sshpass with $VM_PASS_FILE"
-        SSH_PREFIX=(sshpass -f "$VM_PASS_FILE")
+    if command -v sshpass >/dev/null 2>&1 && SSHPASS=$(resolve_sudo_pass) && [ -n "$SSHPASS" ]; then
+        export SSHPASS
+        warn "key auth failed — falling back to sshpass with the account password from born2root.conf"
+        SSH_PREFIX=(sshpass -e)
     else
-        die "cannot reach ${VM_USER}@127.0.0.1:${SSH_PORT} with key auth (and sshpass/$VM_PASS_FILE unavailable)"
+        die "cannot reach ${VM_USER}@127.0.0.1:${SSH_PORT} with key auth (and no sshpass, or no password in born2root.conf)"
     fi
 fi
 
@@ -94,26 +126,6 @@ vm_ssh() { "${SSH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@"; 
 # look double-spaced and breaks anything downstream that matches line ends.
 vm_ssh_tty() { "${SSH_PREFIX[@]}" ssh "${SSH_TTY_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@" | tr -d '\r'; }
 vm_scp() { "${SSH_PREFIX[@]}" scp "${SCP_OPTS[@]}" "$@"; }
-
-# ── The sudo password ───────────────────────────────────────────────────────
-# The VM's user password is set by the preseed, so the preseed is the source of
-# truth for it. Note it is NOT the passphrase in vm_pass.txt: that one unlocks
-# the LUKS volume and is a different secret.
-resolve_sudo_pass() {
-    if [ -n "${VM_SUDO_PASS:-}" ]; then
-        printf '%s' "$VM_SUDO_PASS"
-        return 0
-    fi
-    if [ -n "${VM_SUDO_PASS_FILE:-}" ] && [ -f "$VM_SUDO_PASS_FILE" ]; then
-        head -n1 "$VM_SUDO_PASS_FILE" | tr -d '\r\n'
-        return 0
-    fi
-    if [ -f preseeds/preseed.cfg ]; then
-        awk '/^d-i passwd\/user-password[[:space:]]/ { print $4; exit }' preseeds/preseed.cfg
-        return 0
-    fi
-    return 1
-}
 
 # Run a privileged command in the VM.
 #

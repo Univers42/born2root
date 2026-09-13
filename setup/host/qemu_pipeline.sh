@@ -64,7 +64,7 @@ newest_iso=$(find . -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p
 if [ -n "$newest_iso" ] && [ "${FORCE_ISO:-0}" != "1" ]; then
     ok "reusing $newest_iso"
 else
-    CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}" AI_MODE="${AI_MODE:-off}" FORCE_ISO=1 LUKS="$LUKS" \
+    CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-dist/hellish}" AI_MODE="${AI_MODE:-off}" FORCE_ISO=1 LUKS="$LUKS" \
         $MAKE_BIN --no-print-directory gen_iso || die "ISO build failed"
     ok "ISO built"
 fi

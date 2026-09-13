@@ -13,7 +13,7 @@
 #   di_reached_final_unmount <log>   d-i started 95umount, its last hook
 #
 # WHERE THE LINES COME FROM
-#   preseeds/preseed.cfg's early_command starts a job inside the installer that
+#   preseeds/preseed.cfg.in's early_command starts a job inside the installer that
 #   copies its own /var/log/syslog to /dev/ttyS0, minus the kernel's lines.
 #   That is not the same as booting d-i on a serial console -- which makes it
 #   wrap itself in GNU screen and stall (generate/create_custom_iso.sh) -- it
@@ -123,7 +123,7 @@ di_feature_failed() {
 }
 
 # 95umount is the last hook d-i runs, and it unmounts /dev -- which is why
-# nothing after it can log or write to the serial port (see preseeds/preseed.cfg).
+# nothing after it can log or write to the serial port (see preseeds/preseed.cfg.in).
 # Reaching it means every step that installs anything has already finished.
 di_reached_final_unmount() {
     [ -n "$1" ] && [ -r "$1" ] &&

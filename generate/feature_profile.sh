@@ -175,14 +175,19 @@ RECIPE="$HERE/partition_recipe.sh"
 #                                  92), plus the 13.5 MB mermaid-ascii binary
 #                                  in /usr/local/bin. That set now needs 3115 of
 #                                  the 3259 usable at 15 GB: 144 MB to spare.
+#
+# 2026-09-13 -- hellish is the shell, not a feature. Its row
+# (`hellish-upstream base 0 0 0 1`) is gone: a row reads as something a set
+# could leave out, and colleagues had already built bash-only guests. Its
+# 1 MB of ~/.hellish moved into b2b-mandatory's /home column, so every total
+# below is unchanged. first-boot-setup.sh still measures it, as `hellish`.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
-b2b-mandatory      base      8     0     0     0      -
+b2b-mandatory      base      8     0     0     1      -
 devtools-apt       base      279   0     0     0      -
 nvim               base      382   120   0     200    devtools-apt
 npm-cache          base      0     0     0     55     nvim
 vscode-remote      standard  0     0     0     500    -
-hellish-upstream   base      0     0     0     1      -
 webstack           standard  272   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
@@ -369,20 +374,65 @@ done
 
 # The layout for a given disk, from the one place that decides it.
 sizes_for() { DISK_SIZE_MB="$1" VM_RAM_MB="$VM_RAM_MB" "${SCRIPT_SH:-bash}" "$RECIPE" --sizes 2>/dev/null; }
-usable() { printf '%s' $(($(printf '%s\n' "$1" | awk -F= -v n="$2" '$1 == n { print $2 }') * USABLE_PERMILLE / 1000)); }
-
-# fits <sizes> -> prints the mounts that overflow, one per line ("/opt 370 428"); empty = fits.
-fits() {
-    s="$1"
-    [ "$NEED_ROOT" -gt "$(usable "$s" root)" ] && printf '/ %s %s\n' "$NEED_ROOT" "$(usable "$s" root)"
-    [ "$NEED_OPT" -gt "$(usable "$s" opt)" ] && printf '/opt %s %s\n' "$NEED_OPT" "$(usable "$s" opt)"
-    [ "$NEED_VAR" -gt "$(usable "$s" var)" ] && printf '/var %s %s\n' "$NEED_VAR" "$(usable "$s" var)"
-    [ "$NEED_HOME" -gt "$(usable "$s" home)" ] && printf '/home %s %s\n' "$NEED_HOME" "$(usable "$s" home)"
-    return 0
+# A volume missing from the sizes counts as 0 MB usable, so it overflows
+# loudly. It used to be an empty string, `[ n -gt "" ]` then exits 2, and the
+# && after it swallowed that: a mount with no volume was never checked at all.
+usable() {
+    local n
+    n=$(printf '%s\n' "$1" | awk -F= -v n="$2" '$1 == n { print $2 }')
+    printf '%s' $((${n:-0} * USABLE_PERMILLE / 1000))
 }
 
 SIZES=$(sizes_for "$DISK_MB") || die "partition_recipe.sh refused ${DISK_MB} MB — see its message above"
 [ -n "$SIZES" ] || die "partition_recipe.sh produced no layout for ${DISK_MB} MB (too small? see: make partitions)"
+
+# Which volume each priced mount lives on, from the same --sizes. The volume
+# table in born2root.conf may have no /opt (or /var, or /home): that mount is
+# then a directory of /, so its costs are added to /'s and it is not checked
+# on its own. The label says so -- "/+/opt" -- wherever / is reported.
+holder_of() { printf '%s\n' "$SIZES" | sed -n "s|^holder:$1=||p" | head -n1; }
+H_ROOT=$(holder_of /)
+H_OPT=$(holder_of /opt)
+H_VAR=$(holder_of /var)
+H_HOME=$(holder_of /home)
+if [ -z "$H_ROOT" ] || [ -z "$H_OPT" ] || [ -z "$H_VAR" ] || [ -z "$H_HOME" ]; then
+    die "partition_recipe.sh --sizes did not say which volume holds /, /opt, /var and /home"
+fi
+ROOT_LABEL=/
+if [ "$H_OPT" = "$H_ROOT" ]; then
+    NEED_ROOT=$((NEED_ROOT + NEED_OPT))
+    NEED_OPT=0
+    ROOT_LABEL="$ROOT_LABEL+/opt"
+fi
+if [ "$H_VAR" = "$H_ROOT" ]; then
+    NEED_ROOT=$((NEED_ROOT + NEED_VAR))
+    NEED_VAR=0
+    ROOT_LABEL="$ROOT_LABEL+/var"
+fi
+if [ "$H_HOME" = "$H_ROOT" ]; then
+    NEED_ROOT=$((NEED_ROOT + NEED_HOME))
+    NEED_HOME=0
+    ROOT_LABEL="$ROOT_LABEL+/home"
+fi
+
+# fits <sizes> -> prints the mounts that overflow, one per line ("/opt 370 428"); empty = fits.
+fits() {
+    s="$1"
+    [ "$NEED_ROOT" -gt "$(usable "$s" "$H_ROOT")" ] && printf '%s %s %s\n' "$ROOT_LABEL" "$NEED_ROOT" "$(usable "$s" "$H_ROOT")"
+    [ "$H_OPT" != "$H_ROOT" ] && [ "$NEED_OPT" -gt "$(usable "$s" "$H_OPT")" ] && printf '/opt %s %s\n' "$NEED_OPT" "$(usable "$s" "$H_OPT")"
+    [ "$H_VAR" != "$H_ROOT" ] && [ "$NEED_VAR" -gt "$(usable "$s" "$H_VAR")" ] && printf '/var %s %s\n' "$NEED_VAR" "$(usable "$s" "$H_VAR")"
+    [ "$H_HOME" != "$H_ROOT" ] && [ "$NEED_HOME" -gt "$(usable "$s" "$H_HOME")" ] && printf '/home %s %s\n' "$NEED_HOME" "$(usable "$s" "$H_HOME")"
+    return 0
+}
+# A usable figure for the table: the volume's, or "on /" for a folded mount.
+usable_cell() { # <sizes> <holder>
+    if [ "$2" = "$H_ROOT" ]; then
+        printf 'on /'
+    else
+        usable "$1" "$2"
+    fi
+}
+
 OVERFLOW=$(fits "$SIZES")
 
 # The smallest SIZE_B2B at which this exact feature set fits. Linear search is
@@ -437,11 +487,17 @@ emit_table() {
         printf '    %-18s %-9s %-4s %6s %6s %6s %6s   %s\n' "$n" "$(field "$n" 2)" "$st" \
             "$(cost_of "$n" 3)" "$(cost_of "$n" 4)" "$(cost_of "$n" 5)" "$(cost_of "$n" 6)" "$(field "$n" 7)"
     done
-    printf '    %-18s %-9s %-4s %6s %6s %6s %6s\n' "needed (on)" "" "" "$NEED_ROOT" "$NEED_OPT" "$NEED_VAR" "$NEED_HOME"
+    printf '    %-18s %-9s %-4s %6s %6s %6s %6s\n' "needed (on)" "" "" "$NEED_ROOT" \
+        "$([ "$H_OPT" = "$H_ROOT" ] && echo 'on /' || echo "$NEED_OPT")" \
+        "$([ "$H_VAR" = "$H_ROOT" ] && echo 'on /' || echo "$NEED_VAR")" \
+        "$([ "$H_HOME" = "$H_ROOT" ] && echo 'on /' || echo "$NEED_HOME")"
     printf '    %-18s %-9s %-4s %6s %6s %6s %6s   %s\n' "usable at this size" "" "" \
-        "$(usable "$SIZES" root)" "$(usable "$SIZES" opt)" "$(usable "$SIZES" var)" "$(usable "$SIZES" home)" \
+        "$(usable "$SIZES" "$H_ROOT")" "$(usable_cell "$SIZES" "$H_OPT")" \
+        "$(usable_cell "$SIZES" "$H_VAR")" "$(usable_cell "$SIZES" "$H_HOME")" \
         "(80% of the mounted volume)"
     printf '\n'
+    [ "$ROOT_LABEL" = / ] ||
+        printf '    %s: no volume in born2root.conf, counted against /\n\n' "${ROOT_LABEL#/+}"
     printf '    %s\n\n' "rsvd = space the workflow claims, not a step first boot runs"
     if [ -z "$OVERFLOW" ]; then
         printf '  ✓ fits\n\n'

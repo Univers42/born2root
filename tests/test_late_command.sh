@@ -29,7 +29,7 @@ grep -oE '/root/install_[a-z_]+\.sh' preseeds/first-boot-setup.sh |
 awk '/^for PROVISIONER in/,/; do$/' generate/create_custom_iso.sh |
     grep -oE 'setup/install/[^ ]+\.sh' | sed 's|.*/||' | sort -u >"$TMP/staged"
 # What late_command copies into /root, only where source and target agree.
-grep -oE 'cp /cdrom/install_[a-z_]+\.sh /target/root/install_[a-z_]+\.sh' preseeds/preseed.cfg |
+grep -oE 'cp /cdrom/install_[a-z_]+\.sh /target/root/install_[a-z_]+\.sh' preseeds/preseed.cfg.in |
     awk '{ s = $2; t = $3; sub(".*/", "", s); sub(".*/", "", t); if (s == t) print s }' |
     sort -u >"$TMP/copied"
 

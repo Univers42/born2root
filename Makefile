@@ -13,16 +13,18 @@
 # ============================================================================ #
 
 # =========@@ Config @@=========================================================
-VM_NAME      ?= debian
-# Which hypervisor executes the VM. The GUEST is identical either way -- same
-# preseeded ISO, same LUKS+LVM layout, same b2b-setup.sh, same first boot --
-# so this only decides what runs the machine, never what is inside it.
+# Most defaults below come from born2root.conf at the repo root, read right
+# after the shell is chosen (see "born2root.conf" further down): VM_NAME,
+# BACKEND, SIZE_B2B, VM_RAM_MB, PROFILE, FEATURES, AI_MODE and LOGIN.
+#
+# BACKEND: which hypervisor executes the VM. The GUEST is identical either way
+# -- same preseeded ISO, same LUKS+LVM layout, same b2b-setup.sh, same first
+# boot -- so this only decides what runs the machine, never what is inside it.
 #   auto        pick whatever this machine can actually do, and ask only when
 #               both are available and there is a terminal to ask on
 #   virtualbox  the original path; needs the vboxdrv kernel module (root)
 #   qemu        KVM; needs no module, only access to /dev/kvm, so it works as
 #               an ordinary user on machines where VirtualBox cannot
-BACKEND      ?= auto
 # ── Which shell interprets the scripts ──────────────────────────────────────
 # make parses the Makefile; the .sh files it calls are interpreted by a shell.
 # Run them with the shell you launched make FROM -- hellish when that is your
@@ -71,6 +73,44 @@ export SCRIPT_SH
 # every $(shell ...) below this line, VM_PATH's included, runs under it too.
 SHELL := $(SCRIPT_SH)
 
+# ── born2root.conf: the defaults people edit ────────────────────────────────
+# The knobs below take their default from born2root.conf (read through
+# utils/b2b_config.sh, which never fails and never prints at this point), so
+# personalising the VM is editing one file instead of remembering flags. The
+# command line and the environment still win: a variable given either way has
+# an origin other than `undefined`, and the file is not asked. The literal in
+# each $(or) is what applies when the file does not answer -- a copy of the
+# Makefile alone, as tests/test_make_pull.sh makes, has no file at all.
+# B2B_CONFIG=path points every read, here and in the scripts, at another file.
+# env, not a bare assignment: make 4.3 does not hand command-line variables to
+# $(shell).
+B2B_CONFIG_ENV := $(if $(B2B_CONFIG),env B2B_CONFIG=$(B2B_CONFIG) ,)
+b2b_conf = $(shell $(B2B_CONFIG_ENV)$(SCRIPT_SH) $(CURDIR)/utils/b2b_config.sh get $(1) 2>/dev/null)
+ifeq ($(origin VM_NAME),undefined)
+VM_NAME := $(or $(call b2b_conf,B2B_VM_NAME),debian)
+endif
+ifeq ($(origin BACKEND),undefined)
+BACKEND := $(or $(call b2b_conf,B2B_BACKEND),auto)
+endif
+ifeq ($(origin SIZE_B2B),undefined)
+SIZE_B2B := $(or $(call b2b_conf,B2B_SIZE_GB),15)
+endif
+ifeq ($(origin VM_RAM_MB),undefined)
+VM_RAM_MB := $(call b2b_conf,B2B_VM_RAM_MB)
+endif
+ifeq ($(origin PROFILE),undefined)
+PROFILE := $(or $(call b2b_conf,B2B_PROFILE),auto)
+endif
+ifeq ($(origin FEATURES),undefined)
+FEATURES := $(call b2b_conf,B2B_FEATURES)
+endif
+ifeq ($(origin AI_MODE),undefined)
+AI_MODE := $(or $(call b2b_conf,B2B_AI_MODE),off)
+endif
+ifeq ($(origin LOGIN),undefined)
+LOGIN := $(or $(call b2b_conf,B2B_LOGIN),$(USER))
+endif
+
 # Where the VM lives. VirtualBox remembers a VM's disk itself; for QEMU the
 # last create/boot recorded it (utils/vm_path.sh remember_vm_dir), so after a
 # `make all VM_PATH=/mnt/storage/qemu` no later `make qemu_*` needs VM_PATH.
@@ -80,14 +120,14 @@ VM_PATH      := $(shell cat $(CURDIR)/disk_images/.vm_path.$(VM_NAME) 2>/dev/nul
 endif
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
-PRESEED_FILE := preseeds/preseed.cfg
+PRESEED_FILE := preseeds/preseed.cfg.in
 RM           := rm -rf
 VMS_ISO_TAR  := vms_iso.tar
 
-# Inception (the project that runs *inside* this VM). LOGIN drives the
-# subject-mandated domain; SRC optionally points `make inception` at a
-# host-side copy of the repo instead of cloning from GitHub.
-LOGIN        ?= dlesieur
+# Inception (the project that runs *inside* this VM). LOGIN (B2B_LOGIN in
+# born2root.conf) drives the subject-mandated domain; SRC optionally points
+# `make inception` at a host-side copy of the repo instead of cloning from
+# GitHub.
 DOMAIN       ?= $(LOGIN).42.fr
 SRC          ?=
 
@@ -95,11 +135,11 @@ SRC          ?=
 # `make all` sets this automatically so the ISO always matches the latest scripts/binaries.
 FORCE_ISO ?= 0
 
-# Optional: set a custom default login shell inside the VM.
-# Default is the hellish binary downloaded from the upstream GitHub release
-# (see setup/fetch_hellish.sh) — no submodule, no compile.
-# To keep bash, override with an empty value:
-#   make gen_iso CUSTOM_SHELL_PATH=
+# The guest's login shell: hellish, for every account, in every build. This
+# names the binary that goes into the ISO -- the upstream release `make shell`
+# downloads (setup/fetch_hellish.sh), or a hellish you built yourself. It is
+# not a way to choose another shell: an empty value is refused below, and
+# create_custom_iso.sh refuses anything that is not hellish.
 CUSTOM_SHELL_PATH ?= dist/hellish
 
 # Which hellish release to bake in. Empty = always resolve the newest release.
@@ -136,27 +176,28 @@ NVIM_USERS ?=
 # With that fixed the virtual size means what it says: a hard ceiling on what
 # this VM can cost.
 #
-# ONE NUMBER DRIVES EVERYTHING: SIZE_B2B, in GB. From it are derived
+# ONE NUMBER DRIVES EVERYTHING: SIZE_B2B, in GB (B2B_SIZE_GB in
+# born2root.conf, read above). From it are derived
 #   - the disk (DISK_SIZE_MB),
 #   - the partition layout (generate/partition_recipe.sh: floors, weighted
-#     shares, caps, /var takes the rest — preview with `make partitions`),
-#   - what gets installed (generate/feature_profile.sh: minimal 8-13,
-#     standard 14-29, full 30+ — preview with `make features`), and
+#     shares, caps from born2root.conf's volume table, the `rest` volume takes
+#     the remainder — preview with `make partitions`),
+#   - what gets installed (generate/feature_profile.sh: minimal 8-14,
+#     standard 15-29, full 30+ — preview with `make features`), and
 #   - the footprint cap `make space` enforces.
 # `make all` with nothing set builds a 15GB VM, the school quota. Anything
 # below 8 is refused with the reason; a feature set that would not fit the
 # layout is refused before a single byte is downloaded.
 #   make all SIZE_B2B=50                     bigger disk, more features on
 #   make all SIZE_B2B=10 FEATURES=+docker    refused: names the size that fits
-SIZE_B2B ?= 15
 DISK_SIZE_MB ?= $(shell echo $$(( $(SIZE_B2B) * 1024 )))
 
-# Which installs go into the guest. auto = from SIZE_B2B (see above);
-# FEATURES adds/removes single ones on top, e.g. FEATURES="+docker -pytools".
-# Base features (everything Born2beRoot mandates, hellish, nvim) cannot be
-# turned off. `make features` shows the resolved set and whether it fits.
-PROFILE ?= auto
-FEATURES ?=
+# Which installs go into the guest (PROFILE and FEATURES, B2B_PROFILE and
+# B2B_FEATURES in born2root.conf). auto = from SIZE_B2B (see above); FEATURES
+# adds/removes single ones on top, e.g. FEATURES="+docker -pytools". Base
+# features (everything Born2beRoot mandates, nvim) cannot be turned off, and
+# hellish is not a feature at all: it is the shell. `make features` shows the
+# resolved set and whether it fits.
 
 # Encrypt the guest's LVM with LUKS. ON is the default and is the only mode
 # that satisfies the born2root mandatory requirement — the VM you hand in must
@@ -194,25 +235,27 @@ SPACE_BUDGET_GB ?= auto
 # clusters. Off by default because it requires the VM to be stopped.
 COMPACT ?= 0
 
-# Override the VM's RAM (MB). Default is 25% of host RAM clamped to [2048,8192],
-# which is sized to keep the HOST responsive. Raise it for a local model — the
-# 2048 floor is below what any model needs, and AI_MODE=local will say so.
+# VM_RAM_MB (B2B_VM_RAM_MB): the VM's RAM in MB. Empty = 25% of host RAM
+# clamped to [2048,8192], which is sized to keep the HOST responsive. Raise it
+# for a local model — the 2048 floor is below what any model needs, and
+# AI_MODE=local will say so.
 #   make re VM_RAM_MB=6144 AI_MODE=local
-VM_RAM_MB ?=
 
-# Optional AI, baked into the ISO so first boot honours it (default: off).
+# AI_MODE (B2B_AI_MODE): optional AI, baked into the ISO so first boot
+# honours it (default: off).
 #   off     nothing installed, nothing downloaded
 #   client  Ollama CLI pointed at an endpoint elsewhere (10.0.2.2 = the host)
 #   local   Ollama server + a model chosen to FIT this VM's RAM
 # The model is computed, never guessed: a 27B model needs ~17GB and will be
 # refused rather than left to thrash swap. See setup/install/ai/install_ai.sh.
-AI_MODE ?= off
-# Note: once connected to the VM via SSH, you can change the default shell for the user (e.g. dlesieur) with:
-# sudo usermod -s /bin/bash dlesieur && getent passwd dlesieur
 
-# Normalize to absolute path so ISO builder works from any cwd.
+# Normalize to absolute path so ISO builder works from any cwd. Empty is not
+# "keep bash": this VM has no such mode, and colleagues' guests were built
+# without hellish exactly that way.
 ifneq ($(strip $(CUSTOM_SHELL_PATH)),)
 CUSTOM_SHELL_PATH := $(abspath $(CUSTOM_SHELL_PATH))
+else
+$(error CUSTOM_SHELL_PATH is empty. hellish is the login shell of this VM, not an option: leave CUSTOM_SHELL_PATH unset (make shell fetches dist/hellish) or point it at a hellish binary)
 endif
 
 # Colours (portable — works in bash/dash/zsh)
@@ -233,7 +276,7 @@ C_CYAN   := \033[36m
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
-        space slim partitions features features_select _build
+        space slim partitions features features_select _build config
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -492,7 +535,8 @@ shell:
 
 # =========@@ Install host developer dependencies @@==========================
 # Checks for: VirtualBox + ext-pack, xorriso, curl, gcc, libreadline-dev,
-# python3, git, openssh-client, make.
+# python3, openssl (hashes born2root.conf's passwords), git, openssh-client,
+# make.
 # Missing packages are installed via `sudo apt install` WITHOUT -y so the
 # user reviews and confirms the apt plan themselves.
 deps:
@@ -764,6 +808,13 @@ clean:
 space:
 	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 		$(SCRIPT_SH) utils/space_budget.sh
+
+# born2root.conf, resolved and validated: what the guest will be called, who
+# logs in, the volume table. Fails, naming each key to fix, when it is not
+# valid -- the same check `make all` runs before downloading anything.
+config:
+	@$(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh --show
+	@$(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh --check
 
 # What the guest's disk will look like for this SIZE_B2B, without building.
 partitions:

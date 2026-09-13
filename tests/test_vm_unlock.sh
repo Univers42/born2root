@@ -22,28 +22,31 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 # Sourcing must only define functions, never start a VM.
-VM_PASS="" VM_PASS_FILE="$TMP/none" . ./unlock_vm.sh
+VM_PASS="" . ./unlock_vm.sh
+
+# The passphrase comes from born2root.conf now (it was a vm_pass.txt nothing
+# kept in step with the preseed). Fixtures stand in for the real file.
+sed 's/^B2B_LUKS_PASSPHRASE=.*/B2B_LUKS_PASSPHRASE=from-conf-42/' tests/fixtures/default.conf >"$TMP/conf"
 
 # Explicit override wins over the file.
-printf 'from-file\n' >"$TMP/pass"
-check "VM_PASS overrides file" \
-    "$(VM_PASS=from-env VM_PASS_FILE=$TMP/pass resolve_passphrase)" "from-env"
+check "VM_PASS overrides born2root.conf" \
+    "$(VM_PASS=from-env B2B_CONFIG=$TMP/conf resolve_passphrase)" "from-env"
 
-# Falls back to the file, and the trailing newline must not be typed into the prompt.
-check "falls back to file" \
-    "$(VM_PASS='' VM_PASS_FILE=$TMP/pass resolve_passphrase)" "from-file"
+check "falls back to born2root.conf" \
+    "$(VM_PASS='' B2B_CONFIG=$TMP/conf resolve_passphrase)" "from-conf-42"
 
-printf 'crlf-pass\r\n' >"$TMP/crlf"
-check "strips CR and LF" \
-    "$(VM_PASS='' VM_PASS_FILE=$TMP/crlf resolve_passphrase)" "crlf-pass"
+# A config edited on Windows must not type a CR into the prompt.
+sed 's/$/\r/' "$TMP/conf" >"$TMP/crlf"
+check "strips CR" \
+    "$(VM_PASS='' B2B_CONFIG=$TMP/crlf resolve_passphrase)" "from-conf-42"
 
-# Only the first line: a stray second line must not leak into the passphrase.
-printf 'first\nsecond\n' >"$TMP/multi"
-check "uses first line only" \
-    "$(VM_PASS='' VM_PASS_FILE=$TMP/multi resolve_passphrase)" "first"
+# Only the first definition counts, the one --check would accept.
+printf 'B2B_LUKS_PASSPHRASE=second-one\n' >>"$TMP/conf"
+check "uses the first definition only" \
+    "$(VM_PASS='' B2B_CONFIG=$TMP/conf resolve_passphrase)" "from-conf-42"
 
 # No passphrase anywhere is an error, not an empty string typed at the prompt.
-if VM_PASS='' VM_PASS_FILE="$TMP/missing" resolve_passphrase >/dev/null 2>&1; then
+if VM_PASS='' B2B_CONFIG="$TMP/missing" resolve_passphrase >/dev/null 2>&1; then
     printf 'FAIL %-34s = succeeded (expected failure)\n' "errors when no passphrase"
     fail=1
 else

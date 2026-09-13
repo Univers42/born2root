@@ -14,8 +14,8 @@
 #
 # It is deliberately non-interactive: the few root-only facts (luksDump, ufw)
 # are fetched with `sudo -S` over `ssh -tt`, using the account password from
-# preseeds/preseed.cfg the way deploy_inception.sh already does. Nothing is
-# changed in the guest.
+# born2root.conf the way deploy_inception.sh does. The expected login, host
+# name and owner come from the same file. Nothing is changed in the guest.
 #
 # Usage:  verify_guest_parity.sh [ssh-alias]        (default: b2b)
 #         BACKEND_LABEL=qemu verify_guest_parity.sh > qemu.txt
@@ -26,7 +26,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 ALIAS="${1:-b2b}"
-PRESEED_FILE="${PRESEED_FILE:-$REPO_ROOT/preseeds/preseed.cfg}"
+. "$REPO_ROOT/utils/b2b_config.sh"
+B2B_LOGIN=$(b2b_get B2B_LOGIN)
+B2B_HOSTNAME=$(b2b_get B2B_HOSTNAME)
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -53,8 +55,7 @@ guest_pass() {
         printf '%s' "$GUEST_PASS"
         return 0
     }
-    [ -r "$PRESEED_FILE" ] &&
-        awk '$1 == "d-i" && $2 == "passwd/user-password" { print $4; exit }' "$PRESEED_FILE"
+    b2b_user_password 2>/dev/null
 }
 
 # sudo in this guest requires a tty (requiretty in the sudoers policy), so -tt
@@ -98,7 +99,7 @@ printf "\n${C_DIM}  Everything below comes from the preseeded ISO, not from the 
 
 # shellcheck disable=SC2059
 printf "\n${C_BOLD}System${C_RESET}\n"
-row "hostname" "$(g hostname)" "dlesieur42"
+row "hostname" "$(g hostname)" "$B2B_HOSTNAME"
 row "debian" "$(g 'cat /etc/debian_version')" "13"
 row "kernel" "$(g 'uname -r')" "--"
 # shellcheck disable=SC2016
@@ -143,7 +144,7 @@ if g 'pgrep -f "first[-]boot-setup" >/dev/null'; then
     printf "     framework installs near the end of it. Re-run this when it finishes:\n"
     printf "     ${C_DIM}ssh %s 'pgrep -f first-boot-setup.sh || echo done'${C_RESET}\n" "$ALIAS"
 fi
-row "login shell" "$(g 'getent passwd dlesieur | cut -d: -f7')" "/usr/bin/hellish"
+row "login shell" "$(g "getent passwd $B2B_LOGIN | cut -d: -f7")" "/usr/bin/hellish"
 row "root shell" "$(g 'getent passwd root | cut -d: -f7')" "/bin/bash"
 row "hellish" "$(g '/usr/bin/hellish.real --version 2>/dev/null | head -1')" "hellish"
 row "shell link" "$(g 'readlink /usr/bin/hellish')" "/usr/bin/hellish.real"
@@ -152,7 +153,7 @@ row "ssh command" "$(g 'x=$(readlink /proc/$$/exe); echo "$x"')" "/usr/bin/helli
 # shellcheck disable=SC2016
 row "ssh \$0" "$(g 'echo $0')" "hellish"
 row "plugins" "$(g 'ls ~/.hellish/plugins 2>/dev/null | wc -l')" "--"
-row "hellishrc" "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')" "dlesieur"
+row "hellishrc" "$(g 'stat -c %U ~/.hellishrc 2>/dev/null')" "$B2B_LOGIN"
 
 # (`ssh b2b 'readlink /proc/$$/exe'` would be answered by readlink itself: a
 # shell execs a lone command in place of itself; the substitution keeps $$

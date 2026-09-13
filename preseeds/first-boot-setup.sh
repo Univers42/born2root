@@ -7,25 +7,45 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "=== First-boot setup starting ($(date)) ==="
 
-# Ensure custom shell is the default (if configured during install)
+# Who this VM is for (born2root.conf on the host, /etc/b2b/build.conf here):
+# the login and the extra accounts. See b2b-setup.sh, section 0, for the
+# UID-1000 fallback on a guest built before the file existed.
+B2B_LOGIN=""
+B2B_HOSTNAME=""
+B2B_EXTRA_USERS=""
+if [ -f /etc/b2b/build.conf ]; then
+    # shellcheck disable=SC1091
+    . /etc/b2b/build.conf
+fi
+[ -n "$B2B_LOGIN" ] || B2B_LOGIN=$(awk -F: '$3 == 1000 { print $1; exit }' /etc/passwd)
+[ -n "$B2B_HOSTNAME" ] || B2B_HOSTNAME="${B2B_LOGIN}42"
+# Every account born2root.conf named, one per line: the login, then the extras.
+b2b_accounts() { printf '%s %s\n' "$B2B_LOGIN" "$B2B_EXTRA_USERS" | tr ' ' '\n' | cut -d: -f1 | grep -v '^$'; }
+echo "accounts: $(b2b_accounts | tr '\n' ' ')"
+
+# hellish is every account's login shell (b2b-setup.sh set it); re-assert it.
 if [ -f /etc/b2b_custom_shell.conf ]; then
     # shellcheck disable=SC1091
     . /etc/b2b_custom_shell.conf 2>/dev/null || true
-    if [ -n "${B2B_CUSTOM_USER:-}" ] && [ -n "${B2B_CUSTOM_SHELL:-}" ] && [ -x "${B2B_CUSTOM_SHELL:-}" ]; then
+    if [ -n "${B2B_CUSTOM_SHELL:-}" ] && [ -x "${B2B_CUSTOM_SHELL:-}" ]; then
         # Register in /etc/shells (needed for some tools, harmless otherwise)
         if [ -f /etc/shells ]; then
             grep -qxF "$B2B_CUSTOM_SHELL" /etc/shells || echo "$B2B_CUSTOM_SHELL" >>/etc/shells
         else
             echo "$B2B_CUSTOM_SHELL" >/etc/shells
         fi
-        if id "$B2B_CUSTOM_USER" >/dev/null 2>&1; then
-            usermod -s "$B2B_CUSTOM_SHELL" "$B2B_CUSTOM_USER" 2>/dev/null || true
-            echo "[OK] Default shell enforced on first boot: $B2B_CUSTOM_USER -> $B2B_CUSTOM_SHELL"
-        else
-            echo "[WARN] Custom shell configured but user missing: $B2B_CUSTOM_USER"
-        fi
+        while read -r u; do
+            if id "$u" >/dev/null 2>&1; then
+                usermod -s "$B2B_CUSTOM_SHELL" "$u" 2>/dev/null || true
+                echo "[OK] Login shell enforced on first boot: $u -> $B2B_CUSTOM_SHELL"
+            else
+                echo "[WARN] born2root.conf names $u, but there is no such account"
+            fi
+        done <<ACCOUNTSEOF
+$(b2b_accounts)
+ACCOUNTSEOF
     else
-        echo "[WARN] /etc/b2b_custom_shell.conf present but invalid (USER/SHELL missing or SHELL not executable)"
+        echo "[WARN] /etc/b2b_custom_shell.conf present but invalid (SHELL missing or not executable)"
     fi
 fi
 
@@ -63,7 +83,7 @@ else
     echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
 fi
 feature_on() {
-    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
     grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
 }
 # Every feature records what it actually cost, so the estimates in
@@ -274,7 +294,7 @@ if [ -f /root/install_nvim.sh ]; then
         # to the user's first interactive start: minutes of cloning behind a
         # blank editor, on a VM whose point is to arrive finished.
         if run_logged /var/log/b2b-nvim-install.log \
-            env NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
+            env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
             echo "[OK] Neovim + kickstart installed, plugins included (log: /var/log/b2b-nvim-install.log)"
         else
             feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
@@ -310,7 +330,7 @@ else
     fi
     chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
     if run_logged /var/log/b2b-nvim-install.log \
-        env NVIM_USERS="dlesieur" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
+        env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
         echo "[OK] Neovim extras installed (log: /var/log/b2b-nvim-install.log)"
     else
         echo "[FAIL] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
@@ -322,7 +342,7 @@ else
     if [ -f /root/install_excalidraw.sh ]; then
         chmod +x /root/install_excalidraw.sh 2>/dev/null || true
         if run_logged /var/log/b2b-nvim-install.log \
-            env EXCALIDRAW_USERS="dlesieur" "$B2B_SH" /root/install_excalidraw.sh; then
+            env EXCALIDRAW_USERS="$B2B_LOGIN" "$B2B_SH" /root/install_excalidraw.sh; then
             echo "[OK] Excalidraw editor built (log: /var/log/b2b-nvim-install.log)"
         else
             echo "[FAIL] Excalidraw build reported errors — see /var/log/b2b-nvim-install.log"
@@ -334,8 +354,8 @@ else
     fi
     feature_end nvim-extras "$NVIM_EXTRAS_STATUS"
 fi
-feature_begin hellish-upstream /home
-### ─── The login shell, from upstream ────────────────────────────────────────
+feature_begin hellish /home
+### ─── The login shell, from upstream, and its configuration for everyone ────
 # b2b-setup.sh already installed the ISO-baked binary in the installer chroot,
 # which is what guarantees a usable shell even with no network. This step runs
 # upstream's own installer now that there IS a network, so the VM gets the
@@ -347,41 +367,59 @@ feature_begin hellish-upstream /home
 # It also re-links /usr/bin/hellish to the refreshed hellish.real, so `ssh b2b
 # '<command>'` from the host keeps running inside hellish, and pins the
 # guest-side scripts' interpreter again (see normalize_guest_interpreters).
+#
+# Through run_logged: this section used to be `installer | tee log`, which
+# reports tee's status, so it was filed ok whatever the installer did, and
+# the plugin fallback below it could never run.
 echo "--- Installing hellish from upstream (binary + plugin framework) ---"
-HELLISH_OK=0
 if [ -f /root/install_hellish_upstream.sh ]; then
     chmod +x /root/install_hellish_upstream.sh 2>/dev/null || true
-    if HELLISH_USER="dlesieur" HELLISH_PLUGINS="all" \
-        "$B2B_SH" /root/install_hellish_upstream.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
+    if run_logged /var/log/b2b-hellish-install.log \
+        env HELLISH_USER="$B2B_LOGIN" HELLISH_PLUGINS="all" "$B2B_SH" /root/install_hellish_upstream.sh; then
         echo "[OK] hellish installed from upstream (log: /var/log/b2b-hellish-install.log)"
-        HELLISH_OK=1
     else
         echo "[WARN] upstream hellish install reported errors — see /var/log/b2b-hellish-install.log"
     fi
 else
-    echo "[SKIP] upstream hellish — /root/install_hellish_upstream.sh not present"
+    echo "[WARN] upstream hellish — /root/install_hellish_upstream.sh is not in the ISO"
 fi
 
-# Fallback only. The upstream installer brings the plugin framework itself, so
-# this runs when that failed (no network, upstream down) and the framework is
-# therefore absent -- never on top of a good install.
-if [ "$HELLISH_OK" != "1" ] && [ ! -f /home/dlesieur/.hellishrc ]; then
-    echo "--- Installing hellishrc plugin framework (fallback) ---"
-    if [ -f /root/install_hellish_plugins.sh ]; then
-        chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
-        if HELLISH_USERS="dlesieur" "$B2B_SH" /root/install_hellish_plugins.sh 2>&1 | tee -a /var/log/b2b-hellish-install.log; then
-            echo "[OK] hellishrc plugins installed (log: /var/log/b2b-hellish-install.log)"
-        else
-            echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
-        fi
+# hellish's own configuration (~/.hellishrc and the plugin framework) for
+# every account born2root.conf named that does not have it yet: the extra
+# users always, the login user when the upstream install above did not bring
+# it. A shell without its configuration is half of what this VM promises.
+HELLISH_MISSING=""
+while read -r u; do
+    home=$(getent passwd "$u" 2>/dev/null | cut -d: -f6)
+    [ -n "$home" ] || continue
+    [ -f "$home/.hellishrc" ] || HELLISH_MISSING="${HELLISH_MISSING}${HELLISH_MISSING:+ }$u"
+done <<ACCOUNTSEOF
+$(b2b_accounts)
+ACCOUNTSEOF
+if [ -z "$HELLISH_MISSING" ]; then
+    echo "[OK] every account already has its hellish configuration"
+elif [ -f /root/install_hellish_plugins.sh ]; then
+    echo "--- Installing the hellishrc plugin framework for: $HELLISH_MISSING ---"
+    chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+    if run_logged /var/log/b2b-hellish-install.log \
+        env HELLISH_USERS="$HELLISH_MISSING" "$B2B_SH" /root/install_hellish_plugins.sh; then
+        echo "[OK] hellishrc plugins installed for $HELLISH_MISSING"
     else
-        echo "[SKIP] hellishrc plugins — /root/install_hellish_plugins.sh not present"
+        echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
     fi
 else
-    echo "[SKIP] hellishrc plugin fallback — the upstream install already provided it"
+    echo "[WARN] hellishrc plugins — /root/install_hellish_plugins.sh is not in the ISO"
 fi
 
-feature_end hellish-upstream ok
+# The verdict. hellish itself is mandatory: no executable /usr/bin/hellish
+# means the build failed, whatever the steps above said. A failed upstream
+# refresh over a working baked binary is only a warning, above.
+if [ -x /usr/bin/hellish ]; then
+    feature_end hellish ok
+else
+    feature_fail hellish "/usr/bin/hellish is not executable after first boot — see /var/log/b2b-hellish-install.log"
+    feature_end hellish failed
+fi
 if ! feature_on webstack; then
     feature_off webstack
 else
@@ -495,7 +533,7 @@ if (is_blog_installed()) {
 $result = wp_install(
     'Born2beRoot Blog',           // Site title
     'admin',                       // Admin username
-    'admin@dlesieur42.local',      // Admin email
+    'admin@@B2B_HOSTNAME@.local',  // Admin email (filled in below)
     true,                          // Public (allow search engines)
     '',                            // Deprecated
     'admin123wp!',                 // Admin password
@@ -522,6 +560,8 @@ update_option('blogdescription', 'A WordPress site on Born2beRoot');
 
 echo "Done!\n";
 INSTALLEOF
+    # The heredoc is quoted (PHP's $ must survive); the host name is filled here.
+    sed -i "s|@B2B_HOSTNAME@|${B2B_HOSTNAME}|" "$WP_INSTALL_PHP"
     chown www-data:www-data "$WP_INSTALL_PHP"
 
     # Run the install script.
@@ -544,7 +584,7 @@ INSTALLEOF
                 --title="Born2beRoot Blog" \
                 --admin_user=admin \
                 --admin_password='admin123wp!' \
-                --admin_email=admin@dlesieur42.local \
+                --admin_email="admin@${B2B_HOSTNAME}.local" \
                 --skip-email 2>&1 || true
             echo "[OK] WordPress installed via WP-CLI"
         fi
@@ -906,14 +946,14 @@ https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.lis
 
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
 
-    # Add dlesieur to docker group
-    usermod -aG docker dlesieur 2>/dev/null || true
+    # Add the login user to the docker group
+    usermod -aG docker "$B2B_LOGIN" 2>/dev/null || true
 
     # Kill any running VS Code server so it restarts with the docker group loaded.
     # Without this, the VS Code server inherits the old group list (no docker GID)
     # and every Docker command from the VS Code terminal fails with "permission denied".
     # The user's next VS Code reconnect will spawn a fresh server with correct groups.
-    pkill -u dlesieur -f "vscode-server" 2>/dev/null || true
+    pkill -u "$B2B_LOGIN" -f "vscode-server" 2>/dev/null || true
 
     # Enable and start Docker
     systemctl enable docker

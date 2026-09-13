@@ -60,6 +60,18 @@ if ! NERD_FONT_RESOLVED=$(resolve_nerd_font "${NVIM_NERD_FONT:-auto}"); then
     exit 1
 fi
 
+# ── born2root.conf, checked before anything is fetched ──────────────────────
+# The guest's login, hostname, passwords, locale and disk table all come from
+# the one file at the repo root (see utils/b2b_config.sh). A typo there used
+# to be impossible to make because every value was typed into the preseed by
+# hand; now it is possible, so it is caught here, with the key named, instead
+# of as a d-i question on a screen nobody watches twenty minutes from now.
+. "$REPO_ROOT/utils/b2b_config.sh"
+if ! b2b_check >/dev/null; then
+    echo "Error: born2root.conf is not valid (see above) — nothing was downloaded" >&2
+    exit 1
+fi
+
 # ── Portable downloader (curl preferred, wget fallback) ──────────────────────
 download() {
     local url="$1" dest="$2"
@@ -93,7 +105,8 @@ URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
 # Both overridable so a test build can run beside a real one without sharing
 # the extraction tree or overwriting the ISO a running VM booted from.
 ISO_DIR="${ISO_DIR:-debian_iso_extract}"
-PRESEED_FILE="preseeds/preseed.cfg"
+# A template: @B2B_*@ placeholders filled from born2root.conf below.
+PRESEED_FILE="preseeds/preseed.cfg.in"
 # Encrypted unless explicitly told otherwise; see utils/luks_mode.sh for why
 # the default leans that way and why the mode lands in the ISO's name.
 . "$REPO_ROOT/utils/luks_mode.sh"
@@ -152,8 +165,11 @@ fi
 # on which firmware path booted it, which is painful to diagnose.
 # Preseed is inside the initrd (auto-detected by d-i), so no preseed/file= here.
 # locale/country/keymap are belt-and-suspenders for questions asked before the
-# preseed is read.
-DI_CMDLINE="auto=true priority=critical DEBIAN_FRONTEND=noninteractive locale=en_US.UTF-8 language=en country=ES keymap=es hostname=dlesieur domain= vga=788 ${CONSOLE_ARGS}"
+# preseed is read, so they come from the same born2root.conf the preseed does:
+# language and country out of the locale (en_US.UTF-8 -> en, US), not out of
+# the keymap, which says nothing about either. hostname used to say `dlesieur`
+# here while the preseed said `dlesieur42`.
+DI_CMDLINE="auto=true priority=critical DEBIAN_FRONTEND=noninteractive locale=$(b2b_get B2B_LOCALE) language=$(b2b_locale_language) country=$(b2b_locale_country) keymap=$(b2b_get B2B_KEYMAP) hostname=$(b2b_get B2B_HOSTNAME) domain= vga=788 ${CONSOLE_ARGS}"
 
 # Trailing args after the "---" separator. `quiet` is dropped on the serial path
 # so the boot can be followed; on the VGA path it matches the cmdline that has
@@ -236,21 +252,29 @@ fi
 # Make extracted files writable
 chmod -R u+w "$ISO_DIR"
 
-# Copy preseed file to ISO root (fallback)
+# Render the preseed into the ISO root.
 #
 # This is the ONLY place the preseed is staged: the initrd injection further
 # down copies $ISO_DIR/preseed.cfg rather than the source file, so whatever is
-# written here is what the installer actually reads. Applying the LUKS switch
-# at this single point keeps the ISO root and the initrd copy in agreement by
-# construction, instead of by two edits that have to be remembered together.
-echo "Copying preseed file to ISO root..."
+# written here is what the installer actually reads. Filling born2root.conf's
+# values in and applying the LUKS switch at this single point keeps the ISO
+# root and the initrd copy in agreement by construction, instead of by two
+# edits that have to be remembered together.
+echo "Rendering the preseed from born2root.conf..."
+PRESEED_RENDERED=$(mktemp)
+if ! b2b_render "$PRESEED_FILE" >"$PRESEED_RENDERED"; then
+    rm -f "$PRESEED_RENDERED"
+    echo "Error: could not render $PRESEED_FILE — see above. Nothing was built." >&2
+    exit 1
+fi
+echo "  ✓ login $(b2b_get B2B_LOGIN), host $(b2b_get B2B_HOSTNAME), $(b2b_get B2B_LOCALE), keymap $(b2b_get B2B_KEYMAP), $(b2b_get B2B_TIMEZONE)"
 if luks_enabled "$LUKS"; then
-    cp "$PRESEED_FILE" "$ISO_DIR/preseed.cfg"
+    cp "$PRESEED_RENDERED" "$ISO_DIR/preseed.cfg"
     echo "  ✓ preseed.cfg (LUKS=ON — encrypted LVM)"
 else
     # Replace everything between the markers with the plain-LVM equivalent.
     # The crypto-specific debconf keys are all inside that region by design
-    # (see preseeds/preseed.cfg), so nothing outside it needs touching and the
+    # (see preseeds/preseed.cfg.in), so nothing outside it needs touching and the
     # partition recipe is identical in both modes.
     awk '
         /^# ── LUKS-BEGIN/ {
@@ -262,7 +286,7 @@ else
         }
         /^# ── LUKS-END/ { skipping = 0; print "# ── LUKS-END ──"; next }
         !skipping { print }
-    ' "$PRESEED_FILE" >"$ISO_DIR/preseed.cfg"
+    ' "$PRESEED_RENDERED" >"$ISO_DIR/preseed.cfg"
 
     # The markers are a contract between two files. If someone reworded them in
     # preseed.cfg, awk above would have copied the crypto keys through silently
@@ -282,6 +306,7 @@ else
     fi
     echo "  ✓ preseed.cfg (LUKS=OFF — plain LVM, evaluation-failing by design)"
 fi
+rm -f "$PRESEED_RENDERED"
 
 # ── Partition recipe: generated for THIS build's SIZE_B2B ────────────────────
 # The checked-in RECIPE region is the generator's output for the default size,
@@ -308,13 +333,16 @@ rm -f "$RECIPE_TMP"
 # Same contract as the LUKS markers: if RECIPE-BEGIN/END were reworded, awk
 # above would leave the checked-in default in place and a SIZE_B2B=50 build
 # would silently install a 15 GB layout onto a 50 GB disk. Check the result,
-# not the intent.
+# not the intent: as many volumes as born2root.conf's table plus swap, and
+# the `rest` volume last.
 recipe_lvs=$(grep -c '^\s*lv_name{' "$ISO_DIR/preseed.cfg")
 recipe_last=$(grep '^\s*lv_name{' "$ISO_DIR/preseed.cfg" | tail -1 | sed 's/.*lv_name{ *\([^ }]*\).*/\1/')
 recipe_marks=$(grep -c '^# ── RECIPE-BEGIN' "$ISO_DIR/preseed.cfg")
-if [ "$recipe_marks" != 1 ] || [ "$recipe_lvs" != 8 ] || [ "$recipe_last" != var ]; then
+want_lvs=$(($(b2b_volumes | wc -l) + 1))
+want_last=$(b2b_volumes | tail -1 | awk '{ print $1 }')
+if [ "$recipe_marks" != 1 ] || [ "$recipe_lvs" != "$want_lvs" ] || [ "$recipe_last" != "$want_last" ]; then
     echo "Error: the sized partition recipe did not land in the staged preseed." >&2
-    echo "       markers=$recipe_marks (want 1)  volumes=$recipe_lvs (want 8)  last=$recipe_last (want var)" >&2
+    echo "       markers=$recipe_marks (want 1)  volumes=$recipe_lvs (want $want_lvs)  last=$recipe_last (want $want_last)" >&2
     echo "       The RECIPE-BEGIN/RECIPE-END markers in $PRESEED_FILE no longer match" >&2
     echo "       what create_custom_iso.sh looks for. Fix them; shipping the checked-in" >&2
     echo "       default under SIZE_B2B=${SIZE_B2B:-15} would be the wrong disk layout." >&2
@@ -355,6 +383,25 @@ echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") 
 # =on lines. install_nvim.sh reads it back as B2B_NERD_FONT.
 printf 'B2B_NERD_FONT=%s\n' "$NERD_FONT_RESOLVED" >>"$ISO_DIR/features.conf"
 echo "  ✓ Nerd Font icons in Neovim: ${NERD_FONT_RESOLVED} (NVIM_NERD_FONT=${NVIM_NERD_FONT:-auto})"
+
+# What the guest is told about itself (login, hostname, extra users and their
+# groups, the volume table), as /etc/b2b/build.conf: b2b-setup.sh, first boot
+# and every provisioner read the login from there instead of a literal. No
+# password goes in it. The extra users' passwords travel separately, hashed,
+# in a file b2b-setup.sh deletes once the accounts exist.
+b2b_guest >"$ISO_DIR/build.conf" || {
+    echo "Error: could not write build.conf" >&2
+    exit 1
+}
+echo "  ✓ build.conf staged — /etc/b2b/build.conf in the guest"
+rm -f "$ISO_DIR/extra_users.shadow"
+if [ -n "$(b2b_get B2B_EXTRA_USERS)" ]; then
+    b2b_shadow >"$ISO_DIR/extra_users.shadow" || {
+        echo "Error: could not hash the extra users' passwords" >&2
+        exit 1
+    }
+    echo "  ✓ extra users: $(cut -d: -f1 "$ISO_DIR/extra_users.shadow" | tr '\n' ' ')(hashed passwords)"
+fi
 
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)
 echo "Copying setup scripts to ISO root..."
@@ -399,56 +446,50 @@ for PROVISIONER in \
     fi
 done
 
-# Optional: bake a custom login shell into the ISO.
-# Usage:
-#   CUSTOM_SHELL_PATH=dist/hellish make gen_iso   (the default; see make shell)
-# If not provided, the VM keeps the default /bin/bash.
-CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-}"
-if [ -n "$CUSTOM_SHELL_PATH" ]; then
-    echo "Copying custom shell to ISO root..."
-    # If relative, resolve against repo root
-    case "$CUSTOM_SHELL_PATH" in
-    /*) : ;;
-    *) CUSTOM_SHELL_PATH="${REPO_ROOT}/${CUSTOM_SHELL_PATH}" ;;
-    esac
-    if [ ! -f "$CUSTOM_SHELL_PATH" ]; then
-        echo "Error: CUSTOM_SHELL_PATH points to a missing file: $CUSTOM_SHELL_PATH" >&2
-        exit 1
-    fi
-    CUSTOM_SHELL_NAME="${CUSTOM_SHELL_NAME:-$(basename "$CUSTOM_SHELL_PATH")}"
-    CUSTOM_SHELL_DEST="${CUSTOM_SHELL_DEST:-/usr/bin/$CUSTOM_SHELL_NAME}"
-
-    cp "$CUSTOM_SHELL_PATH" "$ISO_DIR/custom_shell.bin"
-    chmod 755 "$ISO_DIR/custom_shell.bin" || true
-    printf '%s\n' "$CUSTOM_SHELL_DEST" >"$ISO_DIR/custom_shell.dest"
-    printf '%s\n' "$CUSTOM_SHELL_NAME" >"$ISO_DIR/custom_shell.name"
-    echo "  ✓ custom shell baked: $CUSTOM_SHELL_PATH"
-    echo "    dest: $CUSTOM_SHELL_DEST"
-    # Every in-target step of late_command then runs under the baked shell
-    # rather than /bin/bash: the guest's own setup (b2b-setup.sh), the ssh
-    # key, dpkg, grub. /tmp/custom_shell.bin is the copy late_command itself
-    # made a line earlier, so it is there whatever b2b-setup.sh decides. The
-    # poweroff hook systemd runs at shutdown gets the installed shell as its
-    # interpreter. The repository's preseed keeps /bin/bash, for an ISO built
-    # without a shell; only the ISO's copy is rewritten, and that copy is what
-    # goes into the initrd below.
-    sed -i -e "s|in-target /bin/bash |in-target /tmp/custom_shell.bin |g" \
-        -e "s|echo '#!/bin/sh' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|echo '#!${CUSTOM_SHELL_DEST}' > /target/lib/systemd/system-shutdown/vbox-poweroff.sh|" \
-        "$ISO_DIR/preseed.cfg"
-    echo "  ✓ late_command runs in-target under the baked shell"
-    # Optional extra: upstream's own shell-registration helper, if a hellish
-    # source tree happens to be checked out beside us. Not required — b2b-setup.sh
-    # appends to /etc/shells and runs usermod itself — so its absence is normal
-    # now that the sh42 submodule is gone.
-    REGISTER_SCRIPT="hellish/vendor/scripts/register_shell.sh"
-    if [ -f "$REGISTER_SCRIPT" ]; then
-        cp "$REGISTER_SCRIPT" "$ISO_DIR/register_shell.sh"
-        chmod 755 "$ISO_DIR/register_shell.sh" || true
-        echo "  ✓ register_shell.sh"
-    fi
-else
-    echo "ℹ CUSTOM_SHELL_PATH not set — keeping default shell (bash)"
+# The login shell: hellish, baked into the ISO. Always.
+#
+# This used to be optional -- an empty CUSTOM_SHELL_PATH printed "keeping
+# default shell (bash)" and the Makefile documented that as the way to keep
+# bash -- and guests were built that way. hellish is the shell of this VM, so
+# there is no such path any more: no binary, no ISO. CUSTOM_SHELL_PATH can
+# still name a hellish you built yourself (see the Makefile's `shell` target).
+CUSTOM_SHELL_PATH="${CUSTOM_SHELL_PATH:-dist/hellish}"
+case "$CUSTOM_SHELL_PATH" in
+/*) : ;;
+*) CUSTOM_SHELL_PATH="${REPO_ROOT}/${CUSTOM_SHELL_PATH}" ;;
+esac
+if [ ! -f "$CUSTOM_SHELL_PATH" ]; then
+    echo "Error: the hellish binary is missing: $CUSTOM_SHELL_PATH" >&2
+    echo "       hellish is the guest's login shell, not an option. Fetch it: make shell" >&2
+    exit 1
 fi
+case "$(basename "$CUSTOM_SHELL_PATH")" in
+hellish | hellish.real) ;;
+*)
+    echo "Error: CUSTOM_SHELL_PATH must name a hellish binary (got $(basename "$CUSTOM_SHELL_PATH"))." >&2
+    echo "       The guest's login shell is hellish; there is no other choice to make." >&2
+    exit 1
+    ;;
+esac
+CUSTOM_SHELL_DEST=/usr/bin/hellish
+echo "Copying the login shell (hellish) to ISO root..."
+cp "$CUSTOM_SHELL_PATH" "$ISO_DIR/custom_shell.bin"
+chmod 755 "$ISO_DIR/custom_shell.bin" || true
+printf '%s\n' "$CUSTOM_SHELL_DEST" >"$ISO_DIR/custom_shell.dest"
+echo "  ✓ hellish baked: $CUSTOM_SHELL_PATH -> $CUSTOM_SHELL_DEST"
+# Every in-target step of late_command then runs under the baked shell rather
+# than /bin/bash: the guest's own setup (b2b-setup.sh), dpkg, grub.
+# /tmp/custom_shell.bin is the copy late_command itself made a line earlier.
+# Only the ISO's copy is rewritten, and that copy is what goes into the initrd.
+#
+# The shutdown hook late_command writes keeps #!/bin/sh, on purpose. A second
+# expression here was meant to give it hellish, but its pattern had a space
+# (`> /target`) the preseed never had (`>/target`), so no build ever ran that
+# hook under hellish -- and it runs after systemd has remounted / read-only,
+# where a shell that fails to start leaves the VM hanging at poweroff and the
+# host waiting for it. /bin/sh is the one interpreter that is certain there.
+sed -i "s|in-target /bin/bash |in-target /tmp/custom_shell.bin |g" "$ISO_DIR/preseed.cfg"
+echo "  ✓ late_command runs in-target under hellish"
 
 # Copy host's SSH public key into the ISO so b2b-setup.sh can install it
 # This enables passwordless SSH from the host right after first boot

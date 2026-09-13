@@ -24,8 +24,8 @@
 #   7. `:checkhealth` written to ~/.local/state/nvim/checkhealth.log
 #
 # USAGE
-#   sudo ./install_nvim.sh                       # default: user dlesieur
-#   sudo NVIM_USERS="dlesieur root" ./install_nvim.sh
+#   sudo ./install_nvim.sh                       # default: the login in /etc/b2b/build.conf
+#   sudo NVIM_USERS="<login> root" ./install_nvim.sh
 #   sudo NVIM_VERSION=latest ./install_nvim.sh    # newest release, unpinned
 #   sudo NVIM_BOOTSTRAP=0 ./install_nvim.sh       # skip the slow plugin install
 #   sudo NVIM_FORCE_CONFIG=1 ./install_nvim.sh    # re-clone kickstart over an existing config
@@ -57,7 +57,14 @@ export PATH
 NVIM_VERSION="${NVIM_VERSION:-v0.12.5}"
 NVIM_MIN_VERSION="${NVIM_MIN_VERSION:-0.12.0}" # what kickstart master needs (vim.pack)
 NVIM_OPT_DIR="${NVIM_OPT_DIR:-/opt}"
-NVIM_USERS="${NVIM_USERS:-dlesieur}"
+# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# written by utils/b2b_config.sh --guest). Unset NVIM_USERS defaults to it.
+B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
+NVIM_USERS="${NVIM_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"
+if [ -z "${NVIM_USERS}" ]; then
+    printf '[nvim] ERROR: NVIM_USERS is empty and %s names no B2B_LOGIN\n' "$B2B_BUILD_CONF" >&2
+    exit 1
+fi
 KICKSTART_REPO="${KICKSTART_REPO:-https://github.com/nvim-lua/kickstart.nvim.git}"
 NVIM_BOOTSTRAP="${NVIM_BOOTSTRAP:-1}"
 NVIM_FORCE_CONFIG="${NVIM_FORCE_CONFIG:-0}"
@@ -441,7 +448,7 @@ setup_user_config() {
     # ~/.cache/nvim left ~/.cache itself root:root 755. Nothing in nvim cares,
     # but `tree-sitter build` keeps its lock in ~/.cache/tree-sitter/lock, so
     # on the 2026-09-13 15 GB build every parser compile at first boot died on
-    #     Permission denied (os error 13) (/home/dlesieur/.cache/tree-sitter/lock)
+    #     Permission denied (os error 13) (/home/<login>/.cache/tree-sitter/lock)
     # and nvim was filed as failed. The chown -R after the parser step then
     # repaired it, which is why nvim-extras compiled all 40 parsers minutes
     # later, and why `make nvim` on a lived-in home never showed it. Reproduced

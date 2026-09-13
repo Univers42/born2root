@@ -31,6 +31,10 @@ FP=("${SCRIPT_SH:-bash}" generate/feature_profile.sh)
 # webstack" failed with 0, because the checkout said docker was off. The tests
 # below that DO exercise the file override this per invocation.
 export B2B_SELECT_FILE=/nonexistent
+# Same for the volume table: born2root.conf is personalised, and every size
+# below is about the shipped layout. The fixture runs at the end vary it.
+DEFAULTS=tests/fixtures/default.conf
+export B2B_CONFIG="$DEFAULTS"
 rc_of() { "$@" >/dev/null 2>&1 && echo 0 || echo $?; }
 fits_from() { "$@" 2>&1 | grep -o 'fits from SIZE_B2B=[0-9]*' | head -1; }
 
@@ -43,7 +47,10 @@ check "30 GB → full" "$(SIZE_B2B=30 "${FP[@]}" --resolve | sed -n 's/^profile=
 
 # ── Base is always on; standard joins at 15 ─────────────────────────────────
 check "minimal has nvim" "$(SIZE_B2B=8 "${FP[@]}" --resolve | grep -c '^feature=nvim$')" 1
-check "minimal has hellish" "$(SIZE_B2B=8 "${FP[@]}" --resolve | grep -c '^feature=hellish-upstream$')" 1
+# hellish is the login shell of every build, not a feature: no row, nothing
+# a set could leave out (colleagues had built bash-only guests).
+check "hellish is not a feature row" "$(sed -n "/^MANIFEST='/,/^'/p" generate/feature_profile.sh | grep -c hellish)" 0
+check "FEATURES=-hellish-upstream is unknown" "$(rc_of env FEATURES=-hellish-upstream "${FP[@]}" --resolve)" 1
 check "minimal has no docker" "$(SIZE_B2B=8 "${FP[@]}" --resolve | grep -c '^feature=docker$')" 0
 check "minimal has no webstack" "$(SIZE_B2B=8 "${FP[@]}" --resolve | grep -c '^feature=webstack$')" 0
 check "standard has docker and webstack" "$(SIZE_B2B=15 "${FP[@]}" --resolve | grep -cE '^feature=(docker|webstack)$')" 2
@@ -138,7 +145,22 @@ manifest_rows=$(sed -n "/^MANIFEST='/,/^'/p" generate/feature_profile.sh | awk '
 check "conf: one line per manifest feature" "$(printf '%s\n' "$conf" | grep -c '^B2B_FEATURE_')" "$manifest_rows"
 check "conf: names the profile" "$(printf '%s\n' "$conf" | sed -n 's/^B2B_PROFILE=//p')" minimal
 check "conf: names the size" "$(printf '%s\n' "$conf" | sed -n 's/^B2B_SIZE_GB=//p')" 10
-check "conf: hyphens become underscores" "$(printf '%s\n' "$conf" | grep -c '^B2B_FEATURE_hellish_upstream=on$')" 1
+check "conf: hyphens become underscores" "$(printf '%s\n' "$conf" | grep -c '^B2B_FEATURE_devtools_apt=on$')" 1
+check "conf: no hellish switch" "$(printf '%s\n' "$conf" | grep -ci hellish)" 0
 check "conf: carries AI_MODE" "$(SIZE_B2B=50 AI_MODE=client "${FP[@]}" --conf | sed -n 's/^B2B_AI_MODE=//p')" client
+
+# ── A volume table without /opt ─────────────────────────────────────────────
+# /opt's costs must land on /, not vanish. They used to vanish: `usable opt`
+# came back empty, `[ n -gt "" ]` exited 2, and the && swallowed it.
+noopt="$(mktemp)"
+trap 'rm -f "$sel" "$noopt"' EXIT
+sed -e '/^B2B_VOLUME  opt /d' "$DEFAULTS" >"$noopt"
+check "no /opt, 15 GB: the default set still fits" "$(rc_of env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --check)" 0
+check "no /opt, 15 GB AI_MODE=local: refused" "$(rc_of env B2B_CONFIG="$noopt" SIZE_B2B=15 AI_MODE=local "${FP[@]}" --check)" 1
+check "no /opt, 15 GB AI_MODE=local: on /, not /opt" "$(env B2B_CONFIG="$noopt" SIZE_B2B=15 AI_MODE=local "${FP[@]}" --check 2>&1 | grep -oE '^      /[^ ]* ' | tr -d ' ')" "/+/opt"
+need_default=$(SIZE_B2B=15 "${FP[@]}" --table | awk '/^ *needed/ { print $3 + $4 }')
+need_noopt=$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | awk '/^ *needed/ { print $3 }')
+check "no /opt: / needs what / and /opt needed together" "$need_noopt" "$need_default"
+check "no /opt: the table says / pays for /opt" "$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | grep -c '/opt: no volume in born2root.conf, counted against /')" 1
 
 exit "$fail"

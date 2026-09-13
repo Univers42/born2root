@@ -27,10 +27,10 @@
 #
 # WHAT THIS SCRIPT ADDS ON TOP OF THE ONE-LINER
 #   1. --no-login-shell. Run as root, upstream's chsh would change ROOT's login
-#      shell, not dlesieur's. The login shell is set here, for dlesieur only.
-#   2. HOME=/home/dlesieur for the run, so the plugin framework and ~/.hellishrc
+#      shell, not the user's. The login shell is set here, for HELLISH_USER.
+#   2. HOME=/home/<login> for the run, so the plugin framework and ~/.hellishrc
 #      land in the user's home instead of /root, then ownership is repaired.
-#   3. The link. /usr/bin/hellish is dlesieur's login shell and a symlink to
+#   3. The link. /usr/bin/hellish is the login shell and a symlink to
 #      /usr/bin/hellish.real, the ELF (what b2b-setup.sh set up for the baked
 #      binary). Upstream's installer writes a fresh binary at /usr/bin/hellish;
 #      it is moved to .real and the link restored, so `ssh b2b '<command>'`,
@@ -50,7 +50,8 @@
 #   place: keep it. A first boot must never end with no usable login shell.
 #
 # Env:
-#   HELLISH_USER        user whose login shell is set   (default dlesieur)
+#   HELLISH_USER        user whose login shell is set   (default: B2B_LOGIN
+#                       from /etc/b2b/build.conf)
 #   HELLISH_VERSION     pin a release tag               (default: latest)
 #   HELLISH_PLUGINS     all | none | "git jump z"       (default all)
 #   HELLISH_INSTALL_URL override the installer URL      (for testing)
@@ -58,7 +59,14 @@
 
 set -u
 
-HELLISH_USER="${HELLISH_USER:-dlesieur}"
+# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# written by utils/b2b_config.sh --guest). Unset HELLISH_USER defaults to it.
+B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
+HELLISH_USER="${HELLISH_USER:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"
+if [ -z "${HELLISH_USER}" ]; then
+    printf '[hellish-upstream] ERROR: HELLISH_USER is empty and %s names no B2B_LOGIN\n' "$B2B_BUILD_CONF" >&2
+    exit 1
+fi
 HELLISH_VERSION="${HELLISH_VERSION:-}"
 HELLISH_PLUGINS="${HELLISH_PLUGINS:-all}"
 HELLISH_INSTALL_URL="${HELLISH_INSTALL_URL:-https://raw.githubusercontent.com/Univers42/hellish/main/install.sh}"

@@ -37,10 +37,32 @@ if [ -f /etc/b2b/features.conf ]; then
 else
     echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
 fi
+# Who this VM is for: born2root.conf on the host, shipped as /etc/b2b/build.conf
+# (utils/b2b_config.sh --guest; late_command copies it in). Every name below
+# comes from here -- the login, the host name, the extra accounts -- instead of
+# the literals this script used to carry. Without the file (an ISO older than
+# it) the login is the account d-i created, UID 1000, so nothing below ever
+# chowns or usermods an empty name.
+B2B_LOGIN=""
+B2B_HOSTNAME=""
+B2B_MIRROR=deb.debian.org
+B2B_EXTRA_USERS=""
+B2B_VOLUMES=""
+if [ -f /etc/b2b/build.conf ]; then
+    # shellcheck disable=SC1091
+    . /etc/b2b/build.conf
+fi
+[ -n "$B2B_LOGIN" ] || B2B_LOGIN=$(awk -F: '$3 == 1000 { print $1; exit }' /etc/passwd)
+[ -n "$B2B_HOSTNAME" ] || B2B_HOSTNAME="${B2B_LOGIN}42"
+echo "[OK] build.conf: login=$B2B_LOGIN host=$B2B_HOSTNAME extra users: ${B2B_EXTRA_USERS:-none}"
+# extra_users: "name:groups" per line. Read with `while read`, never by
+# word-splitting an unquoted variable, which hellish -- the shell this runs
+# under -- has not always done the way bash does.
+extra_users() { printf '%s\n' "$B2B_EXTRA_USERS" | tr ' ' '\n' | grep -v '^$'; }
 # feature_on <name>: is this feature in the build? Base features are on even
 # without the file, so a mandatory install never depends on it.
 feature_on() {
-    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim | hellish-upstream) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
     grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
 }
 # feature_fail <name> <reason>: a BASE feature could not be installed. The
@@ -83,8 +105,8 @@ echo "[INFO] Detected release: $RELEASE"
 
 # Use the detected release for all repos — consistent with base install
 cat >/etc/apt/sources.list <<SRCEOF
-deb http://deb.debian.org/debian ${RELEASE} main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian ${RELEASE}-updates main contrib non-free non-free-firmware
+deb http://${B2B_MIRROR}/debian ${RELEASE} main contrib non-free non-free-firmware
+deb http://${B2B_MIRROR}/debian ${RELEASE}-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security ${RELEASE}-security main contrib non-free non-free-firmware
 SRCEOF
 
@@ -144,8 +166,10 @@ fi
 # Clean apt cache after package install to reclaim space on /var
 apt-get clean 2>/dev/null || true
 
-### ─── 2b. Optional custom login shell — install + set default ─────────────
-# The ISO late_command (if configured) copies:
+### ─── 2b. The login shell: hellish — install + set default ─────────────────
+# hellish is the shell of every account in this VM, not an option. The ISO
+# always carries it (create_custom_iso.sh refuses to build without it), and
+# late_command copies:
 #   /cdrom/custom_shell.bin  -> /target/tmp/custom_shell.bin
 #   /cdrom/custom_shell.dest -> /target/tmp/custom_shell.dest
 # Since this script runs via in-target, these paths are under /tmp/.
@@ -202,26 +226,35 @@ if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
             echo "$CUSTOM_SHELL_DEST" >/etc/shells
         fi
 
-        # Set default shell for the main user created by preseed
-        if id dlesieur >/dev/null 2>&1; then
-            usermod -s "$CUSTOM_SHELL_DEST" dlesieur 2>/dev/null || chsh -s "$CUSTOM_SHELL_DEST" dlesieur 2>/dev/null || true
-            echo "[OK] Custom shell installed and set as default for dlesieur: $CUSTOM_SHELL_DEST"
+        # Set default shell for the main user created by preseed. The extra
+        # accounts get it when section 4 creates them.
+        if id "$B2B_LOGIN" >/dev/null 2>&1; then
+            usermod -s "$CUSTOM_SHELL_DEST" "$B2B_LOGIN" 2>/dev/null || chsh -s "$CUSTOM_SHELL_DEST" "$B2B_LOGIN" 2>/dev/null || true
+            echo "[OK] hellish installed and set as the login shell of $B2B_LOGIN: $CUSTOM_SHELL_DEST"
         else
-            echo "[WARN] User dlesieur not found — custom shell installed but not set as default"
+            feature_fail b2b-mandatory "user $B2B_LOGIN not found — hellish installed but nobody's login shell"
         fi
 
         # Persist desired shell so first-boot can re-apply (if needed)
-        printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\n' "dlesieur" "$CUSTOM_SHELL_DEST" >/etc/b2b_custom_shell.conf 2>/dev/null || true
+        printf 'B2B_CUSTOM_USER=%s\nB2B_CUSTOM_SHELL=%s\n' "$B2B_LOGIN" "$CUSTOM_SHELL_DEST" >/etc/b2b_custom_shell.conf 2>/dev/null || true
         chmod 644 /etc/b2b_custom_shell.conf 2>/dev/null || true
 
         # Verify and log the result for debugging
         echo "[INFO] /etc/shells contains custom shell? $(grep -qxF "$CUSTOM_SHELL_DEST" /etc/shells 2>/dev/null && echo yes || echo no)"
-        echo "[INFO] passwd entry: $(getent passwd dlesieur 2>/dev/null || echo '(missing)')"
+        echo "[INFO] passwd entry: $(getent passwd "$B2B_LOGIN" 2>/dev/null || echo '(missing)')"
     else
-        echo "[WARN] custom shell dest looks unsafe ($CUSTOM_SHELL_DEST) — skipping"
+        feature_fail hellish "custom_shell.dest looks unsafe ($CUSTOM_SHELL_DEST) — hellish not installed"
     fi
 else
-    echo "[OK] No custom shell payload provided — keeping default shell (bash)"
+    # No bash fallback: a guest without hellish is not this VM. The host is
+    # watching the serial port for this line and fails `make all` on it.
+    feature_fail hellish "custom_shell.bin is not in the ISO — hellish is the login shell of every build"
+fi
+# What section 4 gives the accounts it creates. /bin/bash only when the lines
+# above already failed the build, so no account is ever created shell-less.
+LOGIN_SHELL=/bin/bash
+if [ -n "${CUSTOM_SHELL_DEST:-}" ] && [ -x "$CUSTOM_SHELL_DEST" ]; then
+    LOGIN_SHELL="$CUSTOM_SHELL_DEST"
 fi
 
 # ── The interpreter of everything this guest runs on its own ────────────────
@@ -254,30 +287,65 @@ echo "[OK] Guest-side scripts run under $B2B_GUEST_SH"
 # ═══════════════════════════════════════════════════════════════════════════
 
 ### ─── 3. Hostname — Born2beRoot requires login+42 ───────────────────────────
-echo "dlesieur42" >/etc/hostname
-hostname dlesieur42 2>/dev/null || true
+echo "$B2B_HOSTNAME" >/etc/hostname
+hostname "$B2B_HOSTNAME" 2>/dev/null || true
 
 # Fix /etc/hosts — replace any old hostname or add the correct one
 if grep -q "127\.0\.1\.1" /etc/hosts 2>/dev/null; then
-    sed -i 's/127\.0\.1\.1.*/127.0.1.1\tdlesieur42/' /etc/hosts
+    sed -i "s/127\.0\.1\.1.*/127.0.1.1\t$B2B_HOSTNAME/" /etc/hosts
 else
-    echo "127.0.1.1	dlesieur42" >>/etc/hosts
+    printf '127.0.1.1\t%s\n' "$B2B_HOSTNAME" >>/etc/hosts
 fi
 # Also ensure localhost line exists
 grep -q "127\.0\.0\.1.*localhost" /etc/hosts ||
     sed -i '1i 127.0.0.1\tlocalhost' /etc/hosts
-echo "[OK] Hostname set to dlesieur42"
+echo "[OK] Hostname set to $B2B_HOSTNAME"
 
 ### ─── 4. Groups & user ─────────────────────────────────────────────────────
 groupadd user42 2>/dev/null || true
-# Pre-create docker group NOW so dlesieur has it from the very first login.
+# Pre-create docker group NOW so the login user has it from the very first login.
 # Docker is installed later by first-boot-setup.sh (needs systemd + network),
 # but the GROUP must exist before the first SSH/VS Code session or the VS Code
 # server process inherits a stale group list without docker → "permission denied"
 # on /var/run/docker.sock. Docker's postinst will reuse this group.
 groupadd -f docker 2>/dev/null || true
-usermod -aG sudo,user42,docker dlesieur
-echo "[OK] User dlesieur in groups: sudo, user42, docker"
+usermod -aG sudo,user42,docker "$B2B_LOGIN"
+echo "[OK] User $B2B_LOGIN in groups: sudo, user42, docker"
+
+# The extra accounts born2root.conf asks for (B2B_EXTRA_USERS): user42, sudo
+# when asked, hellish as login shell. Their passwords arrive as SHA-512 hashes
+# in /tmp/extra_users.shadow -- written by the host, copied by late_command,
+# deleted right after -- so no password is in clear in the ISO or in this log.
+# useradd -p writes /etc/shadow directly, without PAM, exactly like d-i's own
+# -crypted accounts: the policy of section 8 applies from the first change.
+# Aging is set in section 8, once login.defs says what it is.
+EXTRA_SHADOW="${EXTRA_SHADOW:-/tmp/extra_users.shadow}"
+EXTRA_NAMES=""
+create_extra_users() {
+    local entry name groups hash
+    while read -r entry; do
+        name=${entry%%:*}
+        groups=${entry#*:}
+        [ -n "$name" ] || continue
+        hash=$(awk -F: -v n="$name" '$1 == n { sub(/^[^:]*:/, ""); print; exit }' "$EXTRA_SHADOW" 2>/dev/null)
+        if id "$name" >/dev/null 2>&1; then
+            usermod -aG "$groups" -s "$LOGIN_SHELL" "$name"
+            [ -n "$hash" ] && usermod -p "$hash" "$name"
+        elif [ -z "$hash" ]; then
+            feature_fail b2b-mandatory "extra user $name: no password hash in extra_users.shadow — account not created"
+            continue
+        elif ! useradd -m -G "$groups" -s "$LOGIN_SHELL" -p "$hash" "$name"; then
+            feature_fail b2b-mandatory "extra user $name: useradd failed"
+            continue
+        fi
+        EXTRA_NAMES="${EXTRA_NAMES}${EXTRA_NAMES:+ }$name"
+        echo "[OK] Extra user $name in groups: $groups, shell $LOGIN_SHELL"
+    done <<EXTRAEOF
+$(extra_users)
+EXTRAEOF
+    rm -f "$EXTRA_SHADOW"
+}
+create_extra_users
 
 ### ─── 5. SSH — port 4242, no root login ─────────────────────────────────────
 sed -i 's/^#*Port .*/Port 4242/' /etc/ssh/sshd_config
@@ -377,13 +445,31 @@ while true; do
         systemctl restart ssh >> "$LOG" 2>&1
         echo "$(date): sshd restart attempted, new_status=$(systemctl is-active ssh)" >> "$LOG"
     fi
-    # Login-shell guard. sshd rejects an account whose shell is missing as an
-    # "invalid user", which kills key auth, password auth and console login in
-    # one stroke -- with no hint that the shell is the cause. Rebuilding a
-    # custom shell in place is routine here, so treat a missing one as a fault
-    # to repair rather than a state to sit in.
-    USER_SHELL=$(getent passwd dlesieur 2>/dev/null | cut -d: -f7)
-    if [ -n "$USER_SHELL" ] && [ ! -x "$USER_SHELL" ]; then
+    # Login-shell guard, for every account born2root.conf named (the login
+    # and the extra users, from /etc/b2b/build.conf, read each round).
+    #
+    # hellish IS the shell of this VM. Colleagues had switched their guests
+    # back to bash with chsh, so a login shell that is anything else while
+    # hellish is present is put back, and the correction is logged.
+    #
+    # sshd also rejects an account whose shell is missing as an "invalid
+    # user", which kills key auth, password auth and console login in one
+    # stroke -- with no hint that the shell is the cause. Rebuilding hellish
+    # in place is routine here, so a missing binary is repaired from the
+    # pristine copy; only when there is nothing to restore from does the
+    # account fall back to bash, because losing the shell beats losing access.
+    B2B_LOGIN=$(sed -n 's/^B2B_LOGIN=//p' /etc/b2b/build.conf 2>/dev/null | head -n1)
+    B2B_EXTRA=$(sed -n 's/^B2B_EXTRA_USERS=//p' /etc/b2b/build.conf 2>/dev/null | head -n1 | tr -d '"')
+    printf '%s %s\n' "$B2B_LOGIN" "$B2B_EXTRA" | tr ' ' '\n' | cut -d: -f1 | grep -v '^$' |
+    while read -r U; do
+        USER_SHELL=$(getent passwd "$U" 2>/dev/null | cut -d: -f7)
+        [ -n "$USER_SHELL" ] || continue
+        if [ "$USER_SHELL" != /usr/bin/hellish ] && [ -x /usr/bin/hellish ]; then
+            usermod -s /usr/bin/hellish "$U" 2>> "$LOG" &&
+                echo "$(date): $U's login shell was $USER_SHELL -- put back to /usr/bin/hellish, the shell of this VM" >> "$LOG"
+            continue
+        fi
+        [ -x "$USER_SHELL" ] && continue
         if [ ! -x "${USER_SHELL}.real" ] && [ -x /usr/local/lib/b2b/hellish.real ]; then
             install -m 755 /usr/local/lib/b2b/hellish.real "${USER_SHELL}.real" 2>> "$LOG"
             echo "$(date): ${USER_SHELL}.real was missing -- restored from /usr/local/lib/b2b" >> "$LOG"
@@ -392,12 +478,10 @@ while true; do
             ln -sfn "${USER_SHELL}.real" "$USER_SHELL" 2>> "$LOG"
             echo "$(date): login shell $USER_SHELL was missing -- link to ${USER_SHELL}.real restored" >> "$LOG"
         else
-            # Nothing to restore from: fall back to bash so the box stays
-            # reachable. Losing the custom shell beats losing all access.
-            usermod -s /bin/bash dlesieur 2>> "$LOG"
-            echo "$(date): login shell $USER_SHELL missing and unrecoverable -- fell back to /bin/bash" >> "$LOG"
+            usermod -s /bin/bash "$U" 2>> "$LOG"
+            echo "$(date): login shell $USER_SHELL missing and unrecoverable -- $U fell back to /bin/bash" >> "$LOG"
         fi
-    fi
+    done
 
     MIN=$(date +%M); SEC=$(date +%S)
     if [ "$((MIN % 5))" = "0" ] && [ "$SEC" -lt "16" ]; then
@@ -444,10 +528,10 @@ echo "[OK] SSH configured on port 4242 (keepalives + NAT keepalive + sshd watchd
 ### ─── 5b. SSH key auth — bake host's public key for passwordless login ──────
 # This enables VS Code Remote SSH to reconnect instantly without password prompts.
 # The key is from the host machine that runs `make all`.
-HOST_PUBKEY_DIR="/home/dlesieur/.ssh"
+HOST_PUBKEY_DIR="/home/$B2B_LOGIN/.ssh"
 mkdir -p "$HOST_PUBKEY_DIR"
 chmod 700 "$HOST_PUBKEY_DIR"
-chown dlesieur:dlesieur "$HOST_PUBKEY_DIR"
+chown "$B2B_LOGIN:$B2B_LOGIN" "$HOST_PUBKEY_DIR"
 
 # The orchestrator will inject the actual key at ISO creation time.
 # late_command copies it from /cdrom/host_ssh_pubkey to /target/tmp/host_ssh_pubkey
@@ -455,11 +539,20 @@ chown dlesieur:dlesieur "$HOST_PUBKEY_DIR"
 if [ -f /tmp/host_ssh_pubkey ]; then
     cat /tmp/host_ssh_pubkey >>"$HOST_PUBKEY_DIR/authorized_keys"
     chmod 600 "$HOST_PUBKEY_DIR/authorized_keys"
-    chown dlesieur:dlesieur "$HOST_PUBKEY_DIR/authorized_keys"
-    echo "[OK] Host SSH public key installed for dlesieur"
+    chown "$B2B_LOGIN:$B2B_LOGIN" "$HOST_PUBKEY_DIR/authorized_keys"
+    echo "[OK] Host SSH public key installed for $B2B_LOGIN"
 else
     echo "[WARN] No host SSH public key found at /tmp/host_ssh_pubkey — password auth only"
 fi
+
+# The user's own key pair. This was two in-target lines of late_command that
+# spelt the user out; it lives here now, beside the directory it goes in.
+if [ ! -f "$HOST_PUBKEY_DIR/id_ed25519" ]; then
+    ssh-keygen -t ed25519 -f "$HOST_PUBKEY_DIR/id_ed25519" -N '' -q -C "$B2B_LOGIN@$B2B_HOSTNAME" ||
+        echo "[WARN] ssh-keygen failed for $B2B_LOGIN"
+fi
+chown -R "$B2B_LOGIN:$B2B_LOGIN" "$HOST_PUBKEY_DIR"
+chmod 600 "$HOST_PUBKEY_DIR/id_ed25519" 2>/dev/null || true
 
 # Ensure PubkeyAuthentication is enabled in sshd_config
 sed -i 's/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
@@ -527,6 +620,26 @@ for setting in \
         echo "$setting" >>/etc/security/pwquality.conf
     fi
 done
+# login.defs only reaches accounts created AFTER it says so. root and the login
+# user were created by d-i before this script ran, and the extra users by
+# section 4 above, so every one of them kept 99999 days -- on every build until
+# this line. Apply the subject's aging to each account explicitly.
+apply_password_aging() {
+    local U
+    while read -r U; do
+        [ -n "$U" ] || continue
+        if chage -M 30 -m 2 -W 7 "$U" 2>/dev/null; then
+            echo "[OK] $U: password expires every 30 days (min 2, warned 7 before)"
+        else
+            echo "[WARN] chage failed for $U"
+        fi
+    done <<AGINGEOF
+root
+$B2B_LOGIN
+$(printf '%s\n' "$EXTRA_NAMES" | tr ' ' '\n')
+AGINGEOF
+}
+apply_password_aging
 echo "[OK] Password policy set"
 
 ### ─── 9. tmux — persistent sessions (survive SSH drops) ────────────────────
@@ -535,8 +648,8 @@ if ! command -v tmux >/dev/null 2>&1; then
     $APT tmux || true
 fi
 
-# tmux config for user dlesieur — sane defaults for dev work
-TMUX_CONF="/home/dlesieur/.tmux.conf"
+# tmux config for the login user — sane defaults for dev work
+TMUX_CONF="/home/$B2B_LOGIN/.tmux.conf"
 cat >"$TMUX_CONF" <<'TMUXEOF'
 # ── Born2beRoot tmux config ──────────────────────────────────
 # Reload: tmux source ~/.tmux.conf
@@ -597,11 +710,11 @@ bind -n M-Right next-window
 # Reload config
 bind r source-file ~/.tmux.conf \; display "Config reloaded!"
 TMUXEOF
-chown dlesieur:dlesieur "$TMUX_CONF"
+chown "$B2B_LOGIN:$B2B_LOGIN" "$TMUX_CONF"
 
-# Auto-attach to tmux on interactive SSH login (for user dlesieur)
+# Auto-attach to tmux on interactive SSH login (for the login user)
 # This goes in .bashrc — only activates on interactive login, NOT in scripts
-BASHRC="/home/dlesieur/.bashrc"
+BASHRC="/home/$B2B_LOGIN/.bashrc"
 if ! grep -q 'TMUX_AUTO_ATTACH' "$BASHRC" 2>/dev/null; then
     cat >>"$BASHRC" <<'BASHEOF'
 
@@ -614,9 +727,9 @@ if [ -n "$SSH_CONNECTION" ] && [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [
 fi
 BASHEOF
 fi
-chown dlesieur:dlesieur "$BASHRC"
+chown "$B2B_LOGIN:$B2B_LOGIN" "$BASHRC"
 
-echo "[OK] tmux configured with auto-attach for dlesieur"
+echo "[OK] tmux configured with auto-attach for $B2B_LOGIN"
 
 ### ─── 10. Git config (fix NAT large-clone stalls) ──────────────────────────
 git config --system http.postBuffer 524288000
@@ -749,7 +862,7 @@ cat >/etc/motd <<'MOTDEOF'
   ╔═══════════════════════════════════════════════════════╗
   ║            BORN2BEROOT SECURE SYSTEM                  ║
   ╠═══════════════════════════════════════════════════════╣
-  ║  Hostname:   dlesieur42      SSH Port: 4242           ║
+@B2B_MOTD_HOST@
   ║  Firewall:   Active (UFW)    AppArmor: Enforced       ║
   ║  Monitoring: Every 10 min    Sudo log: /var/log/sudo/ ║
   ╠═══════════════════════════════════════════════════════╣
@@ -771,6 +884,11 @@ cat >/etc/motd <<'MOTDEOF'
   ╚═══════════════════════════════════════════════════════╝
 
 MOTDEOF
+# The one row of the box that depends on the build, padded like its
+# neighbours so the right border stays put (a host name up to 15 characters
+# lines up exactly as the old literal did; a longer one pushes the border).
+MOTD_ROW=$(printf '  ║%-55s║' "$(printf '  Hostname:   %-15s SSH Port: 4242' "$B2B_HOSTNAME")")
+sed -i "s|^@B2B_MOTD_HOST@\$|$MOTD_ROW|" /etc/motd
 # Below the box: the layout this guest was built with, so the numbers are one
 # login away. Written after the layout file exists (see the block further
 # down), which is why this is a hook rather than static text.
@@ -936,7 +1054,11 @@ fi
 # That is worth keeping on / — it is what stops a runaway log wedging the
 # system — but on /home, /var, /srv, /opt and /tmp it is several hundred MB
 # held back for nothing on a disk this size. 1% keeps the safety margin.
-for LV in home var srv opt tmp var-log; do
+# Every volume born2root.conf's table created, except swap and the one on /.
+ROOT_LV=$(printf '%s\n' "$B2B_VOLUMES" | tr ' ' '\n' | awk -F: '$2 == "/" { print $1; exit }')
+[ -n "$ROOT_LV" ] || ROOT_LV=root
+lvs --noheadings -o lv_name LVMGroup 2>/dev/null | awk '{ print $1 }' | while read -r LV; do
+    [ "$LV" = swap ] || [ "$LV" = "$ROOT_LV" ] || [ -z "$LV" ] && continue
     DEV="/dev/LVMGroup/$LV"
     [ -b "$DEV" ] || continue
     if tune2fs -m 1 "$DEV" >/dev/null 2>&1; then

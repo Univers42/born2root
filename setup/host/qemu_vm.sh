@@ -61,7 +61,8 @@
 #
 # Env
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (15360 = SIZE_B2B*1024)
-#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (read from vm_pass.txt)
+#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (default: born2root.conf's B2B_LUKS_PASSPHRASE)
+#   VM_USER (default: born2root.conf's B2B_LOGIN)
 #   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
 # ============================================================================ #
 
@@ -75,11 +76,14 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$REPO_ROOT/utils/vm_path.sh"
 # Encrypted or not, and which ISO name that implies.
 . "$REPO_ROOT/utils/luks_mode.sh"
+# born2root.conf: the login to ssh in as, the passphrase to type at boot.
+. "$REPO_ROOT/utils/b2b_config.sh"
 LUKS="${LUKS:-ON}"
 
 VM_NAME="${VM_NAME:-debian}"
 VM_PATH="${VM_PATH:-$REPO_ROOT/disk_images}"
-VM_USER="${VM_USER:-dlesieur}"
+VM_USER="${VM_USER:-$(b2b_get B2B_LOGIN)}"
+[ -n "$VM_USER" ] || VM_USER=$(id -un)
 # Everything below is keyed on VM_PATH. It is a function because stop/kill may
 # re-key onto a guest of this VM found running from ANOTHER VM_PATH (see
 # adopt_other_guest), and every derived path has to follow.
@@ -161,13 +165,8 @@ find_iso() {
     find "$REPO_ROOT" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
-vm_pass() {
-    [ -n "${VM_PASS:-}" ] && {
-        printf '%s' "$VM_PASS"
-        return 0
-    }
-    [ -r "$REPO_ROOT/vm_pass.txt" ] && head -n1 "$REPO_ROOT/vm_pass.txt" | tr -d '\r\n'
-}
+# The passphrase the preseed was rendered with: VM_PASS, else born2root.conf.
+vm_pass() { b2b_luks_passphrase 2>/dev/null; }
 
 # Alive? /proc, not `kill -0`: kill -0 answers EPERM for a process owned by
 # someone else, which read as "not running" for a guest root had started.
@@ -511,7 +510,7 @@ launch() {
     done
 
     # -device ich9-ahci gives the guest a SATA controller, so the disk appears
-    # as /dev/sda and preseed.cfg's partman recipe applies unchanged. virtio
+    # as /dev/sda and preseed.cfg.in's partman recipe applies unchanged. virtio
     # would be faster but shows up as /dev/vda and would silently not match.
     "$QEMU" \
         -name "$VM_NAME" \
@@ -542,7 +541,7 @@ launch() {
 # A headless install shows nothing, and nothing reads as "hung" long before the
 # ~20 minutes are up. So watch it, and say what is happening from evidence:
 #
-#   serial.log   the installer's own syslog. preseed.cfg's early_command
+#   serial.log   the installer's own syslog. preseed.cfg.in's early_command
 #                streams it to ttyS0 (see di_progress.sh), so the current d-i
 #                stage, the package being unpacked, any failed step, and the
 #                B2B-INSTALL-COMPLETE marker all arrive here within a second.
@@ -871,7 +870,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         }
 
         if [ -z "$pass" ]; then
-            warn "no passphrase (set VM_PASS or vm_pass.txt) — unlock it yourself"
+            warn "no passphrase (B2B_LUKS_PASSPHRASE in born2root.conf, or VM_PASS) — unlock it yourself"
         else
             info "waiting for the initramfs to reach the LUKS prompt"
             sleep "${UNLOCK_DELAY:-45}"

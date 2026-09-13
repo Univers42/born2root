@@ -20,8 +20,9 @@
 
 set -uo pipefail
 
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)/utils/b2b_config.sh"
 VM_NAME="${VM_NAME:-debian}"
-DOMAIN="${INCEPTION_DOMAIN:-dlesieur.42.fr}"
+DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
 SSH_ALIAS="${SSH_ALIAS:-b2b}"
 
 C_RESET=$'\033[0m'

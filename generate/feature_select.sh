@@ -218,6 +218,15 @@ S_VAR=0
 S_HOME=0
 S_SWAP=0
 S_BOOT=0
+# Which volume holds /, /opt, /var and /home (partition_recipe.sh's holder:
+# lines). They come from born2root.conf's volume table, not from the size, so
+# the first parse sets them for good. A mount whose holder is the / volume
+# has no volume of its own: its costs are folded into / (compute_need) and
+# its usable size is 0, which the folded need of 0 always fits.
+H_ROOT=""
+H_OPT=""
+H_VAR=""
+H_HOME=""
 load_sizes() { # <gb>
     local gb="$1" cached raw name val
     eval "cached=\${SZC_$gb-}"
@@ -230,17 +239,26 @@ load_sizes() { # <gb>
             # shellcheck disable=SC2034  # read back through eval, per size
             val=${line#*=}
             case "$name" in
-            root | opt | var | home | swap | boot)
-                eval "SZ_${name}_${gb}=\$val"
-                ;;
+            holder:/) H_ROOT=$val ;;
+            holder:/opt) H_OPT=$val ;;
+            holder:/var) H_VAR=$val ;;
+            holder:/home) H_HOME=$val ;;
+            *[!a-z0-9-]*) ;;
+            *) eval "SZ_${name//-/_}_${gb}=\$val" ;;
             esac
         done <<SZEOF
 $raw
 SZEOF
         eval "SZC_$gb=1"
     fi
-    eval "S_ROOT=\${SZ_root_$gb:-0} S_OPT=\${SZ_opt_$gb:-0}"
-    eval "S_VAR=\${SZ_var_$gb:-0} S_HOME=\${SZ_home_$gb:-0}"
+    # eval, not $(...): this runs for every size resize() probes, per key.
+    eval "S_ROOT=\${SZ_${H_ROOT//-/_}_$gb:-0}"
+    S_OPT=0
+    S_VAR=0
+    S_HOME=0
+    [ "$H_OPT" = "$H_ROOT" ] || eval "S_OPT=\${SZ_${H_OPT//-/_}_$gb:-0}"
+    [ "$H_VAR" = "$H_ROOT" ] || eval "S_VAR=\${SZ_${H_VAR//-/_}_$gb:-0}"
+    [ "$H_HOME" = "$H_ROOT" ] || eval "S_HOME=\${SZ_${H_HOME//-/_}_$gb:-0}"
     eval "S_SWAP=\${SZ_swap_$gb:-0} S_BOOT=\${SZ_boot_$gb:-0}"
     S_ROOT=$((S_ROOT * PERMILLE / 1000))
     S_OPT=$((S_OPT * PERMILLE / 1000))
@@ -283,6 +301,19 @@ compute_need() { # <gb>
         NEED_VAR=$((NEED_VAR + $3))
         NEED_HOME=$((NEED_HOME + $4))
     done
+    # A mount with no volume of its own is paid for by / (see H_ROOT).
+    if [ "$H_OPT" = "$H_ROOT" ]; then
+        NEED_ROOT=$((NEED_ROOT + NEED_OPT))
+        NEED_OPT=0
+    fi
+    if [ "$H_VAR" = "$H_ROOT" ]; then
+        NEED_ROOT=$((NEED_ROOT + NEED_VAR))
+        NEED_VAR=0
+    fi
+    if [ "$H_HOME" = "$H_ROOT" ]; then
+        NEED_ROOT=$((NEED_ROOT + NEED_HOME))
+        NEED_HOME=0
+    fi
 }
 
 fits_at() { # <gb>
@@ -411,6 +442,15 @@ blurb() {
     esac
 }
 
+# One mount's bar, or a note when born2root.conf gives it no volume and / pays.
+mount_bar() { # <mount> <holder> <need> <usable>
+    if [ "$2" = "$H_ROOT" ]; then
+        printf '    %-6s %s(no volume of its own: counted in /)%s\n' "$1" "$C_DIM" "$C_R"
+    else
+        printf '    %-6s %b %5s / %-5s\n' "$1" "$(bar "$3" "$4")" "$3" "$4"
+    fi
+}
+
 CURSOR=1
 # shellcheck disable=SC2120  # the `set --` inside is eval'd cost fields, not args
 draw() {
@@ -450,9 +490,9 @@ draw() {
 
     printf '\n'
     printf '    %-6s %b %5s / %-5s\n' "/" "$(bar "$NEED_ROOT" "$S_ROOT")" "$NEED_ROOT" "$S_ROOT"
-    printf '    %-6s %b %5s / %-5s\n' "/opt" "$(bar "$NEED_OPT" "$S_OPT")" "$NEED_OPT" "$S_OPT"
-    printf '    %-6s %b %5s / %-5s\n' "/var" "$(bar "$NEED_VAR" "$S_VAR")" "$NEED_VAR" "$S_VAR"
-    printf '    %-6s %b %5s / %-5s\n' "/home" "$(bar "$NEED_HOME" "$S_HOME")" "$NEED_HOME" "$S_HOME"
+    mount_bar /opt "$H_OPT" "$NEED_OPT" "$S_OPT"
+    mount_bar /var "$H_VAR" "$NEED_VAR" "$S_VAR"
+    mount_bar /home "$H_HOME" "$NEED_HOME" "$S_HOME"
     printf '\n'
     if [ "$FITS" = 1 ]; then
         printf '    %s* fits%s  %sswap %s MB, /boot %s MB, 20%% of each volume kept free%s\n' \
@@ -513,6 +553,8 @@ read_key() {
 }
 
 # ── Loop ────────────────────────────────────────────────────────────────────
+# The holders must exist before the first compute_need folds by them.
+load_sizes "$SIZE_FLOOR"
 resize
 while :; do
     draw
