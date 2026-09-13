@@ -321,30 +321,92 @@ echo "[OK] User $B2B_LOGIN in groups: sudo, user42, docker"
 # Aging is set in section 8, once login.defs says what it is.
 EXTRA_SHADOW="${EXTRA_SHADOW:-/tmp/extra_users.shadow}"
 EXTRA_NAMES=""
+# One record per line, from the ISO (tests point these at fixtures).
+B2B_USERS_FILE="${B2B_USERS_FILE:-/etc/b2b/users}"
+B2B_SSH_KEYS_FILE="${B2B_SSH_KEYS_FILE:-/etc/b2b/ssh_keys}"
+# GECOS for one account, from /etc/b2b/users ("name:fullname:groups"). The
+# file is the only place a full name may live -- build.conf is sourced, and
+# free text in a sourced file is a command waiting to run. A build whose ISO
+# predates that file (or where the copy failed) falls back to the login, which
+# is what useradd would have got before.
+user_fullname() {
+    awk -F: -v n="$1" '$1 == n { print $2; exit }' "$B2B_USERS_FILE" 2>/dev/null
+}
+
+# Every group an account asks for has to exist before usermod -aG names it:
+# usermod fails as a whole on one unknown group, which used to leave the
+# account with neither user42 nor sudo. `groupadd -f` is a no-op for a group
+# that is already there (docker's is created earlier, before Docker exists).
+ensure_groups() {
+    local group
+    for group in $(printf '%s' "$1" | tr ',' ' '); do
+        [ -n "$group" ] || continue
+        getent group "$group" >/dev/null 2>&1 && continue
+        groupadd -f "$group" ||
+            echo "[WARN] group $group could not be created for $2"
+    done
+}
+
+# The account's own keys from born2root.toml ([users.<name>] ssh_keys), one
+# "name key..." line per key in /etc/b2b/ssh_keys. Appended, never written
+# over -- the first account also gets the building machine's key (section 5b),
+# and that is what `ssh b2b` uses -- and a key already there is not added again.
+install_user_keys() {
+    local name="$1" home keys
+    [ -f "$B2B_SSH_KEYS_FILE" ] || return 0
+    keys=$(awk -v n="$name" '$1 == n { sub(/^[^ ]+ +/, ""); print }' "$B2B_SSH_KEYS_FILE")
+    [ -n "$keys" ] || return 0
+    home=$(getent passwd "$name" | cut -d: -f6)
+    [ -n "$home" ] && [ -d "$home" ] || return 0
+    mkdir -p "$home/.ssh"
+    touch "$home/.ssh/authorized_keys"
+    printf '%s\n' "$keys" | while IFS= read -r key; do
+        grep -qxF "$key" "$home/.ssh/authorized_keys" ||
+            printf '%s\n' "$key" >>"$home/.ssh/authorized_keys"
+    done
+    chmod 700 "$home/.ssh"
+    chmod 600 "$home/.ssh/authorized_keys"
+    chown -R "$name:$name" "$home/.ssh"
+    echo "[OK] $(printf '%s\n' "$keys" | wc -l) ssh key(s) installed for $name"
+}
+
 create_extra_users() {
-    local entry name groups hash
+    local entry name groups hash fullname
     while read -r entry; do
         name=${entry%%:*}
         groups=${entry#*:}
         [ -n "$name" ] || continue
         hash=$(awk -F: -v n="$name" '$1 == n { sub(/^[^:]*:/, ""); print; exit }' "$EXTRA_SHADOW" 2>/dev/null)
+        fullname=$(user_fullname "$name")
+        [ -n "$fullname" ] || fullname="$name"
+        ensure_groups "$groups" "$name"
         if id "$name" >/dev/null 2>&1; then
-            usermod -aG "$groups" -s "$LOGIN_SHELL" "$name"
+            usermod -aG "$groups" -s "$LOGIN_SHELL" -c "$fullname" "$name"
             [ -n "$hash" ] && usermod -p "$hash" "$name"
         elif [ -z "$hash" ]; then
             feature_fail b2b-mandatory "extra user $name: no password hash in extra_users.shadow — account not created"
             continue
-        elif ! useradd -m -G "$groups" -s "$LOGIN_SHELL" -p "$hash" "$name"; then
+        # No hash at all is a bug; the hash `!` is a deliberate empty password
+        # in born2root.toml: the account exists and is locked until someone
+        # runs `sudo passwd <name>` in the guest, which is what it says.
+        elif ! useradd -m -G "$groups" -s "$LOGIN_SHELL" -p "$hash" -c "$fullname" "$name"; then
             feature_fail b2b-mandatory "extra user $name: useradd failed"
             continue
         fi
+        install_user_keys "$name"
         EXTRA_NAMES="${EXTRA_NAMES}${EXTRA_NAMES:+ }$name"
-        echo "[OK] Extra user $name in groups: $groups, shell $LOGIN_SHELL"
+        echo "[OK] Extra user $name ($fullname) in groups: $groups, shell $LOGIN_SHELL"
     done <<EXTRAEOF
 $(extra_users)
 EXTRAEOF
     rm -f "$EXTRA_SHADOW"
 }
+# A missing /etc/b2b/users means the ISO's copy did not happen: the accounts
+# are still created (build.conf names them), they just get their login as their
+# full name. Said out loud, because the host's own check compares GECOS.
+if [ ! -f "$B2B_USERS_FILE" ] && [ -n "$B2B_EXTRA_USERS" ]; then
+    echo "[WARN] /etc/b2b/users is missing — full names fall back to the login"
+fi
 create_extra_users
 
 ### ─── 5. SSH — port 4242, no root login ─────────────────────────────────────
@@ -544,6 +606,9 @@ if [ -f /tmp/host_ssh_pubkey ]; then
 else
     echo "[WARN] No host SSH public key found at /tmp/host_ssh_pubkey — password auth only"
 fi
+
+# ...and the keys the config gives this account, on top of it.
+install_user_keys "$B2B_LOGIN"
 
 # The user's own key pair. This was two in-target lines of late_command that
 # spelt the user out; it lives here now, beside the directory it goes in.

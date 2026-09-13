@@ -403,6 +403,25 @@ if [ -n "$(b2b_get B2B_EXTRA_USERS)" ]; then
     echo "  ✓ extra users: $(cut -d: -f1 "$ISO_DIR/extra_users.shadow" | tr '\n' ' ')(hashed passwords)"
 fi
 
+# Whatever is free text goes in its own file, one record per line, never in
+# build.conf: that file is SOURCED by the guest scripts and re-read with sed by
+# the sshd watchdog, so a quote or a $ in a full name would break the loop that
+# puts a changed login shell back. IFS=: parses these three fields, and --check
+# has already refused a : or a , in a name.
+b2b_users >"$ISO_DIR/users" || {
+    echo "Error: could not write the account list" >&2
+    exit 1
+}
+echo "  ✓ users staged — $(wc -l <"$ISO_DIR/users") account(s), full names and groups"
+# Per-account keys from born2root.toml. The host's own key still travels as
+# host_ssh_pubkey and still goes to the first account: that is what makes
+# `ssh b2b` work without a password on the machine that built the VM.
+rm -f "$ISO_DIR/ssh_keys"
+if [ -s "$ISO_DIR/users" ] && KEYS=$(b2b_ssh_keys) && [ -n "$KEYS" ]; then
+    printf '%s\n' "$KEYS" >"$ISO_DIR/ssh_keys"
+    echo "  ✓ ssh_keys staged — $(wc -l <"$ISO_DIR/ssh_keys") key(s) from born2root.toml"
+fi
+
 # Copy late_command helper scripts to ISO root (accessible as /cdrom/ during install)
 echo "Copying setup scripts to ISO root..."
 for SCRIPT in b2b-setup.sh monitoring.sh first-boot-setup.sh; do

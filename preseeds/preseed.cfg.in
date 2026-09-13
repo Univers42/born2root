@@ -83,7 +83,7 @@ d-i mirror/http/proxy string
 # the ISO, the initrd or d-i's debconf log in clear. No -again key: that
 # confirmation only exists for the cleartext form.
 d-i passwd/root-password-crypted password @B2B_ROOT_PASSWORD_HASH@
-d-i passwd/user-fullname string @B2B_LOGIN@
+d-i passwd/user-fullname string @B2B_FULLNAME@
 d-i passwd/username string @B2B_LOGIN@
 d-i passwd/user-password-crypted password @B2B_USER_PASSWORD_HASH@
 d-i user-setup/allow-password-weak boolean true
@@ -332,6 +332,8 @@ d-i preseed/late_command string \
 	cp /cdrom/host_ssh_pubkey /target/tmp/host_ssh_pubkey 2>/dev/null || true ; \
 	cp /cdrom/extra_users.shadow /target/tmp/extra_users.shadow 2>/dev/null || true ; \
 	mkdir -p /target/etc/b2b ; cp /cdrom/features.conf /target/etc/b2b/features.conf 2>/dev/null || true ; cp /cdrom/build.conf /target/etc/b2b/build.conf 2>/dev/null || true ; \
+	cp /cdrom/users /target/etc/b2b/users 2>/dev/null || echo "B2B-MISSING users" >/dev/ttyS0 ; \
+	cp /cdrom/ssh_keys /target/etc/b2b/ssh_keys 2>/dev/null || true ; \
 	in-target /bin/bash /tmp/b2b-setup.sh || true ; \
 	in-target /bin/bash -c "dpkg --configure -a" || true ; \
 	in-target /bin/bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -y -f" || true ; \

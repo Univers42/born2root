@@ -316,6 +316,23 @@ contains "--guest quotes the volume list" "$GUEST" 'B2B_VOLUMES="root:/ home:/ho
 check "--guest is sourceable" \
     "$(printf '%s\n' "$GUEST" >"$TMP/build.conf" && "${SCRIPT_SH:-bash}" -c ". '$TMP/build.conf'; printf '%s' \"\$B2B_KEYMAP\"")" es
 
+# --users: the one place a full name travels, never build.conf.
+USERS3=$(append users3 '[users.bob]
+password = "Bob-secret-1"
+fullname = "Bob O'"'"'Hara"
+groups = ["docker"]
+
+[users.saint]
+password = ""
+nvim = true')
+check "--users: one record per account, in file order" \
+    "$(env B2B_CONFIG="$USERS3" "${CFG[@]}" --users | tr '\n' '|')" \
+    "dlesieur:dlesieur:user42,sudo|bob:Bob O'Hara:user42,docker|saint:saint:user42|"
+GUEST3=$(env B2B_CONFIG="$USERS3" "${CFG[@]}" --guest)
+contains "--guest lists every account" "$GUEST3" 'B2B_USERS="dlesieur bob saint"'
+contains "--guest lists the editor users (first account always)" "$GUEST3" 'B2B_NVIM_USERS="dlesieur saint"'
+check "--guest never carries a full name" "$(printf '%s\n' "$GUEST3" | grep -c "O'Hara")" 0
+
 THREE=$(append users '[users.bob]
 password = "Bob-secret-1"
 sudo = true

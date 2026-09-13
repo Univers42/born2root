@@ -36,10 +36,12 @@ trap 'rm -rf "$TMP"' EXIT
 # Stubs on PATH: each records its arguments, one call per line. `id` knows
 # only the accounts listed in $TMP/existing.
 mkdir -p "$TMP/bin"
-for cmd in useradd usermod chage; do
+for cmd in useradd usermod chage groupadd chown; do
     printf '#!/bin/sh\nprintf "%%s\\n" "%s $*" >>"%s/calls"\n' "$cmd" "$TMP" >"$TMP/bin/$cmd"
 done
 printf '#!/bin/sh\ngrep -qx "$1" "%s/existing" 2>/dev/null\n' "$TMP" >"$TMP/bin/id"
+# getent: `group` knows user42 and sudo only; `passwd` puts every home in $TMP.
+printf '#!/bin/sh\ncase "$1" in group) case "$2" in user42|sudo) exit 0;; esac; exit 2;;\npasswd) printf "%%s:x:1000:1000::%s/home/%%s:/usr/bin/hellish\\n" "$2" "$2";; esac\n' "$TMP" >"$TMP/bin/getent"
 chmod +x "$TMP/bin/"*
 : >"$TMP/existing"
 
@@ -47,6 +49,9 @@ chmod +x "$TMP/bin/"*
 {
     printf 'PATH=%s:$PATH\n' "$TMP/bin"
     awk '/^extra_users\(\) \{/' preseeds/b2b-setup.sh
+    awk '/^user_fullname\(\) \{/,/^}/' preseeds/b2b-setup.sh
+    awk '/^ensure_groups\(\) \{/,/^}/' preseeds/b2b-setup.sh
+    awk '/^install_user_keys\(\) \{/,/^}/' preseeds/b2b-setup.sh
     awk '/^create_extra_users\(\) \{/,/^}/' preseeds/b2b-setup.sh
     awk '/^apply_password_aging\(\) \{/,/^}/' preseeds/b2b-setup.sh
     cat <<'EOF'
@@ -62,6 +67,7 @@ run() { # <extra users> -> runs the lifted code; calls in $TMP/calls
     : >"$TMP/fails"
     env B2B_LOGIN=alice42login B2B_EXTRA_USERS="$1" LOGIN_SHELL=/usr/bin/hellish \
         EXTRA_SHADOW="$TMP/shadow" FAILS="$TMP/fails" \
+        B2B_USERS_FILE="$TMP/users" B2B_SSH_KEYS_FILE="$TMP/ssh_keys" \
         "${SCRIPT_SH:-bash}" "$TMP/lifted.sh" >"$TMP/out" 2>&1
 }
 
@@ -71,9 +77,9 @@ check "the functions were found in b2b-setup.sh" "$(grep -c '^create_extra_users
 printf 'alice:$6$salta$hashA\nbob:$6$saltb$hash/B.x\n' >"$TMP/shadow"
 run "alice:user42 bob:user42,sudo"
 check "alice: created in user42 with hellish and her hash" \
-    "$(grep '^useradd ' "$TMP/calls" | grep -c -- '-m -G user42 -s /usr/bin/hellish -p $6$salta$hashA alice$')" 1
+    "$(grep '^useradd ' "$TMP/calls" | grep -c -- '-m -G user42 -s /usr/bin/hellish -p $6$salta$hashA -c alice alice$')" 1
 check "bob: created in user42 AND sudo" \
-    "$(grep '^useradd ' "$TMP/calls" | grep -c -- '-G user42,sudo -s /usr/bin/hellish -p $6$saltb$hash/B.x bob$')" 1
+    "$(grep '^useradd ' "$TMP/calls" | grep -c -- '-G user42,sudo -s /usr/bin/hellish -p $6$saltb$hash/B.x -c bob bob$')" 1
 check "exactly two accounts created" "$(grep -c '^useradd ' "$TMP/calls")" 2
 check "the hash file is deleted afterwards" "$([ -e "$TMP/shadow" ] && echo present || echo gone)" gone
 check "no failure reported" "$(wc -l <"$TMP/fails")" 0
@@ -100,7 +106,29 @@ printf 'alice\n' >"$TMP/existing"
 printf 'alice:$6$salta$hashA\n' >"$TMP/shadow"
 run "alice:user42,sudo"
 check "existing alice: no useradd" "$(grep -c '^useradd ' "$TMP/calls")" 0
-check "existing alice: groups and shell set" "$(grep -c '^usermod -aG user42,sudo -s /usr/bin/hellish alice$' "$TMP/calls")" 1
+check "existing alice: groups and shell set" "$(grep -c '^usermod -aG user42,sudo -s /usr/bin/hellish -c alice alice$' "$TMP/calls")" 1
 check "existing alice: password set from the hash" "$(grep -c '^usermod -p $6$salta$hashA alice$' "$TMP/calls")" 1
+
+# ── What born2root.toml adds: full names, new groups, keys, a locked account ─
+: >"$TMP/existing"
+printf 'dave:$6$saltd$hashD\nerin:!\n' >"$TMP/shadow"
+printf "alice42login:Alice:user42,sudo\ndave:Dave O'Hara:user42,sudo,docker\nerin:erin:user42\n" >"$TMP/users"
+printf 'dave ssh-ed25519 AAAAkeyD dave@laptop\ndave ssh-rsa AAAAkeyD2 dave@work\nerin ssh-ed25519 AAAAkeyE e\n' >"$TMP/ssh_keys"
+mkdir -p "$TMP/home/dave" "$TMP/home/erin" # useradd -m, which the stub does not do
+run "dave:user42,sudo,docker erin:user42"
+check "dave: GECOS from the users file, quote and all" \
+    "$(grep -c "^useradd .* -c Dave O'Hara dave$" "$TMP/calls")" 1
+check "dave: the missing group docker is created first" \
+    "$(grep -n '' "$TMP/calls" | grep -E 'groupadd -f docker$|useradd .* dave$' | cut -d: -f1 | tr '\n' ' ')" "1 2 "
+check "only groups that do not exist are created" "$(grep -c '^groupadd ' "$TMP/calls")" 1
+check "erin: an empty password is a locked account, created" \
+    "$(grep -c '^useradd .* -p ! -c erin erin$' "$TMP/calls")" 1
+check "dave: both keys, nobody else's" "$(cat "$TMP/home/dave/.ssh/authorized_keys" 2>/dev/null | tr '\n' '|')" \
+    "ssh-ed25519 AAAAkeyD dave@laptop|ssh-rsa AAAAkeyD2 dave@work|"
+check "dave: keys are 600 in a 700 directory" \
+    "$(stat -c %a "$TMP/home/dave/.ssh" "$TMP/home/dave/.ssh/authorized_keys" 2>/dev/null | tr '\n' ' ')" "700 600 "
+check "erin: her key only" "$(cat "$TMP/home/erin/.ssh/authorized_keys" 2>/dev/null)" "ssh-ed25519 AAAAkeyE e"
+check "a second run adds no duplicate, removes nothing" \
+    "$(printf 'dave\n' >"$TMP/existing" && run "dave:user42,sudo,docker" && wc -l <"$TMP/home/dave/.ssh/authorized_keys" | tr -d ' ')" 2
 
 exit "$fail"

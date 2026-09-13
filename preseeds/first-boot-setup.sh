@@ -285,7 +285,11 @@ if [ -f /root/install_nvim.sh ]; then
     # never once said "no space". Mason's downloads came back as curl(23) and
     # git could not even write a ref lock. 400 MB is nvim + nvim-extras from
     # the manifest (200 + 150) with a little room over.
-    if check_disk_space / 1000 && check_disk_space /home 400; then
+    # Every account with `nvim = true` in born2root.toml gets the setup, in
+    # its own home -- so /home pays once per editor user, not once.
+    EDITOR_USERS="${B2B_NVIM_USERS:-$B2B_LOGIN}"
+    EDITOR_COUNT=$(printf '%s' "$EDITOR_USERS" | tr ' ' '\n' | grep -c .)
+    if check_disk_space / 1000 && check_disk_space /home $((400 * EDITOR_COUNT)); then
         chmod +x /root/install_nvim.sh 2>/dev/null || true
         # NVIM_BOOTSTRAP=1: kickstart's plugins, tree-sitter parsers and
         # language servers are installed NOW, at build time, and the script
@@ -294,7 +298,7 @@ if [ -f /root/install_nvim.sh ]; then
         # to the user's first interactive start: minutes of cloning behind a
         # blank editor, on a VM whose point is to arrive finished.
         if run_logged /var/log/b2b-nvim-install.log \
-            env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
+            env NVIM_USERS="$EDITOR_USERS" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
             echo "[OK] Neovim + kickstart installed, plugins included (log: /var/log/b2b-nvim-install.log)"
         else
             feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
@@ -324,13 +328,13 @@ else
     echo "--- Installing the Neovim extras layer ---"
     # Same guard as the nvim section above, for the same reason: this layer's
     # plugins go to /home, and a full /home fails it invisibly.
-    if ! check_disk_space /home 200; then
-        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
+    if ! check_disk_space /home $((200 * EDITOR_COUNT)); then
+        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs $((200 * EDITOR_COUNT)) for $EDITOR_COUNT editor user(s))"
         NVIM_EXTRAS_STATUS=failed
     fi
     chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
     if run_logged /var/log/b2b-nvim-install.log \
-        env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
+        env NVIM_USERS="$EDITOR_USERS" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim_extras.sh; then
         echo "[OK] Neovim extras installed (log: /var/log/b2b-nvim-install.log)"
     else
         echo "[FAIL] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
@@ -342,7 +346,7 @@ else
     if [ -f /root/install_excalidraw.sh ]; then
         chmod +x /root/install_excalidraw.sh 2>/dev/null || true
         if run_logged /var/log/b2b-nvim-install.log \
-            env EXCALIDRAW_USERS="$B2B_LOGIN" "$B2B_SH" /root/install_excalidraw.sh; then
+            env EXCALIDRAW_USERS="$EDITOR_USERS" "$B2B_SH" /root/install_excalidraw.sh; then
             echo "[OK] Excalidraw editor built (log: /var/log/b2b-nvim-install.log)"
         else
             echo "[FAIL] Excalidraw build reported errors — see /var/log/b2b-nvim-install.log"

@@ -35,6 +35,7 @@ function names):
   b2b_config.py --dump           resolved values as JSON (tests, debugging)
   b2b_config.py --volumes        "name mount floor share cap" lines
   b2b_config.py --guest          /etc/b2b/build.conf body (no password)
+  b2b_config.py --users          "name:fullname:groups" per account
   b2b_config.py --shadow         "name:$6$..." per extra account, "name:!"
                                  when it has no password
   b2b_config.py --ssh-keys       "name key..." lines, paths already read
@@ -306,6 +307,14 @@ class Config:
     def fullname(self):
         first = self.users[0] if self.users else {}
         return first.get("fullname") or self.login
+
+    def fullname_of(self, user):
+        """GECOS for any account: the login when nothing was given.
+
+        Never empty: an empty `passwd/user-fullname` makes d-i ask the question
+        on a screen nobody watches, and `useradd -c ''` loses the field.
+        """
+        return user.get("fullname") or user["name"]
 
     @property
     def luks_passphrase(self):
@@ -1126,7 +1135,9 @@ def guest_view(config):
         "B2B_TIMEZONE",
         "B2B_LOCALE",
         "B2B_KEYMAP",
+        "B2B_USERS",
         "B2B_EXTRA_USERS",
+        "B2B_NVIM_USERS",
         "B2B_VOLUMES",
     )
     for key in keys:
@@ -1136,11 +1147,33 @@ def guest_view(config):
             )
         else:
             value = get(config, key)
-        if key in ("B2B_EXTRA_USERS", "B2B_VOLUMES"):
+        if key in ("B2B_USERS", "B2B_EXTRA_USERS", "B2B_NVIM_USERS", "B2B_VOLUMES"):
             lines.append('%s="%s"' % (key, value))
         else:
             lines.append("%s=%s" % (key, value))
     return "\n".join(lines)
+
+
+def users_view(config):
+    """name:fullname:groups per account, one record per line.
+
+    Its own file rather than a build.conf variable because a full name is free
+    text -- "Bob O'Hara" would end a shell string and the sshd watchdog
+    re-reads build.conf with sed, so a quote there could break the loop that
+    puts a changed login shell back. A `:` in a name is refused by --check,
+    which is what makes the three fields readable with IFS=: alone.
+    """
+    out = []
+    for user in config.users:
+        out.append(
+            "%s:%s:%s"
+            % (
+                user["name"],
+                config.fullname_of(user),
+                ",".join(config.groups_of(user)),
+            )
+        )
+    return "\n".join(out)
 
 
 def shadow_view(config):
@@ -1346,7 +1379,7 @@ def check(config):
 
 
 USAGE = """usage: b2b_config.py get KEY | --check | --parses | --show | --dump
-       | --volumes | --guest | --shadow | --ssh-keys | --render FILE
+       | --volumes | --guest | --users | --shadow | --ssh-keys | --render FILE
        (env: B2B_CONFIG=path/to/born2root.toml, VM_PASS)
 """
 
@@ -1392,6 +1425,9 @@ def main(argv):
             return 0
         if mode == "--guest":
             sys.stdout.write(guest_view(config) + "\n")
+            return 0
+        if mode == "--users":
+            sys.stdout.write(users_view(config) + "\n")
             return 0
         if mode == "--shadow":
             out = shadow_view(config)

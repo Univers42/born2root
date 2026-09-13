@@ -31,6 +31,7 @@
 #                                          `/` first, the `rest` volume last
 #   utils/b2b_config.sh --guest            /etc/b2b/build.conf body: what the
 #                                          guest may know (no password)
+#   utils/b2b_config.sh --users            "name:fullname:groups" per account
 #   utils/b2b_config.sh --shadow           "name:$6$..." per extra account
 #   utils/b2b_config.sh --ssh-keys         "name key..." lines
 #   utils/b2b_config.sh --render FILE      FILE with every @B2B_KEY@ filled in
@@ -87,6 +88,7 @@ b2b_check() { _b2b_py --check; }
 b2b_show() { _b2b_py --show; }
 b2b_dump() { _b2b_py --dump; }
 b2b_guest() { _b2b_py --guest; }
+b2b_users() { _b2b_py --users; }
 b2b_shadow() { _b2b_py --shadow; }
 b2b_ssh_keys() { _b2b_py --ssh-keys; }
 b2b_render() { _b2b_py --render "$1"; }
@@ -94,7 +96,7 @@ b2b_render() { _b2b_py --render "$1"; }
 _b2b_usage() {
     cat >&2 <<EOF
 usage: $0 get KEY | --check | --parses | --show | --dump | --volumes
-       | --guest | --shadow | --ssh-keys | --render FILE
+       | --guest | --users | --shadow | --ssh-keys | --render FILE
        (env: B2B_CONFIG=path/to/born2root.toml, VM_PASS)
 EOF
 }
@@ -113,6 +115,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     --dump) b2b_dump ;;
     --volumes) b2b_volumes ;;
     --guest) b2b_guest ;;
+    --users) b2b_users ;;
     --shadow) b2b_shadow ;;
     --ssh-keys) b2b_ssh_keys ;;
     --render) b2b_render "${2:-}" ;;

@@ -150,6 +150,10 @@ fi
 
 # ── Everything below comes out of feature_profile.sh ────────────────────────
 NOT_INSTALLED=$(sed -n "s/^NOT_INSTALLED='\(.*\)'/\1/p" "$FP")
+PER_USER_HOME=$(sed -n "s/^PER_USER_HOME='\(.*\)'/\1/p" "$FP")
+# Same count feature_profile.sh uses: one /home charge per editor user.
+EDITOR_COUNT="${B2B_NVIM_USER_COUNT:-$("${SCRIPT_SH:-bash}" "$HERE/../utils/b2b_config.sh" get B2B_NVIM_USERS | wc -w)}"
+case "$EDITOR_COUNT" in '' | *[!0-9]* | 0) EDITOR_COUNT=1 ;; esac
 PERMILLE=$(sed -n 's/^USABLE_PERMILLE=\([0-9]*\).*/\1/p' "$FP" | head -n1)
 STANDARD_FROM=$(sed -n 's/^STANDARD_FROM_GB=\([0-9]*\).*/\1/p' "$FP" | head -n1)
 FULL_FROM=$(sed -n 's/^FULL_FROM_GB=\([0-9]*\).*/\1/p' "$FP" | head -n1)
@@ -165,6 +169,7 @@ OPT_KEYS=""
 while read -r n tier c1 c2 c3 c4 req; do
     case "$n" in '' | ai-*) continue ;; esac
     k=${n//-/_}
+    case " $PER_USER_HOME " in *" $n "*) c4=$((c4 * EDITOR_COUNT)) ;; esac
     eval "NAME_${k}=\$n TIER_${k}=\$tier REQ_${k}=\$req COST_${k}=\"\$c1 \$c2 \$c3 \$c4\""
     ALL_KEYS="${ALL_KEYS}${ALL_KEYS:+ }$k"
     case "$tier" in base) continue ;; esac
