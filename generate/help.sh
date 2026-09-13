@@ -162,7 +162,7 @@ row "  ${DIM}No VirtualBox window is ever opened.${RST}"
 
 sec "Make it yours: born2root.toml (repo root)"
 cmd "make config" "Show what the file resolves to, validate it" "${BLD}${GRN}"
-note "login, passwords, users, locale, partitions"
+note "accounts, packages, features, policies, ports, partitions"
 note "hellish is every account's shell: no switch"
 
 sec "Build it"

@@ -93,41 +93,47 @@ with hellish, so also check an edited script with `hellish -n` as well as
 e.g. a one-line `case … esac; }` that shfmt collapses into something hellish
 cannot parse).
 
-## born2root.conf: the one file people personalise
+## born2root.toml: the one file people personalise
 
-`born2root.conf` at the repo root holds everything about the guest a user may
-change: login, host name, the three passwords, extra users, locale, keymap,
-timezone, mirror, the `B2B_VOLUME` table, swap, and the Makefile knobs
-(`B2B_SIZE_GB`, `B2B_VM_NAME`, `B2B_BACKEND`, `B2B_PROFILE`, `B2B_FEATURES`,
-`B2B_AI_MODE`, `B2B_VM_RAM_MB`). It is tracked and edited in place.
-`utils/b2b_config.sh` is its only reader, and nothing sources the file:
+`born2root.toml` at the repo root (TOML, tracked, edited in place) holds
+everything a user may change: `[vm]` (the Makefile knobs), `[system]`
+(hostname, locale, keymap, timezone, mirror, root and LUKS passwords),
+`[users.<name>]` (one table per account, the first is the login: password,
+fullname, sudo, groups, ssh_keys, nvim), `[packages] apt`, `[features]`
+(`"auto"`/true/false per optional feature), `[policy.password|sudo|ssh|
+monitoring]` (the subject is the floor: stricter accepted, weaker refused),
+`[network] forwards` and `[disk]` (swap, the volume table as inline tables).
 
-- `get KEY` never fails and never prints to stderr, because the Makefile calls
-  it at parse time for every target. The Makefile reads a knob from the file
-  only when its `origin` is `undefined`, so the command line and the
-  environment still win. `B2B_CONFIG=path` points every reader at another file.
-- `--check` refuses unknown, missing or duplicate keys and invalid values,
-  naming each one (`make config`, and `create_custom_iso.sh` before any
-  download). `--render` fills `@B2B_*@` placeholders with an awk
-  `index`/`substr` scan over `ENVIRON`: no regex and no `-v`, so `$ & \ /` in a
-  value or a crypt hash pass through untouched. A leftover placeholder is an
-  error.
-- Anything that needs the login, a password or the layout calls this library.
-  A literal `dlesieur`, `temp*123` or `vm_pass.txt` in non-comment code fails
-  `tests/test_b2b_config.sh`.
-- Tests must not assert against `born2root.conf`: it is personalised. They pin
-  `tests/fixtures/default.conf`, the shipped defaults without comments; change
-  a default in both files.
-- The guest never sees the file. It gets `/etc/b2b/build.conf` (`--guest`: no
-  passwords), which `b2b-setup.sh`, `first-boot-setup.sh` and the provisioners
-  read the login and accounts from. Extra users' passwords travel as
-  `extra_users.shadow` (SHA-512) and are deleted after `useradd -p`.
-- Deliberately not configurable: SSH port 4242, groups `user42`/`sudo`, VG
-  `LVMGroup`, `/boot`, LUKS, and the shell. hellish is every account's login
-  shell. `create_custom_iso.sh` refuses an empty or non-hellish
-  `CUSTOM_SHELL_PATH`, a guest without it fails the build, it is no longer a
-  feature row, and the guest's sshd watchdog puts a changed login shell back.
-  Do not add an opt-out.
+- `utils/b2b_config.py` is the only reader (`tomllib`, else the vendored tomli
+  in `utils/vendor/` for Python 3.10); `utils/b2b_config.sh` is its shell face
+  and keeps the function names. Every call passes the environment with `env`:
+  hellish does not export `VAR=x func` to what the function runs.
+- `get KEY` (a legacy `B2B_*` name or a dotted path like `users.bob.sudo`)
+  never fails and never prints to stderr: the Makefile calls it at parse time,
+  and reads a knob only when its `origin` is `undefined`. Because an
+  unparsable file answers empty, the destructive path runs `guard_config`
+  (`--parses`) first, so `make re` never falls back to the literal VM name.
+- `--check` names every problem with a "did you mean"; `create_custom_iso.sh`
+  runs it, then `utils/b2b_apt.py` for `[packages] apt` (Debian's index,
+  cached in `~/.cache/born2root/apt`), before any download. `--render` fills
+  `@B2B_*@` with `re.sub` and a function, so `$ & \ /` survive; a leftover or
+  empty placeholder is an error.
+- The guest never sees the file. `build.conf` (`--guest`) holds scalars and
+  name lists only, no password and no free text (it is sourced, and the sshd
+  watchdog re-reads it with sed). Free text and secrets travel one record per
+  line: `users` (`name:fullname:groups`), `ssh_keys`, `extra_users.shadow`
+  (SHA-512, `!` for an empty password), `apt-packages`.
+- Built-in forwards, feature names and ports are scraped from the scripts
+  (`PORTS_SPEC`, `add_natpf`, `ensure_vm_nat_forward`, the `MANIFEST`), never
+  copied: rename one and the validator follows.
+- A literal `dlesieur`, `temp*123`, `vm_pass.txt` or `born2root.conf` in
+  non-comment code fails `tests/test_b2b_config.sh`. Tests pin
+  `tests/fixtures/default.toml` (the shipped values without comments), never
+  the personalised file; change a default in both.
+- Deliberately not configurable: SSH port 4242, root login, group `user42`,
+  VG `LVMGroup`, `/boot`, ext4, LUKS, and the shell. hellish is every
+  account's login shell; a guest without it fails the build and the sshd
+  watchdog puts a changed login shell back. Do not add an opt-out.
 
 ## The shell every script runs under
 
@@ -168,10 +174,11 @@ hardcoded `bash`.
    reasons on stderr), and `utils/vm_path.sh` (is `$VM_PATH/$VM_NAME`
    writable, and if not, why).
 2. `make gen_iso` runs `generate/create_custom_iso.sh`: validates
-   `born2root.conf`, downloads the current netinst from cdimage.debian.org,
-   extracts it with xorriso, renders `preseeds/preseed.cfg.in` into
-   `preseed.cfg` (see the marker blocks below), stages the three
-   `preseeds/*.sh`, the provisioners, `features.conf`, `build.conf`,
+   `born2root.toml` (and `[packages] apt`), downloads the current netinst
+   from cdimage.debian.org, extracts it with xorriso, renders
+   `preseeds/preseed.cfg.in` into `preseed.cfg` (see the marker blocks
+   below), stages the three `preseeds/*.sh`, the provisioners,
+   `features.conf`, `build.conf`, `users`, `ssh_keys`, `apt-packages`,
    `dist/hellish` as `custom_shell.bin` and your `~/.ssh/id_*.pub`, appends
    `preseed.cfg` to `initrd.gz` as a second cpio archive, and rebuilds the
    ISO. The output name carries a LUKS suffix so `LUKS=ON` and `LUKS=OFF`
@@ -237,8 +244,8 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
   purpose: they are the one reclaimable line, and `utils/space_budget.sh`
   names them with the exact `rm -rf` rather than absorbing them into the cap.
 - The partition layout, from `generate/partition_recipe.sh` and the
-  `B2B_VOLUME` table: every volume has a floor, a weighted share and a cap. The
-  volume with share `rest` (`/var`) is declared last with `-1`, so partman's
+  `[disk]` volume table: every volume has a floor, a weighted share and a cap.
+  The volume with share `rest` (`/var`) is declared last with `-1`, so partman's
   remainder lands where Docker grows. Below 8 GB it refuses. The script names
   no volume. `--sizes` ends with `holder:<mount>=<volume>` lines. When the table
   has no volume for `/opt`, `/var` or `/home`, `feature_profile.sh` and the
@@ -267,7 +274,7 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
 matter when editing it. The `RECIPE-BEGIN`/`RECIPE-END` block is the generator's
 output for the shipped defaults and is regenerated at ISO build time. After
 changing `partition_recipe.sh` or the default table, paste
-`B2B_CONFIG=tests/fixtures/default.conf bash generate/partition_recipe.sh
+`B2B_CONFIG=tests/fixtures/default.toml bash generate/partition_recipe.sh
 --recipe` back into it, or `tests/test_partition_recipe.sh` fails. The
 `LUKS-BEGIN`/`LUKS-END` block is what `LUKS=OFF` rewrites. Feature cost
 estimates in `feature_profile.sh` are meant to be corrected from a built guest's
@@ -315,9 +322,9 @@ use, so never assume 4242: read the port back the way `orchestrate.sh` and
   validated before any download or destructive step. A switch once named
   `NERD_FONT` read a shell prompt theme's exported `NERD_FONT=0` and stopped
   builds after `make re` had already deleted the VM (now `NVIM_NERD_FONT`).
-- Credentials are the temporary defaults in `born2root.conf`. The LUKS
-  passphrase is `VM_PASS`, else `B2B_LUKS_PASSPHRASE`, for the preseed and the
-  unlock alike. Add no hardcoded secrets.
+- Credentials are the temporary defaults in `born2root.toml`. The LUKS
+  passphrase is `VM_PASS`, else `system.luks_passphrase`, for the preseed and
+  the unlock alike. Add no hardcoded secrets.
 - `doc/` holds deep dives (CI architecture, port forwarding, host domain
   access, the VS Code SSH timeout fix). `doc/HANDOFF_SPACE_AND_PROFILES.md` is
   the measured record behind the sizing model and the feature costs.

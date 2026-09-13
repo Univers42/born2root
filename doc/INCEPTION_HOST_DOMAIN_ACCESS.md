@@ -229,7 +229,7 @@ assertion that something _should_ work.
   with _"you must have a tty"_ no matter what is piped at it.
 - **Two different passwords.** `B2B_LUKS_PASSPHRASE` unlocks the disk; the
   account password `sudo` wants is `B2B_USER_PASSWORD`. Both live in
-  `born2root.conf` (the defaults are throwaway lab credentials sitting in a
+  `born2root.toml` (the defaults are throwaway lab credentials sitting in a
   public repository) — set your own there, or `VM_PASS` / `GUEST_PASS` for a
   single run, if this VM is ever reachable from anywhere but this host.
 - **The port-80 `lighttpd`** inside the VM is this repo's own bonus web server,
