@@ -69,7 +69,7 @@ REACT_VERSION="${REACT_VERSION:-19.3.0}"
 ESBUILD_VERSION="${ESBUILD_VERSION:-0.28.2}"
 EXCALIDRAW_PORT="${EXCALIDRAW_PORT:-8421}"
 EXCALIDRAW_DIR="${EXCALIDRAW_DIR:-/opt/excalidraw}"
-# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# The login born2root.toml named, as the guest records it (/etc/b2b/build.conf,
 # written by utils/b2b_config.sh --guest). Unset EXCALIDRAW_USERS defaults to it.
 B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
 EXCALIDRAW_USERS="${EXCALIDRAW_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"

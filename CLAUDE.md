@@ -322,3 +322,17 @@ use, so never assume 4242: read the port back the way `orchestrate.sh` and
   access, the VS Code SSH timeout fix). `doc/HANDOFF_SPACE_AND_PROFILES.md` is
   the measured record behind the sizing model and the feature costs.
   `doc/README.md` is a Born2beRoot command cheat sheet, not an index.
+
+## Working economically in this repo
+
+Tokens are the scarce resource here, so:
+
+- No subagents, no workflows, no artifacts. Every task in this repo is done
+  inline with Read/Edit/Bash. A fan-out of agents re-derives context that is
+  already loaded and costs several times what the work is worth.
+- One batched `Bash` call over several narrow ones; `grep -n` a symbol rather
+  than reading a 1000-line file; `Read` with `offset`/`limit` when only a block
+  matters. Never re-read a file just edited, and never print more than ~40
+  lines of command output.
+- Run a test suite once, not once per shell, until it is green; then do the
+  hellish pass.

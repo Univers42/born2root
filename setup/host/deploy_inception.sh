@@ -25,7 +25,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
-# The guest account and the subject's <login>.42.fr come from born2root.conf.
+# The guest account and the subject's <login>.42.fr come from born2root.toml.
 . "$REPO_ROOT/utils/b2b_config.sh"
 VM_NAME="${VM_NAME:-debian}"
 DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
@@ -67,7 +67,7 @@ die() {
 vm_ssh() { ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$@"; }
 
 # ── The guest sudo password ─────────────────────────────────────────────────
-# The account password the preseed was rendered with: born2root.conf's
+# The account password the preseed was rendered with: born2root.toml's
 # B2B_USER_PASSWORD (GUEST_PASS overrides it for a guest whose password has
 # since been changed). NOT the disk passphrase, which this used to fall back
 # to -- a different secret that could only ever fail.

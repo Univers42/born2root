@@ -31,9 +31,9 @@ FP=("${SCRIPT_SH:-bash}" generate/feature_profile.sh)
 # webstack" failed with 0, because the checkout said docker was off. The tests
 # below that DO exercise the file override this per invocation.
 export B2B_SELECT_FILE=/nonexistent
-# Same for the volume table: born2root.conf is personalised, and every size
+# Same for the volume table: born2root.toml is personalised, and every size
 # below is about the shipped layout. The fixture runs at the end vary it.
-DEFAULTS=tests/fixtures/default.conf
+DEFAULTS=tests/fixtures/default.toml
 export B2B_CONFIG="$DEFAULTS"
 rc_of() { "$@" >/dev/null 2>&1 && echo 0 || echo $?; }
 fits_from() { "$@" 2>&1 | grep -o 'fits from SIZE_B2B=[0-9]*' | head -1; }
@@ -154,13 +154,13 @@ check "conf: carries AI_MODE" "$(SIZE_B2B=50 AI_MODE=client "${FP[@]}" --conf | 
 # came back empty, `[ n -gt "" ]` exited 2, and the && swallowed it.
 noopt="$(mktemp)"
 trap 'rm -f "$sel" "$noopt"' EXIT
-sed -e '/^B2B_VOLUME  opt /d' "$DEFAULTS" >"$noopt"
+sed -e '/name = "opt",/d' "$DEFAULTS" >"$noopt"
 check "no /opt, 15 GB: the default set still fits" "$(rc_of env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --check)" 0
 check "no /opt, 15 GB AI_MODE=local: refused" "$(rc_of env B2B_CONFIG="$noopt" SIZE_B2B=15 AI_MODE=local "${FP[@]}" --check)" 1
 check "no /opt, 15 GB AI_MODE=local: on /, not /opt" "$(env B2B_CONFIG="$noopt" SIZE_B2B=15 AI_MODE=local "${FP[@]}" --check 2>&1 | grep -oE '^      /[^ ]* ' | tr -d ' ')" "/+/opt"
 need_default=$(SIZE_B2B=15 "${FP[@]}" --table | awk '/^ *needed/ { print $3 + $4 }')
 need_noopt=$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | awk '/^ *needed/ { print $3 }')
 check "no /opt: / needs what / and /opt needed together" "$need_noopt" "$need_default"
-check "no /opt: the table says / pays for /opt" "$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | grep -c '/opt: no volume in born2root.conf, counted against /')" 1
+check "no /opt: the table says / pays for /opt" "$(env B2B_CONFIG="$noopt" SIZE_B2B=15 "${FP[@]}" --table | grep -c '/opt: no volume in born2root.toml, counted against /')" 1
 
 exit "$fail"

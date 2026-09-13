@@ -61,8 +61,8 @@
 #
 # Env
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (15360 = SIZE_B2B*1024)
-#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (default: born2root.conf's B2B_LUKS_PASSPHRASE)
-#   VM_USER (default: born2root.conf's B2B_LOGIN)
+#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (default: born2root.toml's B2B_LUKS_PASSPHRASE)
+#   VM_USER (default: born2root.toml's B2B_LOGIN)
 #   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
 # ============================================================================ #
 
@@ -76,7 +76,7 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$REPO_ROOT/utils/vm_path.sh"
 # Encrypted or not, and which ISO name that implies.
 . "$REPO_ROOT/utils/luks_mode.sh"
-# born2root.conf: the login to ssh in as, the passphrase to type at boot.
+# born2root.toml: the login to ssh in as, the passphrase to type at boot.
 . "$REPO_ROOT/utils/b2b_config.sh"
 LUKS="${LUKS:-ON}"
 
@@ -165,7 +165,7 @@ find_iso() {
     find "$REPO_ROOT" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
-# The passphrase the preseed was rendered with: VM_PASS, else born2root.conf.
+# The passphrase the preseed was rendered with: VM_PASS, else born2root.toml.
 vm_pass() { b2b_luks_passphrase 2>/dev/null; }
 
 # Alive? /proc, not `kill -0`: kill -0 answers EPERM for a process owned by
@@ -870,7 +870,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         }
 
         if [ -z "$pass" ]; then
-            warn "no passphrase (B2B_LUKS_PASSPHRASE in born2root.conf, or VM_PASS) — unlock it yourself"
+            warn "no passphrase (B2B_LUKS_PASSPHRASE in born2root.toml, or VM_PASS) — unlock it yourself"
         else
             info "waiting for the initramfs to reach the LUKS prompt"
             sleep "${UNLOCK_DELAY:-45}"

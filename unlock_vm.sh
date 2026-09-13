@@ -14,7 +14,7 @@
 # Sourcing this file only defines functions; it starts nothing.
 
 VM_NAME="${VM_NAME:-debian}"
-# The passphrase lives in born2root.conf (B2B_LUKS_PASSPHRASE), the same value
+# The passphrase lives in born2root.toml (B2B_LUKS_PASSPHRASE), the same value
 # the preseed was rendered with, so the two cannot disagree. Located from this
 # file, not the working directory: orchestrate.sh sources this from elsewhere.
 . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/utils/b2b_config.sh"
@@ -30,7 +30,7 @@ VM_UNLOCK_RESEND="${VM_UNLOCK_RESEND:-15}" # re-send interval if it did not land
 VM_UNLOCK_TIMEOUT="${VM_UNLOCK_TIMEOUT:-240}"
 
 # VM_PASS wins, so the passphrase can be kept out of the repo; otherwise
-# born2root.conf's B2B_LUKS_PASSPHRASE (it used to be a vm_pass.txt that
+# born2root.toml's B2B_LUKS_PASSPHRASE (it used to be a vm_pass.txt that
 # nothing kept in step with the preseed). One line, CR stripped: the guest
 # would otherwise receive a stray Enter mid-passphrase.
 resolve_passphrase() {
@@ -40,7 +40,7 @@ resolve_passphrase() {
         printf '%s' "$p"
         return 0
     fi
-    echo "No passphrase: set B2B_LUKS_PASSPHRASE in born2root.conf, or VM_PASS" >&2
+    echo "No passphrase: set B2B_LUKS_PASSPHRASE in born2root.toml, or VM_PASS" >&2
     return 1
 }
 

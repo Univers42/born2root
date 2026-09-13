@@ -387,7 +387,7 @@ SIZES=$(sizes_for "$DISK_MB") || die "partition_recipe.sh refused ${DISK_MB} MB 
 [ -n "$SIZES" ] || die "partition_recipe.sh produced no layout for ${DISK_MB} MB (too small? see: make partitions)"
 
 # Which volume each priced mount lives on, from the same --sizes. The volume
-# table in born2root.conf may have no /opt (or /var, or /home): that mount is
+# table in born2root.toml may have no /opt (or /var, or /home): that mount is
 # then a directory of /, so its costs are added to /'s and it is not checked
 # on its own. The label says so -- "/+/opt" -- wherever / is reported.
 holder_of() { printf '%s\n' "$SIZES" | sed -n "s|^holder:$1=||p" | head -n1; }
@@ -497,7 +497,7 @@ emit_table() {
         "(80% of the mounted volume)"
     printf '\n'
     [ "$ROOT_LABEL" = / ] ||
-        printf '    %s: no volume in born2root.conf, counted against /\n\n' "${ROOT_LABEL#/+}"
+        printf '    %s: no volume in born2root.toml, counted against /\n\n' "${ROOT_LABEL#/+}"
     printf '    %s\n\n' "rsvd = space the workflow claims, not a step first boot runs"
     if [ -z "$OVERFLOW" ]; then
         printf '  ✓ fits\n\n'

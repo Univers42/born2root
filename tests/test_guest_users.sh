@@ -1,5 +1,5 @@
 #!/usr/bin/env hellish
-# The accounts b2b-setup.sh creates from born2root.conf, run on the host with
+# The accounts b2b-setup.sh creates from born2root.toml, run on the host with
 # useradd, usermod, chage and id stubbed. No VM, no root.
 #
 # What it pins:

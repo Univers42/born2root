@@ -1,0 +1,208 @@
+# born2root.toml — the one file to edit before `make all`.
+#
+# This is TOML (toml.io): `key = value`, "strings" in quotes, numbers and
+# true/false bare, [lists] in brackets, `#` comments anywhere. A section in
+# [brackets] groups what follows it. Nothing here is a shell script: no
+# variable is expanded, so a password may contain $ # & \ and stay itself.
+#
+# Leave a key out and its default below applies; misspell one and the build
+# refuses, naming the line and what it expected. Run `make config` to see
+# every resolved value and catch a typo before anything is downloaded, then
+# `make all`.
+#
+# Deliberately NOT configurable, because the subject mandates it or because
+# every script relies on it: SSH on port 4242, root login refused, the group
+# user42, the volume group LVMGroup, a 500 MB unencrypted /boot, ext4, LUKS,
+# and the login shell. hellish is the shell of every account in every build:
+# it is not a feature and has no switch.
+
+# ── The machine ─────────────────────────────────────────────────────────────
+# Defaults for the Makefile. The command line and the environment still win:
+# `make all SIZE_B2B=30` builds a 30 GB disk whatever is written here.
+[vm]
+name    = "debian"
+# auto | virtualbox | qemu   (`make backend` explains what auto would pick)
+backend = "auto"
+# Disk size in GB. 15 is the school quota; the layout below and the install
+# set are both derived from it.
+disk_gb = 15
+# Guest RAM: "auto" is a quarter of this machine's, clamped to 2048-8192 MB.
+ram_mb  = "auto"
+# auto | minimal | standard | full   (auto follows the disk size: minimal
+# under 15 GB, standard 15-29, full 30+)
+profile = "auto"
+# off | client | local   (a local model needs ~1 GB on /opt plus the model)
+ai_mode = "off"
+
+# ── The system ──────────────────────────────────────────────────────────────
+[system]
+# Empty means <your login>42, which is what the subject requires. Anything
+# else is accepted with a warning.
+hostname        = ""
+locale          = "en_US.UTF-8"
+# Console keymap, a d-i name: es, us, fr, de, uk…
+keymap          = "es"
+timezone        = "Europe/Madrid"
+# Debian mirror, host name only (the installer and the guest's sources.list).
+mirror          = "deb.debian.org"
+# Temporary passwords, as in the README. The evaluation expects you to change
+# them in the guest (`passwd`); [policy.password] below is what it will then
+# demand. They reach the ISO as SHA-512 hashes, never in clear.
+root_password   = "temproot123"
+# Typed into the guest's virtual keyboard by this machine at every boot, so
+# only characters the hypervisor can name: letters, digits and
+# - _ . , / = + ! @ # $ % & * ? : ;   (8 or more). VM_PASS in the environment
+# overrides it, for the ISO and for the unlock alike.
+luks_passphrase = "tempencrypt123"
+
+# ── The accounts ────────────────────────────────────────────────────────────
+# One [users.<name>] section per account, created in the order they appear.
+# The FIRST one is you: the account the installer creates, the one `ssh b2b`
+# logs in as, the owner of <login>.42.fr and of the editor setup. Put your 42
+# login there.
+#
+# Every account gets hellish as its login shell, its hellish configuration,
+# the group user42, and the password ageing in [policy.password]. Fields:
+#
+#   password   "" means no password: the account is locked until you run
+#              `sudo passwd <name>` in the guest. Yours cannot be empty.
+#   fullname   what `getent passwd` shows; empty means the login. No , or :
+#   sudo       true adds the group sudo. Yours is always true.
+#   groups     extra groups; one that does not exist yet is created. docker
+#              is added to yours anyway when Docker is installed.
+#   ssh_keys   public keys for that account: paste the line, or give a path
+#              on this machine such as "~/.ssh/id_ed25519.pub". Your own
+#              ~/.ssh/id_ed25519.pub (or id_rsa.pub) is added to your account
+#              in any case, which is what makes `ssh b2b` work without typing
+#              a password.
+#   nvim       the full Neovim setup for that account. Yours is always true;
+#              for anyone else it costs ~400 MB of /home, so it is false
+#              unless you ask. If the disk check then refuses, raise /home's
+#              share in [disk] below rather than the disk size.
+[users.dlesieur]
+password = "tempuser123"
+fullname = ""
+sudo     = true
+groups   = []
+ssh_keys = []
+nvim     = true
+
+# Add a colleague by copying this block and removing the `#`:
+#
+# [users.bob]
+# password = ""                    # locked until `sudo passwd bob`
+# fullname = "Bob from cluster 3"
+# sudo     = true
+# groups   = ["docker"]
+# ssh_keys = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… bob@laptop"]
+# nvim     = false
+
+# ── Extra packages ──────────────────────────────────────────────────────────
+# Debian packages installed at first boot, on top of what the VM needs. Names
+# are checked against the mirror's index before anything is downloaded, so a
+# typo refuses in seconds instead of failing a 20-minute install; their size
+# is measured and checked against the disk the same way features are.
+# Recommends are not installed — list what you want explicitly.
+[packages]
+apt = []
+
+# ── What gets installed ─────────────────────────────────────────────────────
+# "auto" leaves the decision to the profile (and to `make features_select`,
+# the interactive picker). true installs it whatever the profile says, false
+# never installs it. The tier after each name is when auto turns it on.
+#
+# Always installed, no switch: the Debian base, everything the subject
+# mandates (SSH on 4242, UFW, sudo policy, password policy, AppArmor, the
+# monitoring script), the apt developer tools, Neovim, and hellish.
+[features]
+webstack       = "auto"   # standard — WordPress + lighttpd + MariaDB (bonus)
+docker         = "auto"   # standard — Docker Engine, what Inception runs on
+nodejs         = "auto"   # standard — Node.js and npm
+pytools        = "auto"   # standard — Python tooling
+nvim-extras    = "auto"   # standard — the extra Neovim plugins and tools
+devtools-extra = "auto"   # standard — needs nodejs
+claude-code    = "auto"   # full (opt-in under 30 GB: 320 MB on /)
+
+# ── Policies ────────────────────────────────────────────────────────────────
+# The subject's rules are the floor: a stricter value is accepted, a weaker
+# one is refused naming the rule it breaks. `make verify_guest` checks the VM
+# against what you set here.
+[policy.password]
+# Ageing, in days: /etc/login.defs and `chage` for every account.
+max_days    = 30   # at most 30
+min_days    = 2    # at least 2
+warn_days   = 7    # at least 7
+# Quality, enforced by pwquality when a password is set in the guest.
+min_length  = 10   # at least 10
+min_upper   = 1    # at least 1 uppercase letter
+min_lower   = 1    # at least 1 lowercase letter
+min_digit   = 1    # at least 1 digit
+max_repeat  = 3    # at most 3 identical characters in a row
+min_changed = 7    # at least 7 characters not in the old password
+# Always on: a password may not contain the login, and root obeys the policy
+# too.
+
+[policy.sudo]
+# Wrong-password attempts before sudo gives up (at most 3).
+tries           = 3
+# Shown on a wrong password. One line, and none of  ' " \ ` $
+badpass_message = "Wrong password. Access denied!"
+# Where sudo writes its log and its input/output recordings.
+log_dir         = "/var/log/sudo"
+# Always on: a TTY is required, input and output are logged, and secure_path
+# is restricted.
+
+[policy.ssh]
+# false = keys only. Refused unless you have a key, otherwise nobody could
+# log in: your own ~/.ssh key counts, so do ssh_keys above.
+password_login = true
+# Always: port 4242, and root may not log in.
+
+[policy.monitoring]
+# How often monitoring.sh broadcasts to every terminal. The subject says
+# every 10 minutes; a different value is accepted with a warning. 1, 2, 3, 4,
+# 5, 6 or 10 (it becomes cron's */N).
+interval_min = 10
+
+# ── Network ─────────────────────────────────────────────────────────────────
+# Ports of your own, forwarded from this machine into the VM and opened in
+# the VM's firewall. TCP only. `guest` is the port inside the VM, `host` the
+# one you connect to here; if that one is taken the build moves up to the
+# next free port and `make status` shows where it landed.
+#
+# SSH (4242) and the ports Inception and the web stack need are forwarded
+# already — these are extras.
+[network]
+forwards = [
+  # { name = "grafana", guest = 3100, host = 3100 },
+]
+
+# ── The disk ────────────────────────────────────────────────────────────────
+[disk]
+# "auto" is the guest's RAM clamped to 1024-4096 MB and to a quarter of the
+# volume group; or a number of MB.
+swap_mb = "auto"
+# One line per logical volume:
+#   name      the LVM volume name
+#   mount     where it is mounted
+#   floor_mb  what it always gets (a working Debian fits in 8 GB)
+#   share     percent of what is left once every floor is served, or "rest"
+#             for the one volume that takes the remainder — exactly one, and
+#             that is where the leftover is wanted, because the installer
+#             inflates the last volume anyway and Docker lives in /var.
+#             Shares need not add up to 100; what they leave goes to "rest".
+#   cap_mb    it never grows past this; leave it out for no cap.
+#
+# Delete a line and that directory lives on / instead (the disk check
+# follows); add one to carve out another mount, e.g. /var/www. `make
+# partitions` previews the result, `make features` checks the install set
+# still fits it.
+volumes = [
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 25,     cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 512,  share = 18,     cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 5,      cap_mb = 20480  },
+  { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 3,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 3,      cap_mb = 20480  },
+  { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
+]

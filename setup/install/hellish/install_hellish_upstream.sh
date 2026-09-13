@@ -59,7 +59,7 @@
 
 set -u
 
-# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# The login born2root.toml named, as the guest records it (/etc/b2b/build.conf,
 # written by utils/b2b_config.sh --guest). Unset HELLISH_USER defaults to it.
 B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
 HELLISH_USER="${HELLISH_USER:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"

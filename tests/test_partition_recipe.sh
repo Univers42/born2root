@@ -24,14 +24,14 @@ GEN="${SCRIPT_SH:-bash} generate/partition_recipe.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# The volume table comes from born2root.conf, which people personalise. Every
+# The volume table comes from born2root.toml, which people personalise. Every
 # number below is about the SHIPPED table, so pin it; the fixture runs at the
 # end point B2B_CONFIG at variants of it per command.
-DEFAULTS=tests/fixtures/default.conf
+DEFAULTS=tests/fixtures/default.toml
 export B2B_CONFIG="$DEFAULTS"
 # A variant of the defaults: sed expressions, each its own -e. Prints its path.
 variant() {
-    local out="$TMP/$1.conf" e
+    local out="$TMP/$1.toml" e
     local -a args=()
     shift
     for e in "$@"; do
@@ -94,7 +94,7 @@ check "DISK_SIZE_MB=20480 beats SIZE_B2B=15" "$(SIZE_B2B=15 DISK_SIZE_MB=20480 $
 check "defaults: the recipe's volumes, in order" "$($GEN --recipe | lv_names)" "root swap home opt srv tmp var-log var "
 check "defaults: every priced mount has its own volume" "$($GEN --sizes | grep '^holder:' | tr '\n' ' ')" "holder:/=root holder:/opt=opt holder:/var=var holder:/home=home "
 
-f=$(variant no-opt '/^B2B_VOLUME  opt /d' 's|^\(B2B_VOLUME  root  *\S*  *\S*\)  *25 |\1   30 |')
+f=$(variant no-opt '/name = "opt",/d' 's/share = 25,/share = 30,/')
 check "no /opt: seven volumes, no opt" "$(B2B_CONFIG=$f $GEN --recipe | lv_names)" "root swap home srv tmp var-log var "
 check "no /opt: no empty stanza anywhere" "$(B2B_CONFIG=$f $GEN --recipe | grep -cE '^\s+(ext4|linux-swap) \\$|^\s+[0-9]* +[0-9]* +ext4')" 0
 check "no /opt: /opt is held by root" "$(B2B_CONFIG=$f $GEN --sizes | sed -n 's|^holder:/opt=||p')" root
@@ -104,28 +104,30 @@ for gb in 8 15 50; do
     check "no /opt, $gb GB: volumes sum to the group size" "$(awk -F= '$1 != "boot" && $1 !~ /^holder:/ { s += $2 } END { print s }' "$TMP/no-opt$gb")" "$((gb * 1024 - 521))"
 done
 
-f=$(variant www '/^B2B_VOLUME  var  /i\
-B2B_VOLUME  www  /var/www  256  2  10240')
+f=$(variant www '/name = "var",/i\
+{ name = "www", mount = "/var/www", floor_mb = 256, share = 2, cap_mb = 10240 },')
 check "added /var/www: nine volumes, www before var" "$(B2B_CONFIG=$f $GEN --recipe | lv_names)" "root swap home opt srv tmp var-log www var "
 check "added /var/www: mounted there" "$(B2B_CONFIG=$f $GEN --recipe | grep -A4 'lv_name{ www }' | grep -o 'mountpoint{ [^ ]* }')" "mountpoint{ /var/www }"
 check "added /var/www: /var is still held by var" "$(B2B_CONFIG=$f $GEN --sizes | sed -n 's|^holder:/var=||p')" var
 check "added /var/www: volumes sum to the group" "$(B2B_CONFIG=$f $GEN --sizes | awk -F= '$1 != "boot" && $1 !~ /^holder:/ { s += $2 } END { print s }')" "$((15 * 1024 - 521))"
 
-f=$(variant rest-home 's|^B2B_VOLUME  home .*|B2B_VOLUME  home  /home  512  rest  -|' 's|^B2B_VOLUME  var  .*|B2B_VOLUME  var  /var  2048  18  -|')
+f=$(variant rest-home \
+    's|.*name = "home".*|{ name = "home", mount = "/home", floor_mb = 512, share = "rest" },|' \
+    's|.*name = "var",.*|{ name = "var", mount = "/var", floor_mb = 2048, share = 18 },|')
 check "rest on /home: home is the last volume" "$(B2B_CONFIG=$f $GEN --recipe | lv_names | awk '{print $NF}')" home
 check "rest on /home: home takes the remainder (-1)" "$(B2B_CONFIG=$f $GEN --recipe | grep -B2 'lv_name{ home }' | head -1 | awk '{print $3}')" -1
 check "rest on /home: the header names /home" "$(B2B_CONFIG=$f $GEN --recipe | grep -c '^# /home is last with -1')" 1
 
-f=$(variant swap3g 's/^B2B_SWAP_MB=.*/B2B_SWAP_MB=3000/')
-check "B2B_SWAP_MB=3000 at 15 GB: swap is 3000" "$(B2B_CONFIG=$f $GEN --sizes | awk -F= '$1=="swap"{print $2}')" 3000
+f=$(variant swap3g 's/^swap_mb = .*/swap_mb = 3000/')
+check "swap_mb=3000 at 15 GB: swap is 3000" "$(B2B_CONFIG=$f $GEN --sizes | awk -F= '$1=="swap"{print $2}')" 3000
 out=$(B2B_CONFIG=$f SIZE_B2B=8 $GEN --recipe 2>&1) && rc=0 || rc=$?
-check "B2B_SWAP_MB=3000 at 8 GB: refused, not shrunk" "$rc" 1
-check "B2B_SWAP_MB=3000 at 8 GB: names the size that fits" "$(printf '%s' "$out" | grep -o 'SIZE_B2B must be at least [0-9]*')" "SIZE_B2B must be at least 10"
+check "swap_mb=3000 at 8 GB: refused, not shrunk" "$rc" 1
+check "swap_mb=3000 at 8 GB: names the size that fits" "$(printf '%s' "$out" | grep -o 'SIZE_B2B must be at least [0-9]*')" "SIZE_B2B must be at least 10"
 
-f=$(variant two-rest 's|^B2B_VOLUME  home .*|B2B_VOLUME  home  /home  512  rest  -|')
+f=$(variant two-rest 's|.*name = "home".*|{ name = "home", mount = "/home", floor_mb = 512, share = "rest" },|')
 out=$(B2B_CONFIG=$f $GEN --recipe 2>&1) && rc=0 || rc=$?
 check "two rest volumes: refused" "$rc" 1
-check "two rest volumes: names B2B_VOLUME" "$(printf '%s' "$out" | grep -c "share 'rest'")" 1
+check "two rest volumes: names the rule" "$(printf '%s' "$out" | grep -c 'exactly one volume takes the remainder')" 1
 check "two rest volumes: emits no recipe" "$(printf '%s' "$out" | grep -c expert_recipe)" 0
 
 exit "$fail"

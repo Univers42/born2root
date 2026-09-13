@@ -219,7 +219,7 @@ S_HOME=0
 S_SWAP=0
 S_BOOT=0
 # Which volume holds /, /opt, /var and /home (partition_recipe.sh's holder:
-# lines). They come from born2root.conf's volume table, not from the size, so
+# lines). They come from born2root.toml's volume table, not from the size, so
 # the first parse sets them for good. A mount whose holder is the / volume
 # has no volume of its own: its costs are folded into / (compute_need) and
 # its usable size is 0, which the folded need of 0 always fits.
@@ -442,7 +442,7 @@ blurb() {
     esac
 }
 
-# One mount's bar, or a note when born2root.conf gives it no volume and / pays.
+# One mount's bar, or a note when born2root.toml gives it no volume and / pays.
 mount_bar() { # <mount> <holder> <need> <usable>
     if [ "$2" = "$H_ROOT" ]; then
         printf '    %-6s %s(no volume of its own: counted in /)%s\n' "$1" "$C_DIM" "$C_R"

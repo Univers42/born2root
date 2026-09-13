@@ -57,7 +57,7 @@ export PATH
 NVIM_VERSION="${NVIM_VERSION:-v0.12.5}"
 NVIM_MIN_VERSION="${NVIM_MIN_VERSION:-0.12.0}" # what kickstart master needs (vim.pack)
 NVIM_OPT_DIR="${NVIM_OPT_DIR:-/opt}"
-# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# The login born2root.toml named, as the guest records it (/etc/b2b/build.conf,
 # written by utils/b2b_config.sh --guest). Unset NVIM_USERS defaults to it.
 B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
 NVIM_USERS="${NVIM_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"

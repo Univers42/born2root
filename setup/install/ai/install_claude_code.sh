@@ -67,7 +67,7 @@ CLAUDE_CODE_CHANNEL="${CLAUDE_CODE_CHANNEL:-stable}"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}" # empty = whatever the channel says
 CLAUDE_CODE_DEST="${CLAUDE_CODE_DEST:-/usr/local/bin/claude}"
 INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
-# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# The login born2root.toml named, as the guest records it (/etc/b2b/build.conf,
 # written by utils/b2b_config.sh --guest). Unset CLAUDE_CODE_USERS defaults to it.
 B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
 CLAUDE_CODE_USERS="${CLAUDE_CODE_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"

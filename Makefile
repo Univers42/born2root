@@ -13,8 +13,8 @@
 # ============================================================================ #
 
 # =========@@ Config @@=========================================================
-# Most defaults below come from born2root.conf at the repo root, read right
-# after the shell is chosen (see "born2root.conf" further down): VM_NAME,
+# Most defaults below come from born2root.toml at the repo root, read right
+# after the shell is chosen (see "born2root.toml" further down): VM_NAME,
 # BACKEND, SIZE_B2B, VM_RAM_MB, PROFILE, FEATURES, AI_MODE and LOGIN.
 #
 # BACKEND: which hypervisor executes the VM. The GUEST is identical either way
@@ -73,8 +73,8 @@ export SCRIPT_SH
 # every $(shell ...) below this line, VM_PATH's included, runs under it too.
 SHELL := $(SCRIPT_SH)
 
-# ── born2root.conf: the defaults people edit ────────────────────────────────
-# The knobs below take their default from born2root.conf (read through
+# ── born2root.toml: the defaults people edit ────────────────────────────────
+# The knobs below take their default from born2root.toml (read through
 # utils/b2b_config.sh, which never fails and never prints at this point), so
 # personalising the VM is editing one file instead of remembering flags. The
 # command line and the environment still win: a variable given either way has
@@ -125,7 +125,7 @@ RM           := rm -rf
 VMS_ISO_TAR  := vms_iso.tar
 
 # Inception (the project that runs *inside* this VM). LOGIN (B2B_LOGIN in
-# born2root.conf) drives the subject-mandated domain; SRC optionally points
+# born2root.toml) drives the subject-mandated domain; SRC optionally points
 # `make inception` at a host-side copy of the repo instead of cloning from
 # GitHub.
 DOMAIN       ?= $(LOGIN).42.fr
@@ -177,10 +177,10 @@ NVIM_USERS ?=
 # this VM can cost.
 #
 # ONE NUMBER DRIVES EVERYTHING: SIZE_B2B, in GB (B2B_SIZE_GB in
-# born2root.conf, read above). From it are derived
+# born2root.toml, read above). From it are derived
 #   - the disk (DISK_SIZE_MB),
 #   - the partition layout (generate/partition_recipe.sh: floors, weighted
-#     shares, caps from born2root.conf's volume table, the `rest` volume takes
+#     shares, caps from born2root.toml's volume table, the `rest` volume takes
 #     the remainder — preview with `make partitions`),
 #   - what gets installed (generate/feature_profile.sh: minimal 8-14,
 #     standard 15-29, full 30+ — preview with `make features`), and
@@ -193,7 +193,7 @@ NVIM_USERS ?=
 DISK_SIZE_MB ?= $(shell echo $$(( $(SIZE_B2B) * 1024 )))
 
 # Which installs go into the guest (PROFILE and FEATURES, B2B_PROFILE and
-# B2B_FEATURES in born2root.conf). auto = from SIZE_B2B (see above); FEATURES
+# B2B_FEATURES in born2root.toml). auto = from SIZE_B2B (see above); FEATURES
 # adds/removes single ones on top, e.g. FEATURES="+docker -pytools". Base
 # features (everything Born2beRoot mandates, nvim) cannot be turned off, and
 # hellish is not a feature at all: it is the shell. `make features` shows the
@@ -268,7 +268,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all prepare pull shell deps extpack check_system check_driver guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -535,7 +535,7 @@ shell:
 
 # =========@@ Install host developer dependencies @@==========================
 # Checks for: VirtualBox + ext-pack, xorriso, curl, gcc, libreadline-dev,
-# python3, openssl (hashes born2root.conf's passwords), git, openssh-client,
+# python3, openssl (hashes born2root.toml's passwords), git, openssh-client,
 # make.
 # Missing packages are installed via `sudo apt install` WITHOUT -y so the
 # user reviews and confirms the apt plan themselves.
@@ -640,6 +640,19 @@ check_driver:
 # Only a disk that actually holds an installed system (>100MB) is protected. A
 # freshly created VDI is ~2MB and holds nothing, so a build that got as far as
 # creating the disk and then failed does not leave a guard behind to trip over.
+# A TOML error makes every value unreadable, and `get` answers empty by
+# contract (the Makefile calls it at parse time for every target, `make help`
+# included). Empty means the literal fallbacks above apply, so a typo anywhere
+# in born2root.toml would point the destructive targets at VM_NAME=debian --
+# a machine the file never named. They ask first whether it parses at all.
+# Reading a knob is never gated on this: only deleting something is.
+guard_config:
+	@$(B2B_CONFIG_ENV)$(SCRIPT_SH) utils/b2b_config.sh --parses || { \
+		printf "$(C_RED)✗$(C_RESET) Refusing to delete anything: the config does not parse (above), so \"$(VM_NAME)\" is a guess, not your setting.\n"; \
+		printf "    fix the line it names, then: make config\n"; \
+		exit 1; \
+	}
+
 guard_host:
 	@stamp="$(VM_PATH)/$(VM_NAME)/.built-on"; \
 	sz=0; \
@@ -761,7 +774,7 @@ pop_iso:
 # its forwarded ports, running headless with nothing on disk left to name it.
 # `qemu_vm.sh stop` flushes the qcow2 and exits, prints "not running" when
 # there is nothing to stop, and finds a guest started from another VM_PATH.
-rm_disk_image: guard_host
+rm_disk_image: guard_config guard_host
 	@if command -v qemu-system-x86_64 >/dev/null 2>&1; then \
 		$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop || exit 1; \
 	fi
@@ -809,7 +822,7 @@ space:
 	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 		$(SCRIPT_SH) utils/space_budget.sh
 
-# born2root.conf, resolved and validated: what the guest will be called, who
+# born2root.toml, resolved and validated: what the guest will be called, who
 # logs in, the volume table. Fails, naming each key to fix, when it is not
 # valid -- the same check `make all` runs before downloading anything.
 config:

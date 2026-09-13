@@ -1,23 +1,23 @@
 #!/usr/bin/env hellish
-# Regression test for utils/b2b_config.sh and born2root.conf.
+# Regression test for utils/b2b_config.{sh,py} and born2root.toml.
 #
-# What it guards: born2root.conf is the only place the VM's identity, users,
-# locale and disk layout are written down, and every consumer reads it
-# through this one script. Two things must hold. A value must come out
-# exactly as typed (trimmed, one pair of quotes stripped, a `#` kept: a
-# passphrase may contain one), and a wrong value must be refused BEFORE the
-# ISO download, naming the key -- the alternative is a 20-minute install that
-# stops at a d-i question nobody sees, or a guest whose sudo user is "".
-# `get` is special: the Makefile calls it at parse time for every `make`,
-# `make help` included, so it must never fail and never write to stderr.
+# What it pins:
+#   1. `get` answers every key the rest of the repo asks for, from a file the
+#      validator would refuse as well, and stays silent: the Makefile calls it
+#      at parse time for every target, `make help` included.
+#   2. Every rule --check enforces, one fixture each, each naming its key. A
+#      build that would fail 20 minutes in has to fail here in milliseconds.
+#   3. VM_PASS beats the file everywhere, including as a bare prefix on a
+#      sourced function -- hellish does not export those to children, which is
+#      how a preseed and an unlock once disagreed.
+#   4. --render splices values, never patterns: a crypt hash full of $ and /,
+#      a passphrase with & \ and /, and the template's own $(list-devices ...)
+#      all come out verbatim, and a placeholder nothing answers is an error.
+#   5. Nothing in the code carries the owner's login or a temporary password:
+#      those live in born2root.toml and nowhere else.
+#   6. The vendored TOML parser is exercised even where Python has tomllib.
 #
-# Every refusal below is a fixture derived from the shipped defaults
-# (tests/fixtures/default.conf, NOT born2root.conf: that one is meant to be
-# personalised, and a colleague's login must not fail this test) by one sed
-# edit, so the defaults themselves are proven valid first. born2root.conf is
-# only required to be valid, whatever it holds.
-#
-# shellcheck disable=SC2016 # sed programs and crypt hashes: $ is literal here
+# shellcheck disable=SC2016 # crypt hashes, $ in messages: literal here
 set -e
 
 cd "$(dirname "$0")/.."
@@ -25,240 +25,425 @@ cd "$(dirname "$0")/.."
 fail=0
 check() {
     if [ "$2" = "$3" ]; then
-        printf 'ok   %-58s = %s\n' "$1" "$2"
+        printf 'ok   %-62s = %s\n' "$1" "$2"
     else
-        printf 'FAIL %-58s = %s (expected %s)\n' "$1" "$2" "$3"
+        printf 'FAIL %-62s = %s (expected %s)\n' "$1" "$2" "$3"
         fail=1
     fi
 }
-CFG=("${SCRIPT_SH:-bash}" utils/b2b_config.sh)
-DEFAULTS=tests/fixtures/default.conf
+contains() { # <label> <haystack> <needle>
+    case "$2" in
+    *"$3"*) printf 'ok   %-62s\n' "$1" ;;
+    *)
+        printf 'FAIL %-62s: %s does not hold %s\n' "$1" "$2" "$3"
+        fail=1
+        ;;
+    esac
+}
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+DEFAULTS=tests/fixtures/default.toml
+CFG=("${SCRIPT_SH:-bash}" utils/b2b_config.sh)
 
-# A fixture: the defaults with sed edits applied, each its own -e. Prints its
-# path.
-variant() {
-    local out="$TMP/$1.conf" e
-    local -a args=()
+# A copy of the shipped defaults with sed edits applied. The volume table is
+# one inline table per line, so a volume is edited or dropped by its name.
+variant() { # <name> <sed expression>... -> path
+    local name="$1" out args
     shift
-    for e in "$@"; do
-        args+=(-e "$e")
+    out="$TMP/$name.toml"
+    args=()
+    for expr in "$@"; do
+        args+=(-e "$expr")
     done
     sed "${args[@]}" "$DEFAULTS" >"$out"
     printf '%s' "$out"
 }
-# The exit status of --check on a fixture, and the keys its complaints name.
-# Variables reach the script through `env` on the COMMAND: hellish does not
-# export `VAR=x helper` to what the helper runs, so a test written that way
-# would pass under bash and exercise nothing under hellish.
-rc_check() { env B2B_CONFIG="$1" "${CFG[@]}" --check >/dev/null 2>&1 && echo 0 || echo $?; }
-names_in() { env B2B_CONFIG="$1" "${CFG[@]}" --check 2>&1 >/dev/null | grep -oE "$2" | head -1; }
-get_of() { env B2B_CONFIG="$1" "${CFG[@]}" get "$2"; }
-
-# ── The shipped file is valid, and get reads it back ───────────────────────
-check "born2root.conf (whatever it holds) passes --check" "$(rc_check born2root.conf)" 0
-check "the defaults fixture passes --check" "$(rc_check "$DEFAULTS")" 0
-# The fixture is the shipped file minus its comments: same keys, same rows.
-check "the fixture sets every key born2root.conf sets" \
-    "$(grep -oE '^[A-Z0-9_]+=' "$DEFAULTS" | sort | tr -d '\n')" \
-    "$(grep -oE '^[A-Z0-9_]+=' born2root.conf | sort | tr -d '\n')"
-check "get B2B_LOGIN" "$(get_of "$DEFAULTS" B2B_LOGIN)" dlesieur
-check "get B2B_HOSTNAME derives <login>42" "$(get_of "$DEFAULTS" B2B_HOSTNAME)" dlesieur42
-f=$(variant hostname 's/^B2B_HOSTNAME=.*/B2B_HOSTNAME=srv42/')
-check "an explicit B2B_HOSTNAME wins" "$(get_of "$f" B2B_HOSTNAME)" srv42
-check "a hostname that is not <login>42 warns but passes" "$(rc_check "$f")" 0
-check "...and says so" "$(env B2B_CONFIG="$f" "${CFG[@]}" --check 2>&1 >/dev/null | grep -c '^warning: B2B_HOSTNAME')" 1
-f=$(variant quotes 's/^B2B_FEATURES=.*/B2B_FEATURES="+docker -pytools"/')
-check "one pair of quotes is stripped" "$(get_of "$f" B2B_FEATURES)" "+docker -pytools"
-f=$(variant spaces 's/^B2B_LOGIN=.*/  B2B_LOGIN =   bob   /')
-check "whitespace around key and value is trimmed" "$(get_of "$f" B2B_LOGIN)" bob
-f=$(variant hash 's|^B2B_LUKS_PASSPHRASE=.*|B2B_LUKS_PASSPHRASE=ab#cd.efgh|')
-check "a # inside a value is part of it (no inline comments)" "$(get_of "$f" B2B_LUKS_PASSPHRASE)" 'ab#cd.efgh'
-check "...and such a passphrase is accepted" "$(rc_check "$f")" 0
-printf 'B2B_LOGIN=crlf\r\n' >"$TMP/crlf.conf"
-check "CRLF endings are stripped" "$(get_of "$TMP/crlf.conf" B2B_LOGIN)" crlf
-check "get of an unknown key is empty, exit 0" "$(
-    get_of "$DEFAULTS" B2B_NOPE
-    echo "rc=$?"
-)" "rc=0"
-check "get with no file is empty, exit 0, silent" "$(
-    get_of /nonexistent B2B_LOGIN 2>&1
-    echo "rc=$?"
-)" "rc=0"
-check "--check with no file fails" "$(rc_check /nonexistent)" 1
-
-# ── Refusals name the key ───────────────────────────────────────────────────
-refuse() { # <label> <expected key in the message> <sed expr>...
-    local label="$1" key="$2" f
-    shift 2
-    f=$(variant "$(printf '%s' "$label" | tr -c 'A-Za-z0-9' _)" "$@")
-    check "$label: refused" "$(rc_check "$f")" 1
-    check "$label: names $key" "$(names_in "$f" "$key")" "$key"
+append() { # <name> <text> -> path  (a section the defaults do not have)
+    local out="$TMP/$1.toml"
+    cp "$DEFAULTS" "$out"
+    printf '%s\n' "$2" >>"$out"
+    printf '%s' "$out"
 }
-refuse "login with a capital" B2B_LOGIN 's/^B2B_LOGIN=.*/B2B_LOGIN=Root/'
-refuse "login root" B2B_LOGIN 's/^B2B_LOGIN=.*/B2B_LOGIN=root/'
-refuse "hostname with an underscore" B2B_HOSTNAME 's/^B2B_HOSTNAME=.*/B2B_HOSTNAME=my_vm/'
-refuse "empty user password" B2B_USER_PASSWORD 's/^B2B_USER_PASSWORD=.*/B2B_USER_PASSWORD=/'
-refuse "empty root password" B2B_ROOT_PASSWORD 's/^B2B_ROOT_PASSWORD=.*/B2B_ROOT_PASSWORD=/'
-refuse "passphrase too short" B2B_LUKS_PASSPHRASE 's/^B2B_LUKS_PASSPHRASE=.*/B2B_LUKS_PASSPHRASE=abc1234/'
-refuse "passphrase with a space" B2B_LUKS_PASSPHRASE 's/^B2B_LUKS_PASSPHRASE=.*/B2B_LUKS_PASSPHRASE=abc def ghi/'
-refuse "passphrase with a quote" B2B_LUKS_PASSPHRASE "s/^B2B_LUKS_PASSPHRASE=.*/B2B_LUKS_PASSPHRASE=abcdefg'h/"
-refuse "passphrase with a backslash" B2B_LUKS_PASSPHRASE 's/^B2B_LUKS_PASSPHRASE=.*/B2B_LUKS_PASSPHRASE=abcdefg\\h/'
-refuse "extra user without a password" B2B_EXTRA_USERS 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS=alice/'
-refuse "extra user with an empty password" B2B_EXTRA_USERS 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS=alice:/'
-refuse "extra user with a bad flag" B2B_EXTRA_USERS 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS=alice:pw:admin/'
-refuse "extra user listed twice" B2B_EXTRA_USERS 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS=alice:pw alice:pw2/'
-refuse "extra user named root" B2B_EXTRA_USERS 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS=root:pw/'
-refuse "extra user named like the login" B2B_EXTRA_USERS 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS=dlesieur:pw/'
-refuse "locale without a territory" B2B_LOCALE 's/^B2B_LOCALE=.*/B2B_LOCALE=en/'
-refuse "keymap in capitals" B2B_KEYMAP 's/^B2B_KEYMAP=.*/B2B_KEYMAP=ES/'
-refuse "unknown timezone" B2B_TIMEZONE 's|^B2B_TIMEZONE=.*|B2B_TIMEZONE=Mars/Olympus|'
-refuse "mirror given as a URL" B2B_MIRROR 's|^B2B_MIRROR=.*|B2B_MIRROR=http://deb.debian.org|'
-refuse "swap below 256" B2B_SWAP_MB 's/^B2B_SWAP_MB=.*/B2B_SWAP_MB=100/'
-refuse "disk below 8 GB" B2B_SIZE_GB 's/^B2B_SIZE_GB=.*/B2B_SIZE_GB=7/'
-refuse "RAM below 512" B2B_VM_RAM_MB 's/^B2B_VM_RAM_MB=.*/B2B_VM_RAM_MB=256/'
-refuse "VM name with a space" B2B_VM_NAME 's/^B2B_VM_NAME=.*/B2B_VM_NAME=my vm/'
-refuse "unknown backend" B2B_BACKEND 's/^B2B_BACKEND=.*/B2B_BACKEND=kvm/'
-refuse "unknown profile" B2B_PROFILE 's/^B2B_PROFILE=.*/B2B_PROFILE=huge/'
-refuse "feature without + or -" B2B_FEATURES 's/^B2B_FEATURES=.*/B2B_FEATURES=docker/'
-refuse "unknown AI mode" B2B_AI_MODE 's/^B2B_AI_MODE=.*/B2B_AI_MODE=yes/'
-refuse "unknown key" 'unknown key B2B_LOGN' 's/^B2B_LOGIN=/B2B_LOGN=/'
-refuse "key set twice" 'B2B_LOGIN is set twice' '$a\
-B2B_LOGIN=again'
-refuse "a line that is neither" 'not a KEY=value' '$a\
-this is not a setting'
-refuse "a missing key" 'B2B_MIRROR is missing' '/^B2B_MIRROR=/d'
-# The volume table.
-refuse "no / volume" 'B2B_VOLUME: exactly one volume must be mounted on /' 's|^B2B_VOLUME  root     /  |B2B_VOLUME  root     /root |'
-refuse "two rest volumes" "share 'rest'" 's|^B2B_VOLUME  home .*|B2B_VOLUME  home /home 512 rest -|'
-refuse "no rest volume" "share 'rest'" 's|^B2B_VOLUME  var .*|B2B_VOLUME  var /var 2048 0 -|'
-refuse "a /boot volume" 'B2B_VOLUME boot' '$a\
-B2B_VOLUME boot /boot 500 0 -'
-refuse "a volume named swap" 'B2B_VOLUME swap' '$a\
-B2B_VOLUME swap /swap 512 0 -'
-refuse "two volumes with one name" 'this name is used twice' '$a\
-B2B_VOLUME opt /opt2 256 0 -'
-refuse "two volumes on one mount" 'is used twice' '$a\
-B2B_VOLUME opt2 /opt 256 0 -'
-refuse "floor below 128" 'floor' 's|^B2B_VOLUME  srv .*|B2B_VOLUME  srv /srv 64 0 -|'
-refuse "share above 100" 'share' 's|^B2B_VOLUME  srv .*|B2B_VOLUME  srv /srv 256 150 -|'
-refuse "shares adding up past 100" 'add up' 's|^B2B_VOLUME  srv .*|B2B_VOLUME  srv /srv 256 60 -|'
-refuse "cap below the floor" 'cap' 's|^B2B_VOLUME  srv .*|B2B_VOLUME  srv /srv 256 0 100|'
-refuse "a row with four fields" 'exactly 5 fields' 's|^B2B_VOLUME  srv .*|B2B_VOLUME  srv /srv 256 0|'
-refuse "a mount with a capital" 'mount' 's|^B2B_VOLUME  srv .*|B2B_VOLUME  srv /Srv 256 0 -|'
+get_of() { env B2B_CONFIG="$1" "${CFG[@]}" get "$2"; }
+rc_of() { # <config> <mode...> -> exit code, output in $TMP/out
+    local cfg="$1"
+    shift
+    env B2B_CONFIG="$cfg" "${CFG[@]}" "$@" >"$TMP/out" 2>&1 && echo 0 || echo 1
+}
+# The message a refusal prints, for asserting it names the right key.
+refuse() { # <label> <key it must name> <sed expression>...
+    local label="$1" key="$2" cfg
+    shift 2
+    cfg=$(variant "refuse$$" "$@")
+    if [ "$(rc_of "$cfg" --check)" != 1 ]; then
+        printf 'FAIL %-62s: accepted\n' "$label"
+        fail=1
+        return
+    fi
+    contains "$label" "$(cat "$TMP/out")" "$key"
+}
+refuse_add() { # <label> <key it must name> <appended text>
+    local cfg
+    cfg=$(append "add$$" "$3")
+    if [ "$(rc_of "$cfg" --check)" != 1 ]; then
+        printf 'FAIL %-62s: accepted\n' "$1"
+        fail=1
+        return
+    fi
+    contains "$1" "$(cat "$TMP/out")" "$2"
+}
 
-# ── VM_PASS overrides the passphrase, and is validated the same way ─────────
-check "VM_PASS with a space is refused" "$(env B2B_CONFIG="$DEFAULTS" VM_PASS='bad pass' "${CFG[@]}" --check >/dev/null 2>&1 && echo 0 || echo $?)" 1
-check "...naming VM_PASS" "$(env B2B_CONFIG="$DEFAULTS" VM_PASS='bad pass' "${CFG[@]}" --check 2>&1 >/dev/null | grep -o '^[^ ]*: VM_PASS' | sed 's/.*: //')" VM_PASS
-check "a valid VM_PASS passes" "$(env B2B_CONFIG="$DEFAULTS" VM_PASS='Other-pass.42' "${CFG[@]}" --check >/dev/null 2>&1 && echo 0 || echo $?)" 0
-# The library, sourced: the passphrase helper prefers VM_PASS.
-(
-    B2B_CONFIG=$DEFAULTS
-    # shellcheck disable=SC1091
-    . utils/b2b_config.sh
-    # The helper reads VM_PASS itself, in this shell, so a plain assignment
-    # is what is being tested here.
-    VM_PASS=''
-    check "b2b_luks_passphrase reads the file" "$(b2b_luks_passphrase)" tempencrypt123
-    VM_PASS=Other-pass.42
-    check "b2b_luks_passphrase prefers VM_PASS" "$(b2b_luks_passphrase)" Other-pass.42
-    VM_PASS=
-    check "b2b_locale_language" "$(b2b_locale_language)" en
-    check "b2b_locale_country" "$(b2b_locale_country)" US
-    check "sourcing runs no command" "$(sed -n '/^if \[ "\${BASH_SOURCE\[0\]:-\$0}" = "\$0" \]; then$/p' utils/b2b_config.sh | wc -l)" 1
-    exit "$fail"
-) || fail=1
+# ── The shipped file and the fixture ────────────────────────────────────────
+check "born2root.toml is valid" "$(rc_of born2root.toml --check)" 0
+check "the fixture is valid" "$(rc_of "$DEFAULTS" --check)" 0
+check "the fixture resolves exactly like the shipped file" \
+    "$(diff <(env B2B_CONFIG=born2root.toml "${CFG[@]}" --dump | grep -v '"path"') \
+        <(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --dump | grep -v '"path"') >/dev/null && echo same || echo differs)" same
 
-# ── Volumes come out normalised: / first, rest last ─────────────────────────
-f=$(variant reorder '/^B2B_VOLUME  root /{h;d;}' '/^B2B_VOLUME  var  /{H;d;}' '$G')
-check "reordered file: / first" "$(env B2B_CONFIG="$f" "${CFG[@]}" --volumes | head -1 | awk '{print $2}')" /
-check "reordered file: rest last" "$(env B2B_CONFIG="$f" "${CFG[@]}" --volumes | tail -1 | awk '{print $4}')" rest
-check "--volumes: seven rows" "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --volumes | wc -l)" 7
-check "--volumes refuses a bad table" "$(env B2B_CONFIG="$(variant badvol 's|^B2B_VOLUME  var .*|B2B_VOLUME  var /var 2048 0 -|')" "${CFG[@]}" --volumes >/dev/null 2>&1 && echo 0 || echo $?)" 1
+# ── get: every key the repo asks for ────────────────────────────────────────
+check "get B2B_LOGIN" "$(get_of "$DEFAULTS" B2B_LOGIN)" dlesieur
+check "get B2B_HOSTNAME defaults to <login>42" "$(get_of "$DEFAULTS" B2B_HOSTNAME)" dlesieur42
+check "get B2B_FULLNAME defaults to the login" "$(get_of "$DEFAULTS" B2B_FULLNAME)" dlesieur
+check "get B2B_USER_PASSWORD" "$(get_of "$DEFAULTS" B2B_USER_PASSWORD)" tempuser123
+check "get B2B_ROOT_PASSWORD" "$(get_of "$DEFAULTS" B2B_ROOT_PASSWORD)" temproot123
+check "get B2B_LUKS_PASSPHRASE" "$(get_of "$DEFAULTS" B2B_LUKS_PASSPHRASE)" tempencrypt123
+check "get B2B_LOCALE_LANGUAGE" "$(get_of "$DEFAULTS" B2B_LOCALE_LANGUAGE)" en
+check "get B2B_LOCALE_COUNTRY" "$(get_of "$DEFAULTS" B2B_LOCALE_COUNTRY)" US
+check "get B2B_KEYMAP" "$(get_of "$DEFAULTS" B2B_KEYMAP)" es
+check "get B2B_TIMEZONE" "$(get_of "$DEFAULTS" B2B_TIMEZONE)" Europe/Madrid
+check "get B2B_MIRROR" "$(get_of "$DEFAULTS" B2B_MIRROR)" deb.debian.org
+check "get B2B_SIZE_GB" "$(get_of "$DEFAULTS" B2B_SIZE_GB)" 15
+check "get B2B_VM_NAME" "$(get_of "$DEFAULTS" B2B_VM_NAME)" debian
+check "get B2B_BACKEND" "$(get_of "$DEFAULTS" B2B_BACKEND)" auto
+check "get B2B_PROFILE" "$(get_of "$DEFAULTS" B2B_PROFILE)" auto
+check "get B2B_AI_MODE" "$(get_of "$DEFAULTS" B2B_AI_MODE)" off
+check "get B2B_SWAP_MB" "$(get_of "$DEFAULTS" B2B_SWAP_MB)" auto
+check 'get B2B_VM_RAM_MB: "auto" is empty, as the Makefile expects' \
+    "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" ""
+check "get B2B_FEATURES: all auto means empty, so the picker still runs" \
+    "$(get_of "$DEFAULTS" B2B_FEATURES)" ""
+check "get B2B_NVIM_USERS" "$(get_of "$DEFAULTS" B2B_NVIM_USERS)" dlesieur
+check "get B2B_USERS" "$(get_of "$DEFAULTS" B2B_USERS)" dlesieur
+check "get B2B_EXTRA_USERS is empty with one account" "$(get_of "$DEFAULTS" B2B_EXTRA_USERS)" ""
+check "get B2B_PASS_MAX_DAYS" "$(get_of "$DEFAULTS" B2B_PASS_MAX_DAYS)" 30
+check "get B2B_SUDO_TRIES" "$(get_of "$DEFAULTS" B2B_SUDO_TRIES)" 3
+check "get B2B_SUDO_BADPASS" "$(get_of "$DEFAULTS" B2B_SUDO_BADPASS)" "Wrong password. Access denied!"
+check "get B2B_SSH_PASSWORD_LOGIN" "$(get_of "$DEFAULTS" B2B_SSH_PASSWORD_LOGIN)" yes
+check "get B2B_MONITOR_INTERVAL" "$(get_of "$DEFAULTS" B2B_MONITOR_INTERVAL)" 10
+check "get a dotted path" "$(get_of "$DEFAULTS" vm.name)" debian
+check "get a dotted path into a policy" "$(get_of "$DEFAULTS" policy.sudo.tries)" 3
+check "get a dotted path into an account" "$(get_of "$DEFAULTS" users.dlesieur.nvim)" true
+check "get an unknown key is empty, not an error" "$(get_of "$DEFAULTS" B2B_NOT_A_KEY)" ""
 
-# ── What the guest gets ─────────────────────────────────────────────────────
-f=$(variant users 's/^B2B_EXTRA_USERS=.*/B2B_EXTRA_USERS="alice:Alice1234 bob:Bob12345:sudo"/')
-check "users fixture is valid" "$(rc_check "$f")" 0
-guest=$(env B2B_CONFIG="$f" "${CFG[@]}" --guest)
-check "--guest: extra users with their groups" "$(printf '%s\n' "$guest" | sed -n 's/^B2B_EXTRA_USERS=//p')" '"alice:user42 bob:user42,sudo"'
-check "--guest: the volumes as name:mount" "$(printf '%s\n' "$guest" | sed -n 's/^B2B_VOLUMES=//p')" '"root:/ home:/home opt:/opt srv:/srv tmp:/tmp var-log:/var/log var:/var"'
-check "--guest: no password, no passphrase" "$(printf '%s\n' "$guest" | grep -v '^#' | grep -ciE 'password|passphrase|Alice1234|Bob12345|tempuser|temproot|tempencrypt')" 0
-check "--guest: source-able" "$(
-    printf '%s\n' "$guest" >"$TMP/build.conf"
-    "${SCRIPT_SH:-bash}" -c ". $TMP/build.conf && echo \"\$B2B_LOGIN \$B2B_HOSTNAME\""
-)" "dlesieur dlesieur42"
-shadow=$(env B2B_CONFIG="$f" "${CFG[@]}" --shadow)
-check "--shadow: one SHA-512 line per extra user" "$(printf '%s\n' "$shadow" | grep -cE '^(alice|bob):\$6\$')" 2
-salt=$(printf '%s\n' "$shadow" | sed -n 's/^alice:\$6\$\([^$]*\)\$.*/\1/p')
-check "--shadow: alice's hash verifies" "$(printf '%s\n' "$shadow" | sed -n 's/^alice://p')" "$(openssl passwd -6 -salt "$salt" Alice1234)"
-check "--shadow: nothing for no extra users" "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --shadow | wc -l)" 0
+# get must answer from a file --check refuses, and say nothing on stderr:
+# `make status` on a half-edited file still has to print a banner.
+BROKEN=$(printf '%s\n' 'this is not toml = = =' >"$TMP/broken.toml" && printf '%s' "$TMP/broken.toml")
+check "a broken file: get is silent" \
+    "$(env B2B_CONFIG="$BROKEN" "${CFG[@]}" get B2B_VM_NAME 2>&1)" ""
+check "a broken file: get exits 0" \
+    "$(env B2B_CONFIG="$BROKEN" "${CFG[@]}" get B2B_VM_NAME >/dev/null 2>&1 && echo 0 || echo 1)" 0
+check "a broken file: --parses refuses, so the destructive targets can stop" \
+    "$(rc_of "$BROKEN" --parses)" 1
+contains "--parses names TOML" "$(cat "$TMP/out")" "not valid TOML"
+check "the shipped file parses" "$(rc_of born2root.toml --parses)" 0
+check "an invalid value still answers get" \
+    "$(get_of "$(variant badsize 's/^disk_gb  *=.*/disk_gb = 2/')" B2B_SIZE_GB)" 2
 
-# ── The render ──────────────────────────────────────────────────────────────
-# Values pass through untouched whatever they contain, the template's own
-# text is never rewritten, and a placeholder nothing answers stops the build.
-cat >"$TMP/tpl" <<'EOF'
-d-i passwd/username string @B2B_LOGIN@
-d-i partman-crypto/passphrase password @B2B_LUKS_PASSPHRASE@
-d-i passwd/root-password-crypted password @B2B_ROOT_PASSWORD_HASH@
-	debconf-set partman-auto/disk "$(list-devices disk | head -n1)" $lvmok{ } & \ /
-@B2B_LOGIN@@B2B_LOGIN@ user@B2B_HOSTNAME@.local @not_a_placeholder@ @B2B_
-EOF
-# In a sed replacement & is "the match" and \\ is one backslash, hence \& and \\.
-f=$(variant render 's|^B2B_LUKS_PASSPHRASE=.*|B2B_LUKS_PASSPHRASE=A$\&/b.42=x|' 's|^B2B_ROOT_PASSWORD=.*|B2B_ROOT_PASSWORD=p$\&\\w"x|')
-check "render fixture holds the password as typed" "$(sed -n 's/^B2B_ROOT_PASSWORD=//p' "$f")" 'p$&\w"x'
-out=$(env B2B_CONFIG="$f" "${CFG[@]}" --render "$TMP/tpl")
-check "render: username" "$(printf '%s\n' "$out" | sed -n '1p')" "d-i passwd/username string dlesieur"
-check "render: \$ & / in a value survive" "$(printf '%s\n' "$out" | sed -n '2p')" 'd-i partman-crypto/passphrase password A$&/b.42=x'
-rsalt=$(printf '%s\n' "$out" | sed -n '3s/.*password \$6\$\([^$]*\)\$.*/\1/p')
-check "render: the root hash verifies against the password" "$(printf '%s\n' "$out" | sed -n '3s/.*password //p')" "$(printf '%s\n' 'p$&\w"x' | openssl passwd -6 -stdin -salt "$rsalt")"
-check "render: the template's own \$(...) and \$lvmok{ } untouched" "$(printf '%s\n' "$out" | sed -n '4p')" "$(sed -n '4p' "$TMP/tpl")"
-check "render: adjacent placeholders, text after, unknown @...@ kept" "$(printf '%s\n' "$out" | sed -n '5p')" 'dlesieurdlesieur userdlesieur42.local @not_a_placeholder@ @B2B_'
-printf 'x @B2B_NOPE@ y\n' >"$TMP/tpl2"
-check "render: a placeholder without a value fails" "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --render "$TMP/tpl2" >/dev/null 2>&1 && echo 0 || echo $?)" 1
-check "render: ...naming it" "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --render "$TMP/tpl2" 2>&1 >/dev/null | grep -c '@B2B_NOPE@')" 1
-check "render: nothing on stdout then" "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --render "$TMP/tpl2" 2>/dev/null | wc -c)" 0
-check "render: VM_PASS reaches the preseed" "$(env B2B_CONFIG="$DEFAULTS" VM_PASS=Other-pass.42 "${CFG[@]}" --render "$TMP/tpl" | sed -n '2p')" 'd-i partman-crypto/passphrase password Other-pass.42'
+# ── Refusals: [vm] and [system] ─────────────────────────────────────────────
+refuse "vm.name with a space" vm.name 's/^name    = "debian"/name    = "my vm"/'
+refuse "vm.backend nonsense" vm.backend 's/^backend = "auto"/backend = "hyperv"/'
+refuse "vm.disk_gb below 8" vm.disk_gb 's/^disk_gb = 15/disk_gb = 4/'
+refuse "vm.disk_gb quoted" vm.disk_gb 's/^disk_gb = 15/disk_gb = "15"/'
+refuse "vm.ram_mb below 512" vm.ram_mb 's/^ram_mb  = "auto"/ram_mb  = 128/'
+refuse "vm.profile nonsense" vm.profile 's/^profile = "auto"/profile = "enormous"/'
+refuse "vm.ai_mode nonsense" vm.ai_mode 's/^ai_mode = "off"/ai_mode = "maybe"/'
+refuse "an unknown key in [vm]" "vm.nmae" 's/^name    = "debian"/nmae = "debian"/'
+refuse "an unknown section" "wat" 's/^\[packages\]/[wat]/'
+refuse "system.hostname with an underscore" system.hostname \
+    's/^hostname        = ""/hostname        = "my_host"/'
+refuse "system.locale nonsense" system.locale \
+    's/^locale          = "en_US.UTF-8"/locale          = "english"/'
+refuse "system.keymap nonsense" system.keymap \
+    's/^keymap          = "es"/keymap          = "ES2"/'
+refuse "system.timezone nonsense" system.timezone \
+    's|^timezone        = "Europe/Madrid"|timezone        = "Mars/Olympus"|'
+refuse "system.mirror with a path" system.mirror \
+    's|^mirror          = "deb.debian.org"|mirror          = "deb.debian.org/debian"|'
+refuse "system.root_password empty" system.root_password \
+    's/^root_password   = "temproot123"/root_password   = ""/'
+refuse "system.root_password missing altogether" system.root_password \
+    '/^root_password/d'
+refuse "system.luks_passphrase too short" system.luks_passphrase \
+    's/^luks_passphrase = "tempencrypt123"/luks_passphrase = "short"/'
+refuse "system.luks_passphrase with a space the keyboard cannot type" \
+    system.luks_passphrase \
+    's/^luks_passphrase = "tempencrypt123"/luks_passphrase = "pass phrase"/'
 
-# ── The real template, rendered with the shipped defaults ───────────────────
-# Every value the preseed used to spell out by hand must come out as it was,
-# except the two passwords, which must now be hashes and nowhere in clear.
-pre=$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --render preseeds/preseed.cfg.in)
-check "preseed: no placeholder left" "$(printf '%s\n' "$pre" | grep -cE '@B2B_[A-Z0-9_]+@')" 0
-check "preseed: username" "$(printf '%s\n' "$pre" | grep -c '^d-i passwd/username string dlesieur$')" 1
-check "preseed: hostname, both keys" "$(printf '%s\n' "$pre" | grep -cE '^d-i netcfg/(get_)?hostname string dlesieur42$')" 2
-check "preseed: locale, both keys" "$(printf '%s\n' "$pre" | grep -c ' en_US.UTF-8$')" 2
-check "preseed: keymap" "$(printf '%s\n' "$pre" | grep -c '^d-i keyboard-configuration/xkb-keymap select es$')" 1
-check "preseed: timezone" "$(printf '%s\n' "$pre" | grep -c '^d-i time/zone string Europe/Madrid$')" 1
-check "preseed: mirror" "$(printf '%s\n' "$pre" | grep -c '^d-i mirror/http/hostname string deb.debian.org$')" 1
-check "preseed: two crypted password keys" "$(printf '%s\n' "$pre" | grep -cE '^d-i passwd/(root|user)-password-crypted password \$6\$')" 2
-check "preseed: no cleartext password key" "$(printf '%s\n' "$pre" | grep -cE '^d-i passwd/(root|user)-password(-again)? ')" 0
-check "preseed: no password in clear anywhere" "$(printf '%s\n' "$pre" | grep -cE 'tempuser123|temproot123')" 0
-check "preseed: user hash verifies" "$(printf '%s\n' "$pre" | sed -n 's/^d-i passwd\/user-password-crypted password //p')" \
-    "$(printf '%s\n' "$pre" | sed -n 's/^d-i passwd\/user-password-crypted password \$6\$\([^$]*\)\$.*/\1/p' | xargs -I{} openssl passwd -6 -salt {} tempuser123)"
-check "preseed: LUKS passphrase, both keys" "$(printf '%s\n' "$pre" | grep -cE '^d-i partman-crypto/passphrase(-again)? password tempencrypt123$')" 2
-check "preseed: the partman early_command is untouched" "$(printf '%s\n' "$pre" | grep -c 'debconf-set partman-auto/disk "\$(list-devices disk | head -n1)"')" 1
-check "preseed: RECIPE markers once" "$(printf '%s\n' "$pre" | grep -c '^# ── RECIPE-BEGIN')" 1
-check "preseed: late_command copies build.conf" "$(printf '%s\n' "$pre" | grep -c 'cp /cdrom/build.conf /target/etc/b2b/build.conf')" 1
-check "preseed: late_command copies the extra users' hashes" "$(printf '%s\n' "$pre" | grep -c 'cp /cdrom/extra_users.shadow /target/tmp/extra_users.shadow')" 1
-check "preseed: no login spelt out in late_command" "$(printf '%s\n' "$pre" | sed -n '/^d-i preseed\/late_command/,/^$/p' | grep -c dlesieur)" 0
-f=$(variant who 's/^B2B_LOGIN=.*/B2B_LOGIN=b2rtest/' 's|^B2B_TIMEZONE=.*|B2B_TIMEZONE=Europe/Paris|' 's/^B2B_KEYMAP=.*/B2B_KEYMAP=fr/')
-pre=$(env B2B_CONFIG="$f" "${CFG[@]}" --render preseeds/preseed.cfg.in)
-check "preseed, personalised: username" "$(printf '%s\n' "$pre" | grep -c '^d-i passwd/username string b2rtest$')" 1
-check "preseed, personalised: hostname follows the login" "$(printf '%s\n' "$pre" | grep -c '^d-i netcfg/hostname string b2rtest42$')" 1
-check "preseed, personalised: timezone and keymap" "$(printf '%s\n' "$pre" | grep -cE '^d-i (time/zone string Europe/Paris|keyboard-configuration/xkb-keymap select fr)$')" 2
-check "preseed, personalised: dlesieur appears nowhere" "$(printf '%s\n' "$pre" | grep -v '^#' | grep -c dlesieur)" 0
+# ── Refusals: accounts ──────────────────────────────────────────────────────
+refuse "no account at all" users '/^\[users.dlesieur\]/,/^nvim     = true/d'
+refuse "your own account without a password" users.dlesieur.password \
+    's/^password = "tempuser123"/password = ""/'
+refuse "your own account with sudo = false" users.dlesieur.sudo \
+    's/^sudo     = true/sudo     = false/'
+refuse "your own account with nvim = false" users.dlesieur.nvim \
+    's/^nvim     = true/nvim     = false/'
+refuse "a login with a capital letter" users.Bob \
+    's/^\[users.dlesieur\]/[users.Bob]/'
+refuse "root as an account" users.root 's/^\[users.dlesieur\]/[users.root]/'
+refuse "a shell set per account" users.dlesieur.shell \
+    's/^nvim     = true/nvim     = true\nshell = "\/bin\/bash"/'
+refuse "an unknown key in an account" users.dlesieur.passwrd \
+    's/^password = "tempuser123"/passwrd = "tempuser123"/'
+refuse "fullname with a comma" users.dlesieur.fullname \
+    's/^fullname = ""/fullname = "Ann, PhD"/'
+refuse "sudo in groups" users.dlesieur.groups \
+    's/^groups   = \[\]/groups   = ["sudo"]/'
+refuse "user42 in groups" users.dlesieur.groups \
+    's/^groups   = \[\]/groups   = ["user42"]/'
+refuse "a group name with a capital" users.dlesieur.groups \
+    's/^groups   = \[\]/groups   = ["Docker"]/'
+refuse "an ssh key that is not a key or a path" users.dlesieur.ssh_keys \
+    's/^ssh_keys = \[\]/ssh_keys = ["hello"]/'
+refuse "an ssh key whose base64 is broken" users.dlesieur.ssh_keys \
+    's/^ssh_keys = \[\]/ssh_keys = ["ssh-ed25519 not!base64 c"]/'
+refuse "an ssh key wrapped over two lines (half a blob)" users.dlesieur.ssh_keys \
+    's/^ssh_keys = \[\]/ssh_keys = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 c"]/'
+refuse "an ssh key path that does not exist" users.dlesieur.ssh_keys \
+    's|^ssh_keys = \[\]|ssh_keys = ["~/.ssh/nothing-here.pub"]|'
+refuse_add "the same account twice" "users" '[users.dlesieur]
+password = "x"'
+# An array of tables collides with the [users.x] tables above it, so TOML
+# itself refuses it -- with the line, which is what a reader needs.
+refuse_add "an account written as [[users]]" "not valid TOML" '[[users]]
+name = "bob"'
+refuse_add "an extra account with no password key" "users.bob.password" '[users.bob]
+sudo = true'
 
-# ── No identity is spelt out in code any more ───────────────────────────────
-# Every consumer asks born2root.conf. A literal in a non-comment line is a
-# place a personalised VM would silently keep the owner's values. The two
-# welcome scripts are unreferenced art keyed by login name.
-lits=$(grep -rnE 'dlesieur|temp(user|root|encrypt)123|vm_pass\.txt' \
-    preseeds generate setup/host setup/install/nvim setup/install/hellish setup/install/tools setup/install/ai \
-    utils unlock_vm.sh Makefile 2>/dev/null |
+# ── Refusals: features, packages, policies, network ─────────────────────────
+refuse "a feature that is neither auto nor a boolean" features.docker \
+    's/^docker         = "auto"/docker         = "yes"/'
+refuse "turning a base feature off" features.nvim \
+    's/^docker         = "auto"/nvim = false/'
+refuse "turning hellish off" features.hellish \
+    's/^docker         = "auto"/hellish = false/'
+refuse "an unknown feature" features.dcoker \
+    's/^docker         = "auto"/dcoker = true/'
+refuse "an ai feature instead of vm.ai_mode" features.ai-local \
+    's/^docker         = "auto"/ai-local = true/'
+refuse "a space reservation as a feature" features.vscode-remote \
+    's/^docker         = "auto"/vscode-remote = false/'
+refuse "a package name with a capital" packages.apt \
+    's/^apt = \[\]/apt = ["Htop"]/'
+refuse "the same package twice" packages.apt \
+    's/^apt = \[\]/apt = ["htop", "htop"]/'
+refuse "a password policy weaker than the subject" policy.password.min_length \
+    's/^min_length  = 10/min_length  = 8/'
+refuse "a password that never expires" policy.password.max_days \
+    's/^max_days    = 30/max_days    = 99999/'
+refuse "min_days at or above max_days" policy.password.min_days \
+    's/^min_days    = 2/min_days    = 30/'
+refuse "sudo tries above 3" policy.sudo.tries 's/^tries           = 3/tries           = 5/'
+refuse "a sudo message with a quote in it" policy.sudo.badpass_message \
+    's/^badpass_message = "Wrong password. Access denied!"/badpass_message = "Nope, said the \\"guard\\""/'
+refuse "a relative sudo log dir" policy.sudo.log_dir \
+    's|^log_dir         = "/var/log/sudo"|log_dir         = "sudo"|'
+refuse "a monitoring interval cron cannot repeat" policy.monitoring.interval_min \
+    's/^interval_min = 10/interval_min = 7/'
+refuse "a forward on the SSH port" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "x", guest = 4242, host = 4243 } ]/'
+refuse "a forward on a port the build already uses" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "x", guest = 443, host = 9443 } ]/'
+refuse "a forward below 1024 on this machine" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 80 } ]/'
+refuse "two forwards with the same name" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 9100 }, { name = "x", guest = 9101, host = 9101 } ]/'
+refuse "an unknown key in a forward" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 9100, proto = "udp" } ]/'
+
+# ── Refusals: the volume table ──────────────────────────────────────────────
+refuse "no volume on /" disk.volumes 's|{ name = "root",    mount = "/",|{ name = "root",    mount = "/roo",|'
+refuse "two volumes taking the remainder" disk.volumes \
+    's/{ name = "srv",     mount = "\/srv",     floor_mb = 256,  share = 0,/{ name = "srv",     mount = "\/srv",     floor_mb = 256,  share = "rest",/'
+refuse "no volume taking the remainder" disk.volumes \
+    's/share = "rest"                  }/share = 9 }/'
+refuse "a volume called swap" disk.volumes.swap 's/{ name = "tmp",/{ name = "swap",/'
+refuse "two volumes with the same mount" disk.volumes \
+    's|{ name = "srv",     mount = "/srv",|{ name = "srv",     mount = "/tmp",|'
+refuse "a volume on /boot" disk.volumes 's|{ name = "srv",     mount = "/srv",|{ name = "srv",     mount = "/boot",|'
+refuse "a floor below 128 MB" disk.volumes.srv 's/{ name = "srv",     mount = "\/srv",     floor_mb = 256,/{ name = "srv",     mount = "\/srv",     floor_mb = 64,/'
+refuse "a cap below the floor" disk.volumes.srv \
+    's/{ name = "srv",     mount = "\/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  }/{ name = "srv",     mount = "\/srv",     floor_mb = 256,  share = 0,      cap_mb = 100 }/'
+refuse "shares above 100 in total" disk.volumes 's/share = 25,/share = 95,/'
+refuse "an unknown key in a volume" disk.volumes.srv 's/floor_mb = 256,  share = 0,      cap_mb = 10240/floor_mb = 256,  share = 0,      ceiling = 10240/'
+refuse "swap_mb below 256" disk.swap_mb 's/^swap_mb = "auto"/swap_mb = 64/'
+
+# ── VM_PASS beats the file, even as a bare prefix under hellish ─────────────
+check "VM_PASS wins over the file" \
+    "$(env B2B_CONFIG="$DEFAULTS" VM_PASS=Other-pass.42 "${CFG[@]}" get B2B_LUKS_PASSPHRASE)" Other-pass.42
+sourced() { # run a snippet with the library sourced, under the shell being tested
+    "${SCRIPT_SH:-bash}" -c "cd '$PWD'; export B2B_CONFIG='$DEFAULTS'; . utils/b2b_config.sh; $1"
+}
+check "sourced: the passphrase comes from the file" \
+    "$(sourced 'b2b_luks_passphrase')" tempencrypt123
+check "sourced: a plain VM_PASS assignment still wins" \
+    "$(sourced 'VM_PASS=Assigned-pass.42; b2b_luks_passphrase')" Assigned-pass.42
+check "sourced: VM_PASS as a prefix on the function wins (hellish exports none)" \
+    "$(sourced 'VM_PASS=Prefixed-pass.42 b2b_luks_passphrase')" Prefixed-pass.42
+check "sourced: b2b_user_password" "$(sourced 'b2b_user_password')" tempuser123
+check "sourced: b2b_locale_country" "$(sourced 'b2b_locale_country')" US
+check "sourced: b2b_extra_users is empty here" "$(sourced 'b2b_extra_users')" ""
+check "sourced: nothing runs when the library is sourced" \
+    "$(sourced 'echo quiet')" quiet
+
+# ── --volumes, --guest, --shadow, --ssh-keys ────────────────────────────────
+check "--volumes puts / first" \
+    "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --volumes | head -1)" "root / 2816 25 30720"
+check "--volumes puts the remainder volume last" \
+    "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --volumes | tail -1)" "var /var 2048 rest -"
+check "--volumes lists every volume" \
+    "$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --volumes | wc -l)" 7
+check "--volumes refuses a table the installer could not create" \
+    "$(rc_of "$(variant novol 's|{ name = "root",    mount = "/",|{ name = "root",    mount = "/roo",|')" --volumes)" 1
+
+GUEST=$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --guest)
+check "--guest records no password" \
+    "$(printf '%s\n' "$GUEST" | grep -v '^#' |
+        grep -ciE 'password|passphrase|tempuser|temproot|tempencrypt')" 0
+contains "--guest names the login" "$GUEST" "B2B_LOGIN=dlesieur"
+contains "--guest names the hostname" "$GUEST" "B2B_HOSTNAME=dlesieur42"
+contains "--guest quotes the volume list" "$GUEST" 'B2B_VOLUMES="root:/ home:/home'
+check "--guest is sourceable" \
+    "$(printf '%s\n' "$GUEST" >"$TMP/build.conf" && "${SCRIPT_SH:-bash}" -c ". '$TMP/build.conf'; printf '%s' \"\$B2B_KEYMAP\"")" es
+
+THREE=$(append users '[users.bob]
+password = "Bob-secret-1"
+sudo = true
+groups = ["docker"]
+nvim = false
+
+[users.saint]
+password = ""
+fullname = "Saint of cluster 3"')
+check "three accounts: B2B_USERS lists them in file order" \
+    "$(get_of "$THREE" B2B_USERS)" "dlesieur bob saint"
+check "three accounts: the extras carry their groups" \
+    "$(get_of "$THREE" B2B_EXTRA_USERS)" "bob:user42,sudo,docker saint:user42"
+check "three accounts: only those who asked get nvim" \
+    "$(get_of "$THREE" B2B_NVIM_USERS)" dlesieur
+check "an empty password is reported as locked" \
+    "$(env B2B_CONFIG="$THREE" "${CFG[@]}" --show | grep -c 'saint.*locked')" 1
+check "an account with sudo but no password warns" \
+    "$(env B2B_CONFIG="$(append sudonopass '[users.bob]
+password = ""
+sudo = true')" "${CFG[@]}" --check 2>&1 | grep -c 'warning:.*sudo')" 1
+
+SHADOW=$(env B2B_CONFIG="$THREE" "${CFG[@]}" --shadow)
+check "--shadow has one line per extra account" "$(printf '%s\n' "$SHADOW" | wc -l)" 2
+check "--shadow hashes with SHA-512" \
+    "$(printf '%s\n' "$SHADOW" | grep -c '^bob:\$6\$')" 1
+check "--shadow locks an account with no password" \
+    "$(printf '%s\n' "$SHADOW" | grep -c '^saint:!$')" 1
+BOBHASH=$(printf '%s\n' "$SHADOW" | sed -n 's/^bob://p')
+BOBSALT=$(printf '%s' "$BOBHASH" | cut -d'$' -f3)
+check "--shadow: the hash is really that password" \
+    "$(printf '%s\n' Bob-secret-1 | openssl passwd -6 -salt "$BOBSALT" -stdin)" "$BOBHASH"
+check "--shadow never holds the login's own password" \
+    "$(printf '%s\n' "$SHADOW" | grep -c dlesieur)" 0
+
+KEYS=$(append keys '[users.bob]
+password = "Bob-secret-1"
+ssh_keys = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJJ0l7ZHSFAPmNEMzE0YSFXjPtHFMH0Aa3nOEWaVSFvB bob@laptop"]')
+check "--ssh-keys names the account and keeps the key whole" \
+    "$(env B2B_CONFIG="$KEYS" "${CFG[@]}" --ssh-keys)" \
+    "bob ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJJ0l7ZHSFAPmNEMzE0YSFXjPtHFMH0Aa3nOEWaVSFvB bob@laptop"
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJJ0l7ZHSFAPmNEMzE0YSFXjPtHFMH0Aa3nOEWaVSFvB from@file\n' >"$TMP/id.pub"
+check "--ssh-keys reads a path on this machine" \
+    "$(env B2B_CONFIG="$(append keypath "[users.bob]
+password = \"Bob-secret-1\"
+ssh_keys = [\"$TMP/id.pub\"]")" "${CFG[@]}" --ssh-keys)" \
+    "bob ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJJ0l7ZHSFAPmNEMzE0YSFXjPtHFMH0Aa3nOEWaVSFvB from@file"
+
+# ── Features, packages and forwards as the rest of the repo reads them ──────
+FEAT=$(variant feat 's/^docker         = "auto"/docker         = true/' \
+    's/^pytools        = "auto"/pytools        = false/')
+check "[features] becomes the +docker -pytools string FEATURES takes" \
+    "$(get_of "$FEAT" B2B_FEATURES)" "+docker -pytools"
+check "packages become a space-separated list for the guest" \
+    "$(get_of "$(variant pkgs 's/^apt = \[\]/apt = ["htop", "tree"]/')" B2B_APT_PACKAGES)" "htop tree"
+FWD=$(variant fwd 's/^forwards = \[\]/forwards = [ { name = "grafana", guest = 3100, host = 3100 }, { name = "api", guest = 9000, host = 19000 } ]/')
+check "forwards come out as name:host:guest, what PORTS_SPEC takes" \
+    "$(get_of "$FWD" B2B_FORWARDS)" "grafana:3100:3100 api:19000:9000"
+check "the guest ports alone, for the firewall" \
+    "$(get_of "$FWD" B2B_FORWARD_PORTS)" "3100 9000"
+
+# ── --render ────────────────────────────────────────────────────────────────
+render_of() { # <config> <template text> -> rendered text, or the error
+    printf '%s\n' "$2" >"$TMP/tpl"
+    env B2B_CONFIG="$1" "${CFG[@]}" --render "$TMP/tpl" 2>&1
+}
+check "render fills a placeholder" \
+    "$(render_of "$DEFAULTS" 'login=@B2B_LOGIN@')" "login=dlesieur"
+check "render fills two placeholders side by side" \
+    "$(render_of "$DEFAULTS" '@B2B_LOGIN@@B2B_KEYMAP@')" "dlesieures"
+check "render leaves the preseed's own \$(...) alone" \
+    "$(render_of "$DEFAULTS" 'd-i x string $(list-devices disk | head -n1)')" \
+    'd-i x string $(list-devices disk | head -n1)'
+check "render leaves \$lvmok{ } alone" \
+    "$(render_of "$DEFAULTS" '$lvmok{ } method{ lvm }')" '$lvmok{ } method{ lvm }'
+ODD=$(variant odd 's/^luks_passphrase = "tempencrypt123"/luks_passphrase = "A$\&\/b.42"/')
+check "render splices a value holding \$ & / verbatim" \
+    "$(render_of "$ODD" 'p=@B2B_LUKS_PASSPHRASE@')" 'p=A$&/b.42'
+check "render refuses a placeholder nothing answers" \
+    "$(render_of "$DEFAULTS" 'x=@B2B_NO_SUCH_KEY@' >/dev/null 2>&1 && echo 0 || echo 1)" 1
+contains "render names the placeholder it cannot fill" \
+    "$(render_of "$DEFAULTS" 'x=@B2B_NO_SUCH_KEY@')" "@B2B_NO_SUCH_KEY@"
+check "render refuses a placeholder whose value would be empty" \
+    "$(render_of "$DEFAULTS" 'x=@B2B_APT_PACKAGES@' >/dev/null 2>&1 && echo 0 || echo 1)" 1
+check "render hashes the passwords" \
+    "$(render_of "$DEFAULTS" 'root=@B2B_ROOT_PASSWORD_HASH@' | grep -c '^root=\$6\$')" 1
+check "the two hashes differ (each password is salted on its own)" \
+    "$(render_of "$DEFAULTS" '@B2B_ROOT_PASSWORD_HASH@ @B2B_USER_PASSWORD_HASH@' | awk '{ print ($1 == $2) ? "same" : "different" }')" different
+
+# The real template, with the defaults.
+PRESEED=$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --render preseeds/preseed.cfg.in)
+check "the real template renders" "$?" 0
+check "no placeholder survives" "$(printf '%s\n' "$PRESEED" | grep -c '@B2B_[A-Z0-9_]*@')" 0
+contains "the rendered preseed names the login" "$PRESEED" "passwd/username string dlesieur"
+contains "the rendered preseed names the hostname" "$PRESEED" "netcfg/get_hostname string dlesieur42"
+contains "the rendered preseed carries the keymap" "$PRESEED" "xkb-keymap select es"
+contains "the rendered preseed carries the passphrase" "$PRESEED" \
+    "partman-crypto/passphrase password tempencrypt123"
+check "the rendered preseed hashes root's password" \
+    "$(printf '%s\n' "$PRESEED" | grep -c 'passwd/root-password-crypted password \$6\$')" 1
+check "the rendered preseed hashes the login's password" \
+    "$(printf '%s\n' "$PRESEED" | grep -c 'passwd/user-password-crypted password \$6\$')" 1
+check "no cleartext password reaches the preseed" \
+    "$(printf '%s\n' "$PRESEED" | grep -cE 'tempuser123|temproot123')" 0
+check "the RECIPE markers survive, once each" \
+    "$(printf '%s\n' "$PRESEED" | grep -cE '^# ─+ RECIPE-(BEGIN|END)')" 2
+
+# ── The vendored parser, and both parsers agreeing ──────────────────────────
+check "the vendored tomli is shipped" "$([ -f utils/vendor/tomli/_parser.py ] && echo yes)" yes
+check "its licence is kept next to it" "$([ -f utils/vendor/tomli/LICENSE ] && echo yes)" yes
+check "no markdown in the vendored copy (CI lints every .md)" \
+    "$(find utils/vendor -name '*.md' | wc -l)" 0
+check "forced onto the vendored parser, the answer is the same" \
+    "$(env B2B_CONFIG="$DEFAULTS" B2B_TOML_VENDORED=1 "${CFG[@]}" get B2B_LOGIN)" dlesieur
+check "forced onto the vendored parser, the file still validates" \
+    "$(env B2B_CONFIG="$DEFAULTS" B2B_TOML_VENDORED=1 "${CFG[@]}" --check >/dev/null 2>&1 && echo 0 || echo 1)" 0
+check "the reader compiles under this python" \
+    "$(python3 -m py_compile utils/b2b_config.py && echo ok)" ok
+
+# ── No identity literal anywhere but the config ─────────────────────────────
+# The whole point of the file: a colleague changes one line and the build is
+# theirs. A hardcoded login or temp password would quietly ignore them.
+LITERALS=$(grep -rnE 'dlesieur|temp(user|root|encrypt)123|vm_pass\.txt|born2root\.conf' \
+    preseeds generate setup/host setup/install/nvim setup/install/hellish \
+    setup/install/tools setup/install/ai utils unlock_vm.sh Makefile 2>/dev/null |
     grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' |
-    grep -vE '^(utils/welcome\.sh|utils/ascii_welcome\.sh|preseeds/deb_preseed\.bak):' || true)
-check "no login, password or vm_pass.txt literal in code" "$(printf '%s' "$lits" | grep -c .)" 0
-[ -z "$lits" ] || printf '%s\n' "$lits" | sed 's/^/     /'
+    grep -vE 'utils/(welcome|ascii_welcome)\.sh|utils/vendor/|preseeds/deb_preseed\.bak' || true)
+check "no login, password or old file name in code" "$(printf '%s' "$LITERALS" | grep -c . || true)" 0
+[ -z "$LITERALS" ] || printf '%s\n' "$LITERALS" | head -20
 
 exit "$fail"

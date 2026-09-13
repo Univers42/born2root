@@ -37,7 +37,7 @@ if [ -f /etc/b2b/features.conf ]; then
 else
     echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
 fi
-# Who this VM is for: born2root.conf on the host, shipped as /etc/b2b/build.conf
+# Who this VM is for: born2root.toml on the host, shipped as /etc/b2b/build.conf
 # (utils/b2b_config.sh --guest; late_command copies it in). Every name below
 # comes from here -- the login, the host name, the extra accounts -- instead of
 # the literals this script used to carry. Without the file (an ISO older than
@@ -312,7 +312,7 @@ groupadd -f docker 2>/dev/null || true
 usermod -aG sudo,user42,docker "$B2B_LOGIN"
 echo "[OK] User $B2B_LOGIN in groups: sudo, user42, docker"
 
-# The extra accounts born2root.conf asks for (B2B_EXTRA_USERS): user42, sudo
+# The extra accounts born2root.toml asks for (B2B_EXTRA_USERS): user42, sudo
 # when asked, hellish as login shell. Their passwords arrive as SHA-512 hashes
 # in /tmp/extra_users.shadow -- written by the host, copied by late_command,
 # deleted right after -- so no password is in clear in the ISO or in this log.
@@ -445,7 +445,7 @@ while true; do
         systemctl restart ssh >> "$LOG" 2>&1
         echo "$(date): sshd restart attempted, new_status=$(systemctl is-active ssh)" >> "$LOG"
     fi
-    # Login-shell guard, for every account born2root.conf named (the login
+    # Login-shell guard, for every account born2root.toml named (the login
     # and the extra users, from /etc/b2b/build.conf, read each round).
     #
     # hellish IS the shell of this VM. Colleagues had switched their guests
@@ -1054,7 +1054,7 @@ fi
 # That is worth keeping on / — it is what stops a runaway log wedging the
 # system — but on /home, /var, /srv, /opt and /tmp it is several hundred MB
 # held back for nothing on a disk this size. 1% keeps the safety margin.
-# Every volume born2root.conf's table created, except swap and the one on /.
+# Every volume born2root.toml's table created, except swap and the one on /.
 ROOT_LV=$(printf '%s\n' "$B2B_VOLUMES" | tr ' ' '\n' | awk -F: '$2 == "/" { print $1; exit }')
 [ -n "$ROOT_LV" ] || ROOT_LV=root
 lvs --noheadings -o lv_name LVMGroup 2>/dev/null | awk '{ print $1 }' | while read -r LV; do

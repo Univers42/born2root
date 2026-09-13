@@ -151,7 +151,7 @@ VAULT_PORT=18200
 
 # ── Dynamic port allocation (find free host ports) ───────────────────────────
 . "$SCRIPT_DIR/utils/host_ports.sh"
-# The login to show in the ssh hint below (born2root.conf).
+# The login to show in the ssh hint below (born2root.toml).
 . "$SCRIPT_DIR/utils/b2b_config.sh"
 
 # Resolve the actual host ports (they differ from the defaults when a port is

@@ -60,7 +60,7 @@ if ! NERD_FONT_RESOLVED=$(resolve_nerd_font "${NVIM_NERD_FONT:-auto}"); then
     exit 1
 fi
 
-# ── born2root.conf, checked before anything is fetched ──────────────────────
+# ── born2root.toml, checked before anything is fetched ──────────────────────
 # The guest's login, hostname, passwords, locale and disk table all come from
 # the one file at the repo root (see utils/b2b_config.sh). A typo there used
 # to be impossible to make because every value was typed into the preseed by
@@ -68,7 +68,7 @@ fi
 # of as a d-i question on a screen nobody watches twenty minutes from now.
 . "$REPO_ROOT/utils/b2b_config.sh"
 if ! b2b_check >/dev/null; then
-    echo "Error: born2root.conf is not valid (see above) — nothing was downloaded" >&2
+    echo "Error: born2root.toml is not valid (see above) — nothing was downloaded" >&2
     exit 1
 fi
 
@@ -105,7 +105,7 @@ URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
 # Both overridable so a test build can run beside a real one without sharing
 # the extraction tree or overwriting the ISO a running VM booted from.
 ISO_DIR="${ISO_DIR:-debian_iso_extract}"
-# A template: @B2B_*@ placeholders filled from born2root.conf below.
+# A template: @B2B_*@ placeholders filled from born2root.toml below.
 PRESEED_FILE="preseeds/preseed.cfg.in"
 # Encrypted unless explicitly told otherwise; see utils/luks_mode.sh for why
 # the default leans that way and why the mode lands in the ISO's name.
@@ -165,7 +165,7 @@ fi
 # on which firmware path booted it, which is painful to diagnose.
 # Preseed is inside the initrd (auto-detected by d-i), so no preseed/file= here.
 # locale/country/keymap are belt-and-suspenders for questions asked before the
-# preseed is read, so they come from the same born2root.conf the preseed does:
+# preseed is read, so they come from the same born2root.toml the preseed does:
 # language and country out of the locale (en_US.UTF-8 -> en, US), not out of
 # the keymap, which says nothing about either. hostname used to say `dlesieur`
 # here while the preseed said `dlesieur42`.
@@ -256,11 +256,11 @@ chmod -R u+w "$ISO_DIR"
 #
 # This is the ONLY place the preseed is staged: the initrd injection further
 # down copies $ISO_DIR/preseed.cfg rather than the source file, so whatever is
-# written here is what the installer actually reads. Filling born2root.conf's
+# written here is what the installer actually reads. Filling born2root.toml's
 # values in and applying the LUKS switch at this single point keeps the ISO
 # root and the initrd copy in agreement by construction, instead of by two
 # edits that have to be remembered together.
-echo "Rendering the preseed from born2root.conf..."
+echo "Rendering the preseed from born2root.toml..."
 PRESEED_RENDERED=$(mktemp)
 if ! b2b_render "$PRESEED_FILE" >"$PRESEED_RENDERED"; then
     rm -f "$PRESEED_RENDERED"
@@ -333,7 +333,7 @@ rm -f "$RECIPE_TMP"
 # Same contract as the LUKS markers: if RECIPE-BEGIN/END were reworded, awk
 # above would leave the checked-in default in place and a SIZE_B2B=50 build
 # would silently install a 15 GB layout onto a 50 GB disk. Check the result,
-# not the intent: as many volumes as born2root.conf's table plus swap, and
+# not the intent: as many volumes as born2root.toml's table plus swap, and
 # the `rest` volume last.
 recipe_lvs=$(grep -c '^\s*lv_name{' "$ISO_DIR/preseed.cfg")
 recipe_last=$(grep '^\s*lv_name{' "$ISO_DIR/preseed.cfg" | tail -1 | sed 's/.*lv_name{ *\([^ }]*\).*/\1/')

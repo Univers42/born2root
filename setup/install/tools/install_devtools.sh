@@ -76,7 +76,7 @@ OPENCODE_REPO="${OPENCODE_REPO:-anomalyco/opencode}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-}" # empty = latest release, e.g. v1.18.30
 OPENCODE_DEST="${OPENCODE_DEST:-/usr/local/bin/opencode}"
 INSTALL_OPENCODE="${INSTALL_OPENCODE:-1}"
-# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# The login born2root.toml named, as the guest records it (/etc/b2b/build.conf,
 # written by utils/b2b_config.sh --guest). Unset DEVTOOLS_USERS defaults to it.
 B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
 DEVTOOLS_USERS="${DEVTOOLS_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"

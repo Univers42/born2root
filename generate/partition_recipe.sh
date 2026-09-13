@@ -24,10 +24,10 @@
 #
 # swap follows RAM, not disk: clamp(VM_RAM_MB, 1 GB, 4 GB), and never more than
 # a quarter of the group, so a tiny disk is not half swap. B2B_SWAP_MB=<MB> in
-# born2root.conf pins it instead.
+# born2root.toml pins it instead.
 #
-# WHICH volumes exist, and their floors, shares and caps, is born2root.conf's
-# B2B_VOLUME table (read through utils/b2b_config.sh). Nothing below names a
+# WHICH volumes exist, and their floors, shares and caps, is born2root.toml's
+# [disk] volumes table (read through utils/b2b_config.sh). Nothing below names a
 # volume: a table without /opt gets a recipe without /opt, and `holder:` in
 # --sizes tells the fit check that /opt's costs now land on /.
 #
@@ -45,7 +45,7 @@
 #   DISK_SIZE_MB          same thing in MB; wins over SIZE_B2B when both are set,
 #                         because the Makefile derives it and forwards it
 #   VM_RAM_MB (2048)      what the guest boots with; sizes swap
-#   B2B_CONFIG            the born2root.conf to read (tests point it at fixtures)
+#   B2B_CONFIG            the born2root.toml to read (tests point it at fixtures)
 
 set -u
 
@@ -58,7 +58,7 @@ BIOS_MB=1      # bios_boot, for GRUB on a GPT/MBR hybrid
 BOOT_MB=500    # /boot, unencrypted, a few kernels
 OVERHEAD_MB=20 # LUKS2 header (16 MB) plus LVM physical-extent rounding
 
-# The default table in born2root.conf, and why its numbers are what they are:
+# The default table in born2root.toml, and why its numbers are what they are:
 #
 # name  floor  share%  cap      (var has no share and no cap: it takes the rest)
 # home's floor and weight were raised after checking the install against the
@@ -130,7 +130,7 @@ esac
 # volume last. b2b_volumes has already refused a table partman could not
 # satisfy (no /, two rests, shares past 100 %), with the line to fix.
 if ! VOLUMES=$(b2b_volumes); then
-    echo "partition_recipe: the B2B_VOLUME table in ${B2B_CONFIG} is invalid (see above; make config)" >&2
+    echo "partition_recipe: the [disk] volumes table in ${B2B_CONFIG} is invalid (see above; make config)" >&2
     exit 1
 fi
 SWAP_CFG=$(b2b_get B2B_SWAP_MB)

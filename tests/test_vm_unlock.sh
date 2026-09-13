@@ -24,15 +24,15 @@ trap 'rm -rf "$TMP"' EXIT
 # Sourcing must only define functions, never start a VM.
 VM_PASS="" . ./unlock_vm.sh
 
-# The passphrase comes from born2root.conf now (it was a vm_pass.txt nothing
+# The passphrase comes from born2root.toml now (it was a vm_pass.txt nothing
 # kept in step with the preseed). Fixtures stand in for the real file.
-sed 's/^B2B_LUKS_PASSPHRASE=.*/B2B_LUKS_PASSPHRASE=from-conf-42/' tests/fixtures/default.conf >"$TMP/conf"
+sed 's/^luks_passphrase = .*/luks_passphrase = "from-conf-42"/' tests/fixtures/default.toml >"$TMP/conf"
 
 # Explicit override wins over the file.
-check "VM_PASS overrides born2root.conf" \
+check "VM_PASS overrides born2root.toml" \
     "$(VM_PASS=from-env B2B_CONFIG=$TMP/conf resolve_passphrase)" "from-env"
 
-check "falls back to born2root.conf" \
+check "falls back to born2root.toml" \
     "$(VM_PASS='' B2B_CONFIG=$TMP/conf resolve_passphrase)" "from-conf-42"
 
 # A config edited on Windows must not type a CR into the prompt.
@@ -40,10 +40,15 @@ sed 's/$/\r/' "$TMP/conf" >"$TMP/crlf"
 check "strips CR" \
     "$(VM_PASS='' B2B_CONFIG=$TMP/crlf resolve_passphrase)" "from-conf-42"
 
-# Only the first definition counts, the one --check would accept.
-printf 'B2B_LUKS_PASSPHRASE=second-one\n' >>"$TMP/conf"
-check "uses the first definition only" \
-    "$(VM_PASS='' B2B_CONFIG=$TMP/conf resolve_passphrase)" "from-conf-42"
+# A key written twice is a TOML error, so nothing is read and the unlock stops
+# rather than typing one of the two candidates at the prompt.
+sed 's/^luks_passphrase = .*/&\nluks_passphrase = "second-one"/' "$TMP/conf" >"$TMP/twice"
+if VM_PASS='' B2B_CONFIG="$TMP/twice" resolve_passphrase >/dev/null 2>&1; then
+    printf 'FAIL %-34s = succeeded (expected failure)\n' "a duplicate key stops the unlock"
+    fail=1
+else
+    printf 'ok   %-34s = refused\n' "a duplicate key stops the unlock"
+fi
 
 # No passphrase anywhere is an error, not an empty string typed at the prompt.
 if VM_PASS='' B2B_CONFIG="$TMP/missing" resolve_passphrase >/dev/null 2>&1; then

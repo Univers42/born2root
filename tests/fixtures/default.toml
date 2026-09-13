@@ -1,0 +1,77 @@
+# The shipped defaults of born2root.toml, without its comments. Tests pin this
+# copy so a personalised born2root.toml cannot change what they assert. Change
+# a default in both files; the RECIPE block of preseeds/preseed.cfg.in is
+# generated from this one (bash generate/partition_recipe.sh --recipe).
+[vm]
+name    = "debian"
+backend = "auto"
+disk_gb = 15
+ram_mb  = "auto"
+profile = "auto"
+ai_mode = "off"
+
+[system]
+hostname        = ""
+locale          = "en_US.UTF-8"
+keymap          = "es"
+timezone        = "Europe/Madrid"
+mirror          = "deb.debian.org"
+root_password   = "temproot123"
+luks_passphrase = "tempencrypt123"
+
+[users.dlesieur]
+password = "tempuser123"
+fullname = ""
+sudo     = true
+groups   = []
+ssh_keys = []
+nvim     = true
+
+[packages]
+apt = []
+
+[features]
+webstack       = "auto"
+docker         = "auto"
+nodejs         = "auto"
+pytools        = "auto"
+nvim-extras    = "auto"
+devtools-extra = "auto"
+claude-code    = "auto"
+
+[policy.password]
+max_days    = 30
+min_days    = 2
+warn_days   = 7
+min_length  = 10
+min_upper   = 1
+min_lower   = 1
+min_digit   = 1
+max_repeat  = 3
+min_changed = 7
+
+[policy.sudo]
+tries           = 3
+badpass_message = "Wrong password. Access denied!"
+log_dir         = "/var/log/sudo"
+
+[policy.ssh]
+password_login = true
+
+[policy.monitoring]
+interval_min = 10
+
+[network]
+forwards = []
+
+[disk]
+swap_mb = "auto"
+volumes = [
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 25,     cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 512,  share = 18,     cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 5,      cap_mb = 20480  },
+  { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 3,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 3,      cap_mb = 20480  },
+  { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
+]

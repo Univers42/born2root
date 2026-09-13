@@ -392,7 +392,7 @@ set_step() {
 # Sourcing defines functions only, so this starts nothing.
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/../unlock_vm.sh"
 # Who the guest was built for and with which temporary passwords -- the
-# summary and the ssh config block name them. born2root.conf, via the reader
+# summary and the ssh config block name them. born2root.toml, via the reader
 # unlock_vm.sh has just sourced.
 GUEST_LOGIN=$(b2b_get B2B_LOGIN)
 GUEST_ROOT_PASS=$(b2b_get B2B_ROOT_PASSWORD)

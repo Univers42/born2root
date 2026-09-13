@@ -33,7 +33,7 @@ set -u
 HELLISH_PLUGINS_REPO="${HELLISH_PLUGINS_REPO:-https://github.com/Univers42/hellishrc_plugins.git}"
 HELLISH_PLUGINS_REF="${HELLISH_PLUGINS_REF:-}" # empty = the repo's default branch
 HELLISH_PLUGINS_SRC="${HELLISH_PLUGINS_SRC:-}" # a local checkout to install from instead
-# The login born2root.conf named, as the guest records it (/etc/b2b/build.conf,
+# The login born2root.toml named, as the guest records it (/etc/b2b/build.conf,
 # written by utils/b2b_config.sh --guest). Unset HELLISH_USERS defaults to it.
 B2B_BUILD_CONF="${B2B_BUILD_CONF:-/etc/b2b/build.conf}"
 HELLISH_USERS="${HELLISH_USERS:-$(sed -n 's/^B2B_LOGIN=//p' "$B2B_BUILD_CONF" 2>/dev/null | head -n1)}"

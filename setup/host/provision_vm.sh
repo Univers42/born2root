@@ -34,7 +34,7 @@ cd "$REPO_ROOT" || exit 1
 VM_NAME="${1:-debian}"
 ACTION="${2:-all}"
 # Who to log in as, and which account the provisioners set up: the login in
-# born2root.conf, unless VM_USER says otherwise. Each provisioner's *_USERS
+# born2root.toml, unless VM_USER says otherwise. Each provisioner's *_USERS
 # follows it, so `make nvim` configures the same account the build did.
 . "$REPO_ROOT/utils/b2b_config.sh"
 VM_USER="${VM_USER:-$(b2b_get B2B_LOGIN)}"
@@ -48,7 +48,7 @@ CLAUDE_CODE_USERS="${CLAUDE_CODE_USERS:-$VM_USER}"
 AI_USERS="${AI_USERS:-$VM_USER}"
 
 # ── The account password ────────────────────────────────────────────────────
-# What the build set for VM_USER: born2root.conf's B2B_USER_PASSWORD, the same
+# What the build set for VM_USER: born2root.toml's B2B_USER_PASSWORD, the same
 # value the preseed was rendered with. NOT the disk passphrase, which is a
 # different secret. VM_SUDO_PASS / VM_SUDO_PASS_FILE override it for a guest
 # whose password has since been changed (as the evaluation expects).
@@ -114,10 +114,10 @@ SSH_PREFIX=()
 if ! ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${VM_USER}@127.0.0.1" true 2>/dev/null; then
     if command -v sshpass >/dev/null 2>&1 && SSHPASS=$(resolve_sudo_pass) && [ -n "$SSHPASS" ]; then
         export SSHPASS
-        warn "key auth failed — falling back to sshpass with the account password from born2root.conf"
+        warn "key auth failed — falling back to sshpass with the account password from born2root.toml"
         SSH_PREFIX=(sshpass -e)
     else
-        die "cannot reach ${VM_USER}@127.0.0.1:${SSH_PORT} with key auth (and no sshpass, or no password in born2root.conf)"
+        die "cannot reach ${VM_USER}@127.0.0.1:${SSH_PORT} with key auth (and no sshpass, or no password in born2root.toml)"
     fi
 fi
 

@@ -14,7 +14,7 @@
 #
 # It is deliberately non-interactive: the few root-only facts (luksDump, ufw)
 # are fetched with `sudo -S` over `ssh -tt`, using the account password from
-# born2root.conf the way deploy_inception.sh does. The expected login, host
+# born2root.toml the way deploy_inception.sh does. The expected login, host
 # name and owner come from the same file. Nothing is changed in the guest.
 #
 # Usage:  verify_guest_parity.sh [ssh-alias]        (default: b2b)

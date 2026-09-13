@@ -7,7 +7,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "=== First-boot setup starting ($(date)) ==="
 
-# Who this VM is for (born2root.conf on the host, /etc/b2b/build.conf here):
+# Who this VM is for (born2root.toml on the host, /etc/b2b/build.conf here):
 # the login and the extra accounts. See b2b-setup.sh, section 0, for the
 # UID-1000 fallback on a guest built before the file existed.
 B2B_LOGIN=""
@@ -19,7 +19,7 @@ if [ -f /etc/b2b/build.conf ]; then
 fi
 [ -n "$B2B_LOGIN" ] || B2B_LOGIN=$(awk -F: '$3 == 1000 { print $1; exit }' /etc/passwd)
 [ -n "$B2B_HOSTNAME" ] || B2B_HOSTNAME="${B2B_LOGIN}42"
-# Every account born2root.conf named, one per line: the login, then the extras.
+# Every account born2root.toml named, one per line: the login, then the extras.
 b2b_accounts() { printf '%s %s\n' "$B2B_LOGIN" "$B2B_EXTRA_USERS" | tr ' ' '\n' | cut -d: -f1 | grep -v '^$'; }
 echo "accounts: $(b2b_accounts | tr '\n' ' ')"
 
@@ -39,7 +39,7 @@ if [ -f /etc/b2b_custom_shell.conf ]; then
                 usermod -s "$B2B_CUSTOM_SHELL" "$u" 2>/dev/null || true
                 echo "[OK] Login shell enforced on first boot: $u -> $B2B_CUSTOM_SHELL"
             else
-                echo "[WARN] born2root.conf names $u, but there is no such account"
+                echo "[WARN] born2root.toml names $u, but there is no such account"
             fi
         done <<ACCOUNTSEOF
 $(b2b_accounts)
@@ -385,7 +385,7 @@ else
 fi
 
 # hellish's own configuration (~/.hellishrc and the plugin framework) for
-# every account born2root.conf named that does not have it yet: the extra
+# every account born2root.toml named that does not have it yet: the extra
 # users always, the login user when the upstream install above did not bring
 # it. A shell without its configuration is half of what this VM promises.
 HELLISH_MISSING=""
