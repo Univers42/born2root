@@ -84,6 +84,7 @@ check "host_port_of reads ports.env (mariadb)" "$(host_port_of mariadb)" 3307
 # again by a child (qemu_pipeline.sh exports PORTS_SPEC to qemu_vm.sh).
 sed 's|^forwards = \[\]|forwards = [ { name = "grafana", guest = 3100, host = 3000 } ]|' \
     tests/fixtures/default.toml >"$TMP/fwd.toml"
+# shellcheck disable=SC2016 # expanded by the child shell, on purpose
 fwd_spec=$("${SCRIPT_SH:-bash}" -c '
     export B2B_CONFIG="$1" VM_NAME=debian VM_PATH="$2" PORTS_SPEC="ssh:4242:4242"
     . ./setup/host/qemu_vm.sh

@@ -71,6 +71,7 @@ check "build.conf is sourceable and carries the policy" \
     "$("${SCRIPT_SH:-bash}" -c ". '$TMP/build.conf'; printf '%s/%s/%s/%s' \"\$B2B_PASS_MIN_LENGTH\" \"\$B2B_MONITOR_INTERVAL\" \"\$B2B_SUDO_TRIES\" \"\$B2B_SUDO_BADPASS\"")" \
     "12/5/2/Wrong password. Access denied!"
 check "a stricter policy is accepted" "$(env B2B_CONFIG="$TMP/strict.toml" "${CFG[@]}" --check >/dev/null 2>&1 && echo ok || echo refused)" ok
+# shellcheck disable=SC2016 # the $ and backticks are the unsafe characters under test
 for bad in 'Say \"no\"' "It's wrong" 'Costs $5' 'back`tick`'; do
     sed "s|^badpass_message = .*|badpass_message = '$bad'|" "$DEFAULTS" >"$TMP/bad.toml"
     # a TOML literal string cannot hold ', so that one is written as a basic string

@@ -361,19 +361,19 @@ when the ISO is built, and every script reads it through
 `utils/b2b_config.sh` (Python underneath, no extra dependency: `tomllib`, or
 the vendored parser on Python 3.10).
 
-| Section             | What it holds                                                  |
-| ------------------- | -------------------------------------------------------------- |
-| `[vm]`              | name, backend, disk size, RAM, profile, AI mode                |
-| `[system]`          | hostname, locale, keymap, timezone, mirror, root and LUKS pass |
-| `[users.<name>]`    | one per account: password, full name, sudo, groups, keys, nvim |
-| `[packages]`        | `apt = [...]`, extra Debian packages                           |
-| `[features]`        | each optional feature `"auto"`, `true` or `false`              |
-| `[policy.password]` | ageing and quality; the subject is the floor                   |
-| `[policy.sudo]`     | tries, wrong-password message, log directory                   |
-| `[policy.ssh]`      | `password_login = false` for keys only                         |
-| `[policy.monitoring]` | how often `monitoring.sh` broadcasts                         |
-| `[network]`         | `forwards = [ { name, guest, host } ]`, extra ports            |
-| `[disk]`            | swap and the logical volume table                              |
+| Section               | What it holds                                                  |
+| --------------------- | -------------------------------------------------------------- |
+| `[vm]`                | name, backend, disk size, RAM, profile, AI mode                |
+| `[system]`            | hostname, locale, keymap, timezone, mirror, root and LUKS pass |
+| `[users.<name>]`      | one per account: password, full name, sudo, groups, keys, nvim |
+| `[packages]`          | `apt = [...]`, extra Debian packages                           |
+| `[features]`          | each optional feature `"auto"`, `true` or `false`              |
+| `[policy.password]`   | ageing and quality; the subject is the floor                   |
+| `[policy.sudo]`       | tries, wrong-password message, log directory                   |
+| `[policy.ssh]`        | `password_login = false` for keys only                         |
+| `[policy.monitoring]` | how often `monitoring.sh` broadcasts                           |
+| `[network]`           | `forwards = [ { name, guest, host } ]`, extra ports            |
+| `[disk]`              | swap and the logical volume table                              |
 
 Accounts are a table each, created in file order. **The first one is you**:
 the account `ssh b2b` logs into and the owner of `<login>.42.fr`.
