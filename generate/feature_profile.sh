@@ -146,8 +146,8 @@ RECIPE="$HERE/partition_recipe.sh"
 # It went into the `full` tier because at SIZE_B2B=15 the standard set left
 # 289 MB on / by these costs, and 320 does not go into 289. The sixth pass
 # below showed two of those costs were 220 MB too high: it fits at 15 now, by
-# 189 MB. It stays in `full` anyway, since those 189 MB are all the margin the
-# model has left on /, and a default build should keep them.
+# 144 MB since the seventh pass. It stays in `full` anyway, since those 144 MB
+# are all the margin the model has left on /, and a default build keeps them.
 #
 # 2026-09-13, sixth pass -- the / column against a guest with EVERY standard
 # feature plus claude-code installed and verified (debian, SIZE_B2B=16). df
@@ -168,6 +168,13 @@ RECIPE="$HERE/partition_recipe.sh"
 # history.log and ~190 from debootstrap, which history.log never sees, plus
 # ~190 of generated files). The table now says 3070 for that set against the
 # 2670 measured, and 3259 usable at 15 GB.
+#
+# 2026-09-13, seventh pass -- nvim-extras draws mermaid in the buffer:
+#   nvim-extras    /   92 -> 137   123 MB measured by the 15 GB rebuild's
+#                                  features.status (more than a third over
+#                                  92), plus the 13.5 MB mermaid-ascii binary
+#                                  in /usr/local/bin. That set now needs 3115 of
+#                                  the 3259 usable at 15 GB: 144 MB to spare.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      8     0     0     0      -
@@ -179,7 +186,7 @@ hellish-upstream   base      0     0     0     1      -
 webstack           standard  272   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
-nvim-extras        standard  92    135   0     150    nvim
+nvim-extras        standard  137   135   0     150    nvim
 devtools-extra     standard  200   0     0     0      nodejs
 claude-code        full      320   0     0     0      -
 docker             standard  400   0     3300  0      -

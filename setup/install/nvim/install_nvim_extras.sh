@@ -27,7 +27,9 @@
 #
 # AND THE REST OF THE VS CODE FEATURE LIST (50-b2b-markdown, 60-b2b-ide)
 #   markdown, in-buffer   render-markdown.nvim — headings, bullets, tables and
-#                         checkboxes drawn in the buffer you are still editing
+#                         checkboxes drawn in the buffer you are still editing;
+#                         52-b2b-mermaid draws ```mermaid flowcharts and sequence
+#                         diagrams as box-art under their block (mermaid-ascii)
 #   markdown, in browser  markdown-preview.nvim — the live rendered page, with
 #                         mermaid diagrams and maths. Headless-aware: this VM has
 #                         no browser, so it PRINTS the URL and you open it on the
@@ -129,6 +131,10 @@ NVIM_MKDP_PORT="${NVIM_MKDP_PORT:-8420}"
 # install_nvim.sh writes the two Lua helpers the bootstrap runs (parsers,
 # verification) here; this script runs them after its own layer.
 B2B_LIB_DIR="${B2B_LIB_DIR:-/usr/local/lib/b2b}"
+# mermaid-ascii draws ```mermaid blocks inside markdown buffers (see
+# install_mermaid_ascii). Pinned, and checked against the release's checksums.
+MERMAID_ASCII_VERSION="${MERMAID_ASCII_VERSION:-1.6.1}"
+MERMAID_ASCII_BIN="${MERMAID_ASCII_BIN:-/usr/local/bin/mermaid-ascii}"
 
 log() { printf '[nvim-extras] %s\n' "$*"; }
 warn() { printf '[nvim-extras] WARN: %s\n' "$*" >&2; }
@@ -1242,6 +1248,255 @@ LUAEOF
     chmod 644 "${cfg}/plugin/40-b2b-startup.lua"
 }
 
+# ── Mermaid, drawn inside the markdown buffer ──────────────────────────────
+# Asked for on 2026-09-13: see a ```mermaid diagram in nvim, not only in the
+# browser preview. Pictures were measured and ruled out. An image in a terminal
+# needs a graphics protocol the host's gnome-terminal (VTE 0.68) does not have,
+# and turning mermaid into an image needs mermaid-cli with a headless Chromium:
+# 476 MB of node modules plus ~650 MB of browser download, against a 15 GB
+# layout with ~144 MB left on / for everything standard + claude-code.
+#
+# mermaid-ascii draws the same diagrams as box-drawing text instead: one 13.5 MB
+# Go binary, works in any UTF-8 terminal, over ssh, inside tmux. It handles
+# flowcharts (graph/flowchart, every direction) and sequence diagrams; other
+# types exit 1 with "unsupported graph type", and 52-b2b-mermaid.lua shows that
+# as a one-line note pointing at the browser preview.
+install_mermaid_ascii() {
+    local arch base tarball tmp want got
+    case "$(uname -m)" in
+    x86_64 | amd64) arch=x86_64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *)
+        warn "no mermaid-ascii build for $(uname -m) — mermaid blocks stay code in nvim"
+        return 0
+        ;;
+    esac
+    local have
+    have=$(cat "${B2B_LIB_DIR}/mermaid-ascii.version" 2>/dev/null)
+    if [ -x "$MERMAID_ASCII_BIN" ] && [ "$have" = "$MERMAID_ASCII_VERSION" ]; then
+        log "mermaid-ascii ${MERMAID_ASCII_VERSION} already installed"
+        return 0
+    fi
+    base="https://github.com/AlexanderGrooff/mermaid-ascii/releases/download/${MERMAID_ASCII_VERSION}"
+    tarball="mermaid-ascii_Linux_${arch}.tar.gz"
+    tmp=$(mktemp -d /var/tmp/mermaid-ascii.XXXXXX) || {
+        warn "mktemp failed — mermaid blocks will not be drawn in nvim"
+        return 1
+    }
+    log "fetching mermaid-ascii ${MERMAID_ASCII_VERSION} (${tarball})"
+    if ! curl -fsSL --retry 3 --max-time 180 -o "${tmp}/${tarball}" "${base}/${tarball}" ||
+        ! curl -fsSL --retry 3 --max-time 60 -o "${tmp}/checksums.txt" \
+            "${base}/mermaid-ascii_${MERMAID_ASCII_VERSION}_checksums.txt"; then
+        warn "could not download mermaid-ascii — mermaid blocks will not be drawn in nvim"
+        rm -rf "$tmp"
+        return 1
+    fi
+    want=$(awk -v f="$tarball" '$2 == f { print $1; exit }' "${tmp}/checksums.txt")
+    got=$(sha256sum "${tmp}/${tarball}" | awk '{ print $1 }')
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        warn "mermaid-ascii ${tarball}: sha256 ${got:-?} does not match the release's ${want:-(no entry)} — discarding it"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # Proven by drawing, not by existing: two boxes and an arrow.
+    if ! tar -xzf "${tmp}/${tarball}" -C "$tmp" mermaid-ascii ||
+        ! printf 'graph LR\n  A --> B\n' | "${tmp}/mermaid-ascii" -f - 2>/dev/null | grep -q 'A.*B'; then
+        warn "the mermaid-ascii binary did not draw a test diagram — not installing it"
+        rm -rf "$tmp"
+        return 1
+    fi
+    install -m 755 "${tmp}/mermaid-ascii" "$MERMAID_ASCII_BIN" || {
+        warn "could not install ${MERMAID_ASCII_BIN}"
+        rm -rf "$tmp"
+        return 1
+    }
+    mkdir -p "$B2B_LIB_DIR"
+    printf '%s\n' "$MERMAID_ASCII_VERSION" >"${B2B_LIB_DIR}/mermaid-ascii.version"
+    rm -rf "$tmp"
+    log "mermaid-ascii ${MERMAID_ASCII_VERSION} installed at ${MERMAID_ASCII_BIN} (sha256 verified)"
+}
+
+write_mermaid_lua() {
+    local cfg="$1"
+    mkdir -p "${cfg}/plugin"
+    cat >"${cfg}/plugin/52-b2b-mermaid.lua" <<LUAHEAD
+-- 52-b2b-mermaid.lua — written by setup/install/nvim/install_nvim_extras.sh
+local MERMAID_BIN = '${MERMAID_ASCII_BIN}'
+LUAHEAD
+    cat >>"${cfg}/plugin/52-b2b-mermaid.lua" <<'LUAEOF'
+
+-- Mermaid diagrams drawn INSIDE the markdown buffer, as box-drawing text.
+--
+-- A ```mermaid fenced block gets its diagram on virtual lines right under the
+-- closing fence, redrawn a moment after you stop typing. Virtual lines are not
+-- text: nothing is written into the file, undo never sees them, and yanking
+-- the block yanks the mermaid source. Flowcharts and sequence diagrams are
+-- drawn; any other diagram type keeps its code block plus one dim line saying
+-- where to see it (<leader>mp, the browser preview).
+--
+--   <leader>mm                     drawings on/off, in every markdown buffer
+--   :B2BMermaid [on|off|toggle]
+--
+-- The installer header (install_mermaid_ascii) has why this is text and not
+-- pictures: in short, the host terminal cannot show images, and a picture
+-- renderer does not fit the 15 GB layout.
+
+local BIN = vim.g.b2b_mermaid_bin or MERMAID_BIN
+local ns = vim.api.nvim_create_namespace 'b2b-mermaid'
+local uv = vim.uv or vim.loop
+local enabled = vim.g.b2b_mermaid ~= false
+local cache, cached = {}, 0
+local generation, timers = {}, {}
+
+vim.api.nvim_set_hl(0, 'B2BMermaid', { link = 'Special', default = true })
+vim.api.nvim_set_hl(0, 'B2BMermaidNote', { link = 'Comment', default = true })
+
+-- Fenced code blocks, CommonMark's way: a fence is 3+ backticks or 3+ tildes,
+-- closed by a line of the same character, at least as long, with nothing
+-- after it. Every fence is tracked, not only mermaid ones, so a ```mermaid
+-- quoted inside another code block is not drawn.
+local function fenced_blocks(lines)
+  local blocks, open = {}, nil
+  for n, line in ipairs(lines) do
+    local marks, rest = line:match '^%s*(```+)(.*)$'
+    if not marks then marks, rest = line:match '^%s*(~~~+)(.*)$' end
+    if marks then
+      if not open then
+        open = { char = marks:sub(1, 1), len = #marks, info = vim.trim(rest), first = n }
+      elseif marks:sub(1, 1) == open.char and #marks >= open.len and vim.trim(rest) == '' then
+        open.last = n
+        blocks[#blocks + 1] = open
+        open = nil
+      end
+    end
+  end
+  return blocks
+end
+
+local function note(text)
+  return { hl = 'B2BMermaidNote', lines = { 'mermaid: ' .. text } }
+end
+
+-- mermaid-ascii on the block's source; the result is cached by source and
+-- width, so moving around or typing elsewhere never runs it again.
+local function render(src, width, done)
+  local key = width .. '\0' .. src
+  if cache[key] then return done(cache[key]) end
+  local cmd = { BIN, '-f', '-', '-p', '0', '--max-width', tostring(width) }
+  local ok = pcall(vim.system, cmd, { stdin = src, text = true }, function(r)
+    local entry
+    if r.code == 0 and vim.trim(r.stdout or '') ~= '' then
+      entry = { hl = 'B2BMermaid', lines = vim.split((r.stdout:gsub('%s+$', '')), '\n', { plain = true }) }
+    else
+      local why = (r.stderr or ''):match 'msg="([^"]*)"' or vim.trim(r.stderr or '')
+      why = why:gsub('^failed to parse [%w ]*: ', ''):gsub('%. Supported.*$', '')
+      entry = note((why ~= '' and why or 'nothing drawn') .. ' -- <leader>mp shows it in the browser')
+    end
+    if cached >= 256 then cache, cached = {}, 0 end
+    cache[key], cached = entry, cached + 1
+    vim.schedule(function() done(entry) end)
+  end)
+  if not ok then done(note(BIN .. ' is not installed -- re-run install_nvim_extras.sh')) end
+end
+
+local function draw(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  -- Results arrive asynchronously; only the newest pass may place them.
+  generation[buf] = (generation[buf] or 0) + 1
+  local gen = generation[buf]
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  if not enabled then return end
+  local win = vim.fn.bufwinid(buf)
+  local width = math.max(20, (win ~= -1 and vim.api.nvim_win_get_width(win) or vim.o.columns) - 2)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for _, b in ipairs(fenced_blocks(lines)) do
+    if b.last > b.first + 1 and b.info:match '^mermaid%f[%W]' then
+      render(table.concat(lines, '\n', b.first + 1, b.last - 1) .. '\n', width, function(entry)
+        if generation[buf] ~= gen or not vim.api.nvim_buf_is_valid(buf) then return end
+        local virt = {}
+        for i, l in ipairs(entry.lines) do virt[i] = { { l, entry.hl } } end
+        pcall(vim.api.nvim_buf_set_extmark, buf, ns, b.last - 1, 0, { virt_lines = virt })
+      end)
+    end
+  end
+end
+
+local function schedule(buf)
+  local t = timers[buf]
+  if not t then
+    t = uv.new_timer()
+    timers[buf] = t
+  end
+  t:stop()
+  t:start(300, 0, vim.schedule_wrap(function() draw(buf) end))
+end
+
+local function markdown_buffers()
+  return vim.tbl_filter(function(b)
+    return vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == 'markdown'
+  end, vim.api.nvim_list_bufs())
+end
+
+local group = vim.api.nvim_create_augroup('b2b-mermaid', { clear = true })
+vim.api.nvim_create_autocmd('FileType', {
+  group = group,
+  pattern = 'markdown',
+  callback = function(ev)
+    local buf = ev.buf
+    if vim.b[buf].b2b_mermaid then return schedule(buf) end
+    vim.b[buf].b2b_mermaid = true
+    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufWinEnter' }, {
+      group = group,
+      buffer = buf,
+      callback = function() schedule(buf) end,
+    })
+    vim.api.nvim_create_autocmd('BufWipeout', {
+      group = group,
+      buffer = buf,
+      callback = function()
+        local t = timers[buf]
+        if t then
+          t:stop()
+          t:close()
+        end
+        timers[buf], generation[buf] = nil, nil
+      end,
+    })
+    schedule(buf)
+  end,
+})
+-- A different width is a different drawing (--max-width follows the window).
+vim.api.nvim_create_autocmd('VimResized', {
+  group = group,
+  callback = function()
+    for _, b in ipairs(markdown_buffers()) do schedule(b) end
+  end,
+})
+
+local function set_enabled(on)
+  enabled = on
+  for _, b in ipairs(markdown_buffers()) do draw(b) end
+  vim.notify('mermaid drawings ' .. (on and 'on' or 'off'), vim.log.levels.INFO)
+end
+vim.api.nvim_create_user_command('B2BMermaid', function(o)
+  if o.args == 'on' then
+    set_enabled(true)
+  elseif o.args == 'off' then
+    set_enabled(false)
+  else
+    set_enabled(not enabled)
+  end
+end, {
+  nargs = '?',
+  complete = function() return { 'on', 'off', 'toggle' } end,
+  desc = 'Mermaid diagrams drawn inside markdown buffers',
+})
+vim.keymap.set('n', '<leader>mm', function() set_enabled(not enabled) end,
+  { desc = '[M]arkdown: [m]ermaid drawings on/off', silent = true })
+LUAEOF
+    chmod 644 "${cfg}/plugin/52-b2b-mermaid.lua"
+}
+
 # ── Markdown: rendered in the buffer, and rendered in a browser ─────────────
 # The two plugins answer different questions and are both worth having:
 #
@@ -1450,7 +1705,8 @@ vim.api.nvim_create_user_command('B2BMarkdown', function()
     '',
     '  ssh -p ' .. SSH_PORT .. ' -L ' .. PORT .. ':127.0.0.1:' .. PORT .. ' ' .. (vim.env.USER or 'dlesieur') .. '@127.0.0.1',
     '',
-    'Mermaid: a ```mermaid fenced block renders as a diagram in the preview.',
+    'Mermaid: a ```mermaid block is drawn right under itself in this buffer (flowcharts',
+    'and sequence diagrams; <leader>mm toggles), and as a full diagram in the preview.',
     'Excalidraw: :Excalidraw (<leader>me) edits a .excalidraw file in the browser and',
     'saves a .excalidraw.svg beside it; embed that with ![](name.excalidraw.svg).',
     '',
@@ -2029,6 +2285,7 @@ setup_user() {
     write_sessions_lua "$cfg" "$sessdir"
     write_startup_lua "$cfg"
     write_markdown_lua "$cfg" "$NVIM_MKDP_PORT"
+    write_mermaid_lua "$cfg"
     write_ide_lua "$cfg" "$NVIM_PYTHON_VENV"
 
     mkdir -p "$sessdir"
@@ -2040,7 +2297,7 @@ setup_user() {
         for f in plugin/05-b2b-pack.lua plugin/10-b2b-plugins.lua \
             plugin/20-b2b-keymaps.lua plugin/30-b2b-sessions.lua \
             plugin/40-b2b-startup.lua plugin/50-b2b-markdown.lua \
-            plugin/60-b2b-ide.lua; do
+            plugin/52-b2b-mermaid.lua plugin/60-b2b-ide.lua; do
             grep -qxF "$f" "${cfg}/.git/info/exclude" 2>/dev/null ||
                 printf '%s\n' "$f" >>"${cfg}/.git/info/exclude"
         done
@@ -2607,6 +2864,7 @@ mark_feature_ok() {
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Neovim extras (buffers, files, git, sessions, movement) ==="
 install_deps
+install_mermaid_ascii || true
 write_profile
 write_vw "$NVIM_SESSION_DIR_NAME"
 

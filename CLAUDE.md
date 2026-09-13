@@ -168,7 +168,7 @@ to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
   with 20% headroom. A set that does not fit fails the ISO build and names the
   smallest size that would. `full` is not a synonym for `standard`: today it
   is what claude-code lives in. Its 320 MB fits beside the standard set at
-  15 GB with only 189 MB to spare on `/`, so below 30 GB it is opt-in
+  15 GB with only 144 MB to spare on `/`, so below 30 GB it is opt-in
   (`FEATURES="+claude-code"`).
 
 Two marker contracts in `preseeds/preseed.cfg` matter when editing it. The

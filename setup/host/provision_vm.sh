@@ -322,7 +322,7 @@ all)
         install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_" "Herdr + opencode"
     # Claude Code only when this guest's build budgeted for it. It is a
     # full-tier feature: 320 MB on /, which a 15 GB standard guest holds with
-    # 189 MB to spare only when the build planned for it, so running it
+    # 144 MB to spare only when the build planned for it, so running it
     # unconditionally here could take / past its headroom. features.conf inside
     # the guest is the record of what the fit check allowed, so ask it instead
     # of guessing from the host.

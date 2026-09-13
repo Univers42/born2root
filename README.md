@@ -841,6 +841,7 @@ what this setup is modelled on:
 | VS Code feature | Here | Where |
 | --------------- | ---- | ----- |
 | Markdown preview, in the buffer | [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) | `<leader>mr` |
+| Mermaid diagrams, in the buffer | [mermaid-ascii](https://github.com/AlexanderGrooff/mermaid-ascii) box-art under each block | `<leader>mm` |
 | Markdown preview, in a browser | [markdown-preview.nvim](https://github.com/iamcco/markdown-preview.nvim) — mermaid + KaTeX | `<leader>mp` |
 | Autocomplete | blink.cmp | _kickstart_ |
 | Go to definition / references / rename | `vim.lsp` | _kickstart_ |
@@ -941,6 +942,15 @@ graph TD
 ```
 ````
 
+It is also drawn **inside the buffer**, right under the block, as box-drawing
+text that follows your edits (`52-b2b-mermaid.lua`, `<leader>mm` or
+`:B2BMermaid` to toggle). Flowcharts and sequence diagrams are drawn; other
+types (pie, gantt, class) get a one-line note pointing at `<leader>mp`. It is
+text rather than a picture on purpose: an image in a terminal needs a graphics
+protocol gnome-terminal lacks, and mermaid-cli's headless Chromium measured over
+a gigabyte — more than the 15 GB layout has left. The drawing is virtual lines:
+nothing is written into your file.
+
 **Excalidraw** is the real editor — the official `@excalidraw/excalidraw`
 React component, bundled at build time into `/opt/excalidraw` (22 MB, fonts
 included, no CDN at runtime) and served by a ~140-line Node server with no
@@ -962,9 +972,16 @@ the markdown preview, on GitHub, and re-opens in excalidraw.com:
 ![architecture](arch.excalidraw.svg)
 ```
 
-The Neovim side is one more drop-in (`55-b2b-excalidraw.lua`), the server stops
-with the Neovim that started it, and the file API only accepts absolute
-`*.excalidraw` paths.
+Plain **`http://localhost:8421/`** opens the drawing you opened last (or a
+scratch drawing under `~/.local/share/excalidraw/` that is saved like any
+other), so the bare URL never loses work. Leaving or refreshing the page sends
+the last unsaved change first, a failed save turns the status line red with
+`NOT SAVED`, and a `.excalidraw` buffer open in Neovim reloads each time the
+browser saves it.
+
+The Neovim side is one more drop-in (`55-b2b-excalidraw.lua`). The server keeps
+running after the Neovim that started it quits, so an open drawing keeps
+saving, and the file API only accepts absolute `*.excalidraw` paths.
 
 Port 8420/8421 and not 8080/8090 on purpose: this VM already serves lighttpd on
 80/443 and the Inception stack on 8080/8081/8082 with its static site on 8090.
@@ -1191,7 +1208,7 @@ missing things, and Docker could run before nvim and starve it.
 |--------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | **minimal**  | 8–14       | everything Born2beRoot mandates, dev tools (gcc, python3, …), **nvim + kickstart**, **hellish**                                                   |
 | **standard** | 15–29      | + the bonus web stack (lighttpd/MariaDB/PHP/WordPress), Docker, Node + npm globals, pipx tools, the nvim IDE layer + Excalidraw, Herdr + opencode |
-| **full**     | 30+        | + **Claude Code**, whose one binary is 320 MB on `/` and does not fit beside everything else in the 15 GB school quota                            |
+| **full**     | 30+        | + **Claude Code** (320 MB on `/`); it fits the 15 GB quota beside everything else, 144 MB to spare, so below 30 GB it is opt-in                   |
 
 AI (`AI_MODE=client|local`) is never chosen automatically. Base features cannot
 be turned off. Everything else can be, per feature:
@@ -1201,6 +1218,7 @@ make all SIZE_B2B=10                        # minimal
 make all SIZE_B2B=10 FEATURES=+docker       # minimal plus Docker — fits, so it builds
 make all SIZE_B2B=13 PROFILE=standard       # refused: "fits from SIZE_B2B=14"
 make all FEATURES="-pytools -devtools-extra"
+make all NERD_FONT=off                      # plain-text icons in Neovim (default: auto)
 ```
 
 A set that does not fit **fails the ISO build** naming the mount and the
@@ -1311,7 +1329,7 @@ user shell can only watch the update fail; `make claude_code` is how the
 version moves.
 
 **It is off in the default build, but it fits the quota.** At `SIZE_B2B=15` the
-standard set plus this 320 MB binary leaves 189 MB on `/` above the 20%
+standard set plus this 320 MB binary leaves 144 MB on `/` above the 20%
 headroom (measured on a built guest: 2670 MB used on `/` with everything
 installed). That is too thin a margin to spend by default, so it is a
 `full`-tier feature — automatic from 30 GB, and asked for by name below that:

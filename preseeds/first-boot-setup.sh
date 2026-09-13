@@ -830,7 +830,7 @@ fi
 # Claude Code is its own feature, claude-code, and it sits BESIDE opencode --
 # setup/install/ai/install_claude_code.sh has the argument for keeping both.
 # It is off in the default 15 GB build: its single binary is 320 MB on /, and
-# beside the standard set that leaves 189 MB of the 20% headroom -- it fits,
+# beside the standard set that leaves 144 MB of the 20% headroom -- it fits,
 # but by less than a default should spend. `full` (30 GB+) gets it
 # automatically and FEATURES="+claude-code" (or the picker) asks for it on a
 # 15-29 GB disk. Either way the host already checked it fits before this ISO

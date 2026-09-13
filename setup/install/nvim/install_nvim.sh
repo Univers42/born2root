@@ -820,6 +820,14 @@ if mode == 'all' then
       problem 'kulala_http treesitter grammar missing — .http files will not parse'
     end
   end
+
+  -- mermaid-ascii, which 52-b2b-mermaid.lua runs to draw ```mermaid blocks in
+  -- the buffer. Without it every diagram shows a "not installed" note instead,
+  -- and a build that says so is better than a user who finds out.
+  if vim.fn.filereadable(vim.fn.stdpath 'config' .. '/plugin/52-b2b-mermaid.lua') == 1
+    and vim.fn.executable '/usr/local/bin/mermaid-ascii' ~= 1 then
+    problem 'mermaid-ascii missing (/usr/local/bin/mermaid-ascii) — mermaid blocks cannot be drawn in the buffer'
+  end
 end
 
 print(('verify (%s): %d plugins, %d parsers, %d problem(s)'):format(mode, #plugins, parsers_installed, #problems))
