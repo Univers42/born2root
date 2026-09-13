@@ -649,6 +649,10 @@ ufw allow 8001/tcp comment 'BaaS admin'
 ufw allow 8025/tcp comment 'Local mail inbox'
 ufw allow 8787/tcp comment 'Auth gateway'
 ufw allow 18200/tcp comment 'Vault'
+# [network] forwards in born2root.toml (first boot re-applies these too).
+for p in ${B2B_FORWARD_PORTS:-}; do
+    ufw allow "${p}/tcp" comment 'born2root.toml' || echo "[WARN] ufw could not open ${p}/tcp from born2root.toml"
+done
 echo y | ufw enable
 echo "[OK] UFW firewall active"
 

@@ -254,6 +254,10 @@ refuse "a forward on the SSH port" network.forwards \
     's/^forwards = \[\]/forwards = [ { name = "x", guest = 4242, host = 4243 } ]/'
 refuse "a forward on a port the build already uses" network.forwards \
     's/^forwards = \[\]/forwards = [ { name = "x", guest = 443, host = 9443 } ]/'
+refuse "a forward named like a built-in VirtualBox rule" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "vault", guest = 9100, host = 9100 } ]/'
+refuse "a forward on Inception's FTP passive range" network.forwards \
+    's/^forwards = \[\]/forwards = [ { name = "x", guest = 21005, host = 21005 } ]/'
 refuse "a forward below 1024 on this machine" network.forwards \
     's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 80 } ]/'
 refuse "two forwards with the same name" network.forwards \

@@ -26,6 +26,8 @@ check() {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# The personalised born2root.toml may add [network] forwards; pin the defaults.
+export B2B_CONFIG=tests/fixtures/default.toml
 VM_NAME=debian
 VM_PATH="$TMP"
 PORTS_SPEC="ssh:4242:4242 mariadb:3306:3306 frontend:5173:5173"
@@ -75,5 +77,22 @@ mkdir -p "$VM_DIR"
 printf 'ssh=4242\nmariadb=3307\nfrontend=5173\n' >"$VM_DIR/ports.env"
 check "host_port_of reads ports.env (ssh)" "$(host_port_of ssh)" 4242
 check "host_port_of reads ports.env (mariadb)" "$(host_port_of mariadb)" 3307
+
+# ── [network] forwards from born2root.toml join the spec ────────────────────
+# Appended even though PORTS_SPEC is overridden here, walked past a busy port
+# like the built-in ones, and not appended twice when the script is sourced
+# again by a child (qemu_pipeline.sh exports PORTS_SPEC to qemu_vm.sh).
+sed 's|^forwards = \[\]|forwards = [ { name = "grafana", guest = 3100, host = 3000 } ]|' \
+    tests/fixtures/default.toml >"$TMP/fwd.toml"
+fwd_spec=$("${SCRIPT_SH:-bash}" -c '
+    export B2B_CONFIG="$1" VM_NAME=debian VM_PATH="$2" PORTS_SPEC="ssh:4242:4242"
+    . ./setup/host/qemu_vm.sh
+    . ./setup/host/qemu_vm.sh
+    is_host_port_free() { [ "$1" != 3000 ]; }
+    resolve_ports >/dev/null 2>&1
+    printf "%s|%s" "$PORTS_SPEC" "$RESOLVED_SPEC"' _ "$TMP/fwd.toml" "$TMP")
+check "config forward appended once" "${fwd_spec%%|*}" "ssh:4242:4242 grafana:3000:3100"
+check "config forward walks past a busy port" \
+    "$(printf '%s\n' "${fwd_spec#*|}" | tr ' ' '\n' | awk -F: '$1=="grafana"{print $2 ":" $3}')" "3001:3100"
 
 exit "$fail"

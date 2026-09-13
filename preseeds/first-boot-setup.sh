@@ -217,6 +217,11 @@ if command -v ufw >/dev/null 2>&1; then
     for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
         ufw allow "${p}/tcp" >/dev/null 2>&1 || true
     done
+    # [network] forwards in born2root.toml: the guest side of each one.
+    for p in ${B2B_FORWARD_PORTS:-}; do
+        ufw allow "${p}/tcp" comment 'born2root.toml' >/dev/null 2>&1 ||
+            echo "[WARN] ufw could not open ${p}/tcp from born2root.toml"
+    done
 
     ufw --force enable >/dev/null 2>&1 || true
     systemctl enable ufw >/dev/null 2>&1 || true

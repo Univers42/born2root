@@ -424,7 +424,49 @@ def builtin_ports():
             guest.update(int(p) for p in opened.group(1).split())
     except OSError:
         pass
+    # VirtualBox's rule set is its own list, in the orchestrator's argument
+    # order (name guest host); a guest port only it forwards is still taken.
+    orchestrate = os.path.join(ROOT, "generate", "orchestrate.sh")
+    try:
+        with open(orchestrate, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        for m in re.finditer(r"^\s*ensure_vm_nat_forward [a-z0-9-]+ (\d+) ", text, re.M):
+            guest.add(int(m.group(1)))
+        # Inception's FTP passive range is a loop, not a line per port.
+        passive = re.search(r"for _p in ((?:\d+ ?)+); do\s+ensure_vm_nat_forward", text)
+        if passive:
+            guest.update(int(p) for p in passive.group(1).split())
+    except OSError:
+        pass
     return guest
+
+
+def builtin_forward_names():
+    """Every rule name the three forward lists already use.
+
+    VirtualBox refuses a second NAT rule with an existing name, and QEMU's
+    ports.env is keyed by it, so a config forward called "vault" would either
+    fail the VM's creation or overwrite a built-in port's record.
+    """
+    names = set()
+    sources = (
+        ("setup/host/qemu_vm.sh", r'PORTS_SPEC="\$\{PORTS_SPEC:-([^"]*)\}"', True),
+        ("setup/install/vms/install_vm_debian.sh", r"^add_natpf ([a-z0-9-]+) ", False),
+        ("generate/orchestrate.sh", r"^\s*ensure_vm_nat_forward ([a-z0-9-]+) ", False),
+    )
+    for rel, pattern, is_spec in sources:
+        try:
+            with open(os.path.join(ROOT, rel), "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        if is_spec:
+            spec = re.search(pattern, text)
+            if spec:
+                names.update(t.split(":")[0] for t in spec.group(1).split())
+        else:
+            names.update(m.group(1) for m in re.finditer(pattern, text, re.M))
+    return names
 
 
 # ── Validation ──────────────────────────────────────────────────────────────
@@ -830,6 +872,7 @@ class Validator:
     def network(self):
         forwards = self._list("network.forwards", self.c.network["forwards"])
         builtin = builtin_ports()
+        builtin_names = builtin_forward_names()
         names, guests, hosts = set(), set(), set()
         for i, forward in enumerate(forwards or []):
             where = "network.forwards[%d]" % i
@@ -849,6 +892,11 @@ class Validator:
                 self.err(where + ".name", "lowercase letters, digits and - only")
             elif name in names:
                 self.err(where + ".name", "'%s' is used twice" % name)
+            elif name in builtin_names:
+                self.err(
+                    where + ".name",
+                    "'%s' is a forward the VM already has; pick another name" % name,
+                )
             else:
                 names.add(name)
             guest = self._int(where + ".guest", forward.get("guest"), low=1, high=65535)
@@ -1161,6 +1209,8 @@ def guest_view(config):
         "B2B_SUDO_LOG_DIR",
         "B2B_SSH_PASSWORD_LOGIN",
         "B2B_MONITOR_INTERVAL",
+        # [network] forwards: the guest ports UFW opens.
+        "B2B_FORWARD_PORTS",
     )
     for key in keys:
         if key == "B2B_VOLUMES":
@@ -1175,6 +1225,7 @@ def guest_view(config):
             "B2B_NVIM_USERS",
             "B2B_VOLUMES",
             "B2B_SUDO_BADPASS",
+            "B2B_FORWARD_PORTS",
         ):
             lines.append('%s="%s"' % (key, value))
         else:

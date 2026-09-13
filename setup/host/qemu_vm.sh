@@ -107,6 +107,14 @@ VM_CPUS="${VM_CPUS:-3}"
 # Host:guest port pairs, matching the VirtualBox NAT rule set. These are
 # PREFERRED host ports, not guaranteed ones -- see resolve_ports() below.
 PORTS_SPEC="${PORTS_SPEC:-ssh:4242:4242 http:8082:80 https:8443:443 inception-static:8090:8090 inception-adminer:8081:8080 mariadb:3306:3306 frontend:5173:5173 backend:3000:3000}"
+# [network] forwards in born2root.toml, already name:host:guest. Appended even
+# when PORTS_SPEC is overridden: they are the user's, not a default to replace,
+# and --check has refused a name or a guest port the built-in set already uses.
+B2B_EXTRA_FORWARDS="$(b2b_get B2B_FORWARDS)"
+case " $PORTS_SPEC " in
+*" ${B2B_EXTRA_FORWARDS%% *} "*) ;;
+*) PORTS_SPEC="$PORTS_SPEC${B2B_EXTRA_FORWARDS:+ $B2B_EXTRA_FORWARDS}" ;;
+esac
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'

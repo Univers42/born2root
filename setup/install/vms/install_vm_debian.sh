@@ -422,6 +422,16 @@ add_natpf baas-admin "${HOST_BAAS_ADMIN_PORT}" "${BAAS_ADMIN_PORT}"
 add_natpf mailpit "${HOST_MAILPIT_PORT}" "${MAILPIT_PORT}"
 add_natpf auth-gateway "${HOST_AUTH_GATEWAY_PORT}" "${AUTH_GATEWAY_PORT}"
 add_natpf vault "${HOST_VAULT_PORT}" "${VAULT_PORT}"
+# [network] forwards in born2root.toml ("name:host:guest"). The host port walks
+# up past one already taken, like every forward above.
+for B2B_FWD in $(b2b_get B2B_FORWARDS); do
+    B2B_FWD_NAME=${B2B_FWD%%:*}
+    B2B_FWD_GUEST=${B2B_FWD##*:}
+    B2B_FWD_HOST=${B2B_FWD#*:}
+    B2B_FWD_HOST=${B2B_FWD_HOST%%:*}
+    resolve_host_port B2B_FWD_HOST_PORT "$B2B_FWD_HOST"
+    add_natpf "$B2B_FWD_NAME" "$B2B_FWD_HOST_PORT" "$B2B_FWD_GUEST"
+done
 # Create disk if it does not exist
 if [ ! -f "$VM_DISK_PATH" ]; then
     print_header "Creating virtual disk"

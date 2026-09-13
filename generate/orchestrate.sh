@@ -552,6 +552,15 @@ ensure_vm_nat_forwarding() {
     ensure_vm_nat_forward mailpit 8025 8025
     ensure_vm_nat_forward auth-gateway 8787 8787
     ensure_vm_nat_forward vault 18200 18200
+    # [network] forwards in born2root.toml. They are "name:host:guest" there,
+    # while this function takes name GUEST host -- the one place the order flips.
+    local fwd fname fhost
+    for fwd in $(b2b_get B2B_FORWARDS); do
+        fname=${fwd%%:*}
+        fhost=${fwd#*:}
+        fhost=${fhost%%:*}
+        ensure_vm_nat_forward "$fname" "${fwd##*:}" "$fhost"
+    done
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
