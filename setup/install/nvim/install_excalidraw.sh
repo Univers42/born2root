@@ -40,7 +40,8 @@
 #
 # WHAT LANDS WHERE
 #   /opt/excalidraw/app/          index.html, app.js (+ chunks/), index.css, fonts/
-#   /opt/excalidraw/server.js     static files + GET/PUT /api/file?path=… (node, no deps)
+#   /opt/excalidraw/server.js     static files + GET/PUT /api/file?path=… (node, no deps);
+#                                 / redirects to the drawing opened last
 #   /usr/local/bin/excalidraw     `excalidraw diagram.excalidraw` from any shell
 #   ~/.config/nvim/plugin/55-b2b-excalidraw.lua   :Excalidraw, <leader>me
 #
@@ -95,15 +96,23 @@ write_app_source() {
     local src="$1"
     cat >"${src}/app.jsx" <<'JSXEOF'
 // app.jsx — written by setup/install/nvim/install_excalidraw.sh, bundled by esbuild.
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Excalidraw, exportToSvg, serializeAsJSON } from '@excalidraw/excalidraw';
 
+// The server answers a bare / with a redirect to ?file=<the drawing opened
+// last>, so a page this server handed out always has a file to save to.
 const FILE = new URLSearchParams(location.search).get('file');
-const SAVE_DELAY_MS = 800;
+const SAVE_DELAY_MS = 500;
+// A keepalive request -- the only kind that survives the page unloading --
+// may carry at most 64 KiB. A bigger scene cannot be sent on the way out, so
+// leaving is refused instead (the browser's "leave site?" dialog).
+const KEEPALIVE_MAX = 60000;
+
+const fileUrl = (path) => '/api/file?path=' + encodeURIComponent(path);
 
 async function api(method, path, body) {
-  const res = await fetch('/api/file?path=' + encodeURIComponent(path), {
+  const res = await fetch(fileUrl(path), {
     method,
     body,
     headers: body ? { 'Content-Type': 'application/octet-stream' } : undefined,
@@ -114,11 +123,99 @@ async function api(method, path, body) {
   return res;
 }
 
+// Everything about getting the scene onto disk, in one place, so the unload
+// handlers see the same state as the autosave. `lastJson` is what this page
+// last wrote; `pending` is the newest scene onChange reported. onChange fires
+// on every pointer move, and serializeAsJSON drops selection and scroll, so
+// comparing the two is what keeps an idle page from writing.
+function makeSaver(report) {
+  let timer = null;
+  let lastJson = null;
+  let pending = null;
+  let inFlight = false;
+
+  const unsaved = () => {
+    if (!FILE || !pending) return null;
+    const json = serializeAsJSON(pending.elements, pending.appState, pending.files, 'local');
+    return json === lastJson ? null : json;
+  };
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(save, SAVE_DELAY_MS);
+  };
+  async function save() {
+    // One request at a time: two overlapping PUTs can land in either order,
+    // and an older scene landing last is a silent revert.
+    if (inFlight) return schedule();
+    const json = unsaved();
+    if (json === null) return;
+    const scene = pending;
+    inFlight = true;
+    try {
+      await api('PUT', FILE, json);
+      lastJson = json;
+      const live = scene.elements.filter((el) => !el.isDeleted);
+      const when = new Date().toLocaleTimeString();
+      report(false, 'saved ' + when + ' (' + live.length + ' elements)');
+      try {
+        const svg = await exportToSvg({
+          elements: live,
+          appState: { ...scene.appState, exportBackground: true, exportEmbedScene: true, exportWithDarkMode: false },
+          files: scene.files,
+          exportPadding: 16,
+        });
+        await api('PUT', FILE + '.svg', new XMLSerializer().serializeToString(svg));
+        report(false, 'saved ' + when + ' (' + live.length + ' elements, + .svg)');
+      } catch (e) {
+        report(false, 'saved ' + when + ' — the .svg was not written: ' + e.message);
+      }
+    } catch (e) {
+      report(true, 'NOT SAVED — ' + e.message + ' (is the server still running? :Excalidraw restarts it)');
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  return {
+    change(elements, appState, files) {
+      pending = { elements, appState, files };
+      schedule();
+    },
+    saveNow() {
+      clearTimeout(timer);
+      return save();
+    },
+    // Leaving the page (refresh, close, navigate): send whatever is unsaved in
+    // a keepalive request, which the browser completes after the page is gone.
+    // Returns true when it could NOT be sent, so the caller asks to stay.
+    exit() {
+      clearTimeout(timer);
+      const json = unsaved();
+      if (json === null) return false;
+      if (json.length > KEEPALIVE_MAX) return true;
+      fetch(fileUrl(FILE), {
+        method: 'PUT',
+        body: json,
+        keepalive: true,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+      lastJson = json;
+      return false;
+    },
+  };
+}
+
 function App() {
   const [initial, setInitial] = useState(null);
-  const [status, setStatus] = useState(FILE ? 'loading…' : 'scratch pad — nothing is saved without ?file=');
-  const timer = useRef(null);
-  const lastJson = useRef(null);
+  const [status, setStatus] = useState(FILE ? 'loading…' : 'no file to save to — open this page from :Excalidraw or `excalidraw <file>`');
+  const [failed, setFailed] = useState(false);
+  const saver = useRef(null);
+  if (!saver.current) {
+    saver.current = makeSaver((isError, text) => {
+      setFailed(isError);
+      setStatus(text);
+    });
+  }
 
   useEffect(() => {
     (async () => {
@@ -145,48 +242,46 @@ function App() {
         });
         setStatus('loaded');
       } catch (e) {
-        setStatus('error: ' + e.message);
+        setFailed(true);
+        setStatus('could not load: ' + e.message);
       }
     })();
   }, []);
 
-  // Debounced: onChange fires on every pointer move. serializeAsJSON keeps
-  // only the persistent part of appState, so selection and scrolling do not
-  // produce a "change" -- comparing the JSON is what makes autosave quiet.
-  const onChange = useCallback((elements, appState, files) => {
-    if (!FILE) return;
-    clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
-      try {
-        const json = serializeAsJSON(elements, appState, files, 'local');
-        if (json === lastJson.current) return;
-        await api('PUT', FILE, json);
-        lastJson.current = json;
-        const live = elements.filter((el) => !el.isDeleted);
-        const svg = await exportToSvg({
-          elements: live,
-          appState: { ...appState, exportBackground: true, exportEmbedScene: true, exportWithDarkMode: false },
-          files,
-          exportPadding: 16,
-        });
-        await api('PUT', FILE + '.svg', new XMLSerializer().serializeToString(svg));
-        setStatus('saved ' + new Date().toLocaleTimeString() + ' (' + live.length + ' elements, + .svg)');
-      } catch (e) {
-        setStatus('save failed: ' + e.message);
+  useEffect(() => {
+    const s = saver.current;
+    const onBeforeUnload = (e) => {
+      if (s.exit()) {
+        e.preventDefault();
+        e.returnValue = '';
       }
-    }, SAVE_DELAY_MS);
+    };
+    const onPageHide = () => s.exit();
+    // Switching tabs or windows: a normal save, with the .svg, right away.
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') s.saveNow();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ font: '12px system-ui, sans-serif', padding: '3px 10px', background: '#f3f3f3',
+      <div style={{ font: '12px system-ui, sans-serif', padding: '3px 10px', background: failed ? '#fde2e1' : '#f3f3f3',
         borderBottom: '1px solid #ddd', display: 'flex', gap: 14, alignItems: 'baseline' }}>
         <span style={{ fontWeight: 600 }}>{FILE || 'Excalidraw'}</span>
-        <span id="b2b-status" style={{ color: '#555' }}>{status}</span>
+        <span id="b2b-status" style={{ color: failed ? '#b3261e' : '#555', fontWeight: failed ? 600 : 400 }}>{status}</span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {initial && (
-          <Excalidraw initialData={initial} onChange={onChange}
+          <Excalidraw initialData={initial}
+            onChange={(elements, appState, files) => { if (FILE) saver.current.change(elements, appState, files); }}
             UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false } }} />
         )}
       </div>
@@ -223,17 +318,31 @@ HTMLEOF
 # temp file and rename, so a browser tab dying mid-PUT never leaves a
 # half-written drawing, and a body that is not JSON is refused for the
 # .excalidraw itself (the .svg beside it is opaque).
+#
+# A bare / is never a page that saves nothing. It used to be: without ?file=
+# the editor was a scratch pad with "nothing is saved without ?file=" in its
+# status line, and http://localhost:8421/ is exactly the URL a person types.
+# Reported 2026-09-13: drawn there, refreshed, gone -- and the drawing's file,
+# ~/Documents/inception/myschema.excalidraw, still held the 125-byte empty
+# scene :Excalidraw had created, with no .svg beside it (every real save
+# writes one). Now / redirects to the drawing last opened -- recorded in
+# ${XDG_STATE_HOME:-~/.local/state}/excalidraw/last by :Excalidraw, the
+# `excalidraw` launcher, and every load or save through the API -- or, when
+# there is none, to a scratch file that IS saved, under
+# ${XDG_DATA_HOME:-~/.local/share}/excalidraw/.
 write_server() {
     cat >"${EXCALIDRAW_DIR}/server.js" <<'JSEOF'
 #!/usr/bin/env node
 // server.js — written by setup/install/nvim/install_excalidraw.sh.
 //   node server.js [--port 8421] [--host 127.0.0.1]
-// GET  /                          the editor (add ?file=/abs/path.excalidraw)
+// GET  /                          302 to /?file=<last opened drawing, or the scratch file>
+// GET  /?file=/abs/path.excalidraw  the editor for that file
 // GET  /api/file?path=…           the file's bytes (404 when it does not exist yet)
 // PUT  /api/file?path=…           replace the file atomically
 'use strict';
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const APP = path.join(__dirname, 'app');
@@ -244,6 +353,20 @@ const TYPES = {
   '.svg': 'image/svg+xml', '.png': 'image/png',
 };
 const MAX_BODY = 64 * 1024 * 1024;
+const EMPTY_SCENE = '{"type":"excalidraw","version":2,"source":"born2root","elements":[],'
+  + '"appState":{"viewBackgroundColor":"#ffffff"},"files":{}}\n';
+
+// Shared with :Excalidraw and the `excalidraw` launcher, which write the same
+// file before printing a URL, so the bare URL opens what they just opened.
+function defaults() {
+  const home = process.env.HOME || os.homedir();
+  const state = process.env.XDG_STATE_HOME || path.join(home, '.local', 'state');
+  const data = process.env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+  return {
+    state: path.join(state, 'excalidraw', 'last'),
+    scratch: path.join(data, 'excalidraw', 'scratch.excalidraw'),
+  };
+}
 
 function send(res, code, body, type) {
   res.writeHead(code, { 'Content-Type': type || 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -252,6 +375,28 @@ function send(res, code, body, type) {
 function allowed(p) {
   return typeof p === 'string' && path.isAbsolute(p) && !p.includes('\0')
     && (p.endsWith('.excalidraw') || p.endsWith('.excalidraw.svg'));
+}
+function remember(opts, file) {
+  if (!file.endsWith('.excalidraw')) return;
+  try {
+    fs.mkdirSync(path.dirname(opts.state), { recursive: true });
+    fs.writeFileSync(opts.state, file + '\n');
+  } catch (e) {
+    // Not fatal: the bare URL then falls back to the scratch file.
+  }
+}
+function lastDrawing(opts) {
+  try {
+    const p = fs.readFileSync(opts.state, 'utf8').trim();
+    if (allowed(p) && p.endsWith('.excalidraw') && fs.existsSync(p)) return p;
+  } catch (e) {
+    // no record yet
+  }
+  if (!fs.existsSync(opts.scratch)) {
+    fs.mkdirSync(path.dirname(opts.scratch), { recursive: true });
+    fs.writeFileSync(opts.scratch, EMPTY_SCENE);
+  }
+  return opts.scratch;
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -267,14 +412,16 @@ function readBody(req) {
   });
 }
 
-async function handle(req, res) {
+async function handle(req, res, opts) {
   const u = new URL(req.url, 'http://127.0.0.1');
   if (u.pathname === '/api/file') {
     const file = u.searchParams.get('path');
     if (!allowed(file)) return send(res, 400, 'path must be an absolute *.excalidraw or *.excalidraw.svg file');
     if (req.method === 'GET') {
       try {
-        return send(res, 200, fs.readFileSync(file), file.endsWith('.svg') ? 'image/svg+xml' : 'application/json');
+        const data = fs.readFileSync(file);
+        remember(opts, file);
+        return send(res, 200, data, file.endsWith('.svg') ? 'image/svg+xml' : 'application/json');
       } catch (e) {
         return send(res, e.code === 'ENOENT' ? 404 : 500, String(e.message));
       }
@@ -286,6 +433,7 @@ async function handle(req, res) {
         const tmp = file + '.tmp-' + process.pid;
         fs.writeFileSync(tmp, body);
         fs.renameSync(tmp, file);
+        remember(opts, file);
         return send(res, 204, '');
       } catch (e) {
         return send(res, 500, String(e.message));
@@ -294,6 +442,16 @@ async function handle(req, res) {
     return send(res, 405, 'GET or PUT');
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'GET only');
+  if ((u.pathname === '/' || u.pathname === '/index.html') && !u.searchParams.get('file')) {
+    let target;
+    try {
+      target = lastDrawing(opts);
+    } catch (e) {
+      return send(res, 500, 'no drawing to open: ' + e.message);
+    }
+    res.writeHead(302, { Location: '/?file=' + encodeURIComponent(target), 'Cache-Control': 'no-store' });
+    return res.end();
+  }
   let rel = decodeURIComponent(u.pathname);
   if (rel === '/') rel = '/index.html';
   const abs = path.normalize(path.join(APP, rel));
@@ -304,9 +462,10 @@ async function handle(req, res) {
   });
 }
 
-function start(port, host) {
+function start(port, host, options) {
+  const opts = { ...defaults(), ...(options || {}) };
   const server = http.createServer((req, res) => {
-    handle(req, res).catch((e) => send(res, 500, String(e && e.message)));
+    handle(req, res, opts).catch((e) => send(res, 500, String(e && e.message)));
   });
   server.listen(port, host);
   return server;
@@ -329,10 +488,10 @@ if (require.main === module) {
     console.error('excalidraw: ' + e.message);
     process.exit(1);
   });
-  server.on('listening', () => console.log('excalidraw: http://' + host + ':' + port + '/  (add ?file=/absolute/path.excalidraw)'));
+  server.on('listening', () => console.log('excalidraw: http://' + host + ':' + port + '/  (opens the last drawing; ?file=/abs/path.excalidraw for another)'));
 }
 
-module.exports = { start, allowed };
+module.exports = { start, allowed, EMPTY_SCENE };
 JSEOF
     chmod 644 "${EXCALIDRAW_DIR}/server.js"
 }
@@ -357,6 +516,9 @@ if [ -n "\$f" ]; then
         printf '{"type":"excalidraw","version":2,"source":"born2root","elements":[],"appState":{"viewBackgroundColor":"#ffffff"},"files":{}}\\n' >"\$f" ||
             { echo "excalidraw: cannot create \$f" >&2; exit 1; }
     fi
+    # What the bare URL opens (see write_server): this drawing, from now on.
+    state="\${XDG_STATE_HOME:-\$HOME/.local/state}/excalidraw"
+    mkdir -p "\$state" && printf '%s\\n' "\$f" >"\$state/last"
 fi
 if ! node -e "require('net').connect(\$PORT,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))" 2>/dev/null; then
     nohup node "\$SERVER" --port "\$PORT" >/dev/null 2>&1 &
@@ -367,7 +529,7 @@ if [ -n "\$f" ]; then
     url="\${url}?file=\$(printf '%s' "\$f" | node -e 'process.stdout.write(encodeURIComponent(require("fs").readFileSync(0,"utf8")))')"
 fi
 echo "\$url"
-echo "(port \$PORT is forwarded by 'ssh b2b': open the URL in your host browser; saves land in \${f:-the file you open} and its .svg)"
+echo "(port \$PORT is forwarded by 'ssh b2b': open the URL in your host browser, or just http://localhost:\$PORT/; saves land in \${f:-the drawing opened last} and its .svg)"
 LAUNCHEOF
     chmod 755 "$EXCALIDRAW_BIN"
 }
@@ -375,8 +537,14 @@ LAUNCHEOF
 # ── The Neovim side ─────────────────────────────────────────────────────────
 # A plugin/ drop-in like the rest of the born2root layer (see
 # install_nvim_extras.sh): it does not touch kickstart's checkout. :Excalidraw
-# starts the server as a child of this Neovim when nothing answers on the
-# port, so quitting Neovim takes the server with it, and prints the URL.
+# starts the server when nothing answers on the port, records the drawing for
+# the bare URL, and prints the URL.
+#
+# The server is started DETACHED. It used to be a child of the Neovim that
+# started it, so quitting that Neovim took the server along while the
+# drawing's tab stayed open: every later save failed into the status line, and
+# the next refresh had nothing to load from. A tab outliving an editor is the
+# ordinary case, and one idle node process is the cheaper failure.
 write_nvim_lua() {
     local cfg="$1"
     mkdir -p "${cfg}/plugin"
@@ -404,15 +572,58 @@ local EMPTY_SCENE = '{"type":"excalidraw","version":2,"source":"born2root","elem
 -- .excalidraw files are JSON; highlight and fold them as such.
 vim.filetype.add { extension = { excalidraw = 'json' } }
 
--- The browser writes the file behind Neovim's back; pick that up instead of
--- asking "file changed on disk" on the next write.
+local uv = vim.uv or vim.loop
+
+-- The file the server's bare URL redirects to; see write_server's header.
+local STATE = (vim.env.XDG_STATE_HOME or ((vim.env.HOME or '') .. '/.local/state')) .. '/excalidraw/last'
+
+-- The browser writes the file behind Neovim's back, and an open .excalidraw
+-- buffer should show that write as it happens. `autoread` only acts when
+-- something runs :checktime, and FocusGained/CursorHold never fire while you
+-- sit in the browser, which is exactly when the drawing changes -- so each
+-- such buffer watches its DIRECTORY. Not the file: the server saves through a
+-- temp file and rename(), which leaves a watch on the file pointing at the old
+-- inode after the first save. A buffer with unsaved edits is left alone, so
+-- the "changed on disk" question still comes up instead of a silent overwrite.
+local watchers = {}
+local function unwatch(path)
+  local w = watchers[path]
+  if w then
+    watchers[path] = nil
+    pcall(function() w:stop() end)
+    pcall(function() w:close() end)
+  end
+end
+local function watch(buf)
+  local path = vim.api.nvim_buf_get_name(buf)
+  if path == '' or watchers[path] or not uv.new_fs_event then return end
+  local w = uv.new_fs_event()
+  if not w then return end
+  local name = vim.fn.fnamemodify(path, ':t')
+  local ok = w:start(vim.fn.fnamemodify(path, ':h'), {}, function(err, fname)
+    if err or fname ~= name then return end
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(buf) and not vim.bo[buf].modified then
+        vim.cmd('silent! checktime ' .. buf)
+      end
+    end)
+  end)
+  if ok then watchers[path] = w else pcall(function() w:close() end) end
+end
+vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufWritePost' }, {
+  pattern = '*.excalidraw',
+  callback = function(ev) watch(ev.buf) end,
+})
+vim.api.nvim_create_autocmd({ 'BufWipeout', 'BufDelete' }, {
+  pattern = '*.excalidraw',
+  callback = function(ev) unwatch(vim.api.nvim_buf_get_name(ev.buf)) end,
+})
 vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold' }, {
   pattern = '*.excalidraw',
   callback = function() vim.cmd 'silent! checktime' end,
 })
 
 local function port_open(cb)
-  local uv = vim.uv or vim.loop
   local sock = uv.new_tcp()
   sock:connect('127.0.0.1', PORT, function(err)
     sock:close()
@@ -429,7 +640,7 @@ local function ensure_server(cb)
         vim.log.levels.ERROR)
       return cb(false)
     end
-    server_job = vim.fn.jobstart({ 'node', SERVER, '--port', tostring(PORT) }, { detach = false })
+    server_job = vim.fn.jobstart({ 'node', SERVER, '--port', tostring(PORT) }, { detach = true })
     if server_job <= 0 then
       vim.notify('excalidraw: could not start the server', vim.log.levels.ERROR)
       return cb(false)
@@ -471,16 +682,18 @@ local function open(arg)
       return
     end
   end
+  vim.fn.mkdir(vim.fn.fnamemodify(STATE, ':h'), 'p')
+  pcall(vim.fn.writefile, { path }, STATE)
   ensure_server(function(ok)
     if not ok then return end
     local url = ('http://127.0.0.1:%d/?file=%s'):format(PORT, urlencode(path))
     pcall(vim.fn.setreg, '+', url)
     vim.notify(table.concat({
       'Excalidraw: ' .. url,
+      ('  or simply http://localhost:%d/ -- it opens this drawing until you open another'):format(PORT),
       '',
-      ('`ssh b2b` forwards port %d, so that URL opens in your host browser as it is.'):format(PORT),
-      'Saves land in ' .. path .. ' and ' .. path .. '.svg',
-      'The server stops when this Neovim quits; `excalidraw <file>` in a shell keeps one running.',
+      ('`ssh b2b` forwards port %d, so the URL opens in your host browser as it is.'):format(PORT),
+      'Every change is saved to ' .. path .. ' (and its .svg), and this buffer reloads with it.',
     }, '\n'), vim.log.levels.INFO)
   end)
 end
@@ -519,6 +732,22 @@ setup_user() {
 # ── Build ───────────────────────────────────────────────────────────────────
 installed_version() {
     sed -n 's/^excalidraw=//p' "${EXCALIDRAW_DIR}/app/VERSION" 2>/dev/null | head -n1
+}
+# The bundle is only rebuilt when something it is built FROM changed. That used
+# to mean the npm version alone, so a fix to the page itself -- this script's
+# app.jsx -- never reached a guest that already had the same Excalidraw: the
+# installer printed "already built" and kept serving the old page. The page
+# source is fingerprinted into VERSION beside the versions.
+page_fingerprint() {
+    local d fp
+    d=$(mktemp -d) || return 1
+    write_app_source "$d"
+    fp=$(cat "${d}/app.jsx" "${d}/index.html" | sha256sum | cut -c1-16)
+    rm -rf "$d"
+    printf '%s' "$fp"
+}
+installed_page() {
+    sed -n 's/^page=//p' "${EXCALIDRAW_DIR}/app/VERSION" 2>/dev/null | head -n1
 }
 
 build_app() {
@@ -568,8 +797,9 @@ build_app() {
     else
         warn "dist/prod/fonts not found — the editor will use fallback fonts"
     fi
-    printf 'excalidraw=%s\nreact=%s\nesbuild=%s\nbuilt=%s\n' \
-        "$EXCALIDRAW_VERSION" "$REACT_VERSION" "$ESBUILD_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${build}/out/VERSION"
+    printf 'excalidraw=%s\nreact=%s\nesbuild=%s\npage=%s\nbuilt=%s\n' \
+        "$EXCALIDRAW_VERSION" "$REACT_VERSION" "$ESBUILD_VERSION" "${PAGE_FP:-$(page_fingerprint)}" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${build}/out/VERSION"
 
     # Into place atomically: a failure above never leaves a half-built app
     # where a working one was.
@@ -609,15 +839,23 @@ const { start } = require(process.argv[2]);
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const scratch = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-excalidraw-')), 'smoke.excalidraw');
-const server = start(0, '127.0.0.1');
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'b2b-excalidraw-'));
+const scratch = path.join(dir, 'smoke.excalidraw');
+const opts = { state: path.join(dir, 'state', 'last'), scratch: path.join(dir, 'data', 'scratch.excalidraw') };
+const server = start(0, '127.0.0.1', opts);
 server.on('listening', async () => {
   const base = 'http://127.0.0.1:' + server.address().port;
   let ok = true;
   const check = (cond, what) => { if (!cond) { ok = false; console.error('  smoke FAIL: ' + what); } };
   try {
-    const page = await fetch(base + '/');
-    check(page.status === 200 && (await page.text()).includes('id="root"'), 'GET / serves the page');
+    // The bare URL never serves a page that cannot save.
+    const bare = await fetch(base + '/', { redirect: 'manual' });
+    const firstTarget = decodeURIComponent((bare.headers.get('location') || '').replace(/^\/\?file=/, ''));
+    check(bare.status === 302 && firstTarget === opts.scratch, 'GET / with no drawing yet redirects to the scratch file');
+    check(fs.existsSync(opts.scratch) && JSON.parse(fs.readFileSync(opts.scratch, 'utf8')).type === 'excalidraw',
+      'the scratch file exists and is a scene');
+    const page = await fetch(base + '/?file=' + encodeURIComponent(scratch));
+    check(page.status === 200 && (await page.text()).includes('id="root"'), 'GET /?file= serves the page');
     const js = await fetch(base + '/app.js');
     check(js.status === 200 && (js.headers.get('content-type') || '').includes('javascript'), 'GET /app.js is javascript');
     const css = await fetch(base + '/index.css');
@@ -628,6 +866,11 @@ server.on('listening', async () => {
     check(put.status === 204, 'PUT writes the file');
     const back = await fetch(base + '/api/file?path=' + encodeURIComponent(scratch));
     check(back.status === 200 && (await back.json()).type === 'excalidraw', 'GET reads it back');
+    const again = await fetch(base + '/', { redirect: 'manual' });
+    check(decodeURIComponent((again.headers.get('location') || '').replace(/^\/\?file=/, '')) === scratch,
+      'GET / now redirects to the drawing last loaded');
+    const bundle = fs.readFileSync(path.join(path.dirname(process.argv[2]), 'app', 'app.js'), 'utf8');
+    check(bundle.includes('keepalive'), 'the bundle is the page that saves on the way out (rebuilt)');
     const bad = await fetch(base + '/api/file?path=' + encodeURIComponent(scratch), { method: 'PUT', body: 'not json' });
     check(bad.status === 500, 'PUT of non-JSON is refused');
     const outside = await fetch(base + '/api/file?path=' + encodeURIComponent('/etc/passwd'));
@@ -636,19 +879,20 @@ server.on('listening', async () => {
     ok = false;
     console.error('  smoke FAIL: ' + e.message);
   }
-  fs.rmSync(path.dirname(scratch), { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
   server.close(() => process.exit(ok ? 0 : 1));
 });
 SMOKEEOF
         warn "the server smoke test failed"
         return 1
     fi
-    log "verified: page, bundle, css, and the file API round-trip"
+    log "verified: page, bundle, css, the file API round-trip, and / opening the last drawing"
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Excalidraw editor (@excalidraw/excalidraw ${EXCALIDRAW_VERSION}) ==="
-if [ "$EXCALIDRAW_FORCE" != "1" ] && [ "$(installed_version)" = "$EXCALIDRAW_VERSION" ] && [ -s "${EXCALIDRAW_DIR}/app/app.js" ]; then
+PAGE_FP=$(page_fingerprint)
+if [ "$EXCALIDRAW_FORCE" != "1" ] && [ "$(installed_version)" = "$EXCALIDRAW_VERSION" ] && [ "$(installed_page)" = "$PAGE_FP" ] && [ -s "${EXCALIDRAW_DIR}/app/app.js" ]; then
     log "already built at ${EXCALIDRAW_DIR}/app (EXCALIDRAW_FORCE=1 rebuilds)"
 else
     build_app || die "the Excalidraw build failed"
