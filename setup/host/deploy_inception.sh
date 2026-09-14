@@ -97,6 +97,24 @@ ok "guest reachable: $(vm_ssh 'hostname' 2>/dev/null)"
 # takes a couple of minutes. Connecting the moment ssh answers and then failing
 # because docker is not there yet is a race, not a real error — so wait for it.
 step "Waiting for guest provisioning (docker, git, openssl, make, rsync)"
+# ...unless docker will never come. A build whose feature set left docker out
+# (the picker starts with only the base tier ticked, and .b2b-features then
+# outlives the session) finished first boot without it, and this loop printed
+# "still waiting on: docker" for the whole 15 minutes. first-boot-setup.sh
+# records the verdict per feature in /etc/b2b/features.status, so read it.
+# shellcheck disable=SC2016  # $1/$2 are awk's, in the guest
+docker_state=$(vm_ssh 'awk '\''$1 == "docker" { print $2; exit }'\'' /etc/b2b/features.status 2>/dev/null' 2>/dev/null | tr -d '\r')
+case "$docker_state" in
+off | failed | no-space)
+    printf "    /etc/b2b/features.status in the guest: docker %s\n" "$docker_state"
+    [ -f "$REPO_ROOT/.b2b-features" ] && grep -q -- '-docker' "$REPO_ROOT/.b2b-features" &&
+        printf "    .b2b-features (the picker's saved choice) turned it off:\n      %s\n" "$(grep '^B2B_SELECT_FEATURES=' "$REPO_ROOT/.b2b-features")"
+    printf "\n    Docker is installed at first boot only, so this VM needs a rebuild with it:\n"
+    printf "      make features_select      # tick docker (and inception-data), then\n"
+    printf "      make re                   # or: FEATURES=\"+docker +inception-data\" make re\n\n"
+    die "docker is ${docker_state} in this VM, so Inception cannot be deployed on it"
+    ;;
+esac
 provision_deadline=$(($(date +%s) + ${PROVISION_TIMEOUT:-900}))
 reported=""
 while :; do
