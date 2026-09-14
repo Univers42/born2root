@@ -1050,14 +1050,19 @@ https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.lis
 
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
 
-    # Add the login user to the docker group
-    usermod -aG docker "$B2B_LOGIN" 2>/dev/null || true
-
-    # Kill any running VS Code server so it restarts with the docker group loaded.
-    # Without this, the VS Code server inherits the old group list (no docker GID)
-    # and every Docker command from the VS Code terminal fails with "permission denied".
-    # The user's next VS Code reconnect will spawn a fresh server with correct groups.
-    pkill -u "$B2B_LOGIN" -f "vscode-server" 2>/dev/null || true
+    # Who may use Docker is born2root.toml's call: b2b-setup.sh already put
+    # every account whose groups list docker into the group (it exists before
+    # Docker does). This used to add the login unconditionally, so
+    # `groups = []` still meant a docker user.
+    #
+    # Kill those accounts' running VS Code servers so they restart with the
+    # docker group loaded. Without this, a server inherits the old group list
+    # (no docker GID) and every Docker command from the VS Code terminal fails
+    # with "permission denied". The next reconnect spawns a fresh server.
+    awk -F: '("," $3 ",") ~ /,docker,/ { print $1 }' /etc/b2b/users 2>/dev/null |
+        while read -r docker_user; do
+            pkill -u "$docker_user" -f "vscode-server" 2>/dev/null || true
+        done
 
     # Enable and start Docker
     systemctl enable docker

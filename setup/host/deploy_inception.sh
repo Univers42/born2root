@@ -93,8 +93,9 @@ ok "guest reachable: $(vm_ssh 'hostname' 2>/dev/null)"
 
 # ── 2. Toolchain the build needs ────────────────────────────────────────────
 # sshd comes up well before the guest is actually provisioned: first-boot
-# installs Docker, adds the user to the docker group and fetches wp-cli, which
-# takes a couple of minutes. Connecting the moment ssh answers and then failing
+# installs Docker (the accounts born2root.toml lists are already in its group)
+# and fetches wp-cli, which takes a couple of minutes. Connecting the moment
+# ssh answers and then failing
 # because docker is not there yet is a race, not a real error — so wait for it.
 step "Waiting for guest provisioning (docker, git, openssl, make, rsync)"
 # ...unless docker will never come. A build whose feature set left docker out
@@ -115,6 +116,16 @@ off | failed | no-space)
     die "docker is ${docker_state} in this VM, so Inception cannot be deployed on it"
     ;;
 esac
+# Docker installed is not Docker usable: an account is in the docker group only
+# when born2root.toml lists it, and without it `docker info` is "permission
+# denied" -- the loop below would wait its 15 minutes for that too.
+if [ "$docker_state" = ok ] && ! vm_ssh 'id -nG' 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+    login=$(vm_ssh 'id -un' 2>/dev/null | tr -d '\r')
+    printf "    %s is not in the docker group: [users.%s] groups in born2root.toml does not list it.\n" "$login" "$login"
+    printf "\n    Add it for this VM:     ssh -t %s sudo usermod -aG docker %s   (then reconnect)\n" "$SSH_ALIAS" "$login"
+    printf "    And for the next build: groups = [\"docker\"] under [users.%s]\n\n" "$login"
+    die "Inception needs docker without sudo, and ${login} cannot use it"
+fi
 provision_deadline=$(($(date +%s) + ${PROVISION_TIMEOUT:-900}))
 reported=""
 while :; do

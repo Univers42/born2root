@@ -12,6 +12,9 @@
 #      accounts created after it is edited, and root and the login user are
 #      created by d-i before b2b-setup.sh runs, so every build until this one
 #      left them all at 99999 days. The subject wants 30/2/7.
+#   3. The login's groups are born2root.toml's too. b2b-setup.sh used to give
+#      it sudo,user42,docker whatever [users.<login>] groups said, so
+#      `groups = []` still put the login in docker (seen in a 2026-09-14 guest).
 #
 # The functions are lifted out of preseeds/b2b-setup.sh by name, so renaming
 # one, or indenting its closing brace, breaks this test and not the behaviour.
@@ -53,9 +56,11 @@ chmod +x "$TMP/bin/"*
     awk '/^ensure_groups\(\) \{/,/^}/' preseeds/b2b-setup.sh
     awk '/^install_user_keys\(\) \{/,/^}/' preseeds/b2b-setup.sh
     awk '/^create_extra_users\(\) \{/,/^}/' preseeds/b2b-setup.sh
+    awk '/^apply_login_groups\(\) \{/,/^}/' preseeds/b2b-setup.sh
     awk '/^apply_password_aging\(\) \{/,/^}/' preseeds/b2b-setup.sh
     cat <<'EOF'
 feature_fail() { printf 'FEATURE-FAILED %s: %s\n' "$1" "$2" >>"$FAILS"; }
+apply_login_groups
 create_extra_users
 apply_password_aging
 printf 'EXTRA_NAMES=%s\n' "$EXTRA_NAMES"
@@ -125,7 +130,7 @@ run "dave:user42,sudo,docker erin:user42"
 check "dave: GECOS from the users file, quote and all" \
     "$(grep -c "^useradd .* -c Dave O'Hara dave$" "$TMP/calls")" 1
 check "dave: the missing group docker is created first" \
-    "$(grep -n '' "$TMP/calls" | grep -E 'groupadd -f docker$|useradd .* dave$' | cut -d: -f1 | tr '\n' ' ')" "1 2 "
+    "$(grep -E '^groupadd -f docker$|^useradd .* dave$' "$TMP/calls" | cut -d' ' -f1 | tr '\n' ' ')" "groupadd useradd "
 check "only groups that do not exist are created" "$(grep -c '^groupadd ' "$TMP/calls")" 1
 check "erin: an empty password is a locked account, created" \
     "$(grep -c '^useradd .* -p ! -c erin erin$' "$TMP/calls")" 1
@@ -136,5 +141,22 @@ check "dave: keys are 600 in a 700 directory" \
 check "erin: her key only" "$(cat "$TMP/home/erin/.ssh/authorized_keys" 2>/dev/null)" "ssh-ed25519 AAAAkeyE e"
 check "a second run adds no duplicate, removes nothing" \
     "$(printf 'dave\n' >"$TMP/existing" && run "dave:user42,sudo,docker" && wc -l <"$TMP/home/dave/.ssh/authorized_keys" | tr -d ' ')" 2
+
+# ── The login's own groups ──────────────────────────────────────────────────
+: >"$TMP/existing"
+: >"$TMP/shadow"
+printf 'alice42login:Alice:user42,sudo\n' >"$TMP/users"
+run ""
+check "login with groups = []: user42 and sudo, nothing else" \
+    "$(grep '^usermod -aG .* alice42login$' "$TMP/calls")" "usermod -aG user42,sudo alice42login"
+check "login with groups = []: never docker" "$(grep -c 'docker' "$TMP/calls")" 0
+printf 'alice42login:Alice:user42,sudo,docker\n' >"$TMP/users"
+run ""
+check "login with groups = [\"docker\"]: docker created, then joined" \
+    "$(grep -E '^(groupadd|usermod -aG)' "$TMP/calls" | tr '\n' '|')" "groupadd -f docker|usermod -aG user42,sudo,docker alice42login|"
+rm -f "$TMP/users"
+run ""
+check "no users file: the login still gets user42 and sudo" \
+    "$(grep '^usermod -aG .* alice42login$' "$TMP/calls")" "usermod -aG user42,sudo alice42login"
 
 exit "$fail"

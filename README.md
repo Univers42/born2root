@@ -679,10 +679,12 @@ Linux group changes only take effect on **new login sessions**. The VS Code
 server is a persistent process (`--enable-remote-auto-shutdown`), so even
 reconnecting from VS Code reuses the same stale server.
 
-> **This is now auto-fixed:** `first-boot-setup.sh` kills any running VS Code
-> server after adding the docker group, and `b2b-setup.sh` pre-creates the
-> `docker` group during preseed so it's present from the very first login. If
-> you still hit this on an older build, use the manual fix below.
+> **This is now auto-fixed:** `b2b-setup.sh` creates the `docker` group during
+> preseed and puts in it every account whose `groups` in `born2root.toml`
+> lists `docker` (the shipped login does), so it's present from the very first
+> login, and `first-boot-setup.sh` kills those accounts' running VS Code
+> servers once Docker is installed. If you still hit this on an older build,
+> use the manual fix below.
 
 ### The Fix
 

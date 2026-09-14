@@ -146,6 +146,13 @@ row "cron entry" "$(groot 'grep -h monitoring.sh /etc/crontab 2>/dev/null' | awk
 
 # shellcheck disable=SC2059
 printf "\n${C_BOLD}Accounts (born2root.toml)${C_RESET}\n"
+# The groups born2root.toml manages: user42, sudo, docker and every group any
+# account names. An account in one of them that it did not ask for is a
+# mismatch too -- checking only for missing groups let a login with
+# `groups = []` sit in docker for every build (d-i's own default groups for
+# the first user, cdrom, audio and the rest, are not ours and not checked).
+b2b_users_list=$(b2b_users 2>/dev/null)
+managed=" user42 sudo docker $(printf '%s\n' "$b2b_users_list" | cut -d: -f3 | tr ',\n' '  ') "
 while IFS=: read -r name fullname groups; do
     [ -n "$name" ] || continue
     entry=$(g "getent passwd $name")
@@ -154,12 +161,19 @@ while IFS=: read -r name fullname groups; do
     row "$name shell" "$(printf '%s' "$entry" | cut -d: -f7)" "/usr/bin/hellish"
     have=" $(g "id -nG $name") "
     missing=""
+    extra=""
     for group in $(printf '%s' "$groups" | tr ',' ' '); do
         case "$have" in *" $group "*) ;; *) missing="$missing $group" ;; esac
     done
-    row "$name groups" "${missing:+missing:}${missing:-all of $groups}" "all of $groups"
+    for group in $have; do
+        case " $(printf '%s' "$groups" | tr ',' ' ') $name " in *" $group "*) continue ;; esac
+        case "$managed" in *" $group "*) extra="$extra $group" ;; esac
+    done
+    got="exactly $groups"
+    [ -z "$missing$extra" ] || got="${missing:+missing:$missing}${missing:+${extra:+ }}${extra:+not asked for:$extra}"
+    row "$name groups" "$got" "exactly $groups"
 done <<USERSEOF
-$(b2b_users 2>/dev/null)
+$b2b_users_list
 USERSEOF
 # Every other `nvim = true` account runs the editor from the login's shared
 # plugins (first-boot-setup.sh, share_editor_setup): its plugin directory is a

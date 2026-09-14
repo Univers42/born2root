@@ -23,7 +23,7 @@ luks_passphrase = "tempencrypt123"
 password = "tempuser123"
 fullname = ""
 sudo     = true
-groups   = []
+groups   = ["docker"]
 ssh_keys = []
 nvim     = true
 

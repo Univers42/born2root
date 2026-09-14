@@ -68,8 +68,9 @@ luks_passphrase = "tempencrypt123"
 #              `sudo passwd <name>` in the guest. Yours cannot be empty.
 #   fullname   what `getent passwd` shows; empty means the login. No , or :
 #   sudo       true adds the group sudo. Yours is always true.
-#   groups     extra groups; one that does not exist yet is created. docker
-#              is added to yours anyway when Docker is installed.
+#   groups     extra groups, exactly: an account is in docker only when it
+#              lists it here. `make inception` runs Docker as you, so yours
+#              keeps "docker". One that does not exist yet is created.
 #   ssh_keys   public keys for that account: paste the line, or give a path
 #              on this machine such as "~/.ssh/id_ed25519.pub". Your own
 #              ~/.ssh/id_ed25519.pub (or id_rsa.pub) is added to your account
@@ -84,7 +85,7 @@ luks_passphrase = "tempencrypt123"
 password = "tempuser123"
 fullname = ""
 sudo     = true
-groups   = []
+groups   = ["docker"]
 ssh_keys = []
 nvim     = true
 

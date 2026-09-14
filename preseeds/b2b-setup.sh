@@ -309,8 +309,8 @@ groupadd user42 2>/dev/null || true
 # server process inherits a stale group list without docker → "permission denied"
 # on /var/run/docker.sock. Docker's postinst will reuse this group.
 groupadd -f docker 2>/dev/null || true
-usermod -aG sudo,user42,docker "$B2B_LOGIN"
-echo "[OK] User $B2B_LOGIN in groups: sudo, user42, docker"
+# The login's own groups are applied below with the other accounts'
+# (apply_login_groups), once the users file and ensure_groups are defined.
 
 # The extra accounts born2root.toml asks for (B2B_EXTRA_USERS): user42, sudo
 # when asked, hellish as login shell. Their passwords arrive as SHA-512 hashes
@@ -370,6 +370,21 @@ install_user_keys() {
     echo "[OK] $(printf '%s\n' "$keys" | wc -l) ssh key(s) installed for $name"
 }
 
+# The login's groups, from its record in /etc/b2b/users like every other
+# account: user42, sudo (always, for the login) and what [users.<login>] groups
+# lists. This line used to be `usermod -aG sudo,user42,docker`, so the login
+# was in docker whatever born2root.toml said. d-i's own default groups for the
+# first user (cdrom, audio, ...) are untouched. With no users file (an ISO
+# that predates it) the login still gets the two groups the subject requires.
+apply_login_groups() {
+    local groups
+    groups=$(awk -F: -v n="$B2B_LOGIN" '$1 == n { print $3; exit }' "$B2B_USERS_FILE" 2>/dev/null)
+    [ -n "$groups" ] || groups="user42,sudo"
+    ensure_groups "$groups" "$B2B_LOGIN"
+    usermod -aG "$groups" "$B2B_LOGIN"
+    echo "[OK] User $B2B_LOGIN in groups: $groups"
+}
+
 create_extra_users() {
     local entry name groups hash fullname
     while read -r entry; do
@@ -407,6 +422,7 @@ EXTRAEOF
 if [ ! -f "$B2B_USERS_FILE" ] && [ -n "$B2B_EXTRA_USERS" ]; then
     echo "[WARN] /etc/b2b/users is missing — full names fall back to the login"
 fi
+apply_login_groups
 create_extra_users
 
 ### ─── 5. SSH — port 4242, no root login ─────────────────────────────────────

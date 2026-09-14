@@ -198,11 +198,11 @@ refuse "an unknown key in an account" users.dlesieur.passwrd \
 refuse "fullname with a comma" users.dlesieur.fullname \
     's/^fullname = ""/fullname = "Ann, PhD"/'
 refuse "sudo in groups" users.dlesieur.groups \
-    's/^groups   = \[\]/groups   = ["sudo"]/'
+    's/^groups   = \["docker"\]/groups   = ["sudo"]/'
 refuse "user42 in groups" users.dlesieur.groups \
-    's/^groups   = \[\]/groups   = ["user42"]/'
+    's/^groups   = \["docker"\]/groups   = ["user42"]/'
 refuse "a group name with a capital" users.dlesieur.groups \
-    's/^groups   = \[\]/groups   = ["Docker"]/'
+    's/^groups   = \["docker"\]/groups   = ["Docker"]/'
 refuse "an ssh key that is not a key or a path" users.dlesieur.ssh_keys \
     's/^ssh_keys = \[\]/ssh_keys = ["hello"]/'
 refuse "an ssh key whose base64 is broken" users.dlesieur.ssh_keys \
@@ -333,7 +333,7 @@ password = ""
 nvim = true')
 check "--users: one record per account, in file order" \
     "$(env B2B_CONFIG="$USERS3" "${CFG[@]}" --users | tr '\n' '|')" \
-    "dlesieur:dlesieur:user42,sudo|bob:Bob O'Hara:user42,docker|saint:saint:user42|"
+    "dlesieur:dlesieur:user42,sudo,docker|bob:Bob O'Hara:user42,docker|saint:saint:user42|"
 GUEST3=$(env B2B_CONFIG="$USERS3" "${CFG[@]}" --guest)
 contains "--guest lists every account" "$GUEST3" 'B2B_USERS="dlesieur bob saint"'
 contains "--guest lists the editor users (first account always)" "$GUEST3" 'B2B_NVIM_USERS="dlesieur saint"'
