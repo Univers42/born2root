@@ -84,13 +84,13 @@ check "the block runs before any download" \
     "$(awk '/NERD_FONT_RESOLVED=/ { print NR; exit }' "$REPO/generate/create_custom_iso.sh")" \
     "$(awk '/^download\(\) \{/ { d = NR } /NERD_FONT_RESOLVED=/ && !r { r = NR } END { print (r < d ? r : "after download") }' "$REPO/generate/create_custom_iso.sh")"
 check "a prompt's NERD_FONT=0 is ignored (auto, font present)" \
-    "$(env -u NVIM_NERD_FONT NERD_FONT=0 PATH="$TMP/with:$PATH" bash "$TMP/early.sh" 2>&1)" "on"
+    "$(env -u NVIM_NERD_FONT NERD_FONT=0 PATH="$TMP/with:$PATH" "${SCRIPT_SH:-bash}" "$TMP/early.sh" 2>&1)" "on"
 check "a prompt's NERD_FONT=garbage does not fail the build" \
-    "$(env -u NVIM_NERD_FONT NERD_FONT=garbage PATH="$TMP/without:$PATH" bash "$TMP/early.sh" 2>&1)" "off"
+    "$(env -u NVIM_NERD_FONT NERD_FONT=garbage PATH="$TMP/without:$PATH" "${SCRIPT_SH:-bash}" "$TMP/early.sh" 2>&1)" "off"
 check "NVIM_NERD_FONT=off is the switch that is read" \
-    "$(env NVIM_NERD_FONT=off NERD_FONT=1 PATH="$TMP/with:$PATH" bash "$TMP/early.sh" 2>&1)" "off"
+    "$(env NVIM_NERD_FONT=off NERD_FONT=1 PATH="$TMP/with:$PATH" "${SCRIPT_SH:-bash}" "$TMP/early.sh" 2>&1)" "off"
 rc=0
-env NVIM_NERD_FONT=maybe bash "$TMP/early.sh" >/dev/null 2>&1 || rc=$?
+env NVIM_NERD_FONT=maybe "${SCRIPT_SH:-bash}" "$TMP/early.sh" >/dev/null 2>&1 || rc=$?
 check "NVIM_NERD_FONT=maybe refuses the build" "$rc" "1"
 
 # ── 2. the guest's config ───────────────────────────────────────────────────

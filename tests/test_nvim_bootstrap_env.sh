@@ -79,12 +79,12 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
         "$(run_as_user alice pwd)" "$TMP/home/alice"
     check "$name: root's run starts in its home" \
         "$(run_as_user root pwd)" "$TMP/home/root"
-    # shellcheck disable=SC2016 # $TERM is meant for the inner sh
+    # shellcheck disable=SC2016 # $TERM is meant for the inner shell
     check "$name: TERM still reaches the command" \
-        "$(run_as_user alice sh -c 'printf %s "$TERM"')" "xterm-256color"
-    # shellcheck disable=SC2016 # $CFLAGS is meant for the inner sh
+        "$(run_as_user alice "${SCRIPT_SH:-bash}" -c 'printf %s "$TERM"')" "xterm-256color"
+    # shellcheck disable=SC2016 # $CFLAGS is meant for the inner shell
     check "$name: parser compiles skip -Wuninitialized" \
-        "$(run_as_user alice sh -c 'printf %s "$CFLAGS"')" "-Wno-uninitialized"
+        "$(run_as_user alice "${SCRIPT_SH:-bash}" -c 'printf %s "$CFLAGS"')" "-Wno-uninitialized"
     chmod 755 "$TMP/locked"
     cd "$REPO"
 done
