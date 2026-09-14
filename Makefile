@@ -540,7 +540,7 @@ shell:
 # Missing packages are installed via `sudo apt install` WITHOUT -y so the
 # user reviews and confirms the apt plan themselves.
 deps:
-	@$(SCRIPT_SH) setup/install/check_deps.sh
+	@BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/install/check_deps.sh
 
 # =========@@ VirtualBox Extension Pack (optional) @@=========================
 # Deliberately NOT part of `make deps` / `make all`. The pack installs into
@@ -553,7 +553,7 @@ deps:
 # a SATA disk, guest-side LUKS and a serial console. Install it only if you want
 # those extras:
 extpack:
-	@INSTALL_EXTPACK=1 $(SCRIPT_SH) setup/install/check_deps.sh
+	@BACKEND="$(BACKEND)" INSTALL_EXTPACK=1 $(SCRIPT_SH) setup/install/check_deps.sh
 
 # =========@@ System compatibility pre-checks @@==============================
 check_system:
