@@ -692,12 +692,13 @@ else
     exit 1
 fi
 
-# Update MD5 sums
+# Update MD5 sums. The manifest is written by utils/iso_md5.sh, which keeps
+# its temp file out of the tree being walked -- doing it here, in place, had
+# find hash the half-written md5sum.txt.tmp and the mv then take it away, so
+# every ISO listed one file that did not exist and failed `md5sum -c`.
 echo "Updating MD5 checksums..."
-cd "$ISO_DIR"
-find . -type f ! -name md5sum.txt ! -path './isolinux/*' -exec md5sum {} + >md5sum.txt.tmp 2>/dev/null || true
-mv md5sum.txt.tmp md5sum.txt
-cd "$REPO_ROOT"
+. "$REPO_ROOT/utils/iso_md5.sh"
+iso_md5_manifest "$ISO_DIR"
 
 # Rebuild ISO
 echo "Rebuilding ISO with xorriso..."
