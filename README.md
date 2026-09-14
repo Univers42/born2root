@@ -1204,6 +1204,8 @@ make partitions SIZE_B2B=50     # the layout
 make features   SIZE_B2B=50     # what gets installed, and whether it fits
 ```
 
+`VM_SIZE=50` (or `50G`, `50GB`, `50Go`) is the same knob under another name.
+
 The layout is not scaled proportionally — that gives a 100 GB `/tmp` on a
 500 GB disk and floors that don't fit on 10 GB. Every volume has a **floor**
 (a working Debian fits on 8 GB), a **weighted share** of what is left, and a
