@@ -76,6 +76,8 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$REPO_ROOT/utils/vm_path.sh"
 # Encrypted or not, and which ISO name that implies.
 . "$REPO_ROOT/utils/luks_mode.sh"
+# shellcheck source=utils/spinner.sh
+. "$REPO_ROOT/utils/spinner.sh"
 # born2root.toml: the login to ssh in as, the passphrase to type at boot.
 . "$REPO_ROOT/utils/b2b_config.sh"
 LUKS="${LUKS:-ON}"
@@ -571,14 +573,13 @@ watch_install() {
     local pid started elapsed=0 quiet=0 hz failed
     local stage="Booting the installer" prev_stage="" stage_started=0 changed=0 activity=""
     local log_sz=0 disk_sz=0 last_log=-1 last_disk=-1 cpu=0 cpu_prev cpu_now
-    local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-    local fi=0 tty=0 drawn=0 last_beat=-60
+    local tty=0 drawn=0 last_beat=-60
 
     pid=$(qemu_pid) || {
         warn "no QEMU running for $VM_NAME"
         return 1
     }
-    [ -t 1 ] && tty=1
+    spin_tty && tty=1
     hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
     # Age of the install from QEMU's own start, so a re-attach does not say 0s.
     started=$(stat -c %Y "$PIDFILE" 2>/dev/null || date +%s)
@@ -590,15 +591,21 @@ watch_install() {
         local m s l1 l2 l3
         m=$((elapsed / 60))
         s=$((elapsed % 60))
-        l1=$(printf "  ${C_BLUE}%s${C_RESET} ${C_BOLD}%s${C_RESET}  ${C_DIM}%dm%02ds${C_RESET}" \
-            "${frames[$fi]}" "$stage" "$m" "$s")
+        # @G@ and @S@ are the spinner's glyph and sweep: spin_block_sleep
+        # redraws this line with them between two polls (utils/spinner.sh).
+        l1=$(printf "  @G@ ${C_BOLD}%s${C_RESET}  @S@  ${C_DIM}%dm%02ds${C_RESET}" \
+            "$stage" "$m" "$s")
         l2=$(printf "    ${C_DIM}%.72s${C_RESET}" "$activity")
         l3=$(printf "    ${C_DIM}disk %s · log %s · cpu %d%%${C_RESET}" \
             "$(human "$disk_sz")" "$(human "$log_sz")" "$cpu")
         [ "$quiet" -ge "$stall_warn" ] &&
             l3="$l3  ${C_YELLOW}⚠ quiet for $((quiet / 60))m$((quiet % 60))s${C_RESET}"
-        fi=$(((fi + 1) % ${#frames[@]}))
         if [ "$tty" = 1 ]; then
+            # shellcheck disable=SC2034 # read by spin_block_sleep (utils/spinner.sh)
+            SPIN_LINE=$l1
+            spin_frame
+            l1="${l1//@G@/$SPIN_GLYPH}"
+            l1="${l1//@S@/$SPIN_SWEEP}"
             [ "$drawn" = 1 ] && printf '\033[3A'
             printf '\r\033[K%s\n\r\033[K%s\n\r\033[K%s\n' "$l1" "$l2" "$l3"
             drawn=1
@@ -638,7 +645,11 @@ watch_install() {
     }
 
     while :; do
-        sleep "$tick"
+        if [ "$tty" = 1 ] && [ "$drawn" = 1 ]; then
+            spin_block_sleep "$tick" 3
+        else
+            sleep "$tick"
+        fi
         elapsed=$(($(date +%s) - started))
 
         # The definitive signals come from inside the installer.
@@ -881,7 +892,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
             warn "no passphrase (B2B_LUKS_PASSPHRASE in born2root.toml, or VM_PASS) — unlock it yourself"
         else
             info "waiting for the initramfs to reach the LUKS prompt"
-            sleep "${UNLOCK_DELAY:-45}"
+            spin_sleep "${UNLOCK_DELAY:-45}" "booting to the LUKS prompt"
             for attempt in 1 2 3 4; do
                 is_running || die "QEMU exited while booting — see $SERIAL"
                 if ssh_banner_up >/dev/null; then break; fi
@@ -889,7 +900,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
                 sendkey_string "$pass" || break
                 # Unlocking, then booting to sshd, takes a while on first boot.
                 for _ in $(seq 1 24); do
-                    sleep 5
+                    spin_sleep 5 "unlocking the disk"
                     is_running || die "QEMU exited while booting — see $SERIAL"
                     ssh_banner_up >/dev/null && break
                 done
@@ -908,7 +919,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
                 break
             fi
             is_running || die "QEMU exited while booting — see $SERIAL"
-            sleep 5
+            spin_sleep 5 "waiting for sshd"
         done
         ssh_banner_up >/dev/null || warn "sshd never answered — look at the screen: $0 screenshot"
         ;;

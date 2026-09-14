@@ -28,6 +28,8 @@ VM_NAME="${VM_NAME:-debian}"
 MAKE_BIN="${MAKE_BIN:-make}"
 # Encrypted or not, and which ISO name that implies.
 . "$REPO_ROOT/utils/luks_mode.sh"
+# shellcheck source=utils/spinner.sh
+. "$REPO_ROOT/utils/spinner.sh"
 LUKS="${LUKS:-ON}"
 
 C_RESET=$'\033[0m'
@@ -149,7 +151,7 @@ printf "  ${C_DIM}waiting for first boot to finish (nvim, hellish, then the prof
 last=""
 until [ "$(ssh_q 'grep -c first-boot-setup /etc/crontab 2>/dev/null || true')" = 0 ]; do
     [ "$waited" -ge "$FIRST_BOOT_TIMEOUT" ] && die "first boot is still running after $((waited / 60)) min. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
-    sleep 15
+    spin_sleep 15 "first boot is provisioning the guest  $((waited / 60))m$((waited % 60))s"
     waited=$((waited + 15))
     cur=$(ssh_q 'tail -n1 /etc/b2b/features.status 2>/dev/null')
     if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
