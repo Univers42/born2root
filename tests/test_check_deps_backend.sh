@@ -43,7 +43,8 @@ mkdir -p "$BIN"
 # The tools the check looks for, present and pointless. dpkg answers for the
 # one package it asks about by name; apt and sudo write down that they were
 # reached, which is the whole question this test asks.
-for t in xorriso curl cc python3 git ssh make qemu-system-x86_64 qemu-img; do
+for t in xorriso curl cc python3 openssl git ssh make \
+	qemu-system-x86_64 qemu-img; do
 	printf '#!/bin/sh\nexit 0\n' > "$BIN/$t"
 	chmod +x "$BIN/$t"
 done
@@ -82,7 +83,11 @@ deps() {
 }
 
 tried_install() {
-	if [ -s "$TMP/sudo.log" ]; then echo yes; else echo no; fi
+	if [ -s "$TMP/sudo.log" ]; then
+		echo yes
+	else
+		echo no
+	fi
 }
 
 
