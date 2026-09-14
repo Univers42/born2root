@@ -170,6 +170,19 @@ if failed=$(ssh_q 'cat /etc/b2b/PROVISION_FAILED 2>/dev/null') && [ -n "$failed"
 fi
 if bad=$(ssh_q 'grep -E " (failed|no-space) " /etc/b2b/features.status 2>/dev/null') && [ -n "$bad" ]; then
     printf '%s\n' "$bad" | sed 's/^/      /' >&2
+    # The why is in the guest, and a CI guest is gone once this exits: a
+    # hellish CI run reported "devtools-extra failed / 23" and nothing else.
+    # first-boot.log (0644) holds each feature between its "--- [name] ---"
+    # and "--- [name] <status>" lines; print the last 60 of that section.
+    for name in $(printf '%s\n' "$bad" | awk '{ print $1 }' | sort -u); do
+        printf '\n    %s, from /var/log/first-boot.log:\n' "$name" >&2
+        ssh_q awk -v n="$name" -f - /var/log/first-boot.log <<'AWK' | sed 's/^/      /' >&2
+index($0, "--- [" n "] ---") == 1 { on = 1 }
+on { buf[++k] = $0 }
+on && k > 1 && index($0, "--- [" n "] ") == 1 { exit }
+END { for (i = (k > 60 ? k - 59 : 1); i <= k; i++) print buf[i] }
+AWK
+    done
     die "features.status records a failure — see above. Guest log: /var/log/b2b-provision.log"
 fi
 status=$(ssh_q 'cat /etc/b2b/features.status 2>/dev/null' || true)
