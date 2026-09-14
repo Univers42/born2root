@@ -250,13 +250,43 @@ if [ "$PREFLIGHT_MB" -gt 0 ]; then
     # Fitting the budget and fitting the disk are different questions: goinfre
     # is not quota'd but it is finite, and an install that runs the filesystem
     # out of space corrupts the image it is halfway through writing.
-    AVAIL_KB=$(df -Pk "$VM_PATH" 2>/dev/null | awk 'NR==2 {print $4; exit}')
-    if [ -z "$AVAIL_KB" ]; then
-        AVAIL_KB=$(df -Pk "$(dirname "$VM_PATH")" 2>/dev/null | awk 'NR==2 {print $4; exit}')
+    # One df line gives the whole filesystem: size, used, free, mount point.
+    DF_LINE=$(df -Pk "$VM_PATH" 2>/dev/null | awk 'NR==2 {print $2, $3, $4, $6; exit}')
+    if [ -z "$DF_LINE" ]; then
+        DF_LINE=$(df -Pk "$(dirname "$VM_PATH")" 2>/dev/null | awk 'NR==2 {print $2, $3, $4, $6; exit}')
     fi
+    read -r FS_KB USED_KB AVAIL_KB FS_MOUNT <<EOF
+$DF_LINE
+EOF
     # The ISO build needs its own room alongside the disk: the netinst, the
     # preseeded copy and the extraction tree, live at the same time.
     NEED_KB=$((PREFLIGHT_MB * 1024 + 4 * 1048576))
+
+    # "51.9 GB free" alone did not say what was already on the filesystem nor
+    # what would be left, and a 47 GB build on it leaves under 1 GB. The whole
+    # filesystem, then: what is on it before the build (this project's share
+    # named, the rest is someone else's), what the build can take, what stays.
+    if [ -n "$AVAIL_KB" ]; then
+        OURS_KB=$((REPO_KB + ISO_KB + OTHER_VM_KB + VM_KB))
+        printf '    %son %s%s  %s(the filesystem %s is on)%s\n' \
+            "$BLD" "$FS_MOUNT" "$OFF" "$DIM" "$VM_PATH" "$OFF"
+        printf '    %-34s %10s\n' "size" "$(human "$FS_KB")"
+        printf '    %-34s %10s   %s\n' "already used" "$(human "$USED_KB")" \
+            "${DIM}(this project: $(human "$OURS_KB"); the rest is other files)${OFF}"
+        # ext4 keeps ~5% for root; without this row used + free fall short of
+        # the size by gigabytes and the table looks wrong.
+        RESERVED_KB=$((FS_KB - USED_KB - AVAIL_KB))
+        [ "$RESERVED_KB" -gt 0 ] &&
+            printf '    %-34s %10s\n' "reserved by the filesystem" "$(human "$RESERVED_KB")"
+        printf '    %-34s %10s\n' "free now" "$(human "$AVAIL_KB")"
+        printf '    %-34s %10s   %s\n' "this build, at most" "$(human "$NEED_KB")" \
+            "${DIM}(the disk at full size + ~4 GB of ISOs while it installs)${OFF}"
+        if [ "$AVAIL_KB" -ge "$NEED_KB" ]; then
+            printf '    %-34s %10s\n\n' "free after, at worst" "$(human $((AVAIL_KB - NEED_KB)))"
+        else
+            printf '    %-34s %10s\n\n' "short by" "$(human $((NEED_KB - AVAIL_KB)))"
+        fi
+    fi
     if [ -n "$AVAIL_KB" ] && [ "$AVAIL_KB" -lt "$NEED_KB" ]; then
         printf '  %s✗%s %s has %s free; the build needs about %s\n' \
             "$RED" "$OFF" "$VM_PATH" "$(human "$AVAIL_KB")" "$(human "$NEED_KB")"
