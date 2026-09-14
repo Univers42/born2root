@@ -387,10 +387,10 @@ share_editor_setup() {
         feature_fail nvim-shared "$user: $owner has no Neovim config to share"
         return 1
     }
-    [ -n "$home" ] && [ -d "$home" ] || {
+    if [ -z "$home" ] || [ ! -d "$home" ]; then
         feature_fail nvim-shared "$user: no home directory"
         return 1
-    }
+    fi
     mkdir -p "$B2B_EDITOR_SHARED"
     chown "$owner:$owner" "$B2B_EDITOR_SHARED"
     chmod 755 "$B2B_EDITOR_SHARED"

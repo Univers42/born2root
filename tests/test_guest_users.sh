@@ -129,7 +129,7 @@ check "dave: the missing group docker is created first" \
 check "only groups that do not exist are created" "$(grep -c '^groupadd ' "$TMP/calls")" 1
 check "erin: an empty password is a locked account, created" \
     "$(grep -c '^useradd .* -p ! -c erin erin$' "$TMP/calls")" 1
-check "dave: both keys, nobody else's" "$(cat "$TMP/home/dave/.ssh/authorized_keys" 2>/dev/null | tr '\n' '|')" \
+check "dave: both keys, nobody else's" "$(tr '\n' '|' <"$TMP/home/dave/.ssh/authorized_keys" 2>/dev/null)" \
     "ssh-ed25519 AAAAkeyD dave@laptop|ssh-rsa AAAAkeyD2 dave@work|"
 check "dave: keys are 600 in a 700 directory" \
     "$(stat -c %a "$TMP/home/dave/.ssh" "$TMP/home/dave/.ssh/authorized_keys" 2>/dev/null | tr '\n' ' ')" "700 600 "
