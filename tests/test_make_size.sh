@@ -2,8 +2,8 @@
 # Regression test for the size `make all` builds at.
 #
 # THE BUGS THIS PINS DOWN
-#   1. `make all VM_SIZE=50` built a 15 GB VM without a word: the Makefile had
-#      no VM_SIZE, and make accepts any variable on its command line.
+#   1. `make all VM_SIZE=50` and `VM_SIZE=50 make all` built a 15 GB VM without
+#      a word: the Makefile had no VM_SIZE, and make accepts any variable.
 #   2. `make all SIZE_B2B=50` built 15 GB too, on a machine whose .b2b-features
 #      had been saved at 15. The recipe let the saved size win whenever it
 #      differed from the one asked for, but the picker only ever GROWS the
@@ -56,9 +56,14 @@ check "VM_SIZE=47G" "$(built_size '' VM_SIZE=47G)" "SIZE_B2B=47"
 check "VM_SIZE=47Go" "$(built_size 15 VM_SIZE=47Go)" "SIZE_B2B=47"
 check "VM_SIZE=47GB" "$(built_size '' VM_SIZE=47GB)" "SIZE_B2B=47"
 
+# The prefix form, `VM_SIZE=50 make all`, arrives as the environment.
+env_size() { VM_SIZE="$1" built_size "$2"; }
+check "VM_SIZE=50 in the environment, saved at 15" "$(env_size 50 15)" "SIZE_B2B=50"
+
 refusal() { make --no-print-directory -n -C "$REPO_ROOT" all "$@" 2>&1 | grep -c '\*\*\* VM_SIZE'; }
 check "VM_SIZE=big is refused" "$(refusal VM_SIZE=big)" 1
 check "VM_SIZE=50 SIZE_B2B=30 is refused" "$(refusal VM_SIZE=50 SIZE_B2B=30)" 1
+check "VM_SIZE=50 in env, SIZE_B2B=30 refused" "$(VM_SIZE=50 refusal SIZE_B2B=30)" 1
 
 # The sub-make must not re-apply VM_SIZE over the size the picker settled on.
 check "sub-make gets VM_SIZE= (picker grew 47 to 52)" \

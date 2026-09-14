@@ -97,16 +97,18 @@ SIZE_B2B := $(or $(call b2b_conf,B2B_SIZE_GB),15)
 endif
 # VM_SIZE is SIZE_B2B spelled the way people ask for a disk: 50, 50G, 50GB or
 # 50Go. It used to be no variable at all, so `make all VM_SIZE=50` built the
-# 15 GB default without a word. Only the command line counts (a generic name
-# like this one may already be in someone's environment), and `all` hands its
-# sub-make VM_SIZE= so the size the picker grew the disk to is not overridden.
-ifeq ($(origin VM_SIZE),command line)
+# 15 GB default without a word. Both spellings count, `make all VM_SIZE=50`
+# and `VM_SIZE=50 make all` (the prefix form this README uses everywhere):
+# reading only the command line turned the second into a 15 GB build too.
+# `all` hands its sub-make VM_SIZE= so the size the picker grew the disk to is
+# not overridden.
+ifneq ($(filter command line environment,$(origin VM_SIZE)),)
 ifneq ($(strip $(VM_SIZE)),)
 VM_SIZE_GB := $(shell printf '%s\n' '$(strip $(VM_SIZE))' | sed -nE 's/^([0-9]+) *([gG]([oObB]|[iI][bB])?)?$$/\1/p')
 ifeq ($(VM_SIZE_GB),)
 $(error VM_SIZE=$(VM_SIZE) is not a size in GB: write VM_SIZE=50, 50G, 50GB or 50Go)
 endif
-ifeq ($(origin SIZE_B2B),command line)
+ifneq ($(filter command line environment,$(origin SIZE_B2B)),)
 ifneq ($(SIZE_B2B),$(VM_SIZE_GB))
 $(error VM_SIZE=$(VM_SIZE) and SIZE_B2B=$(SIZE_B2B) disagree: give only one)
 endif
