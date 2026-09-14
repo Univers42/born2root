@@ -44,6 +44,47 @@ detect_pkg_mgr() {
 }
 detect_pkg_mgr
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Which hypervisor is a dependency, and which one is just installed
+# ─────────────────────────────────────────────────────────────────────────────
+# `make all BACKEND=qemu` used to run the VirtualBox install path -- on a
+# machine with a perfectly good /dev/kvm, in a container that had been given
+# nothing but /dev/kvm, and the run died inside an interactive
+# `sudo apt install virtualbox-7.1` with nobody there to answer it.  The
+# mistake is older than that failure: `make deps` checked for BOTH
+# hypervisors and treated either one missing as missing, when this project
+# runs on exactly one of them and says so in `make all`.  A hypervisor the
+# build has chosen not to use is not a missing dependency.
+#
+#   BACKEND=qemu        VirtualBox is not needed.  Reported, never installed.
+#   BACKEND=virtualbox  VirtualBox is the dependency it always was.
+#   auto                whichever this machine can run.  When QEMU can take
+#                       the build -- qemu-system-x86_64 and a usable
+#                       /dev/kvm -- nothing is missing, and installing a
+#                       second hypervisor would cost a 400 MB download and a
+#                       kernel module nobody asked for.  Only when QEMU
+#                       cannot is VirtualBox required, which is what every
+#                       machine without KVM saw all along.
+#
+# setup/host/select_backend.sh makes the same decision later, for the same
+# reasons; this is the install-time half of it.
+WANT_BACKEND="${BACKEND:-auto}"
+# The device, so a test can hand this a machine without KVM -- the same hook
+# utils/vbox_driver.sh takes for /proc/modules.
+KVM_DEV="${KVM_DEV:-/dev/kvm}"
+
+vbox_required() {
+	case "$WANT_BACKEND" in
+		qemu | kvm) return 1 ;;
+		virtualbox | vbox) return 0 ;;
+	esac
+	if command -v qemu-system-x86_64 > /dev/null 2>&1 \
+		&& [ -r "$KVM_DEV" ] && [ -w "$KVM_DEV" ]; then
+		return 1
+	fi
+	return 0
+}
+
 pkg_installed() {
 	if [ "$PKG_MGR" = "apt" ]; then
 		dpkg -s "$1" 2>/dev/null | grep -q "^Status:.*installed"
@@ -258,9 +299,12 @@ check_vbox() {
 			printf "${DIM}·${RST} VirtualBox Extension Pack not installed ${DIM}(optional — make extpack)${RST}\n"
 			VBOX_NEED_EXTPACK=true
 		fi
-	else
+	elif vbox_required; then
 		warn "VBoxManage not found"
 		VBOX_OK=false
+	else
+		printf "${DIM}·${RST} VirtualBox not installed ${DIM}(not needed:"
+		printf " this build runs on QEMU/KVM)${RST}\n"
 	fi
 }
 
@@ -307,7 +351,8 @@ ensure_group_membership() {
 }
 
 check_group_membership() {
-	if [ "$VBOX_OK" = true ]; then
+	if [ "$VBOX_OK" = true ] && command -v VBoxManage > /dev/null 2>&1 \
+		&& vbox_required; then
 		ensure_group_membership vboxusers \
 			"needed to use /dev/vboxdrv (start a VM) without root"
 	fi
@@ -449,6 +494,7 @@ fi
 # ── Install VirtualBox if missing ─────────────────────────────────────────────
 if [ "$VBOX_OK" = false ]; then
 	printf "\n"
+	info "VirtualBox is required here (backend: ${WANT_BACKEND})."
 	if [ "$PKG_MGR" = "apt" ]; then
 		info "VirtualBox is not installed. Setting up Oracle apt repository first..."
 		setup_vbox_apt_repo
