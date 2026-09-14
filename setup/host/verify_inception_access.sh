@@ -291,12 +291,27 @@ if [ -n "$ff_pid" ] && [ "$configured" -gt 0 ]; then
     fi
 fi
 
+# Both live checks below need a Firefox that starts. The snap one refuses to
+# when it cannot create /run/user/<uid>/snap.firefox: on a 42 host that
+# directory was root's, mode 700, and even `firefox --version` exited 46. Both
+# checks then failed as "the user.js pref is not taking effect" and "https_first
+# may be upgrading it", blaming a profile that had just been verified. A
+# Firefox that cannot run is reported once, as what it is, and not probed.
+ff_runs=0
+if command -v firefox >/dev/null 2>&1; then
+    if ff_out=$(timeout 60 firefox --version 2>&1); then
+        ff_runs=1
+    else
+        warn "Firefox does not start on this host, so its live checks are skipped: $(printf '%s\n' "$ff_out" | grep -v WARNING | tail -n1)"
+    fi
+fi
+
 # End-to-end proof rather than a claim. Firefox is pointed at the REAL domain on
 # a throwaway port served by a listener started here on the host: if the request
 # arrives, Firefox genuinely resolved that exact name by itself. Testing against
 # a host-local listener rather than the guest keeps the check independent of
 # whether the containers happen to log their accesses.
-if command -v firefox >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && [ "$found" -gt 0 ]; then
+if [ "$ff_runs" = 1 ] && command -v python3 >/dev/null 2>&1 && [ "$found" -gt 0 ]; then
     # NOT a dot-directory: snap confinement blocks hidden paths in $HOME,
     # and snap Firefox silently fails to load a profile placed in one.
     tmpdir=$(mktemp -d "$HOME/b2b-ffverify.XXXXXX")
@@ -355,7 +370,7 @@ fi
 # HTTPS and fail with "SSL received a record that exceeded the maximum
 # permissible length" -- a TLS error about a server that speaks no TLS. Prove
 # a real browser loads it, rather than trusting the pref to mean what it says.
-if command -v firefox >/dev/null 2>&1 && [ "$found" -gt 0 ]; then
+if [ "$ff_runs" = 1 ] && [ "$found" -gt 0 ]; then
     tmpdir=$(mktemp -d "$HOME/b2b-ffstatic.XXXXXX")
     mkdir -p "$tmpdir/profile"
     {
