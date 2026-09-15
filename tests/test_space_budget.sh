@@ -8,7 +8,9 @@
 #   used + reserved + free has to add up to the size it names.
 #
 # A stand-in `df` first in PATH gives a fixed 70 GB filesystem, so the rows
-# are checked against known numbers rather than this machine's.
+# are checked against known numbers rather than this machine's. The budget is
+# pinned to 1000 GB for the same reason: at `auto` it counts this checkout's
+# real disk_images/, so an 8 GB VM built here turned "47 GB passes" red.
 
 set -uo pipefail
 
@@ -37,7 +39,7 @@ DF
 chmod +x "$TMP/bin/df"
 
 preflight() { # GB
-    PATH="$TMP/bin:$PATH" NO_COLOR=1 VM_NAME=t VM_PATH="$TMP/vms" \
+    PATH="$TMP/bin:$PATH" NO_COLOR=1 SPACE_BUDGET_GB=1000 VM_NAME=t VM_PATH="$TMP/vms" \
         "${SCRIPT_SH:-bash}" "$REPO_ROOT/utils/space_budget.sh" --preflight $(($1 * 1024)) 2>&1 |
         sed 's/\x1b\[[0-9;]*m//g'
 }
