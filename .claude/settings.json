@@ -1,0 +1,5 @@
+{
+  "includeCoAuthoredBy": false,
+  "effortLevel": "medium",
+  "permissions": { "deny": ["Agent", "Workflow", "Artifact", "WebSearch", "WebFetch"] }
+}

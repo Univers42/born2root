@@ -509,6 +509,8 @@ make all
 | `make claude_code`      | Claude Code, beside opencode (`full` tier: 320 MB on `/`)                   |
 | `make excalidraw`       | Rebuild just the Excalidraw editor (`:Excalidraw`)                          |
 | `make ai AI_MODE=local` | Ollama + a model sized to the VM's RAM                                      |
+| `make llm_host`         | Free local models for opencode: llama.cpp on the host's GPU (`[ai]`)        |
+| `make llm_select`       | Pick those models from Hugging Face, and their folder, budget and context   |
 | `make global_scope`     | Put npm globals and AI models on `/opt`                                     |
 | `make help`             | Show this help in the terminal                                              |
 
@@ -1478,6 +1480,92 @@ make re VM_RAM_MB=6144 AI_MODE=local  # from scratch, with enough RAM
 
 With the default 2 GB VM, `AI_MODE=local` installs Ollama and pulls no model.
 Raise `VM_RAM_MB` first.
+
+### Free models from the host's GPU — `[ai]` and `make llm_host`
+
+opencode's free cloud models are rate-limited **per public IP**, and a campus
+puts every seat behind one NAT address, so that allowance is shared with the
+whole school. A model served from the host has no quota and needs no account,
+and the host has what the VM does not: RAM and a GPU (a Radeon 780M on the
+Ryzen 7 PRO 8700GE seats).
+
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s prebuilt **Vulkan**
+release does the serving: 30 MB, no compiling, no sudo. It uses the GPU when
+the session can open one, and otherwise says it is falling back to the CPU.
+One server holds several models, and opencode switches between them with
+`/models`.
+
+Choose everything with the picker, which writes `[ai]` in `born2root.toml`
+for you (comments kept):
+
+```bash
+make llm_select
+```
+
+It asks for the folder (typed by you, `$USER` stays literal), the budget, the
+context and the GPU mode. Then it searches Hugging Face's GGUF index and lists
+every quantization with its real size and a verdict: _fits_, _over the budget_,
+_too big for the RAM_ or _already in the folder_. Anything already in the
+folder counts against the budget. Or edit the table by hand:
+
+```toml
+[ai]
+host_models = true
+models      = ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"]
+models_dir  = "/sgoinfre/students/$USER/llm"
+budget_gb   = 15
+```
+
+`make all` then checks everything **before** the install: model sizes from
+Hugging Face, the budget, free space and memory. It prints what it will do on
+the workstation and asks once for those settings (`B2B_LLM_ACK=1` without a
+terminal). If those settings were never confirmed, it offers the picker
+first. At the end it serves the models and writes opencode's config in the
+VM. By hand:
+
+```bash
+make llm_select    # choose models, folder, budget, context, GPU mode
+make llm_host      # release + models + server + opencode in the VM
+make llm_status    # store vs budget, GPU or CPU, server, models
+make llm_stop
+```
+
+| Model (`repo:quant`)                                     | Size    |
+| -------------------------------------------------------- | ------- |
+| `unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL`   | 12.9 GB |
+| `bartowski/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M`       | 8.4 GB  |
+| `Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:q4_k_m`             | 4.4 GB  |
+
+- **The default model.** Qwen3-Coder-30B-A3B is a mixture of experts: 30B
+  parameters, 3B active per token. It runs far faster than a dense model of
+  the same size and calls tools well, which opencode depends on.
+- **Where it lives.** `/home` is a small quota and `/goinfre` is wiped. sgoinfre
+  survives and follows your login to any seat. The first load reads the model
+  over NFS; after that it stays in memory.
+- **Is the GPU used?** `make llm_status` says so, and says why not. On the
+  42 Madrid seats measured on 2026-09-15, **it is not**: the Radeon 780M (PCI
+  `1002:15bf`) is there, but kernel 5.15's `amdgpu` does not support it. No
+  driver binds, `/dev/dri` does not exist, and Vulkan only finds `llvmpipe`
+  (software) — the same limit a Vulkan school project like ft_vox hits. Only
+  an administrator can fix it, with a newer kernel (`linux-generic-hwe-22.04`).
+  Until then, llama.cpp runs on the CPU (AVX-512). The default model is a
+  3B-active mixture of experts, which is still usable at CPU speed, and it
+  switches to the GPU on its own once a driver is there.
+- **Measured speed** (CPU, Qwen3-Coder-30B-A3B UD-Q3_K_XL, 2026-09-15):
+  - the first load of the model from sgoinfre took 139 s;
+  - generation runs at 31 tok/s on an empty context and 12 tok/s at 8k tokens;
+  - prompts are processed at about 80 tok/s.
+
+  In opencode, the first request of a session processes its ~7k-token system
+  prompt. A session that created `hello.c` took 141 s, and a follow-up edit
+  took 42 s because that prompt stays cached. The server uses an f16 cache and
+  one slot, with flash attention off on CPU; each choice was measured, see
+  `setup/host/llm_host.sh`.
+- **After logging out** the server and the VM are gone; run `make qemu_start`
+  and `make llm_host` again.
+- **Security.** It listens on `127.0.0.1` (the VM reaches it as `10.0.2.2`).
+  An API key in `models_dir/api-key` (mode 600) keeps other users of the same
+  workstation out.
 
 ---
 

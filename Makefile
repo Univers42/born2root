@@ -295,6 +295,7 @@ C_CYAN   := \033[36m
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
+        llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
@@ -340,6 +341,7 @@ no_root:
 # 15 GB build.
 all: no_root prepare
 	@$(SCRIPT_SH) utils/luks_mode.sh --banner "$(LUKS)" || exit 1
+	@VM_RAM_MB="$(VM_RAM_MB)" $(SCRIPT_SH) setup/host/llm_host.sh preflight || exit 1
 	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" SCRIPT_SH="$(SCRIPT_SH)" \
 		VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" \
@@ -373,6 +375,7 @@ _build:
 			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
 	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
+	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" $(SCRIPT_SH) setup/host/llm_host.sh build
 
 # Which backend would `make all` pick right now, and why?
 backend:
@@ -1011,6 +1014,23 @@ claude_code:
 #   make ai AI_MODE=client       talk to Ollama on the host (10.0.2.2)
 ai:
 	@VM_PATH="$(VM_PATH)" AI_MODE="$(AI_MODE)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" ai
+
+# Free AI with no per-IP quota: llama.cpp on THIS host (its GPU when the
+# session can see one), models on sgoinfre within [ai] budget_gb, and opencode
+# in the VM pointed at it (10.0.2.2). Settings: [ai] in born2root.toml.
+llm_host:
+	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" $(SCRIPT_SH) setup/host/llm_host.sh up
+
+# Choose the folder, budget, context, GPU mode and models from Hugging Face's
+# list; writes [ai] in born2root.toml.
+llm_select:
+	@VM_RAM_MB="$(VM_RAM_MB)" $(SCRIPT_SH) setup/host/llm_select.sh
+
+llm_status:
+	@$(SCRIPT_SH) setup/host/llm_host.sh status
+
+llm_stop:
+	@$(SCRIPT_SH) setup/host/llm_host.sh stop
 
 # =========@@ Help @@==========================================================
 help:

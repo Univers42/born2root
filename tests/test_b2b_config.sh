@@ -118,6 +118,13 @@ check "get B2B_VM_NAME" "$(get_of "$DEFAULTS" B2B_VM_NAME)" debian
 check "get B2B_BACKEND" "$(get_of "$DEFAULTS" B2B_BACKEND)" auto
 check "get B2B_PROFILE" "$(get_of "$DEFAULTS" B2B_PROFILE)" auto
 check "get B2B_AI_MODE" "$(get_of "$DEFAULTS" B2B_AI_MODE)" off
+check "get ai.host_models" "$(get_of "$DEFAULTS" ai.host_models)" false
+check "get ai.models" "$(get_of "$DEFAULTS" ai.models)" "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"
+# shellcheck disable=SC2016 # the literal $USER placeholder, expanded on the host
+check "get ai.models_dir keeps \$USER" "$(get_of "$DEFAULTS" ai.models_dir)" '/sgoinfre/students/$USER/llm'
+check "get ai.budget_gb" "$(get_of "$DEFAULTS" ai.budget_gb)" 15
+check "get ai.llama_cpp" "$(get_of "$DEFAULTS" ai.llama_cpp)" b10970
+check "get ai.gpu" "$(get_of "$DEFAULTS" ai.gpu)" auto
 check "get B2B_SWAP_MB" "$(get_of "$DEFAULTS" B2B_SWAP_MB)" auto
 check 'get B2B_VM_RAM_MB: "auto" is empty, as the Makefile expects' \
     "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" ""
@@ -149,6 +156,23 @@ contains "--parses names TOML" "$(cat "$TMP/out")" "not valid TOML"
 check "the shipped file parses" "$(rc_of born2root.toml --parses)" 0
 check "an invalid value still answers get" \
     "$(get_of "$(variant badsize 's/^disk_gb  *=.*/disk_gb = 2/')" B2B_SIZE_GB)" 2
+
+# ── Refusals: [ai] ──────────────────────────────────────────────────────────
+refuse "ai.models_dir in the home quota" ai.models_dir 's|^models_dir  = .*|models_dir  = "~/llm"|'
+refuse "ai.models_dir relative" ai.models_dir 's|^models_dir  = .*|models_dir  = "llm"|'
+refuse "ai.models_dir in disk_images" ai.models_dir 's|^models_dir  = .*|models_dir  = "/goinfre/x/disk_images/llm"|'
+refuse "ai.budget_gb quoted" ai.budget_gb 's/^budget_gb   = 15/budget_gb   = "15"/'
+refuse "ai.models not a name" ai.models 's/^models      = .*/models      = ["Qwen Coder"]/'
+refuse "ai.models without a quant" ai.models 's|^models      = .*|models      = ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"]|'
+refuse "ai.llama_cpp not a tag" ai.llama_cpp 's/^llama_cpp   = .*/llama_cpp   = "latest"/'
+refuse "ai.gpu nonsense" ai.gpu 's/^gpu         = .*/gpu         = "cuda"/'
+refuse "ai.context too small" ai.context 's/^context     = .*/context     = 512/'
+refuse "ai.models empty" ai.models 's/^models      = .*/models      = []/'
+refuse "ai.bind on every interface" ai.bind 's/^bind        = .*/bind        = "0.0.0.0:8012"/'
+refuse "ai.bind without a port" ai.bind 's/^bind        = .*/bind        = "127.0.0.1"/'
+refuse "an unknown key in [ai]" ai.modles 's/^models      = /modles      = /'
+check "ai.bind on every interface with expose = true" \
+    "$(rc_of "$(variant expose 's/^bind        = .*/bind        = "0.0.0.0:8012"/' 's/^expose      = false/expose      = true/')" --check)" 0
 
 # ── Refusals: [vm] and [system] ─────────────────────────────────────────────
 refuse "vm.name with a space" vm.name 's/^name    = "debian"/name    = "my vm"/'

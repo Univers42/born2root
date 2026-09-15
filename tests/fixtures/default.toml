@@ -10,6 +10,17 @@ ram_mb  = "auto"
 profile = "auto"
 ai_mode = "off"
 
+[ai]
+host_models = false
+models      = ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"]
+models_dir  = "/sgoinfre/students/$USER/llm"
+budget_gb   = 15
+llama_cpp   = "b10970"
+gpu         = "auto"
+context     = 32768
+bind        = "127.0.0.1:8012"
+expose      = false
+
 [system]
 hostname        = ""
 locale          = "en_US.UTF-8"

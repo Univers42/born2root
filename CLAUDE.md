@@ -30,6 +30,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | One command in a QEMU guest / guest parity check | `make qemu_ssh CMD="uname -a"`, `make verify_guest` |
 | Deploy Inception into a built VM, then prove it from the host | `make inception` (`SRC=` pushes a local tree), `make verify_access` |
 | Project footprint against the quota (fails when over) | `make space` |
+| Serve local models to opencode from the host (`[ai]`) | `make llm_select`, `make llm_host`, `make llm_status`, `make llm_stop` |
 | Status dashboard / follow the headless serial console | `make status`, `make console` |
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
 | Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make hellish_plugins`, `make provision`, `make shell_vm` |
@@ -102,9 +103,12 @@ everything a user may change: `[vm]` (the Makefile knobs), `[system]`
 fullname, sudo, groups, ssh_keys, nvim), `[packages] apt`, `[features]`
 (`"auto"`/true/false per optional feature), `[policy.password|sudo|ssh|
 monitoring]` (the subject is the floor: stricter accepted, weaker refused),
-`[network] forwards` and `[disk]` (swap, the volume table as inline tables).
+`[network] forwards`, `[disk]` (swap, the volume table as inline tables) and
+`[ai]` (host-side llama.cpp models for opencode, below).
 
-- `utils/b2b_config.py` is the only reader (`tomllib`, else the vendored tomli
+- `utils/b2b_config.py` is the only reader, and with `--set-ai KEY JSON` the
+  only writer: it replaces one `[ai]` line in place, keeps every comment, and
+  validates before replacing the file (`tomllib`, else the vendored tomli
   in `utils/vendor/` for Python 3.10); `utils/b2b_config.sh` is its shell face
   and keeps the function names. Every call passes the environment with `env`:
   hellish does not export `VAR=x func` to what the function runs.
@@ -279,6 +283,24 @@ changing `partition_recipe.sh` or the default table, paste
 `LUKS-BEGIN`/`LUKS-END` block is what `LUKS=OFF` rewrites. Feature cost
 estimates in `feature_profile.sh` are meant to be corrected from a built guest's
 `features.status`.
+
+### Host-side models for opencode
+
+`setup/host/llm_host.sh` serves `[ai] models` (Hugging Face `repo:quant`)
+with llama.cpp's pinned prebuilt Vulkan release, from `models_dir` on
+sgoinfre, to opencode in the guest at `10.0.2.2`. Its header records why:
+the per-IP quota, why not Ollama, and why the GPU is detected rather than
+assumed. On the 42 Madrid seats (2026-09-15) the Radeon 780M, PCI
+`1002:15bf`, has no driver under kernel 5.15, so there is no `/dev/dri` even
+in the desktop session and the server runs on the CPU. `unbound_gpu` names
+that cause. `setup/host/llm_select.sh` (`make llm_select`) is the picker: it
+lists Hugging Face GGUF repositories and their quantizations with the same
+budget and RAM arithmetic, and writes through `--set-ai`. With
+`ai.host_models = true`, `make all` runs `preflight` before the feature picker
+(it offers `llm_select` when the settings were never confirmed) and `build`
+after `_build`. Refusals and the confirmation both come before the install.
+`tests/test_llm_host.sh` fakes curl, df and llama-server;
+`tests/test_llm_select.sh` scripts the dialogue through `B2B_LLM_TTY`.
 
 ### Two backends, one guest
 

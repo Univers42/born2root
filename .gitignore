@@ -16,6 +16,7 @@ dist/
 
 # generate/feature_select.sh: which features you ticked, for which disk.
 .b2b-features
+.b2b-llm-ack
 
 # Python byte-code from utils/b2b_config.py, and the apt index cache it
 # resolves package sizes from (kept outside the repo footprint).

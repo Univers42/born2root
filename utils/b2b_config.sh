@@ -92,11 +92,13 @@ b2b_users() { _b2b_py --users; }
 b2b_shadow() { _b2b_py --shadow; }
 b2b_ssh_keys() { _b2b_py --ssh-keys; }
 b2b_render() { _b2b_py --render "$1"; }
+b2b_set_ai() { _b2b_py --set-ai "$1" "$2"; }
 
 _b2b_usage() {
     cat >&2 <<EOF
 usage: $0 get KEY | --check | --parses | --show | --dump | --volumes
        | --guest | --users | --shadow | --ssh-keys | --render FILE
+       | --set-ai KEY JSON
        (env: B2B_CONFIG=path/to/born2root.toml, VM_PASS)
 EOF
 }
@@ -119,6 +121,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     --shadow) b2b_shadow ;;
     --ssh-keys) b2b_ssh_keys ;;
     --render) b2b_render "${2:-}" ;;
+    --set-ai) b2b_set_ai "${2:-}" "${3:-}" ;;
     *)
         _b2b_usage
         exit 2

@@ -194,11 +194,11 @@ install_herdr() {
 # host at the NAT gateway 10.0.2.2, and Ollama speaks the OpenAI API on /v1,
 # which is exactly what opencode's openai-compatible provider wants
 # (opencode.ai/docs/providers). Nothing is downloaded and no model is assumed
-# to exist: this is the one edit away from working, and the MOTD hint says
-# which edit. Serve a model on the host and it works as it stands:
-#
-#     OLLAMA_HOST=0.0.0.0 ollama serve        # the default binds 127.0.0.1,
-#                                             # which the VM cannot reach
+# to exist: this is the one step away from working, and the MOTD hint names
+# it. `make llm_host` on the host (setup/host/llm_host.sh) serves models with
+# llama.cpp and replaces this file with its own provider. A loopback bind is
+# enough for either server: both backends' NAT hands the guest's 10.0.2.2 to
+# the host's 127.0.0.1, and 0.0.0.0 would put the server on the campus LAN.
 #
 # install_ai.sh overwrites this with the real endpoint and the real model list
 # when AI_MODE is set, and both recognise the same marker, so a file the user
@@ -443,7 +443,7 @@ write_motd_hint() {
 # Added by born2root setup/install/tools/install_devtools.sh
 printf '\n  herdr        persistent terminal panes (survives an SSH drop)\n'
 printf '  vw           open a saved Neovim session\n'
-command -v opencode >/dev/null 2>&1 && printf '  opencode     AI coding agent — first time: opencode auth login\n'
+command -v opencode >/dev/null 2>&1 && printf '  opencode     AI coding agent — free local models: make llm_host on the host\n'
 printf '\n'
 MOTDEOF
     chmod 755 /etc/update-motd.d/50-b2b-devtools 2>/dev/null || true

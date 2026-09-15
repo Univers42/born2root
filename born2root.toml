@@ -34,6 +34,38 @@ profile = "auto"
 # off | client | local   (a local model needs ~1 GB on /opt plus the model)
 ai_mode = "off"
 
+# ── AI models served from this computer ─────────────────────────────────────
+# opencode's free cloud models are limited per public IP, and the campus puts
+# every seat behind one. With host_models = true, `make all` runs llama.cpp on
+# THIS workstation (as you, no sudo), on its GPU when the session can see one,
+# downloads the models below into models_dir and points opencode in the VM at
+# it. It says exactly what it will do and asks before the build starts.
+# By hand: make llm_host.
+[ai]
+host_models = false
+# Hugging Face GGUF repository:quantization; the first is opencode's default,
+# the others are one /models away. Qwen3-Coder-30B-A3B is a mixture of experts
+# with 3B active parameters: 12.9 GB at UD-Q3_K_XL, and fast on an iGPU.
+# Smaller: "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF:Q4_K_M" (8.4 GB),
+# "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:q4_k_m" (4.4 GB).
+models      = ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"]
+# Not your home (a small quota) and not /goinfre (wiped): sgoinfre survives and
+# follows your login to any seat. $USER is your login on the host.
+models_dir  = "/sgoinfre/students/$USER/llm"
+# The most models_dir may hold, checked before each download.
+budget_gb   = 15
+# The llama.cpp release (github.com/ggml-org/llama.cpp/releases), pinned.
+llama_cpp   = "b10970"
+# auto: the GPU if this session can open one, else the CPU, said out loud.
+# vulkan: refuse without a GPU. cpu: never use it.
+gpu         = "auto"
+# Tokens of context; opencode's own instructions take ~10k of them.
+context     = 32768
+# Loopback is enough: the VM reaches it as 10.0.2.2. Anything else puts the
+# server on the campus network and needs expose = true.
+bind        = "127.0.0.1:8012"
+expose      = false
+
 # ── The system ──────────────────────────────────────────────────────────────
 [system]
 # Empty means <your login>42, which is what the subject requires. Anything

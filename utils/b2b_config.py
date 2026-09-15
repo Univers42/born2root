@@ -115,6 +115,20 @@ DEFAULTS = {
         "root_password": None,
         "luks_passphrase": None,
     },
+    # Models served from THIS host to opencode in the guest, by llama.cpp
+    # (setup/host/llm_host.sh). $USER in models_dir is the host login, so the
+    # tracked file names no one.
+    "ai": {
+        "host_models": False,
+        "models": ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"],
+        "models_dir": "/sgoinfre/students/$USER/llm",
+        "budget_gb": 15,
+        "llama_cpp": "b10970",
+        "gpu": "auto",
+        "context": 32768,
+        "bind": "127.0.0.1:8012",
+        "expose": False,
+    },
     "packages": {"apt": []},
     "network": {"forwards": []},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
@@ -233,6 +247,7 @@ class Config:
         self.system = _merge(
             DEFAULTS["system"], raw.get("system"), "system", self.errors
         )
+        self.ai = _merge(DEFAULTS["ai"], raw.get("ai"), "ai", self.errors)
         self.packages = _merge(
             DEFAULTS["packages"], raw.get("packages"), "packages", self.errors
         )
@@ -480,6 +495,10 @@ TZ_RE = re.compile(r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$")
 VOLNAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MOUNT_RE = re.compile(r"^(/[a-z0-9_.-]+)+$")
 VMNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+# A Hugging Face GGUF repository and a quantization, as llama.cpp's -hf spells it.
+MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9._-]+$")
+RELEASE_RE = re.compile(r"^b[0-9]+$")
+BIND_RE = re.compile(r"^([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\]):([0-9]{1,5})$")
 PKG_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+$")
 FWNAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 PASSPHRASE_RE = re.compile(r"^[A-Za-z0-9._,/=+!@#$%&*?:;-]{8,}$")
@@ -554,6 +573,58 @@ class Validator:
             self.err("vm.profile", "auto, minimal, standard or full")
         if vm["ai_mode"] not in ("off", "client", "local"):
             self.err("vm.ai_mode", "off, client or local")
+
+    def ai(self):
+        """[ai]: judged here, before `make all` downloads or starts anything."""
+        ai = self.c.ai
+        self._bool("ai.host_models", ai["host_models"])
+        self._bool("ai.expose", ai["expose"])
+        models = self._list("ai.models", ai["models"])
+        if models is not None:
+            if not models:
+                self.err(
+                    "ai.models",
+                    'name at least one, e.g. ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"]',
+                )
+            for model in models:
+                if not isinstance(model, str) or not MODEL_RE.match(model):
+                    self.err(
+                        "ai.models",
+                        "%r is not owner/repo:QUANT, a Hugging Face GGUF repository "
+                        "and a quantization" % (model,),
+                    )
+        self._int("ai.budget_gb", ai["budget_gb"], low=1, high=1000, what="a whole number of GB")
+        if self._str("ai.llama_cpp", ai["llama_cpp"]) and not RELEASE_RE.match(ai["llama_cpp"]):
+            self.err("ai.llama_cpp", "a llama.cpp release tag, e.g. b10970")
+        if ai["gpu"] not in ("auto", "vulkan", "cpu"):
+            self.err("ai.gpu", "auto, vulkan or cpu")
+        self._int("ai.context", ai["context"], low=4096, high=262144, what="a number of tokens")
+        where = ai["models_dir"]
+        if self._str("ai.models_dir", where):
+            if where.startswith("~") or where.startswith("$HOME"):
+                self.err(
+                    "ai.models_dir",
+                    "not in your home: /home is a small quota a model fills; "
+                    "use /sgoinfre/students/$USER/llm",
+                )
+            elif not where.startswith("/"):
+                self.err("ai.models_dir", "an absolute path, e.g. /sgoinfre/students/$USER/llm")
+            elif "/disk_images/" in where + "/":
+                self.err("ai.models_dir", "not inside a disk_images directory, which make fclean empties")
+        bind = ai["bind"]
+        if self._str("ai.bind", bind):
+            match = BIND_RE.match(bind)
+            if not match or not 1 <= int(match.group(2)) <= 65535:
+                self.err("ai.bind", "host:port, e.g. 127.0.0.1:8012")
+            elif (
+                not re.match(r"^(127\.|localhost$|\[::1\]$)", match.group(1))
+                and ai["expose"] is not True
+            ):
+                self.err(
+                    "ai.bind",
+                    "%s puts the model server on the network; the VM needs "
+                    "only 127.0.0.1 (set ai.expose = true if you mean it)" % bind,
+                )
 
     def system(self):
         sys_ = self.c.system
@@ -1011,6 +1082,7 @@ class Validator:
 
     def run(self):
         self.vm()
+        self.ai()
         self.system()
         self.users()
         self.features()
@@ -1142,6 +1214,7 @@ def _dotted(config, path):
         "disk": config.disk,
         "policy": config.policy,
         "features": config.features,
+        "ai": config.ai,
     }.get(head)
     for part in parts[1:]:
         if not isinstance(node, dict):
@@ -1350,6 +1423,12 @@ def show(config):
     row("vm.profile", config.vm["profile"])
     row("vm.ai_mode", config.vm["ai_mode"])
     out.append("")
+    for key in ("host_models", "models", "models_dir", "budget_gb", "gpu", "context", "bind"):
+        value = config.ai[key]
+        if isinstance(value, list):
+            value = " ".join(str(v) for v in value)
+        row("ai." + key, value)
+    out.append("")
     hostname = config.hostname
     if not config.system["hostname"]:
         hostname += "   (from the first account)"
@@ -1420,6 +1499,7 @@ def dump(config):
             "login": config.login,
             "hostname": config.hostname,
             "vm": config.vm,
+            "ai": config.ai,
             "system": config.system,
             "users": [
                 {k: v for k, v in u.items() if k != "given"} for u in config.users
@@ -1457,8 +1537,70 @@ def check(config):
     return 0
 
 
+# ── Writing [ai] ────────────────────────────────────────────────────────────
+# The one place anything writes born2root.toml: setup/host/llm_select.sh, the
+# model picker. A tracked file people annotate cannot be regenerated from a
+# parse -- tomllib drops every comment -- so one `key = value` line of the [ai]
+# table is replaced in place (added when missing, and the table with it), the
+# key's alignment kept, everything else byte for byte. The result is parsed
+# and validated BEFORE it replaces the file, so a bad choice never lands.
+def _toml_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return "[" + ", ".join(json.dumps(v, ensure_ascii=False) for v in value) + "]"
+    raise ConfigError("cannot write %r to born2root.toml" % (value,))
+
+
+def set_ai(path, key, value):
+    if key not in DEFAULTS["ai"]:
+        raise ConfigError("ai.%s: %s" % (key, _unknown(key, DEFAULTS["ai"])))
+    with open(path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if line.strip() == "[ai]"), None)
+    if start is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        lines += ["\n", "[ai]\n"]
+        start = len(lines) - 1
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")),
+        len(lines),
+    )
+    rendered = _toml_value(value)
+    pattern = re.compile(r"^(\s*%s\s*=\s*)" % re.escape(key))
+    for i in range(start + 1, end):
+        match = pattern.match(lines[i])
+        if match:
+            lines[i] = match.group(1) + rendered + "\n"
+            break
+    else:
+        at = end
+        while at > start + 1 and not lines[at - 1].strip():
+            at -= 1
+        lines.insert(at, "%s = %s\n" % (key, rendered))
+    text = "".join(lines)
+    try:
+        raw = toml_module().loads(text)
+    except Exception as exc:
+        raise ConfigError("ai.%s: the result would not parse: %s" % (key, exc))
+    errors, _ = Validator(Config(raw, path)).run()
+    ours = [e for e in errors if e[0] == "ai." + key or e[0] == "ai"]
+    if ours:
+        raise ConfigError("; ".join("%s: %s" % e for e in ours))
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.replace(tmp, path)
+
+
 USAGE = """usage: b2b_config.py get KEY | --check | --parses | --show | --dump
        | --volumes | --guest | --users | --shadow | --ssh-keys | --render FILE
+       | --set-ai KEY JSON
        (env: B2B_CONFIG=path/to/born2root.toml, VM_PASS)
 """
 
@@ -1483,6 +1625,16 @@ def main(argv):
     try:
         if mode == "--parses":
             read_raw()
+            return 0
+        if mode == "--set-ai":
+            if len(argv) < 3:
+                sys.stderr.write(USAGE)
+                return 2
+            try:
+                value = json.loads(argv[2])
+            except ValueError:
+                raise ConfigError("--set-ai %s: %r is not JSON" % (argv[1], argv[2]))
+            set_ai(CONFIG, argv[1], value)
             return 0
         config = load()
         if mode == "--check":
