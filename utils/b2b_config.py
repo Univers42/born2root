@@ -103,6 +103,7 @@ DEFAULTS = {
         "backend": "auto",
         "disk_gb": 15,
         "ram_mb": "auto",
+        "cpus": "auto",
         "profile": "auto",
         "ai_mode": "off",
     },
@@ -569,6 +570,8 @@ class Validator:
         self._int("vm.disk_gb", vm["disk_gb"], low=8, what="a whole number of GB")
         if vm["ram_mb"] != "auto":
             self._int("vm.ram_mb", vm["ram_mb"], low=512, what='"auto" or MB')
+        if vm["cpus"] != "auto":
+            self._int("vm.cpus", vm["cpus"], low=1, what='"auto" or a core count')
         if vm["profile"] not in ("auto", "minimal", "standard", "full"):
             self.err("vm.profile", "auto, minimal, standard or full")
         if vm["ai_mode"] not in ("off", "client", "local"):
@@ -1134,6 +1137,7 @@ LEGACY = {
     "B2B_SWAP_MB": lambda c: c.disk.get("swap_mb"),
     "B2B_SIZE_GB": lambda c: c.vm.get("disk_gb"),
     "B2B_VM_RAM_MB": lambda c: "" if c.vm.get("ram_mb") == "auto" else c.vm.get("ram_mb"),
+    "B2B_VM_CPUS": lambda c: "" if c.vm.get("cpus") == "auto" else c.vm.get("cpus"),
     "B2B_VM_NAME": lambda c: c.vm.get("name") or "",
     "B2B_BACKEND": lambda c: c.vm.get("backend") or "",
     "B2B_PROFILE": lambda c: c.vm.get("profile") or "",
@@ -1420,6 +1424,7 @@ def show(config):
     row("vm.backend", config.vm["backend"])
     row("vm.disk_gb", config.vm["disk_gb"])
     row("vm.ram_mb", config.vm["ram_mb"])
+    row("vm.cpus", config.vm["cpus"])
     row("vm.profile", config.vm["profile"])
     row("vm.ai_mode", config.vm["ai_mode"])
     out.append("")

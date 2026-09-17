@@ -7,6 +7,7 @@ name    = "debian"
 backend = "auto"
 disk_gb = 15
 ram_mb  = "auto"
+cpus    = "auto"
 profile = "auto"
 ai_mode = "off"
 

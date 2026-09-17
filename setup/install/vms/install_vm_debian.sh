@@ -110,6 +110,10 @@ auto_size_vm() {
     VM_CPUS=$((host_cpus / 2))
     [ "$VM_CPUS" -lt 2 ] && VM_CPUS=2
     [ "$VM_CPUS" -gt 8 ] && VM_CPUS=8
+    case "${B2B_VM_CPUS:-}" in
+    '' | 0 | *[!0-9]*) ;;
+    *) VM_CPUS="$B2B_VM_CPUS" ;;
+    esac
 
     VM_VRAM=128
 

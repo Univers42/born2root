@@ -119,6 +119,9 @@ endif
 ifeq ($(origin VM_RAM_MB),undefined)
 VM_RAM_MB := $(call b2b_conf,B2B_VM_RAM_MB)
 endif
+ifeq ($(origin B2B_VM_CPUS),undefined)
+B2B_VM_CPUS := $(call b2b_conf,B2B_VM_CPUS)
+endif
 ifeq ($(origin PROFILE),undefined)
 PROFILE := $(or $(call b2b_conf,B2B_PROFILE),auto)
 endif
@@ -262,6 +265,7 @@ COMPACT ?= 0
 # for a local model — the 2048 floor is below what any model needs, and
 # AI_MODE=local will say so.
 #   make re VM_RAM_MB=6144 AI_MODE=local
+# B2B_VM_CPUS: the VM's cores. Empty = half the host's, clamped to [2,8].
 
 # AI_MODE (B2B_AI_MODE): optional AI, baked into the ISO so first boot
 # honours it (default: off).
@@ -341,8 +345,8 @@ no_root:
 # 15 GB build.
 all: no_root prepare
 	@$(SCRIPT_SH) utils/luks_mode.sh --banner "$(LUKS)" || exit 1
-	@VM_RAM_MB="$(VM_RAM_MB)" $(SCRIPT_SH) setup/host/llm_host.sh preflight || exit 1
-	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
+	@VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" $(SCRIPT_SH) setup/host/llm_host.sh preflight || exit 1
+	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" AI_MODE="$(AI_MODE)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" SCRIPT_SH="$(SCRIPT_SH)" \
 		VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" \
 		$(SCRIPT_SH) generate/feature_select.sh || exit 1
@@ -363,14 +367,14 @@ _build:
 	$(SCRIPT_SH) utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
-		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" VM_NAME="$(VM_NAME)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" VM_NAME="$(VM_NAME)" \
 		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
 	else \
 		$(MAKE_BIN) --no-print-directory check_driver && \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
-		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
@@ -385,7 +389,7 @@ backend:
 # The same VM, run by QEMU instead of VirtualBox. Useful on its own when you
 # want to drive the phases by hand rather than through `make all`.
 QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
-	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" LUKS="$(LUKS)" \
+	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" LUKS="$(LUKS)" \
 	SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)"
 
 # Boots the ISO and runs the unattended install, which REFORMATS the disk.
@@ -718,13 +722,13 @@ fix_app_ports:
 gen_iso: shell
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
 		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" \
-		SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" $(SCRIPT_SH) $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
-		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
 		$(SCRIPT_SH) $(VM_SCRIPT) "$(VM_NAME)"
 
 # =========@@ Start an existing VM @@===========================================
@@ -868,13 +872,13 @@ config:
 
 # What the guest's disk will look like for this SIZE_B2B, without building.
 partitions:
-	@SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+	@SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
 		$(SCRIPT_SH) generate/partition_recipe.sh --table
 
 # What will be installed for this SIZE_B2B/PROFILE/FEATURES, and whether it
 # fits that layout. Exits 1 when it does not, naming the size that would.
 features:
-	@SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" \
+	@SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
 		$(SCRIPT_SH) generate/feature_profile.sh --table
 
@@ -883,7 +887,7 @@ features:
 # by itself when a terminal is attached, so this target is for changing your
 # mind without rebuilding. --show prints the saved choice, --clear forgets it.
 features_select:
-	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" AI_MODE="$(AI_MODE)" \
+	@SIZE_B2B="$(SIZE_B2B)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" AI_MODE="$(AI_MODE)" \
 		VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" \
 		SCRIPT_SH="$(SCRIPT_SH)" $(SCRIPT_SH) generate/feature_select.sh $(ARGS)
 
@@ -1024,7 +1028,7 @@ llm_host:
 # Choose the folder, budget, context, GPU mode and models from Hugging Face's
 # list; writes [ai] in born2root.toml.
 llm_select:
-	@VM_RAM_MB="$(VM_RAM_MB)" $(SCRIPT_SH) setup/host/llm_select.sh
+	@VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" $(SCRIPT_SH) setup/host/llm_select.sh
 
 llm_status:
 	@$(SCRIPT_SH) setup/host/llm_host.sh status

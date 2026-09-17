@@ -26,8 +26,12 @@ backend = "auto"
 # Disk size in GB. 15 is the school quota; the layout below and the install
 # set are both derived from it.
 disk_gb = 15
-# Guest RAM: "auto" is a quarter of this machine's, clamped to 2048-8192 MB.
-ram_mb  = "auto"
+# Guest RAM in MB: "auto" is a quarter of this machine's, clamped to
+# 2048-8192 MB, on both backends. A number (10240 = 10 GB) is taken as is;
+# it applies at the next boot (make qemu_stop qemu_start, or make start_vm).
+ram_mb  = 10240
+# Guest cores: "auto" is half of this machine's, clamped to 2-8.
+cpus    = "auto"
 # auto | minimal | standard | full   (auto follows the disk size: minimal
 # under 15 GB, standard 15-29, full 30+)
 profile = "auto"

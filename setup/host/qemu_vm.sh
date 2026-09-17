@@ -61,7 +61,7 @@
 #
 # Env
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (15360 = SIZE_B2B*1024)
-#   VM_RAM_MB (2048)  VM_CPUS (3)  VM_PASS (default: born2root.toml's B2B_LUKS_PASSPHRASE)
+#   VM_RAM_MB (auto)  B2B_VM_CPUS (auto)  VM_PASS (default: born2root.toml's B2B_LUKS_PASSPHRASE)
 #   VM_USER (default: born2root.toml's B2B_LOGIN)
 #   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
 # ============================================================================ #
@@ -103,8 +103,53 @@ vm_paths() {
 vm_paths
 
 DISK_SIZE_MB="${DISK_SIZE_MB:-15360}"
-VM_RAM_MB="${VM_RAM_MB:-2048}"
-VM_CPUS="${VM_CPUS:-3}"
+# Empty RAM and cores mean the same share install_vm_debian.sh gives a
+# VirtualBox guest: 25% of host RAM clamped to [2048,8192] MB, half the cores
+# clamped to [2,8]. This used to be a flat 2048 MB and 3 cores, so the
+# born2root.toml "auto" was a quarter of the host only on VirtualBox; on a
+# 30 GB, 16-core seat the QEMU guest swapped under nvim and its language
+# servers while the host sat idle.
+vm_sizing() {
+    local host_ram_mb host_cpus
+    host_ram_mb=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null)
+    host_cpus=$(nproc 2>/dev/null)
+    case "${VM_RAM_MB:-}" in
+    '')
+        VM_RAM_MB=$((${host_ram_mb:-8192} / 4))
+        if [ "$VM_RAM_MB" -lt 2048 ]; then
+            VM_RAM_MB=2048
+        fi
+        if [ "$VM_RAM_MB" -gt 8192 ]; then
+            VM_RAM_MB=8192
+        fi
+        ;;
+    *[!0-9]*)
+        echo "VM_RAM_MB='$VM_RAM_MB' is not a number of MB (born2root.toml vm.ram_mb)" >&2
+        exit 1
+        ;;
+    esac
+    if [ -n "$host_ram_mb" ] && [ "$VM_RAM_MB" -gt "$host_ram_mb" ]; then
+        echo "VM_RAM_MB=${VM_RAM_MB} exceeds the host's ${host_ram_mb} MB" >&2
+        exit 1
+    fi
+    case "${B2B_VM_CPUS:-}" in
+    '')
+        VM_CPUS=$((${host_cpus:-4} / 2))
+        if [ "$VM_CPUS" -lt 2 ]; then
+            VM_CPUS=2
+        fi
+        if [ "$VM_CPUS" -gt 8 ]; then
+            VM_CPUS=8
+        fi
+        ;;
+    *[!0-9]* | 0)
+        echo "B2B_VM_CPUS='$B2B_VM_CPUS' is not a core count (born2root.toml vm.cpus)" >&2
+        exit 1
+        ;;
+    *) VM_CPUS="$B2B_VM_CPUS" ;;
+    esac
+}
+vm_sizing
 
 # Host:guest port pairs, matching the VirtualBox NAT rule set. These are
 # PREFERRED host ports, not guaranteed ones -- see resolve_ports() below.
