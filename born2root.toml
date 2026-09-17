@@ -29,7 +29,7 @@ disk_gb = 15
 # Guest RAM in MB: "auto" is a quarter of this machine's, clamped to
 # 2048-8192 MB, on both backends. A number (10240 = 10 GB) is taken as is;
 # it applies at the next boot (make qemu_stop qemu_start, or make start_vm).
-ram_mb  = 10240
+ram_mb  = "auto"
 # Guest cores: "auto" is half of this machine's, clamped to 2-8.
 cpus    = "auto"
 # auto | minimal | standard | full   (auto follows the disk size: minimal
@@ -219,12 +219,7 @@ forwards = [
 [disk]
 # "auto" is the guest's RAM clamped to 1024-4096 MB and to a quarter of the
 # volume group; or a number of MB.
-# Pinned, because "auto" follows vm.ram_mb: with ram_mb = 10240 it asks for
-# 4096 MB and the quarter-of-the-group cap still hands swap 3709 MB, 1661 MB
-# more than the 2048 the layout was measured against — enough that the
-# standard feature set no longer fits 15 GB (/opt, /var and /home all short).
-# This VM never hibernates, so swap does not have to follow RAM.
-swap_mb = 2048
+swap_mb = "auto"
 # One line per logical volume:
 #   name      the LVM volume name
 #   mount     where it is mounted
