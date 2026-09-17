@@ -57,9 +57,9 @@ export PATH
 NVIM_BOOTSTRAP_TIMEOUT=20
 unset NVIM_TERM NVIM_CFLAGS
 
-# shellcheck disable=SC2317 # called by the function bodies eval'd below
+# shellcheck disable=SC2317,SC2329 # called by the function bodies eval'd below
 log() { :; }
-# shellcheck disable=SC2317 # called by the function bodies eval'd below
+# shellcheck disable=SC2317,SC2329 # called by the function bodies eval'd below
 warn() { :; }
 
 for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim_extras.sh; do

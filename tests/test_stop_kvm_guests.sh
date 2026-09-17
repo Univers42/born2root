@@ -30,7 +30,7 @@ check() {
 }
 
 TMP=$(mktemp -d)
-# shellcheck disable=SC2317  # every line below runs from the EXIT trap
+# shellcheck disable=SC2317,SC2329  # every line below runs from the EXIT trap
 cleanup() {
     # Never leave a stand-in behind, whatever the test did.
     if [ -s "$TMP/pids" ]; then

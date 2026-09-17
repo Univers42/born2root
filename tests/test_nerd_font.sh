@@ -94,9 +94,9 @@ env NVIM_NERD_FONT=maybe "${SCRIPT_SH:-bash}" "$TMP/early.sh" >/dev/null 2>&1 ||
 check "NVIM_NERD_FONT=maybe refuses the build" "$rc" "1"
 
 # ── 2. the guest's config ───────────────────────────────────────────────────
-# shellcheck disable=SC2317 # called by the functions eval'd below
+# shellcheck disable=SC2317,SC2329 # called by the functions eval'd below
 log() { :; }
-# shellcheck disable=SC2317 # called by the functions eval'd below
+# shellcheck disable=SC2317,SC2329 # called by the functions eval'd below
 warn() { printf 'warn: %s\n' "$*"; }
 eval "$(awk '/^resolve_nerd_font_setting\(\) \{/,/^}/' "$REPO/setup/install/nvim/install_nvim.sh")"
 eval "$(awk '/^set_nerd_font\(\) \{/,/^}/' "$REPO/setup/install/nvim/install_nvim.sh")"

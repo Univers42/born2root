@@ -841,7 +841,7 @@ verify() {
         warn "server.js does not parse"
         return 1
     }
-    if ! node - "${EXCALIDRAW_DIR}/server.js" <<'SMOKEEOF'; then
+    if ! node - "${EXCALIDRAW_DIR}/server.js" <<'SMOKEEOF'
 const { start } = require(process.argv[2]);
 const fs = require('fs');
 const os = require('os');
@@ -890,6 +890,7 @@ server.on('listening', async () => {
   server.close(() => process.exit(ok ? 0 : 1));
 });
 SMOKEEOF
+    then
         warn "the server smoke test failed"
         return 1
     fi
