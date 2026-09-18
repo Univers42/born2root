@@ -824,24 +824,14 @@ build_app() {
     log "built ${EXCALIDRAW_DIR}/app ($(du -sm "${EXCALIDRAW_DIR}/app" | cut -f1) MB)"
 }
 
-# ── Verify ──────────────────────────────────────────────────────────────────
-# Not "the files exist": the server is started on an ephemeral port, the page
-# is fetched, a scratch drawing is read and written through the API, and the
-# server is stopped -- all inside one node process, so nothing is left running.
-verify() {
-    local f
-    for f in app/index.html app/app.js app/index.css server.js; do
-        [ -s "${EXCALIDRAW_DIR}/${f}" ] || {
-            warn "missing or empty: ${EXCALIDRAW_DIR}/${f}"
-            return 1
-        }
-    done
-    [ -d "${EXCALIDRAW_DIR}/app/fonts" ] || warn "no fonts directory — the editor will use fallback fonts"
-    node --check "${EXCALIDRAW_DIR}/server.js" || {
-        warn "server.js does not parse"
-        return 1
-    }
-    if ! node - "${EXCALIDRAW_DIR}/server.js" <<'SMOKEEOF'
+# The smoke test is a function of its own so that its heredoc is a plain
+# redirect instead of the condition of an `if`. shfmt cannot agree with itself
+# about where the `then` of a heredoc condition goes: releases up to 3.12 (what
+# CI's snap installs) put it on the `<<EOF` line, 3.13+ puts it on its own line
+# after the terminator, so whichever form is committed one of the two fails the
+# lint. With no keyword after the redirect, every version leaves this alone.
+smoke_test() {
+    node - "${EXCALIDRAW_DIR}/server.js" <<'SMOKEEOF'
 const { start } = require(process.argv[2]);
 const fs = require('fs');
 const os = require('os');
@@ -890,7 +880,26 @@ server.on('listening', async () => {
   server.close(() => process.exit(ok ? 0 : 1));
 });
 SMOKEEOF
-    then
+}
+
+# ── Verify ──────────────────────────────────────────────────────────────────
+# Not "the files exist": the server is started on an ephemeral port, the page
+# is fetched, a scratch drawing is read and written through the API, and the
+# server is stopped -- all inside one node process, so nothing is left running.
+verify() {
+    local f
+    for f in app/index.html app/app.js app/index.css server.js; do
+        [ -s "${EXCALIDRAW_DIR}/${f}" ] || {
+            warn "missing or empty: ${EXCALIDRAW_DIR}/${f}"
+            return 1
+        }
+    done
+    [ -d "${EXCALIDRAW_DIR}/app/fonts" ] || warn "no fonts directory — the editor will use fallback fonts"
+    node --check "${EXCALIDRAW_DIR}/server.js" || {
+        warn "server.js does not parse"
+        return 1
+    }
+    if ! smoke_test; then
         warn "the server smoke test failed"
         return 1
     fi

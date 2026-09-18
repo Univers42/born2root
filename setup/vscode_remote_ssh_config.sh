@@ -68,8 +68,18 @@ VSCODE_SETTINGS="${HOME}/.config/Code/User/settings.json"
 # Create directory if it doesn't exist
 mkdir -p "$(dirname "$VSCODE_SETTINGS")"
 
-# Use Python to safely merge JSON settings (handles existing settings gracefully)
-if python3 <<PYTHON_EOF
+# Use Python to safely merge JSON settings (handles existing settings gracefully).
+#
+# The merge lives in a function rather than inline as `if python3 <<EOF; then`
+# because shfmt cannot agree with itself about where the `then` of a heredoc
+# condition belongs: releases up to 3.12 (what CI's snap installs) rewrite it
+# onto the `<<EOF` line, 3.13+ rewrites it back onto its own line, so whichever
+# form is committed one of the two linters fails. A heredoc inside a function
+# body has no keyword after the redirect, so every version leaves it alone.
+# Keeping it a condition also matters under `set -e`: a bare failing python3
+# would abort the script instead of reaching the else branch below.
+merge_vscode_settings() {
+    python3 <<PYTHON_EOF
 import json
 import sys
 
@@ -100,7 +110,9 @@ with open(settings_file, 'w') as f:
 print("✓ VS Code settings updated")
 
 PYTHON_EOF
-then
+}
+
+if merge_vscode_settings; then
     echo -e "${GREEN}✓ VS Code Remote SSH settings configured${NC}\n"
 else
     echo -e "${YELLOW}⚠ Could not auto-configure settings${NC}"
