@@ -20,9 +20,13 @@
 #   machine where VirtualBox is unusable. That is what this script drives.
 #
 # WHAT IT KEEPS IDENTICAL TO THE VIRTUALBOX PATH
-#   guest disk       /dev/sda        an AHCI/SATA controller, so the preseed's
+#   guest disk       /dev/sda        a virtio-SCSI controller: it goes through
+#                                    the SCSI subsystem, so the preseed's
 #                                    `partman-auto/disk string /dev/sda` is
-#                                    still correct and needs no edit
+#                                    still correct and needs no edit. (It was
+#                                    an emulated AHCI controller until the
+#                                    measurements in launch() below; virtio-BLK
+#                                    is what would have produced /dev/vda.)
 #   networking       10.0.2.2 host   QEMU's user-mode ("SLIRP") gateway is the
 #                                    same address VirtualBox NAT uses, so
 #                                    AI_MODE=client and every doc still hold
@@ -64,6 +68,9 @@
 #   VM_RAM_MB (auto)  B2B_VM_CPUS (auto)  VM_PASS (default: born2root.toml's B2B_LUKS_PASSPHRASE)
 #   VM_USER (default: born2root.toml's B2B_LOGIN)
 #   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
+#   B2B_QEMU_LEGACY_HW=1   give the guest the old emulated AHCI + e1000 back,
+#                          PCI slots included. The rollback for a guest that
+#                          will not boot on virtio; changes no disk content.
 # ============================================================================ #
 
 set -uo pipefail
@@ -548,6 +555,9 @@ launch() {
         fi
         hd_index=2
         cd_index=1
+        # Only the media here. The ich9-ahci controller it hangs off is decided
+        # with the rest of the hardware below, because in legacy mode the hard
+        # disk declares that same controller and a second one would collide.
         cd_args=(
             -drive "file=${iso},if=none,id=cd0,media=cdrom,readonly=on"
             -device "ide-cd,drive=cd0,bus=ahci.1,bootindex=${cd_index}"
@@ -572,22 +582,65 @@ launch() {
         printf '%s=%s\n' "$_n" "${_rest%%:*}" >>"$VM_DIR/ports.env"
     done
 
-    # -device ich9-ahci gives the guest a SATA controller, so the disk appears
-    # as /dev/sda and preseed.cfg.in's partman recipe applies unchanged. virtio
-    # would be faster but shows up as /dev/vda and would silently not match.
+    # ── The guest's virtual hardware ────────────────────────────────────────
+    # partman's recipe in preseed.cfg.in addresses the disk as /dev/sda, so the
+    # controller has to produce that name. That is why this was an emulated
+    # ich9-ahci SATA controller: virtio-BLK would be faster but appears as
+    # /dev/vda and would silently not match. virtio-SCSI has neither problem --
+    # it goes through the SCSI subsystem, so the disk is still /dev/sda -- and
+    # it costs far less host CPU per I/O than trapping every AHCI register
+    # access. Measured on this host before the switch: 2.25 ms fsync in the
+    # guest against a 1.33 ms host floor, and the guest saw rotational=1, so it
+    # applied spinning-disk readahead and seek heuristics to an NVMe.
+    #
+    # e1000 -> virtio-net for the same reason, and it is the bigger win: moving
+    # 400 MB guest->host cost 7.18 s of host CPU (~2.1 cores) with e1000, 0.99 s
+    # of it on the QEMU main loop. The link was never slow (123 MB/s), it was
+    # expensive, and on a contended seat that CPU is taken from the desktop.
+    #
+    # PCI slots are pinned because the guest's interface name is derived from
+    # them: /etc/network/interfaces says `ens4` because the NIC sat at slot 4.
+    # A virtio-net that lands anywhere else boots a guest with no network.
+    #
+    # B2B_QEMU_LEGACY_HW=1 restores the old AHCI + e1000 line exactly, slots
+    # included. No snapshot is needed to roll back: swapping the controller
+    # does not alter a byte of the disk image.
+    local disk_args=() net_args=()
+    if [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
+        disk_args=(
+            -device "ich9-ahci,id=ahci"
+            -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap"
+            -device "ide-hd,drive=hd0,bus=ahci.0,bootindex=${hd_index}"
+        )
+        net_args=(-device "e1000,netdev=net0")
+    else
+        # One iothread: block emulation leaves the main loop, which also runs
+        # slirp's userspace TCP. They contend there today.
+        disk_args=(
+            -object "iothread,id=iothread0"
+            -device "virtio-scsi-pci,id=scsi0,addr=0x3,iothread=iothread0"
+            -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring"
+            -device "scsi-hd,drive=hd0,bus=scsi0.0,bootindex=${hd_index}"
+        )
+        net_args=(-device "virtio-net-pci,netdev=net0,addr=0x4")
+        # The CD still needs a SATA controller to hang off. addr=0x5 keeps it
+        # clear of the two pinned slots no matter what order QEMU creates them.
+        [ "$boot" = "cdrom" ] &&
+            disk_args+=(-device "ich9-ahci,id=ahci,addr=0x5")
+    fi
+
     "$QEMU" \
         -name "$VM_NAME" \
         -machine "pc,accel=${ACCEL}" \
         "${cpu_args[@]}" \
-        -smp "$VM_CPUS" \
+        -smp "${VM_CPUS},sockets=1,cores=${VM_CPUS},threads=1" \
         -m "$VM_RAM_MB" \
-        -device ich9-ahci,id=ahci \
-        -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap" \
-        -device "ide-hd,drive=hd0,bus=ahci.0,bootindex=${hd_index}" \
+        "${disk_args[@]}" \
         "${cd_args[@]}" \
         -netdev "user,id=net0$(build_hostfwd)" \
-        -device e1000,netdev=net0 \
+        "${net_args[@]}" \
         -device virtio-rng-pci \
+        -device virtio-balloon-pci,free-page-reporting=on \
         -serial "file:${SERIAL}" \
         -monitor "unix:${MONITOR},server=on,wait=off" \
         -display none \
