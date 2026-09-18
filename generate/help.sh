@@ -214,6 +214,12 @@ cmd "make verify_access" "Prove the domain works from the host"
 cmd "make host_access_undo" "Undo the host-side browser wiring"
 note "Chromium gets the bare URL; Firefox adds :8443"
 
+sec "groot / track-binocle (the other project inside the VM)"
+cmd "make groot" "Tunnel its apps here and trust its CA" "${BLD}${GRN}"
+note "Re-run after 'make certs' in the guest"
+cmd "make groot_map" "Just print the app to port map"
+cmd "make groot_undo" "Close the tunnel, drop the CA"
+
 sec "Editor + shell inside the VM"
 cmd "make provision" "Neovim + kickstart + extras + hellishrc" "${BLD}${GRN}"
 note "Already done at first boot; this re-runs it"

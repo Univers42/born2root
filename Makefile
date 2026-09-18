@@ -298,6 +298,7 @@ C_CYAN   := \033[36m
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
+        groot groot_map groot_undo \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
@@ -937,6 +938,20 @@ host_access:
 
 host_access_undo:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh --undo
+
+# =========@@ groot / track-binocle: host access over HTTPS @@=================
+# Same idea as host_access, different obstacle: groot's apps bind the guest's
+# loopback, which QEMU's NAT cannot reach at all, so the transport is an SSH
+# tunnel instead of a NAT forward. The certificate half is identical (one local
+# CA, imported into the host's NSS stores without root). See the script header.
+groot:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/groot_host_access.sh
+
+groot_map:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/groot_host_access.sh --map
+
+groot_undo:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/groot_host_access.sh --undo
 
 # Clone (or upload) Inception into the VM, build it, wire up the host, verify.
 #   make inception                    clone github.com/Univers42/inception
