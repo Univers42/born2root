@@ -1164,9 +1164,21 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 
     ssh)
         # A shell (or one command) in the guest, on the port it actually got.
+        #
+        # Two ways in. Positional args are the direct one (`qemu_vm.sh ssh
+        # uname -a`). B2B_SSH_CMD is how the Makefile passes CMD: it arrives
+        # through the environment because a recipe's shell would otherwise
+        # re-parse it and run half of it on the host -- see the note above
+        # qemu_ssh in the Makefile. No args and no B2B_SSH_CMD means an
+        # interactive shell, so an empty variable must not become an empty
+        # argument: ssh would take that as a command and return immediately.
         need_running_or_die
+        set -- "${@:2}"
+        if [ $# -eq 0 ] && [ -n "${B2B_SSH_CMD:-}" ]; then
+            set -- "$B2B_SSH_CMD"
+        fi
         exec ssh -p "$(host_port_of ssh)" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o LogLevel=ERROR "${VM_USER}@127.0.0.1" "${@:2}"
+            -o LogLevel=ERROR "${VM_USER}@127.0.0.1" "$@"
         ;;
 
     watch)

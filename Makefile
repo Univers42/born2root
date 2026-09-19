@@ -463,8 +463,26 @@ qemu_screenshot:
 
 # A shell in the guest on the port it actually got -- or one command:
 #   make qemu_ssh CMD="uname -a"
+#
+# CMD travels in the ENVIRONMENT, never on the command line. make expands a
+# recipe into a shell, so an unquoted $(CMD) was re-parsed by that shell and
+# every metacharacter in it acted on the HOST:
+#
+#   make qemu_ssh CMD="hostname; grep PRETTY /etc/os-release"
+#     hostname                      -> ran in the guest   (dlesieur42)
+#     grep PRETTY /etc/os-release   -> ran on the HOST    (Ubuntu 22.04)
+#
+# Half the output came from the seat while looking like guest output, and
+# `CMD="cd /srv && rm -rf ."` would have deleted host files. Quoting the
+# expansion ("$(CMD)") only moves the problem to any CMD containing a double
+# quote -- `psql -c "select 1"` is ordinary here. An exported variable is
+# handed to execve as one string and that shell never parses it at all.
+#
+# make still eats a lone $ on its own account, before any of this: write $$
+# to send one to the guest (CMD='echo $$HOME', CMD='echo $$(id -un)').
+qemu_ssh: export B2B_SSH_CMD = $(CMD)
 qemu_ssh:
-	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh $(CMD)
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh
 
 qemu_ssh_config:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config
