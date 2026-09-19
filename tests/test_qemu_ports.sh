@@ -33,6 +33,10 @@ VM_PATH="$TMP"
 PORTS_SPEC="ssh:4242:4242 mariadb:3306:3306 frontend:5173:5173"
 export VM_NAME VM_PATH PORTS_SPEC
 
+# VM_NAME is the real "debian": anything that reaches ensure_vm_dir would
+# rewrite the developer's own disk_images/.vm_path.debian to point at $TMP.
+export VM_PATH_REGISTRY="$TMP/registry"
+
 . ./setup/host/qemu_vm.sh
 
 # Stub the host probe: pretend 3306 is already taken (the reproduced bug),

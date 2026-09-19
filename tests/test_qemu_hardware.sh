@@ -59,6 +59,13 @@ VM_PATH="$TMP"
 PORTS_SPEC="ssh:4242:4242"
 export VM_NAME VM_PATH PORTS_SPEC
 
+# launch() calls ensure_vm_dir, which records the VM's location in
+# disk_images/.vm_path.<name> -- and VM_NAME here is the real "debian". Without
+# this the test repointed the developer's own registry at $TMP, so the next
+# `make qemu_start` reported "nothing is installed at /tmp/tmp.XXXXXX/debian"
+# with the 31 GB qcow2 sitting untouched in disk_images/. See utils/vm_path.sh.
+export VM_PATH_REGISTRY="$TMP/registry"
+
 . ./setup/host/qemu_vm.sh
 
 # TCG, so launch() skips the KVM availability check and emits no -cpu host.

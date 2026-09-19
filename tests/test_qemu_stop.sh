@@ -33,6 +33,10 @@ VM_NAME=debian
 VM_PATH="$TMP/here"
 export VM_NAME VM_PATH
 
+# VM_NAME is the real "debian": anything that reaches ensure_vm_dir would
+# rewrite the developer's own disk_images/.vm_path.debian to point at $TMP.
+export VM_PATH_REGISTRY="$TMP/registry"
+
 . ./setup/host/qemu_vm.sh
 
 # Three guests, as /proc would show them: ours, one of the same VM started
