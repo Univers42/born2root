@@ -181,30 +181,107 @@ RECIPE="$HERE/partition_recipe.sh"
 # could leave out, and colleagues had already built bash-only guests. Its
 # 1 MB of ~/.hellish moved into b2b-mandatory's /home column, so every total
 # below is unchanged. first-boot-setup.sh still measures it, as `hellish`.
+#
+# 2026-09-20, eighth pass -- the 44 GB guest's features.status, read over a
+# qemu_ssh that finally reached the guest for the whole command:
+#   nvim-extras    /   137 -> 214   (measured 214, more than a third over)
+#   nvim-extras /home  150 -> 259   (measured 259, 73% over)
+#   nvim-extras /opt   135  (146)   within a third, left alone
+#   nvim           /   382  (351)   within a third, left alone
+#   nvim        /home  200 -> 138   within a third on its own, corrected
+#                                   anyway: it shares /home with nvim-extras
+#                                   and the same build measured both. Taking
+#                                   the over-estimate and leaving the under-
+#                                   estimate put the pair 62 MB above what
+#                                   was measured, enough to refuse a second
+#                                   editor account at 15 GB that fits.
+#   docker      /var  3300  (178)   NOT corrected, on purpose: features.status
+#                                   measures the mount at install time, before
+#                                   one image is pulled. 3300 is the allowance
+#                                   for what Docker will hold, not the engine's
+#                                   own size. Reconciling it to 178 would let
+#                                   the check bless a disk that then fills.
+#
+# 2026-09-20 -- two tiers grew out of the datacenter build:
+#
+#   core      on in every profile like base, but a set MAY leave it out by
+#             name. nvim is here now, not in base: a server image with no
+#             editor is still a born2root -- the subject, the scripts and
+#             `make verify_guest` never needed nvim, only the workstation
+#             workflow did. The picker shows core rows ticked; -nvim is legal.
+#
+#   dc-*      the datacenter family, all `explicit` (never chosen by size, so
+#             a datacenter is always something that was asked for). Each row
+#             is one service grobase runs; requires chains keep a set honest
+#             (no identity without a gateway, no storage without an object
+#             store). Costs are the IMAGE sizes, first estimated 2026-09-20
+#             from `docker images` on the 44 GB guest, to be corrected from
+#             features.status like every other row. What the engines will
+#             HOLD is not an install and is not here: that is dc-data, a
+#             reservation like vscode-remote, because volumes are what fill
+#             /var and a model that priced only images would mislead exactly
+#             when it matters. The guest reads which dc-* rows are on from
+#             features.conf; install_grobase.sh turns them into the compose
+#             includes and the tier it brings up.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      8     0     0     1      -
 devtools-apt       base      279   0     0     0      -
-nvim               base      382   120   0     200    devtools-apt
-npm-cache          base      0     0     0     55     nvim
+nvim               core      382   120   0     138    devtools-apt
+npm-cache          core      0     0     0     55     nvim
 vscode-remote      standard  0     0     0     500    -
 webstack           standard  272   0     118   0      -
 nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
-nvim-extras        standard  137   135   0     150    nvim
+nvim-extras        standard  214   135   0     259    nvim
 devtools-extra     standard  200   0     0     0      nodejs
 claude-code        full      320   0     0     0      -
 docker             standard  400   0     3300  0      -
 inception-data     standard  0     0     0     200    docker
 ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -
+dc-netmesh         explicit  50    0     0     0      -
+dc-backup          explicit  30    0     0     0      -
+dc-var-gc          explicit  0     0     0     0      docker
+dc-gateway         explicit  0     0     400   0      docker
+dc-tunnel          explicit  60    0     0     0      dc-gateway
+dc-identity        explicit  0     0     80    0      dc-gateway
+dc-realtime        explicit  0     0     150   0      dc-gateway
+dc-secrets         explicit  0     0     500   0      dc-gateway
+dc-db-postgres     explicit  0     0     450   0      dc-gateway
+dc-db-mysql        explicit  0     0     600   0      dc-gateway
+dc-db-mongo        explicit  0     0     800   0      dc-gateway
+dc-db-redis        explicit  0     0     50    0      dc-gateway
+dc-db-cockroach    explicit  0     0     400   0      dc-gateway
+dc-db-mssql        explicit  0     0     1600  0      dc-gateway
+dc-objectstore     explicit  0     0     150   0      dc-gateway
+dc-storage         explicit  0     0     200   0      dc-objectstore
+dc-observability   explicit  0     0     900   0      dc-gateway
+dc-data            explicit  0     0     4096  0      dc-gateway
+'
+# A bundle is a name that stands for a list of features, expanded before the
+# +name/-name pass so `FEATURES="+dc-standard -dc-tunnel"` reads exactly like
+# `+docker -pytools`. Bundles are not rows: they have no cost of their own and
+# no tier, and adding a column for them would break the NF == 7 contract that
+# names(), field(), feature_select.sh and utils/b2b_config.py all rely on. A
+# bundle may name another bundle; expansion is recursive.
+#
+#   dc-minimal   one gateway, one identity, one engine, private access, a
+#                backup and the garbage collector: the smallest thing that is
+#                still a BaaS, and everything it needs to stay alive.
+#   dc-standard  + object storage, observability and a public tunnel.
+#   dc-full      + every other engine and plane grobase ships.
+BUNDLES='
+dc-minimal   dc-gateway dc-identity dc-db-postgres dc-netmesh dc-backup dc-var-gc dc-data
+dc-standard  dc-minimal dc-objectstore dc-observability dc-tunnel
+dc-full      dc-standard dc-db-mysql dc-db-mongo dc-db-redis dc-db-cockroach dc-db-mssql dc-realtime dc-storage dc-secrets
 '
 # vscode-remote and inception-data are SPACE, not steps: nothing installs them
 # at first boot, and first-boot-setup.sh has no section for either. They are in
 # the manifest because the fit check is a model of the disk, and a disk the
 # documented workflow fills is not a disk that fits. Keeping them out is what
 # let a 974 MB /home pass the check and then fill up completely.
-NOT_INSTALLED='vscode-remote inception-data npm-cache'
+NOT_INSTALLED='vscode-remote inception-data npm-cache dc-data'
 # Every other account with `nvim = true` in born2root.toml shares the login's
 # plugins, parsers and language servers (first-boot-setup.sh moves them to
 # /home/.b2b-editor) and keeps only its config, state and cache: 6 MB measured
@@ -312,6 +389,16 @@ die() {
 names() { printf '%s\n' "$MANIFEST" | awk 'NF == 7 { print $1 }'; }
 field() { printf '%s\n' "$MANIFEST" | awk -v n="$1" -v c="$2" 'NF == 7 && $1 == n { print $c }'; }
 known() { names | grep -qx -- "$1"; }
+bundle_names() { printf '%s\n' "$BUNDLES" | awk 'NF >= 2 { print $1 }'; }
+is_bundle() { bundle_names | grep -qx -- "$1"; }
+bundle_members() { printf '%s\n' "$BUNDLES" | awk -v n="$1" '$1 == n { for (i = 2; i <= NF; i++) print $i }'; }
+# The features a bundle stands for, one per line, bundles inside it expanded.
+expand_bundle() {
+    local m
+    for m in $(bundle_members "$1"); do
+        if is_bundle "$m"; then expand_bundle "$m"; else printf '%s\n' "$m"; fi
+    done
+}
 varname() { printf 'B2B_FEATURE_%s' "$(printf '%s' "$1" | tr '-' '_')"; }
 
 # ── 1. Which profile ────────────────────────────────────────────────────────
@@ -337,6 +424,9 @@ for n in $(names); do
     tier=$(field "$n" 2)
     case "$tier" in
     base) on=on ;;
+    # core is base that a set may leave out by name (nvim, since the server
+    # image): on whatever the profile, and the -name pass below accepts it.
+    core) on=on ;;
     standard) if [ "$PROFILE" = minimal ]; then on=off; else on=on; fi ;;
     # `full` is a real tier now, not a synonym for standard: a feature here is
     # chosen automatically only on a 30 GB+ disk, and asked for by name below
@@ -356,10 +446,30 @@ client) set_state ai-client on ;;
 local) set_state ai-local on ;;
 esac
 
+# Bundles first: a +dc-standard becomes one +name per member, in the same
+# sign, before the pass below ever sees it. Through a command substitution
+# rather than `for tok in $FEATURES`, so it splits the same under every shell
+# this runs under.
+EXPANDED=""
+for tok in $(printf '%s' "$FEATURES"); do
+    case "$tok" in
+    +*) sign=+ n=${tok#+} ;;
+    -*) sign=- n=${tok#-} ;;
+    *) sign="" n="$tok" ;;
+    esac
+    if [ -n "$sign" ] && is_bundle "$n"; then
+        for m in $(expand_bundle "$n"); do
+            EXPANDED="${EXPANDED}${EXPANDED:+ }${sign}${m}"
+        done
+    else
+        EXPANDED="${EXPANDED}${EXPANDED:+ }${tok}"
+    fi
+done
+
 # +name / -name overrides. A base feature cannot be removed: that is the
-# definition of base, and a VM without sudo or without nvim is not a smaller
-# born2root, it is a different project.
-for tok in $FEATURES; do
+# definition of base, and a VM without sudo is not a smaller born2root, it is
+# a different project. A core feature can: the server image has no editor.
+for tok in $(printf '%s' "$EXPANDED"); do
     case "$tok" in
     +*)
         n=${tok#+}
@@ -383,7 +493,19 @@ for n in $(names); do
     is_on "$n" || continue
     req=$(field "$n" 7)
     [ "$req" = - ] && continue
-    is_on "$req" || die "'$n' requires '$req', which is off. Add +$req to FEATURES, or drop $n."
+    is_on "$req" && continue
+    # A reservation (NOT_INSTALLED) whose feature is off is not a
+    # contradiction, it is moot: npm-cache without nvim reserves space for a
+    # cache nothing will write. It follows its feature off, silently -- the
+    # toml refuses `npm-cache = false` as a feature, so -nvim could never be
+    # expressed otherwise.
+    case " $NOT_INSTALLED " in
+    *" $n "*)
+        set_state "$n" off
+        continue
+        ;;
+    esac
+    die "'$n' requires '$req', which is off. Add +$req to FEATURES, or drop $n."
 done
 
 # ── 3. Does it fit ──────────────────────────────────────────────────────────

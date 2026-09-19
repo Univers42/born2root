@@ -247,8 +247,14 @@ sudo = true'
 # ── Refusals: features, packages, policies, network ─────────────────────────
 refuse "a feature that is neither auto nor a boolean" features.docker \
     's/^docker         = "auto"/docker         = "yes"/'
-refuse "turning a base feature off" features.nvim \
-    's/^docker         = "auto"/nvim = false/'
+refuse "turning a base feature off" features.devtools-apt \
+    's/^docker         = "auto"/devtools-apt = false/'
+# nvim is core since the server profile, and a bundle name is a feature the
+# toml may set: both used to be refusals.
+check "turning nvim (core) off is accepted" \
+    "$(rc_of "$(variant "core$$" 's/^docker         = "auto"/nvim = false/')" --check)" 0
+check "a bundle name is accepted in [features]" \
+    "$(rc_of "$(variant "bundle$$" 's/^docker         = "auto"/dc-full = true/')" --check)" 0
 refuse "turning hellish off" features.hellish \
     's/^docker         = "auto"/hellish = false/'
 refuse "an unknown feature" features.dcoker \

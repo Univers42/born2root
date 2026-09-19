@@ -276,45 +276,52 @@ else
     echo "[SKIP] /root/install_global_scope.sh not present"
 fi
 
-echo "--- Installing Neovim + kickstart.nvim ---"
-if [ -f /root/install_nvim.sh ]; then
-    # The profile check on the host already proved nvim fits, so a guard
-    # tripping here means the check was wrong -- a failed build, not a [SKIP].
-    #
-    # /home as well as /: the plugins, their parsers, Mason's language servers
-    # and npm's cache all live in the USER's home, and only / was ever checked.
-    # On the 2026-09-12 VirtualBox build /home filled to 974 MB of 974 MB and
-    # the failure was unreadable -- vim.pack reports a failed clone as a
-    # notification, not an error, so the bootstrap logged 132 "Installing
-    # plugins" lines, left ZERO plugins on disk, retried three times, and
-    # never once said "no space". Mason's downloads came back as curl(23) and
-    # git could not even write a ref lock. 400 MB is nvim + nvim-extras from
-    # the manifest (200 + 150) with a little room over.
-    # The installers run for the login only. Every other account with
-    # `nvim = true` in born2root.toml is wired to the same plugins afterwards
-    # (share_editor_setup, after the extras), which costs it ~10 MB of /home
-    # instead of the ~400 MB a second full install measured.
-    if check_disk_space / 1000 && check_disk_space /home 400; then
-        chmod +x /root/install_nvim.sh 2>/dev/null || true
-        # NVIM_BOOTSTRAP=1: kickstart's plugins, tree-sitter parsers and
-        # language servers are installed NOW, at build time, and the script
-        # exits non-zero when any of them is missing afterwards. The
-        # 2026-09-12 build ran this with NVIM_BOOTSTRAP=0 and left every plugin
-        # to the user's first interactive start: minutes of cloning behind a
-        # blank editor, on a VM whose point is to arrive finished.
-        if run_logged /var/log/b2b-nvim-install.log \
-            env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
-            echo "[OK] Neovim + kickstart installed, plugins included (log: /var/log/b2b-nvim-install.log)"
+# nvim is core, not base, since the server profile: on in every profile, but
+# a set may leave it out by name (-nvim, or nvim = false in the toml), and a
+# server image does. feature_on reads the answer from features.conf.
+if ! feature_on nvim; then
+    feature_off nvim
+else
+    echo "--- Installing Neovim + kickstart.nvim ---"
+    if [ -f /root/install_nvim.sh ]; then
+        # The profile check on the host already proved nvim fits, so a guard
+        # tripping here means the check was wrong -- a failed build, not a [SKIP].
+        #
+        # /home as well as /: the plugins, their parsers, Mason's language servers
+        # and npm's cache all live in the USER's home, and only / was ever checked.
+        # On the 2026-09-12 VirtualBox build /home filled to 974 MB of 974 MB and
+        # the failure was unreadable -- vim.pack reports a failed clone as a
+        # notification, not an error, so the bootstrap logged 132 "Installing
+        # plugins" lines, left ZERO plugins on disk, retried three times, and
+        # never once said "no space". Mason's downloads came back as curl(23) and
+        # git could not even write a ref lock. 400 MB is nvim + nvim-extras from
+        # the manifest (200 + 150) with a little room over.
+        # The installers run for the login only. Every other account with
+        # `nvim = true` in born2root.toml is wired to the same plugins afterwards
+        # (share_editor_setup, after the extras), which costs it ~10 MB of /home
+        # instead of the ~400 MB a second full install measured.
+        if check_disk_space / 1000 && check_disk_space /home 400; then
+            chmod +x /root/install_nvim.sh 2>/dev/null || true
+            # NVIM_BOOTSTRAP=1: kickstart's plugins, tree-sitter parsers and
+            # language servers are installed NOW, at build time, and the script
+            # exits non-zero when any of them is missing afterwards. The
+            # 2026-09-12 build ran this with NVIM_BOOTSTRAP=0 and left every plugin
+            # to the user's first interactive start: minutes of cloning behind a
+            # blank editor, on a VM whose point is to arrive finished.
+            if run_logged /var/log/b2b-nvim-install.log \
+                env NVIM_USERS="$B2B_LOGIN" NVIM_BOOTSTRAP=1 "$B2B_SH" /root/install_nvim.sh; then
+                echo "[OK] Neovim + kickstart installed, plugins included (log: /var/log/b2b-nvim-install.log)"
+            else
+                feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
+            fi
         else
-            feature_fail nvim "install_nvim.sh failed (plugins, parsers or language servers missing) — see /var/log/b2b-nvim-install.log"
+            feature_fail nvim "not enough room before install_nvim.sh: / has $(avail_mb /) MB free (needs 1000), /home has $(avail_mb /home) MB (needs 400)"
         fi
     else
-        feature_fail nvim "not enough room before install_nvim.sh: / has $(avail_mb /) MB free (needs 1000), /home has $(avail_mb /home) MB (needs 400)"
+        feature_fail nvim "/root/install_nvim.sh is not in the ISO"
     fi
-else
-    feature_fail nvim "/root/install_nvim.sh is not in the ISO"
+    feature_end nvim ok
 fi
-feature_end nvim ok
 
 # The IDE layer on top is the STANDARD feature nvim-extras, with its own
 # manifest row, so it is measured apart from nvim: on / (apt: fzf, lazygit,
@@ -430,6 +437,8 @@ share_editor_setup() {
     fi
 }
 EDITOR_OTHERS=$(printf '%s' "${B2B_NVIM_USERS:-}" | tr ' ' '\n' | grep -vx "$B2B_LOGIN" | grep . || true)
+# Nothing to share on a guest built without nvim.
+feature_on nvim || EDITOR_OTHERS=""
 if [ -n "$EDITOR_OTHERS" ]; then
     feature_begin nvim-shared /home
     NVIM_SHARED_STATUS=ok
@@ -1074,6 +1083,68 @@ https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.lis
 
     feature_end docker ok
 fi
+
+### ─── 4b. The datacenter: dc-* features ────────────────────────────────────
+# Four provisioners, in dependency order, each gated by the dc-* rows that
+# are on in features.conf (generate/feature_profile.sh names them; the
+# server profile turns them all on with dc-full). They are opt-in, not base:
+# a failure is filed in features.status and shown, but does not raise
+# B2B-FEATURE-FAILED, because a machine whose images could not be pulled
+# tonight is still a good machine, and `make grobase` / `make edge` from the
+# host rerun the same scripts over SSH.
+#
+#   var-gc   FIRST: it writes docker's daemon.json log caps, and the daemon
+#            must restart with them before grobase starts a container.
+#   edge     Tailscale and cloudflared, software only (no key in the ISO).
+#   grobase  the BaaS itself, at the tier the dc-* rows imply.
+#   backup   restic and its timer, idle until the host sends the password.
+#
+# One features.status line per dc-* row that is on, so the manifest's
+# estimates can be corrected the same way as every other row -- but read
+# the note on docker's /var figure in feature_profile.sh first: install-time
+# deltas do not measure what a database will hold.
+dc_run() { # <feature> <script> <mounts...>
+    local feat="$1" script="$2"
+    shift 2
+    if ! feature_on "$feat"; then
+        feature_off "$feat"
+        return 0
+    fi
+    feature_begin "$feat" "$@"
+    if [ ! -f "/root/$script" ]; then
+        echo "[FAIL] $feat — /root/$script is not in the ISO"
+        feature_end "$feat" failed
+        return 1
+    fi
+    chmod +x "/root/$script" 2>/dev/null || true
+    if run_logged "/var/log/b2b-dc-install.log" "$B2B_SH" "/root/$script"; then
+        feature_end "$feat" ok
+    else
+        echo "[FAIL] $feat — $script exited non-zero (log: /var/log/b2b-dc-install.log)"
+        feature_end "$feat" failed
+        return 1
+    fi
+}
+if feature_on dc-var-gc; then dc_run dc-var-gc install_var_gc.sh /var; fi
+if feature_on dc-netmesh || feature_on dc-tunnel; then
+    dc_run dc-netmesh install_edge.sh / || true
+    feature_on dc-tunnel && printf 'dc-tunnel %s / 0\n' "$(grep -q '^dc-netmesh ok' /etc/b2b/features.status && echo ok || echo failed)" >>/etc/b2b/features.status
+fi
+if feature_on dc-gateway; then
+    dc_run dc-gateway install_grobase.sh /var /opt || true
+    # The other grobase-backed rows are measured under dc-gateway (one
+    # `make pull` fetches them all); record them as on, cost folded there.
+    for f in dc-identity dc-realtime dc-secrets dc-db-postgres dc-db-mysql dc-db-mongo \
+        dc-db-redis dc-db-cockroach dc-db-mssql dc-objectstore dc-storage dc-observability; do
+        if feature_on "$f"; then
+            printf '%s %s /var 0\n' "$f" "$(grep -q '^dc-gateway ok' /etc/b2b/features.status && echo ok || echo failed)" >>/etc/b2b/features.status
+        else
+            feature_off "$f"
+        fi
+    done
+fi
+if feature_on dc-backup; then dc_run dc-backup install_backup.sh / || true; fi
+
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────
 sed -i '/first-boot-setup/d' /etc/crontab
 rm -f /root/first-boot-setup.sh

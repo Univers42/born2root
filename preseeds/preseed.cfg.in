@@ -327,6 +327,10 @@ d-i preseed/late_command string \
 	cp /cdrom/install_excalidraw.sh /target/root/install_excalidraw.sh 2>/dev/null || true ; \
 	cp /cdrom/install_hellish_plugins.sh /target/root/install_hellish_plugins.sh 2>/dev/null || true ; \
 	cp /cdrom/install_hellish_upstream.sh /target/root/install_hellish_upstream.sh 2>/dev/null || true ; \
+	cp /cdrom/install_edge.sh /target/root/install_edge.sh 2>/dev/null || true ; \
+	cp /cdrom/install_grobase.sh /target/root/install_grobase.sh 2>/dev/null || true ; \
+	cp /cdrom/install_var_gc.sh /target/root/install_var_gc.sh 2>/dev/null || true ; \
+	cp /cdrom/install_backup.sh /target/root/install_backup.sh 2>/dev/null || true ; \
 	cp /cdrom/custom_shell.bin /target/tmp/custom_shell.bin 2>/dev/null || true ; \
 	cp /cdrom/custom_shell.dest /target/tmp/custom_shell.dest 2>/dev/null || true ; \
 	cp /cdrom/host_ssh_pubkey /target/tmp/host_ssh_pubkey 2>/dev/null || true ; \

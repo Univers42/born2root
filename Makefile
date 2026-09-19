@@ -300,11 +300,12 @@ C_CYAN   := \033[36m
         host_access host_access_undo inception verify_access verif_access fresh \
         groot groot_map groot_undo \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
+        var_gc edge grobase backup_install \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
-        space slim partitions features features_select _build config
+        space slim partitions features features_select packages _build config
 
 # Plain `make` prints the help instead of building. Building this project means
 # downloading an ISO, creating a VM and running a ~20-minute install — too much
@@ -901,6 +902,14 @@ features:
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
 		$(SCRIPT_SH) generate/feature_profile.sh --table
 
+# What a feature pulls in -- the apt packages and the container images -- so
+# "compose a datacenter" is a decision made with the list in front of you.
+#   make packages                    every feature
+#   make packages FEATURE=dc-db-postgres
+#   make packages FEATURE=dc-standard     a bundle: its members, expanded
+packages:
+	@$(SCRIPT_SH) generate/feature_packages.sh $(FEATURE)
+
 # Tick what you want installed, instead of letting the disk size decide. The
 # strict minimum is always on; everything else starts off. `make all` runs this
 # by itself when a terminal is attached, so this target is for changing your
@@ -1038,6 +1047,21 @@ global_scope:
 # Herdr (persistent terminal panes over SSH) + opencode (the AI coding agent).
 devtools:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
+
+# =========@@ datacenter: rerun a dc-* provisioner in a built guest @@=========
+# The same scripts first boot ran from the ISO (setup/install/dc/), pushed
+# over SSH. Each reads /etc/b2b/features.conf in the guest; overrides go
+# through the script's own prefix, which make hands down:
+#   make grobase GROBASE_PACKAGE=essential
+#   make edge EDGE_TS_AUTHKEY=tskey-...          (or: make tailscale)
+var_gc:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" var-gc
+edge:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" edge
+grobase:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" grobase
+backup_install:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" backup
 
 # Claude Code, installed beside opencode rather than instead of it. This is
 # also how the version moves: the binary is root-owned in /usr/local/bin, so

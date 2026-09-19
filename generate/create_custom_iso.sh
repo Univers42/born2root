@@ -480,7 +480,11 @@ for PROVISIONER in \
     setup/install/nvim/install_nvim_extras.sh \
     setup/install/nvim/install_excalidraw.sh \
     setup/install/hellish/install_hellish_plugins.sh \
-    setup/install/hellish/install_hellish_upstream.sh; do
+    setup/install/hellish/install_hellish_upstream.sh \
+    setup/install/dc/install_edge.sh \
+    setup/install/dc/install_grobase.sh \
+    setup/install/dc/install_var_gc.sh \
+    setup/install/dc/install_backup.sh; do
     if [ -f "$PROVISIONER" ]; then
         cp "$PROVISIONER" "$ISO_DIR/$(basename "$PROVISIONER")"
         chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true

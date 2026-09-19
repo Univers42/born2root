@@ -232,7 +232,7 @@ is_opt_key() {
 }
 tier_on_at() { # <tier> <gb>
     case "$1" in
-    base) return 0 ;;
+    base | core) return 0 ;;
     standard) [ "$2" -ge "$STANDARD_FROM" ] && return 0 ;;
     full) [ "$2" -ge "$FULL_FROM" ] && return 0 ;;
     esac
@@ -466,6 +466,24 @@ blurb() {
     devtools-extra) echo "Herdr persistent panes + opencode" ;;
     claude-code) echo "Claude Code, beside opencode" ;;
     docker) echo "Docker engine (Inception needs it)" ;;
+    nvim) echo "Neovim + kickstart (untick for a server image)" ;;
+    dc-netmesh) echo "Tailscale: private access from anywhere, no inbound port" ;;
+    dc-backup) echo "restic + timers: encrypted dumps of every engine" ;;
+    dc-var-gc) echo "circular cleaning of /var (never volumes)" ;;
+    dc-gateway) echo "Kong: the one public door (grobase)" ;;
+    dc-tunnel) echo "cloudflared: public HTTPS through an outbound tunnel" ;;
+    dc-identity) echo "GoTrue: signup, login, JWT, MFA" ;;
+    dc-realtime) echo "WebSocket realtime plane" ;;
+    dc-secrets) echo "Vault" ;;
+    dc-db-postgres) echo "PostgreSQL (+ PostgREST)" ;;
+    dc-db-mysql) echo "MySQL" ;;
+    dc-db-mongo) echo "MongoDB" ;;
+    dc-db-redis) echo "Redis: cache, sessions, queues" ;;
+    dc-db-cockroach) echo "CockroachDB" ;;
+    dc-db-mssql) echo "SQL Server" ;;
+    dc-objectstore) echo "MinIO: S3-compatible objects" ;;
+    dc-storage) echo "storage plane over MinIO" ;;
+    dc-observability) echo "Prometheus + Grafana + Loki" ;;
     *) echo "" ;;
     esac
 }
@@ -493,12 +511,22 @@ draw() {
     fi
     printf '\n  %sWhat goes in the VM%s                            disk %b\n\n' "$C_B" "$C_R" "$disk"
     printf '      %s[x]%s %-15s %s%s%s\n\n' "$C_GRN" "$C_R" "the strict minimum" \
-        "$C_DIM" "Born2beRoot, nvim, hellish - always installed" "$C_R"
+        "$C_DIM" "Born2beRoot, hellish - always installed" "$C_R"
     printf '      %s%-15s     /  /opt  /var /home MB%s\n' "$C_DIM" "" "$C_R"
 
+    # Rows are grouped by what they are for, from the name alone: the dc-*
+    # family is the datacenter, everything else is the workstation. A heading
+    # is printed where the group changes; the manifest keeps each family
+    # together, so that is once.
     i=1
+    group=""
     for k in $OPT_KEYS; do
         eval "name=\$NAME_$k tier=\$TIER_$k"
+        case "$name" in dc-*) g=datacenter ;; *) g=workstation ;; esac
+        if [ "$g" != "$group" ]; then
+            group=$g
+            printf '      %s-- %s --%s\n' "$C_DIM" "$group" "$C_R"
+        fi
         if [ "$i" = "$CURSOR" ]; then
             printf '  %s>%s ' "$C_CYA" "$C_R"
         else

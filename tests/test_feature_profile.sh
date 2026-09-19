@@ -111,7 +111,20 @@ check "refusal writes no conf" "$(env SIZE_B2B=8 PROFILE=full "${FP[@]}" --check
 
 # ── Overrides and their contradictions ──────────────────────────────────────
 check "-pytools removes it" "$(SIZE_B2B=15 FEATURES=-pytools "${FP[@]}" --resolve | grep -c '^feature=pytools$')" 0
-check "-nvim (base) is an error" "$(rc_of env SIZE_B2B=15 FEATURES=-nvim "${FP[@]}" --resolve)" 1
+# nvim is core since the server profile: on everywhere, removable by name.
+# Its reservation npm-cache follows it off rather than contradicting it.
+# At 15 GB the standard tier turns nvim-extras on, and it requires nvim, so
+# -nvim alone is a contradiction the person should see (next check); with
+# the extras dropped too, it is a server image.
+check "-nvim -nvim-extras (core) is accepted" "$(rc_of env SIZE_B2B=15 FEATURES='-nvim -nvim-extras' "${FP[@]}" --resolve)" 0
+check "-nvim takes npm-cache with it" "$(SIZE_B2B=15 FEATURES='-nvim -nvim-extras' "${FP[@]}" --resolve | grep -c '^feature=npm-cache$')" 0
+check "-nvim alone at standard is an error (nvim-extras needs it)" "$(rc_of env SIZE_B2B=15 FEATURES=-nvim "${FP[@]}" --resolve)" 1
+check "-nvim with nvim-extras still on is an error" "$(rc_of env SIZE_B2B=15 FEATURES='-nvim +nvim-extras' "${FP[@]}" --resolve)" 1
+check "-b2b-mandatory (base) is an error" "$(rc_of env SIZE_B2B=15 FEATURES=-b2b-mandatory "${FP[@]}" --resolve)" 1
+check "+dc-minimal expands to its members" "$(SIZE_B2B=15 FEATURES=+dc-minimal "${FP[@]}" --resolve | grep -c '^feature=dc-')" 7
+check "+dc-standard -dc-tunnel: a member can be taken back out" "$(SIZE_B2B=15 FEATURES='+dc-standard -dc-tunnel' "${FP[@]}" --resolve | grep -c '^feature=dc-tunnel$')" 0
+check "+dc-full expands recursively" "$(SIZE_B2B=44 FEATURES=+dc-full "${FP[@]}" --resolve | grep -c '^feature=dc-')" 18
+check "dc-identity without dc-gateway is an error" "$(rc_of env SIZE_B2B=15 FEATURES=+dc-identity "${FP[@]}" --resolve)" 1
 check "-nodejs with devtools-extra on is an error" "$(rc_of env SIZE_B2B=15 FEATURES=-nodejs "${FP[@]}" --resolve)" 1
 check "-nodejs -devtools-extra is fine" "$(rc_of env SIZE_B2B=15 FEATURES='-nodejs -devtools-extra' "${FP[@]}" --resolve)" 0
 check "unknown feature is an error" "$(rc_of env FEATURES=+kubernetes "${FP[@]}" --resolve)" 1

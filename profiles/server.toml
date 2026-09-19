@@ -1,0 +1,121 @@
+# born2root — the SERVER profile: a backend-only machine that runs grobase.
+#
+#   make all B2B_CONFIG=profiles/server.toml
+#
+# Same schema as born2root.toml (utils/b2b_config.py reads both; the shipped
+# file's comments explain every key). What differs, and why:
+#
+#   [features]   nvim and the whole workstation set are OFF, dc-full is ON.
+#                A server has no editor; what it has is Kong, the identity
+#                plane, seven engines, object storage, observability, a
+#                backup job, the /var garbage collector, Tailscale and
+#                cloudflared. `make packages FEATURE=dc-full` lists what
+#                that pulls. Frontends (groot, osionos, transcendence) live
+#                on the host and talk to the gateway.
+#
+#   [disk]       / and /home give up share, /var takes it. The workstation
+#                image spent 11 GB on / and 6.4 GB on /home at 44 GB for
+#                nvim, npm caches and VS Code servers; without them those
+#                volumes need a fraction of that, and /var is the `rest`
+#                volume, so every point of share they release lands where
+#                the engines and their data live. Measured layout:
+#                `make partitions B2B_CONFIG=profiles/server.toml`.
+#
+#   [vm] name    "baas", not "debian": a different machine under
+#                disk_images/, so the destructive targets never confuse the
+#                two and both builds can be kept.
+#
+# Everything else is the shipped default. Credentials are the temporary
+# ones; change them here as in born2root.toml.
+
+[vm]
+name    = "baas"
+backend = "auto"
+disk_gb = 44
+ram_mb  = "auto"
+cpus    = "auto"
+profile = "auto"
+ai_mode = "off"
+
+[ai]
+host_models = false
+models      = ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"]
+models_dir  = "/sgoinfre/students/$USER/llm"
+budget_gb   = 15
+llama_cpp   = "b10970"
+gpu         = "auto"
+context     = 32768
+bind        = "127.0.0.1:8012"
+expose      = false
+
+[system]
+hostname        = ""
+locale          = "en_US.UTF-8"
+keymap          = "es"
+timezone        = "Europe/Madrid"
+mirror          = "deb.debian.org"
+root_password   = "temproot123"
+luks_passphrase = "tempencrypt123"
+
+[users.dlesieur]
+password = "tempuser123"
+fullname = ""
+sudo     = true
+groups   = ["docker"]
+ssh_keys = []
+nvim     = false
+
+[packages]
+apt = []
+
+[features]
+# workstation: off
+nvim           = false
+nvim-extras    = false
+webstack       = false
+nodejs         = false
+pytools        = false
+devtools-extra = false
+claude-code    = false
+# the machine
+docker         = true
+# the datacenter (a bundle: generate/feature_profile.sh expands it)
+dc-full        = true
+
+[policy.password]
+max_days    = 30
+min_days    = 2
+warn_days   = 7
+min_length  = 10
+min_upper   = 1
+min_lower   = 1
+min_digit   = 1
+max_repeat  = 3
+min_changed = 7
+
+[policy.sudo]
+tries           = 3
+badpass_message = "Wrong password. Access denied!"
+log_dir         = "/var/log/sudo"
+
+[policy.ssh]
+password_login = true
+
+[policy.monitoring]
+interval_min = 10
+
+[network]
+forwards = [
+]
+
+[disk]
+swap_mb = "auto"
+volumes = [
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 15,     cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 512,  share = 5,      cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 5,      cap_mb = 20480  },
+  { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 3,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 3,      cap_mb = 20480  },
+  { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
+]

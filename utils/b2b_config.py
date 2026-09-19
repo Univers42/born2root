@@ -417,6 +417,21 @@ def manifest():
     return rows, not_installed
 
 
+def bundles():
+    """The bundle names feature_profile.sh expands (dc-minimal ...): legal in
+    [features] like a row, priced as their members."""
+    path = os.path.join(ROOT, "generate", "feature_profile.sh")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return set()
+    block = re.search(r"BUNDLES='\n(.*?)'\n", text, re.S)
+    if not block:
+        return set()
+    return {line.split()[0] for line in block.group(1).splitlines() if len(line.split()) >= 2}
+
+
 # Ports already forwarded or opened, read from the scripts that own them, so
 # this is not a fourth copy of a list that drifts.
 def builtin_ports():
@@ -746,11 +761,15 @@ class Validator:
                     "you run `sudo passwd %s` in the guest" % (name, name)
                 )
             nvim = self._bool(where + ".nvim", user["nvim"])
-            if nvim is False and first:
+            # The login always gets the editor -- unless the build has none:
+            # nvim is core, and a server profile turns it off for everyone
+            # with features.nvim = false. Then the account flag is moot.
+            if nvim is False and first and self.c.features.get("nvim") is not False:
                 self.err(
                     where + ".nvim",
-                    "your own account always gets the editor setup: it is a "
-                    "base feature, and `make verify_guest` checks it",
+                    "your own account always gets the editor setup while the "
+                    "build has one; to build without an editor at all, set "
+                    "nvim = false under [features]",
                 )
             groups = self._list(where + ".groups", user["groups"])
             for i, group in enumerate(groups or []):
@@ -830,12 +849,15 @@ class Validator:
 
     def features(self):
         rows, not_installed = manifest()
+        known_bundles = bundles()
         for name, value in self.c.features.items():
             where = "features." + name
             if value == "auto":
                 continue
             if not isinstance(value, bool):
                 self.err(where, '"auto", true or false')
+                continue
+            if name in known_bundles:
                 continue
             if name in ("hellish", "hellish-upstream"):
                 self.err(

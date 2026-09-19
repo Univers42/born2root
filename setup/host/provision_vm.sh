@@ -316,6 +316,26 @@ ai)
 health)
     show_health
     ;;
+# The datacenter provisioners, the same scripts first boot ran from the ISO
+# (setup/install/dc/). Each reads /etc/b2b/features.conf in the guest for
+# what is on, and its own prefix for overrides: GROBASE_PACKAGE=essential,
+# EDGE_TS_AUTHKEY=..., see each script's header.
+var-gc)
+    run_provisioner setup/install/dc/install_var_gc.sh \
+        install_var_gc.sh VARGC_ "the /var garbage collector"
+    ;;
+edge)
+    run_provisioner setup/install/dc/install_edge.sh \
+        install_edge.sh EDGE_ "Tailscale + cloudflared"
+    ;;
+grobase)
+    run_provisioner setup/install/dc/install_grobase.sh \
+        install_grobase.sh GROBASE_ "grobase"
+    ;;
+backup)
+    run_provisioner setup/install/dc/install_backup.sh \
+        install_backup.sh BACKUP_ "restic + the dump job"
+    ;;
 all)
     # Order matters: the npm prefix has to move to /opt BEFORE anything
     # runs `npm install -g`, or those packages are stranded at the old
