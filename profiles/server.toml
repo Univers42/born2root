@@ -25,12 +25,20 @@
 #                disk_images/, so the destructive targets never confuse the
 #                two and both builds can be kept.
 #
+#   [vm] backend "qemu", not "auto". With both hypervisors installed and no
+#                terminal to ask on -- every unattended build -- auto picks
+#                VirtualBox, and the 2026-09-20 server build started there
+#                before it was caught. This machine is built on KVM: virtio
+#                disk and NIC, -cpu host, /dev/kvm granted by ACL on the
+#                seat. A profile that is meant to be reproducible does not
+#                leave that to a prompt.
+#
 # Everything else is the shipped default. Credentials are the temporary
 # ones; change them here as in born2root.toml.
 
 [vm]
 name    = "baas"
-backend = "auto"
+backend = "qemu"
 disk_gb = 44
 ram_mb  = "auto"
 cpus    = "auto"
