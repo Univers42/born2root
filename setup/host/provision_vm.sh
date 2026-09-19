@@ -336,6 +336,18 @@ backup)
     run_provisioner setup/install/dc/install_backup.sh \
         install_backup.sh BACKUP_ "restic + the dump job"
     ;;
+# The restore drill needs root (the repository and its password are root's)
+# and nothing uploaded: the script is already in the guest.
+restore-drill)
+    info "restoring the newest snapshot into a scratch database in the VM"
+    vm_ssh_tty "${SUDO_CMD} /usr/local/sbin/b2b-restore-drill"
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" -eq 0 ]; then
+        ok "restore drill passed"
+    else
+        die "restore drill FAILED (exit $rc)"
+    fi
+    ;;
 all)
     # Order matters: the npm prefix has to move to /opt BEFORE anything
     # runs `npm install -g`, or those packages are stranded at the old

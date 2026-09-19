@@ -300,7 +300,8 @@ C_CYAN   := \033[36m
         host_access host_access_undo inception verify_access verif_access fresh \
         groot groot_map groot_undo \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
-        var_gc edge grobase backup_install \
+        var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
+        tailscale backup backup_verify restore_drill seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
@@ -1062,6 +1063,44 @@ grobase:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" grobase
 backup_install:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" backup
+
+# =========@@ datacenter: operate the server image from the host @@===========
+# Every one of these reads the guest's SSH port back the way provision_vm.sh
+# does, and none of them puts a secret on a command line: keys and passwords
+# live in .b2b-secrets (mode 600, gitignored) and travel over SSH's stdin.
+#
+#   make verify_platform     the session self-test: is the platform the platform
+#   make baas_access         host :8000 -> Kong, :8443 -> WAF, over SSH (loopback-bound in the guest)
+#   make tailscale           log the guest into the tailnet (TS_AUTHKEY from .b2b-secrets, or asked once)
+#   make backup              password -> backup in the guest -> pull the repo to sgoinfre
+#   make backup_verify       ... and restic check the pulled copy
+#   make restore_drill       restore the newest snapshot into a scratch database and count what came back
+#   make seed / loadtest     rows from grobase's own seeder; k6 against Kong, inside the guest
+DC_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" SCRIPT_SH="$(SCRIPT_SH)"
+verify_platform:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/verify_platform.sh
+baas_access:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/baas_host_access.sh
+baas_access_status:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/baas_host_access.sh --status
+baas_access_undo:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/baas_host_access.sh --undo
+tailscale:
+	@$(DC_ENV) TS_AUTHKEY="$(TS_AUTHKEY)" $(SCRIPT_SH) setup/host/tailscale_up.sh
+backup:
+	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh
+backup_verify:
+	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --verify
+restore_drill:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" restore-drill
+seed:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/loadtest.sh --seed
+loadtest:
+	@$(DC_ENV) VUS="$(VUS)" DURATION="$(DURATION)" PATH_UNDER_TEST="$(PATH_UNDER_TEST)" $(SCRIPT_SH) setup/host/loadtest.sh
+# What grobase is running, straight from the guest.
+grobase_status: export B2B_SSH_CMD = cat /etc/b2b/grobase.conf 2>/dev/null; echo; docker ps --format '{{.Names}}\t{{.Status}}' | sort
+grobase_status:
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh
 
 # Claude Code, installed beside opencode rather than instead of it. This is
 # also how the version moves: the binary is root-owned in /usr/local/bin, so

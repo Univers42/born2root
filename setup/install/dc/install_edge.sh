@@ -79,8 +79,11 @@ if [ "$NETMESH" = 1 ]; then
         # The key is passed on the command line to tailscale only, in this
         # process, and never echoed. --ssh off: sshd on 4242 is the audited
         # door, tailscale's own SSH would be a second one.
+        # --operator: the login may run `tailscale status` and friends without
+        # sudo afterwards, which is what verify_platform.sh asks for.
         if tailscale up --authkey="$EDGE_TS_AUTHKEY" --ssh=false \
-            --hostname="${EDGE_TS_HOSTNAME:-$(hostname -s)}" >/dev/null 2>&1; then
+            --hostname="${EDGE_TS_HOSTNAME:-$(hostname -s)}" \
+            ${EDGE_TS_OPERATOR:+--operator="$EDGE_TS_OPERATOR"} >/dev/null 2>&1; then
             log "tailscale is up as $(tailscale ip -4 2>/dev/null | head -n1)"
         else
             die "tailscale up was refused (key expired, or already used?)"

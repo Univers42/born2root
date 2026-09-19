@@ -69,8 +69,16 @@ if have mini-baas-mysql; then
         echo "b2b-backup: mysql dump failed"
 fi
 if have mini-baas-mongo; then
-    docker exec mini-baas-mongo sh -c 'mongodump --archive -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' >"$DUMPS/mongo-$stamp.archive" && n=$((n + 1)) ||
-        echo "b2b-backup: mongo dump failed"
+    # grobase's mongo image (d74aa97) ships mongosh but not the database
+    # tools, so mongodump is not there to run. Said plainly rather than
+    # filed as a generic failure; the fix belongs in grobase's image or its
+    # vault-restore, which round-trips mongo already.
+    if docker exec mini-baas-mongo sh -c 'command -v mongodump' >/dev/null 2>&1; then
+        docker exec mini-baas-mongo sh -c 'mongodump --archive -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' >"$DUMPS/mongo-$stamp.archive" && n=$((n + 1)) ||
+            echo "b2b-backup: mongo dump failed"
+    else
+        echo "b2b-backup: mongo not dumped: no mongodump in the mini-baas-mongo image"
+    fi
 fi
 if have mini-baas-redis; then
     docker exec mini-baas-redis redis-cli SAVE >/dev/null 2>&1
@@ -92,6 +100,46 @@ restic forget --quiet --keep-hourly 24 --keep-daily 14 --keep-weekly 8 --prune >
 echo "b2b-backup: $n dump(s) snapshotted into $REPO ($(restic snapshots --json 2>/dev/null | grep -o '"short_id"' | wc -l) snapshots kept)"
 BKEOF
 chmod 755 /usr/local/sbin/b2b-backup
+
+# The restore drill: a backup nobody has restored is a hypothesis. This
+# takes the NEWEST snapshot, restores it to a scratch directory, loads the
+# Postgres dump into a throwaway container of the same image the stack
+# runs, counts what came back, and exits non-zero if any step fails. It
+# touches nothing that is running. `make restore_drill` from the host.
+cat >/usr/local/sbin/b2b-restore-drill <<'DRILLEOF'
+#!/bin/sh
+# b2b-restore-drill — prove the newest backup restores. Installed by
+# setup/install/dc/install_backup.sh (born2root).
+set -u
+PASS=/etc/b2b/restic.pass
+REPO=/var/backups/b2b/repo
+[ -s "$PASS" ] || { echo "restore-drill: no $PASS (make backup first)"; exit 1; }
+export RESTIC_PASSWORD_FILE="$PASS" RESTIC_REPOSITORY="$REPO"
+umask 077
+work=$(mktemp -d /var/tmp/b2b-drill.XXXXXX) || exit 1
+trap 'rm -rf "$work"; docker rm -f b2b-drill-pg >/dev/null 2>&1' EXIT
+snap=$(restic snapshots --json --latest 1 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | head -n1 | cut -d'"' -f4)
+[ -n "$snap" ] || { echo "restore-drill: no snapshot in $REPO"; exit 1; }
+restic restore "$snap" --target "$work" >/dev/null 2>&1 || { echo "restore-drill: restic restore of $snap FAILED"; exit 1; }
+dump=$(find "$work" -name 'postgres-*.sql' | head -n1)
+n_files=$(find "$work" -type f | wc -l)
+echo "restore-drill: snapshot $snap restored: $n_files file(s)"
+[ -n "$dump" ] || { echo "restore-drill: no postgres dump in the snapshot (nothing to load; $n_files files restored)"; exit 0; }
+image=$(docker inspect --format '{{.Config.Image}}' mini-baas-postgres 2>/dev/null || echo postgres:16)
+docker run -d --name b2b-drill-pg -e POSTGRES_PASSWORD=drill -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null 2>&1 ||
+    { echo "restore-drill: could not start a scratch postgres ($image)"; exit 1; }
+for _ in $(seq 1 30); do
+    docker exec b2b-drill-pg pg_isready -U postgres >/dev/null 2>&1 && break
+    sleep 2
+done
+docker exec -i b2b-drill-pg psql -U postgres -q -v ON_ERROR_STOP=0 <"$dump" >/dev/null 2>"$work/psql.err" ||
+    { echo "restore-drill: psql reported errors loading the dump:"; head -n5 "$work/psql.err"; }
+dbs=$(docker exec b2b-drill-pg psql -U postgres -tA -c "select count(*) from pg_database where not datistemplate" 2>/dev/null)
+tables=$(docker exec b2b-drill-pg psql -U postgres -tA -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')" 2>/dev/null)
+[ "${tables:-0}" -gt 0 ] || { echo "restore-drill: the restored dump produced NO tables -- the backup is not usable"; exit 1; }
+echo "restore-drill: OK -- $dbs database(s), $tables table(s) came back from snapshot $snap (dump: $(basename "$dump"), $(du -h "$dump" | cut -f1))"
+DRILLEOF
+chmod 755 /usr/local/sbin/b2b-restore-drill
 
 cat >/etc/systemd/system/b2b-backup.service <<'UNITEOF'
 [Unit]
@@ -118,9 +166,37 @@ UNITEOF
 systemctl daemon-reload
 systemctl enable --now b2b-backup.timer >/dev/null 2>&1 || die "could not enable b2b-backup.timer"
 
+# The password, when the host sends one: BACKUP_PASS_FILE names a 600 file
+# the host uploaded over SSH's stdin (backup_pull.sh). Moved, not copied, so
+# nothing is left in /tmp.
+if [ -n "${BACKUP_PASS_FILE:-}" ] && [ -s "$BACKUP_PASS_FILE" ]; then
+    install -m 0600 -o root -g root "$BACKUP_PASS_FILE" /etc/b2b/restic.pass && rm -f "$BACKUP_PASS_FILE"
+    log "restic password installed"
+fi
+
 if [ -s /etc/b2b/restic.pass ]; then
-    log "password present; timer armed and first run follows"
-    /usr/local/sbin/b2b-backup || true
+    log "password present; timer armed and a run follows"
+    /usr/local/sbin/b2b-backup || die "the backup run failed"
+    # The login pulls the repository off the guest (backup_pull.sh): group-
+    # readable is enough, and the files are encrypted at rest.
+    if [ -n "${BACKUP_PULL_USER:-}" ] && id "$BACKUP_PULL_USER" >/dev/null 2>&1; then
+        chgrp -R "$BACKUP_PULL_USER" /var/backups/b2b/repo 2>/dev/null || true
+        chmod -R g+rX /var/backups/b2b/repo 2>/dev/null || true
+        # The parent must be traversable by that group too (710: enter, not
+        # list) -- the first pull failed on "change_dir failed: Permission
+        # denied" with the repository itself readable. dumps/ beside it stays
+        # 700 root: those are plaintext.
+        chgrp "$BACKUP_PULL_USER" /var/backups/b2b 2>/dev/null || true
+        chmod 710 /var/backups/b2b 2>/dev/null || true
+    fi
+    if [ "${BACKUP_VERIFY:-0}" = 1 ]; then
+        if RESTIC_PASSWORD_FILE=/etc/b2b/restic.pass RESTIC_REPOSITORY=/var/backups/b2b/repo \
+            restic check --read-data-subset=10% >/dev/null 2>&1; then
+            log "restic check: repository sound"
+        else
+            die "restic check FAILED on the guest's repository"
+        fi
+    fi
 else
     log "restic $(restic version 2>/dev/null | awk '{ print $2 }') installed; timer armed, idle until /etc/b2b/restic.pass exists (make backup)"
 fi

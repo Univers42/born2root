@@ -1,0 +1,86 @@
+#!/usr/bin/env hellish
+# backup_pull.sh — give the guest its restic password, take a backup, and
+# pull the repository off the guest, because a backup that only lives in the
+# thing it backs up is not one.
+#
+# THE PASSWORD
+#   RESTIC_PASSWORD in .b2b-secrets (mode 600, gitignored). Minted here on
+#   first use with openssl, and printed NOWHERE: the file is the record. It
+#   travels to the guest over the SSH channel's stdin into a 600 file under
+#   /tmp, and install_backup.sh (through provision_vm.sh, which owns the sudo
+#   plumbing) moves it to /etc/b2b/restic.pass. Never on a command line, so
+#   never in the guest's process list or a log.
+#
+#   Lose .b2b-secrets and every snapshot is noise. Keep that one line in a
+#   password manager too. That is the price of an encrypted backup.
+#
+# WHERE THE COPY GOES
+#   /sgoinfre/dlesieur/b2b-backups/<vm>/repo by default (BACKUP_DEST=…):
+#   sgoinfre is off-limits for the VM DISK, by standing rule; a restic
+#   repository of a few hundred MB is what it is for. rsync when there is
+#   one, scp -r otherwise. The repository is plain files, encrypted at rest,
+#   so a copy is a full backup wherever it lands. Next tiers are a USB disk
+#   (BACKUP_DEST=/media/…) and B2 -- point restic at them from the copy.
+#
+#   make backup            password → backup in the guest → pull the repo
+#   make backup_verify     … and `restic check` the pulled copy (needs restic here)
+set -u
+
+# shellcheck source=setup/host/dc_lib.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
+
+DEST="${BACKUP_DEST:-/sgoinfre/$(id -un)/b2b-backups/$VM_NAME}"
+VERIFY="${BACKUP_VERIFY:-0}"
+[ "${1:-}" = "--verify" ] && VERIFY=1
+
+dc_connect
+
+pass=$(secret_get RESTIC_PASSWORD)
+if [ -z "$pass" ]; then
+    pass=$(openssl rand -base64 33 | tr -d '\n=/+' | cut -c1-40)
+    [ -n "$pass" ] || die "openssl could not mint a password"
+    secret_set RESTIC_PASSWORD "$pass"
+    ok "minted RESTIC_PASSWORD into $SECRETS_FILE -- copy that line to a password manager"
+fi
+
+# The password reaches the guest by stdin, into a 600 file in /tmp, and
+# install_backup.sh moves it into place as root.
+remote_tmp="/tmp/.b2b-restic.$$"
+printf '%s\n' "$pass" | vm_ssh "umask 077; cat > '$remote_tmp'" || die "could not upload the password"
+
+info "installing the password and taking a backup in the guest"
+BACKUP_PASS_FILE="$remote_tmp" BACKUP_PULL_USER="$VM_USER" BACKUP_VERIFY="$VERIFY" \
+    VM_PATH="${VM_PATH:-$DC_ROOT/disk_images}" \
+    "${SCRIPT_SH:-bash}" "$DC_ROOT/setup/host/provision_vm.sh" "$VM_NAME" backup ||
+    die "install_backup.sh reported a problem (read the output above)"
+vm_ssh "rm -f '$remote_tmp'" 2>/dev/null || true
+
+info "pulling the repository to $DEST"
+mkdir -p "$DEST" || die "cannot create $DEST"
+if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete -e "ssh $SSH_OPTS_STR" "${VM_USER}@127.0.0.1:/var/backups/b2b/repo/" "$DEST/repo/" ||
+        die "rsync of the repository failed"
+else
+    rm -rf "$DEST/repo.new"
+    scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -P "$SSH_PORT" \
+        "${VM_USER}@127.0.0.1:/var/backups/b2b/repo" "$DEST/repo.new" ||
+        die "scp of the repository failed"
+    rm -rf "$DEST/repo"
+    mv "$DEST/repo.new" "$DEST/repo"
+fi
+size=$(du -sh "$DEST/repo" 2>/dev/null | cut -f1)
+ok "repository copied: $DEST/repo ($size)"
+
+if [ "$VERIFY" = 1 ]; then
+    if command -v restic >/dev/null 2>&1; then
+        info "restic check on the pulled copy"
+        RESTIC_PASSWORD="$pass" restic -r "$DEST/repo" check --read-data-subset=10% ||
+            die "the pulled repository FAILED restic check"
+        ok "pulled copy verified (10% of data read)"
+        RESTIC_PASSWORD="$pass" restic -r "$DEST/repo" snapshots --latest 3 2>/dev/null | tail -n +2
+    else
+        warn "no restic on the host: the guest ran its own check; to check the copy here, put a restic binary in ~/.local/bin"
+    fi
+fi
+# shellcheck disable=SC2059 # the colour codes are the format, as everywhere in setup/host
+printf "  ${C_DIM}restore drill: make restore_drill${C_R}\n"

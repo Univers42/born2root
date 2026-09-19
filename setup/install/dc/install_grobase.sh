@@ -121,6 +121,22 @@ if ! git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null; then
 fi
 cd "$GROBASE_DIR" || die "cannot enter $GROBASE_DIR"
 
+# ── one local patch: observability binds loopback like everything else ──────
+# At d74aa97 prometheus (9090), grafana (3030) and loki (3100) publish on
+# 0.0.0.0 while every other service in grobase publishes on 127.0.0.1 (its
+# own commit: "engine ports bind to loopback, like every other service").
+# Behind QEMU's NAT that is invisible; on the tailnet it is Grafana for
+# every peer. Docker's published ports also bypass UFW. So the three lines
+# are rewritten after checkout, idempotently (a line already starting with
+# 127.0.0.1 does not match), until upstream carries the fix and the ref
+# moves. verify_platform.sh's "no container publishes a port off loopback"
+# is what would catch a regression.
+# Two spellings: a literal "9090:9090" and a defaulted "${LOKI_PORT:-3100}:3100".
+sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_]+:-[0-9]+\}:[0-9]+")/\1127.0.0.1:\2/' \
+    orchestrators/compose/base/observability.yml
+n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' orchestrators/compose/base/observability.yml || true)
+[ "${n_open:-0}" = 0 ] || die "observability.yml still publishes $n_open port(s) off loopback after the patch"
+
 # ── env, certs, images, up ──────────────────────────────────────────────────
 # grobase's own steps. `make env` mints .env.secrets (mode 600) on first run
 # and keeps it afterwards; `make certs` is idempotent.
@@ -164,6 +180,17 @@ chmod 644 "$CONF"
 if [ -n "$LOGIN" ] && id "$LOGIN" >/dev/null 2>&1; then
     chown -R "$LOGIN:$LOGIN" "$GROBASE_DIR"
     chmod 600 "$GROBASE_DIR/.env" "$GROBASE_DIR/.env.secrets" 2>/dev/null || true
+    # `make certs` gave the server key to the WAF's group (chgrp
+    # MINI_BAAS_WAF_TLS_GID, mode 640) so nginx, not root in that image, can
+    # open it as a compose secret. The chown above took that away, and the
+    # first server build's WAF restart-looped on "Permission denied" for
+    # /run/secrets/localhost_key. Put the group back and restart it.
+    waf_gid="${MINI_BAAS_WAF_TLS_GID:-101}"
+    if [ -f "$GROBASE_DIR/certs/localhost-key.pem" ]; then
+        chown "root:$waf_gid" "$GROBASE_DIR/certs/localhost-key.pem"
+        chmod 640 "$GROBASE_DIR/certs/localhost-key.pem"
+        docker restart mini-baas-waf >/dev/null 2>&1 || true
+    fi
 fi
 
 log "grobase $GROBASE_PACKAGE is up: gateway on 127.0.0.1:8000 in the guest ($(docker ps --format '{{.Names}}' | grep -c '^mini-baas') containers)"

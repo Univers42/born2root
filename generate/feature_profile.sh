@@ -223,6 +223,20 @@ RECIPE="$HERE/partition_recipe.sh"
 #             when it matters. The guest reads which dc-* rows are on from
 #             features.conf; install_grobase.sh turns them into the compose
 #             includes and the tier it brings up.
+#
+# 2026-09-20, first server build (44 GB, dc-full), features.status:
+#   dc-gateway    /var  400 -> 3041   one `make pull` fetches the whole tier,
+#                                     so it is measured under dc-gateway:
+#                                     8921 MB for pro + observability +
+#                                     engines. The other dc-* rows summed to
+#                                     5880 of that; the rest -- kong, waf,
+#                                     the routers, mailpit, mariadb, dynamodb,
+#                                     promtail, the init images -- is the
+#                                     tier's base and lands here.
+#   dc-gateway    /opt    0 -> 273    the clone.
+#   dc-netmesh    /      50 -> 110    tailscale 1.102 with its deps.
+#   dc-backup     /      30  (24)     within a third, left alone.
+#   dc-var-gc     /var    0  (-177)   it reclaims: apt clean on a fresh guest.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      8     0     0     1      -
@@ -240,10 +254,10 @@ docker             standard  400   0     3300  0      -
 inception-data     standard  0     0     0     200    docker
 ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -
-dc-netmesh         explicit  50    0     0     0      -
+dc-netmesh         explicit  110   0     0     0      -
 dc-backup          explicit  30    0     0     0      -
 dc-var-gc          explicit  0     0     0     0      docker
-dc-gateway         explicit  0     0     400   0      docker
+dc-gateway         explicit  0     273   3041  0      docker
 dc-tunnel          explicit  60    0     0     0      dc-gateway
 dc-identity        explicit  0     0     80    0      dc-gateway
 dc-realtime        explicit  0     0     150   0      dc-gateway
