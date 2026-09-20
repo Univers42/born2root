@@ -180,6 +180,31 @@ done
 make --no-print-directory env >/dev/null || die "make env failed"
 make --no-print-directory certs >/dev/null || die "make certs failed"
 
+# ── the same origins again, for the realtime socket ────────────────────────
+# A WebSocket handshake is not a CORS request: no preflight, no
+# Access-Control-Allow-Origin, nothing for Kong's list to act on. The socket
+# therefore opened for any website that asked, with the public anon key, while
+# every REST door refused it -- found by the Laboratory bench serving itself
+# from an origin the gateway does not allow (2026-09-20). grobase's realtime
+# reads REALTIME_ALLOWED_ORIGINS from .env and checks the Origin header only
+# when it is non-empty; a handshake without an Origin (a server-side client)
+# is always allowed. Written after `make env` because that is what creates
+# .env, and before `up` so the first container already has it.
+rt_origins=$(sed -n 's/^KONG_CORS_ORIGIN_[A-Z]*=//p' .env | grep . | tr '\n' ',')
+for origin in $(printf '%s' "$(sed -n 's/^B2B_DC_CORS_ORIGINS=//p' "$BUILD" | head -n1 | tr -d '"')"); do
+    case ",${rt_origins}" in
+    *",${origin},"*) ;;
+    *) rt_origins="${rt_origins}${origin}," ;;
+    esac
+done
+rt_origins=${rt_origins%,}
+if grep -q '^REALTIME_ALLOWED_ORIGINS=' .env; then
+    sed -i 's|^REALTIME_ALLOWED_ORIGINS=.*|REALTIME_ALLOWED_ORIGINS='"${rt_origins}"'|' .env
+else
+    printf 'REALTIME_ALLOWED_ORIGINS=%s\n' "$rt_origins" >>.env
+fi
+log "realtime: sockets allowed from ${rt_origins}"
+
 pull_ok=0
 for attempt in 1 2 3; do
     if make --no-print-directory pull PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS"; then
