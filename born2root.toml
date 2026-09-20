@@ -216,6 +216,12 @@ forwards = [
 ]
 
 # ── The disk ────────────────────────────────────────────────────────────────
+# ── [dc]: extras for the datacenter provisioners (profiles/server.toml) ──
+# cors_origins: browser origins Kong answers preflights for, beside grobase's
+# own defaults. Origins only: scheme://host[:port], no path.
+[dc]
+cors_origins = []
+
 [disk]
 # "auto" is the guest's RAM clamped to 1024-4096 MB and to a quarter of the
 # volume group; or a number of MB.

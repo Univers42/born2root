@@ -137,6 +137,21 @@ sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_
 n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' orchestrators/compose/base/observability.yml || true)
 [ "${n_open:-0}" = 0 ] || die "observability.yml still publishes $n_open port(s) off loopback after the patch"
 
+# ── extra CORS origins, from [dc] cors_origins in the profile ───────────────
+# kong.yml renders one FRONTEND origin from .env at container start. A test
+# lab or a teammate's frontend on another port needs its own list item, and
+# the file comes back from the clone at every rebuild, so the list travels
+# in build.conf (B2B_DC_CORS_ORIGINS, validated as bare origins) and is
+# pasted after the FRONTEND placeholder here, one line each, idempotently.
+# `make grobase_cors` on the host runs the same loop on a live VM.
+KONG_YML=infra/docker/services/kong/conf/kong.yml
+for origin in $(printf '%s' "$(sed -n 's/^B2B_DC_CORS_ORIGINS=//p' "$BUILD" | head -n1 | tr -d '"')"); do
+    if ! grep -qF -- "- ${origin}" "$KONG_YML"; then
+        sed -i "s|^\(\s*\)- __KONG_CORS_ORIGIN_FRONTEND__\$|&\n\1- ${origin}|" "$KONG_YML"
+        log "cors: allowed origin ${origin}"
+    fi
+done
+
 # ── env, certs, images, up ──────────────────────────────────────────────────
 # grobase's own steps. `make env` mints .env.secrets (mode 600) on first run
 # and keeps it afterwards; `make certs` is idempotent.

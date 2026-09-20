@@ -1072,6 +1072,8 @@ backup_install:
 #   make verify_platform     the session self-test: is the platform the platform
 #   make baas_access         host :8000 -> Kong, :8443 -> WAF, over SSH (loopback-bound in the guest)
 #   make tailscale           log the guest into the tailnet (TS_AUTHKEY from the secrets file, or asked once)
+#   make sql FILE=x.sql      pipe a SQL file into the guest's Postgres (an app's schema)
+#   make grobase_cors        re-apply [dc] cors_origins to a live VM and restart Kong
 #   make backup              password -> backup in the guest -> pull the repo to sgoinfre
 #   make backup_verify       ... and restic check the pulled copy
 #   make restore_drill       restore the newest snapshot into a scratch database and count what came back
@@ -1081,6 +1083,24 @@ backup_install:
 B2B_SECRETS ?= $(or $(wildcard $(CURDIR)/.b2b-secrets),$(HOME)/.config/born2root/b2b-secrets)
 export B2B_SECRETS
 DC_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" SCRIPT_SH="$(SCRIPT_SH)"
+
+# An application's schema reaches the platform through the VM owner: in the
+# pro tier /meta/v1 has no pg-meta behind it and /admin/v1/migrate wants a
+# signed identity envelope, so `make sql` pipes the file straight into
+# grobase's Postgres container as postgres. ON_ERROR_STOP makes a failing
+# statement fail the target instead of scrolling past.
+sql:
+	@[ -n "$(FILE)" ] || { printf 'make sql FILE=path/to/schema.sql\n'; exit 1; }
+	@[ -f "$(FILE)" ] || { printf 'make sql: %s: no such file\n' "$(FILE)"; exit 1; }
+	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='docker exec -i mini-baas-postgres psql -U postgres -v ON_ERROR_STOP=1 -q' < "$(FILE)"
+	@printf '  ✓ %s applied to the guest Postgres\n' "$(FILE)"
+
+# The same loop install_grobase.sh runs at first boot, for a VM that is
+# already up: paste each [dc] origin after Kong's FRONTEND placeholder (once),
+# restart Kong so its entrypoint re-renders the file, print the list.
+grobase_cors:
+	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='cd /opt/grobase && f=infra/docker/services/kong/conf/kong.yml && for o in $(call b2b_conf,B2B_DC_CORS_ORIGINS); do grep -qF -- "- $$o" $$f || sed -i "s|^\(\s*\)- __KONG_CORS_ORIGIN_FRONTEND__$$|&\n\1- $$o|" $$f; done && docker restart mini-baas-kong >/dev/null && grep -nE "^\s+- (http|__KONG)" $$f'
+
 verify_platform:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/verify_platform.sh
 baas_access:

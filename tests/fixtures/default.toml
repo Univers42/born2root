@@ -76,6 +76,9 @@ interval_min = 10
 [network]
 forwards = []
 
+[dc]
+cors_origins = []
+
 [disk]
 swap_mb = "auto"
 volumes = [

@@ -116,6 +116,13 @@ interval_min = 10
 forwards = [
 ]
 
+# ── [dc]: what the platform provisioners get on top of the features ──
+# cors_origins: the Laboratory's hostile origin (:5175) is deliberately
+# absent, so its "blocked as expected" probe stays meaningful. grobase
+# itself already allows http://localhost:5173 (KONG_CORS_ORIGIN_FRONTEND).
+[dc]
+cors_origins = ["http://127.0.0.1:5173"]
+
 [disk]
 swap_mb = "auto"
 volumes = [

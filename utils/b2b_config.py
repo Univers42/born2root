@@ -132,6 +132,12 @@ DEFAULTS = {
     },
     "packages": {"apt": []},
     "network": {"forwards": []},
+    # [dc]: what the datacenter profile hands the platform provisioner.
+    # cors_origins: browser origins Kong must answer preflights for, beside
+    # grobase's own defaults (a test lab or a teammate's frontend on another
+    # port). Origins only -- scheme://host[:port] -- because the value lands
+    # in build.conf (sourced) and in kong.yml (YAML list item).
+    "dc": {"cors_origins": []},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -255,6 +261,7 @@ class Config:
         self.network = _merge(
             DEFAULTS["network"], raw.get("network"), "network", self.errors
         )
+        self.dc = _merge(DEFAULTS["dc"], raw.get("dc"), "dc", self.errors)
         self.disk = _merge(DEFAULTS["disk"], raw.get("disk"), "disk", self.errors)
         self.policy = {}
         given_policy = raw.get("policy") or {}
@@ -965,6 +972,31 @@ class Validator:
             for name in ("id_ed25519", "id_rsa")
         )
 
+    ORIGIN_RE = re.compile(r"^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$")
+
+    def dc(self):
+        """[dc] cors_origins: bare origins, no path, no slash, no wildcard.
+
+        The list is sourced by the guest (build.conf) and pasted into
+        kong.yml one item per line, so anything but scheme://host[:port]
+        is refused here rather than breaking Kong's declarative config at
+        first boot.
+        """
+        origins = self._list("dc.cors_origins", self.c.dc["cors_origins"])
+        seen = set()
+        for i, origin in enumerate(origins or []):
+            where = "dc.cors_origins[%d]" % i
+            if not isinstance(origin, str) or not self.ORIGIN_RE.match(origin):
+                self.err(
+                    where,
+                    "%r is not an origin (it looks like http://localhost:5173, "
+                    "no path and no trailing slash)" % (origin,),
+                )
+                continue
+            if origin in seen:
+                self.err(where, "%s is listed twice" % origin)
+            seen.add(origin)
+
     def network(self):
         forwards = self._list("network.forwards", self.c.network["forwards"])
         builtin = builtin_ports()
@@ -1114,6 +1146,7 @@ class Validator:
         self.packages()
         self.policy()
         self.network()
+        self.dc()
         self.disk()
         return self.errors, self.warnings
 
@@ -1179,6 +1212,9 @@ LEGACY = {
         "%s:%s:%s" % (f.get("name"), f.get("host"), f.get("guest")) for f in c.forwards()
     ),
     "B2B_FORWARD_PORTS": lambda c: " ".join(str(f.get("guest")) for f in c.forwards()),
+    "B2B_DC_CORS_ORIGINS": lambda c: " ".join(
+        o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)
+    ),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
@@ -1310,6 +1346,8 @@ def guest_view(config):
         "B2B_MONITOR_INTERVAL",
         # [network] forwards: the guest ports UFW opens.
         "B2B_FORWARD_PORTS",
+        # [dc] cors_origins: what install_grobase.sh adds to kong.yml.
+        "B2B_DC_CORS_ORIGINS",
     )
     for key in keys:
         if key == "B2B_VOLUMES":
@@ -1325,6 +1363,7 @@ def guest_view(config):
             "B2B_VOLUMES",
             "B2B_SUDO_BADPASS",
             "B2B_FORWARD_PORTS",
+            "B2B_DC_CORS_ORIGINS",
         ):
             lines.append('%s="%s"' % (key, value))
         else:

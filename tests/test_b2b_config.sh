@@ -499,4 +499,26 @@ LITERALS=$(grep -rnE 'dlesieur|temp(user|root|encrypt)123|vm_pass\.txt|born2root
 check "no login, password or old file name in code" "$(printf '%s' "$LITERALS" | grep -c . || true)" 0
 [ -z "$LITERALS" ] || printf '%s\n' "$LITERALS" | head -20
 
+# ── [dc] cors_origins ───────────────────────────────────────────────────────
+# The list is sourced by the guest (build.conf) and pasted into kong.yml one
+# item per line, so only bare scheme://host[:port] pass --check; a path, a
+# wildcard or a duplicate would break Kong's declarative config at first
+# boot, 25 minutes in, instead of here.
+DC=$(variant dc 's|^cors_origins = \[\]|cors_origins = ["http://localhost:5173", "https://lab.example.org"]|')
+check "[dc] cors_origins reach the guest space-joined" \
+    "$(get_of "$DC" B2B_DC_CORS_ORIGINS)" "http://localhost:5173 https://lab.example.org"
+contains "--guest quotes the origin list" \
+    "$(env B2B_CONFIG="$DC" "${CFG[@]}" --guest)" \
+    'B2B_DC_CORS_ORIGINS="http://localhost:5173 https://lab.example.org"'
+check "an origin with a path is refused" \
+    "$(rc_of "$(variant dcpath 's|^cors_origins = \[\]|cors_origins = ["http://localhost:5173/app"]|')" --check)" 1
+contains "  and the refusal names the shape" "$(cat "$TMP/out")" "no path and no trailing slash"
+check "a wildcard origin is refused" \
+    "$(rc_of "$(variant dcstar 's|^cors_origins = \[\]|cors_origins = ["*"]|')" --check)" 1
+check "a duplicate origin is refused" \
+    "$(rc_of "$(variant dcdup 's|^cors_origins = \[\]|cors_origins = ["http://a:1", "http://a:1"]|')" --check)" 1
+check "an unknown [dc] key is refused" \
+    "$(rc_of "$(variant dckey 's|^cors_origins = \[\]|cors_origin = []|')" --check)" 1
+contains "  with a did-you-mean" "$(cat "$TMP/out")" "did you mean cors_origins"
+
 exit "$fail"
