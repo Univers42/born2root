@@ -47,6 +47,7 @@ dc_connect
 slug_var="BAAS_API_KEY_$(printf "%s" "$TENANT" | tr "a-z-" "A-Z_")"
 have=$(secret_get "$slug_var")
 if [ -n "$have" ]; then
+    # shellcheck disable=SC2016 # $k is read from stdin on the guest side, on purpose
     code=$(printf '%s\n' "$have" | vm_ssh 'read -r k; curl -s -o /dev/null -w "%{http_code}" --max-time 8 -H "Authorization: Bearer $k" http://127.0.0.1:8000/v1/tenants/me' 2>/dev/null | tr -d '[:space:]')
     if [ "$code" = 200 ]; then
         secret_set BAAS_API_KEY "$have"

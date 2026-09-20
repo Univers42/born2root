@@ -149,13 +149,13 @@ echo "restore-drill: OK -- $dbs database(s), $tables table(s) came back from sna
 DRILLEOF
 chmod 755 /usr/local/sbin/b2b-restore-drill
 
-# The restore itself, into the LIVE stack: the newest snapshot's Postgres
-# and MySQL dumps loaded back, which is what brings tenants, their keys and
-# every row home on a rebuilt VM. pg_dumpall --clean drops and recreates
-# databases, and a database with open connections cannot be dropped, so
-# every other mini-baas container is stopped for the duration and grobase's
-# own `make up` brings them back in order. Redis is a cache and is not
-# restored; Mongo, CockroachDB and MSSQL were never dumped (see above).
+# The restore itself: the newest snapshot's Postgres and MySQL dumps loaded
+# back, which is what brings tenants, their keys and every row home on a
+# rebuilt VM. Into an EMPTY Postgres, never over a populated one -- the
+# comment inside the script says why, with the errors that taught it. The
+# platform secrets are put back first so the cluster initialises with the
+# dump's own password. Redis is a cache and is not restored; Mongo,
+# CockroachDB and MSSQL were never dumped (see above).
 cat >/usr/local/sbin/b2b-restore <<'RESTOREEOF'
 #!/bin/sh
 # b2b-restore — load the newest snapshot into the running engines. Installed
@@ -192,35 +192,47 @@ else
     echo "restore: snapshot carries no grobase.env.secrets (taken before 2026-09-20): keeping this guest's secrets and reconciling the postgres role after the load"
     reconcile=1
 fi
-keep="mini-baas-postgres mini-baas-mysql"
-stopped=""
-for c in $(docker ps --format '{{.Names}}' | grep '^mini-baas-'); do
-    case " $keep " in *" $c "*) continue ;; esac
-    docker stop "$c" >/dev/null 2>&1 && stopped="$stopped $c"
+# Into an EMPTY cluster, never over a populated one. A fresh guest's first
+# boot already created grobase's schema; loading a pg_dumpall --clean over
+# it fails on dependencies ("relation already exists"), keeps the existing
+# tables WITH their foreign keys, and then rejects the dump's rows in the
+# order a dump writes them (tenant_api_keys before tenants -- constraints
+# are added last, which is fine on an empty cluster and fatal here). The
+# third rebuild lost every API key that way, with the tenant row intact.
+# So: stack down (volumes stay), only the Postgres data volume removed,
+# Postgres started alone with the restored .env (initdb takes the dump's
+# own password), the dump loaded into that empty cluster, then make up.
+conf=/etc/b2b/grobase.conf
+pkg=$(sed -n 's/^GROBASE_PACKAGE=//p' "$conf" 2>/dev/null); add=$(sed -n 's/^GROBASE_ADDONS=//p' "$conf" 2>/dev/null)
+pgvol=$(docker volume ls -q | grep -m1 'postgres-data')
+[ -n "$pgvol" ] || { echo "restore: no postgres data volume found"; exit 1; }
+(cd /opt/grobase && make --no-print-directory down PACKAGE="${pkg:-pro}" ADDONS="$add" >/dev/null 2>&1) || echo "restore: WARN make down reported a problem"
+docker volume rm "$pgvol" >/dev/null 2>&1 || { echo "restore: could not remove $pgvol (a container still uses it?)"; exit 1; }
+echo "restore: stack down, $pgvol removed -- Postgres will start empty"
+(cd /opt/grobase && docker compose up -d postgres >/dev/null 2>&1) || { echo "restore: could not start postgres alone"; exit 1; }
+for _ in $(seq 1 45); do
+    docker exec mini-baas-postgres pg_isready -U postgres >/dev/null 2>&1 && break
+    sleep 2
 done
-echo "restore: stopped $(echo "$stopped" | wc -w) container(s) so databases can be replaced"
-docker exec mini-baas-postgres psql -U postgres -qtA -c "select pg_terminate_backend(pid) from pg_stat_activity where pid <> pg_backend_pid() and datname is not null" >/dev/null 2>&1
+docker exec mini-baas-postgres pg_isready -U postgres >/dev/null 2>&1 || { echo "restore: postgres did not come up"; exit 1; }
 if docker exec -i mini-baas-postgres psql -U postgres -q -v ON_ERROR_STOP=0 <"$pg" >"$work/pg.log" 2>&1; then :; fi
 pg_err=$(grep -c '^ERROR' "$work/pg.log" 2>/dev/null || echo 0)
-# Kept for diagnosis: which statements the load refused, and why.
 cp -f "$work/pg.log" /var/log/b2b-restore-pg.log 2>/dev/null || true
-# An old snapshot restored the superuser's OLD password over a cluster whose
-# .env says otherwise; grobase's db-bootstrap then refuses to run ("REJECTS
-# POSTGRES_USER/POSTGRES_PASSWORD"). Its own documented reconcile, over the
-# trust-authenticated socket:
+tables=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')" 2>/dev/null)
+echo "restore: postgres loaded into an empty cluster ($pg_err error line(s), $tables table(s) in the default database)"
+keys_after_load=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from public.tenant_api_keys" 2>/dev/null)
+grep -iE 'ERROR.*tenant_api_keys' "$work/pg.log" | head -n3 | sed 's/^/restore:   psql: /'
+echo "restore: tenant_api_keys rows after the load: ${keys_after_load:-?}"
 if [ "${reconcile:-0}" = 1 ]; then
     pw=$(sed -n 's/^POSTGRES_PASSWORD=//p' /opt/grobase/.env 2>/dev/null | head -n1 | tr -d '"')
-    # Through stdin: psql interpolates :'p' in input it reads, not in -c.
     [ -n "$pw" ] && printf "ALTER USER postgres WITH PASSWORD :'p';\n" | docker exec -i mini-baas-postgres psql -U postgres -q -v p="$pw" >/dev/null 2>&1 && echo "restore: postgres role password reconciled with this guest's .env"
 fi
-tables=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')" 2>/dev/null)
-echo "restore: postgres loaded ($pg_err error line(s), $tables table(s) in the default database)"
-# The tenants' API keys are the one table whose survival a client notices:
-# counted here, before grobase's own bootstrap runs, and again after it, so
-# a loss can be pinned to the load or to the bootstrap.
-keys_after_load=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from public.tenant_api_keys" 2>/dev/null)
-grep -iE 'tenant_api_keys' "$work/pg.log" | head -n3 | sed 's/^/restore:   psql: /'
-echo "restore: tenant_api_keys rows after the load: ${keys_after_load:-?}"
+# MySQL needs its container: bring it up alone the same way.
+(cd /opt/grobase && docker compose up -d mysql >/dev/null 2>&1) || true
+for _ in $(seq 1 30); do
+    docker exec mini-baas-mysql sh -c 'mysqladmin ping -uroot -p"$MYSQL_ROOT_PASSWORD"' >/dev/null 2>&1 && break
+    sleep 2
+done
 if [ -n "$my" ]; then
     if docker exec -i mini-baas-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' <"$my" >"$work/my.log" 2>&1; then
         echo "restore: mysql loaded"
@@ -228,15 +240,10 @@ if [ -n "$my" ]; then
         echo "restore: mysql load reported errors:"; head -n3 "$work/my.log"
     fi
 fi
-conf=/etc/b2b/grobase.conf
-if [ -f "$conf" ] && [ -d /opt/grobase ]; then
-    pkg=$(sed -n 's/^GROBASE_PACKAGE=//p' "$conf"); add=$(sed -n 's/^GROBASE_ADDONS=//p' "$conf")
-    (cd /opt/grobase && make --no-print-directory up PACKAGE="$pkg" ADDONS="$add" >/dev/null 2>&1) && echo "restore: stack back up (make up PACKAGE=$pkg)" || echo "restore: make up reported a problem -- check docker ps"
+if [ -d /opt/grobase ]; then
+    (cd /opt/grobase && make --no-print-directory up PACKAGE="${pkg:-pro}" ADDONS="$add" >/dev/null 2>&1) && echo "restore: stack back up (make up PACKAGE=${pkg:-pro})" || echo "restore: make up reported a problem -- check docker ps"
     sleep 20
     echo "restore: tenant_api_keys rows after grobase's bootstrap: $(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from public.tenant_api_keys" 2>/dev/null)"
-else
-    for c in $stopped; do docker start "$c" >/dev/null 2>&1; done
-    echo "restore: containers started again"
 fi
 [ "${tables:-0}" -gt 0 ]
 RESTOREEOF
