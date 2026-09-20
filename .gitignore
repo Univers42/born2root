@@ -23,3 +23,7 @@ dist/
 # resolves package sizes from (kept outside the repo footprint).
 __pycache__/
 .cache/
+
+# A separate clone of the agent-config repo, parked here for reference; it
+# carries its own .git and 228 MB of assets, and is not part of the build.
+claude-deal-with-the-devil/
