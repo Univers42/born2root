@@ -1067,15 +1067,19 @@ backup_install:
 # =========@@ datacenter: operate the server image from the host @@===========
 # Every one of these reads the guest's SSH port back the way provision_vm.sh
 # does, and none of them puts a secret on a command line: keys and passwords
-# live in .b2b-secrets (mode 600, gitignored) and travel over SSH's stdin.
+# live in ~/.config/born2root/b2b-secrets (mode 600) and travel over SSH's stdin.
 #
 #   make verify_platform     the session self-test: is the platform the platform
 #   make baas_access         host :8000 -> Kong, :8443 -> WAF, over SSH (loopback-bound in the guest)
-#   make tailscale           log the guest into the tailnet (TS_AUTHKEY from .b2b-secrets, or asked once)
+#   make tailscale           log the guest into the tailnet (TS_AUTHKEY from the secrets file, or asked once)
 #   make backup              password -> backup in the guest -> pull the repo to sgoinfre
 #   make backup_verify       ... and restic check the pulled copy
 #   make restore_drill       restore the newest snapshot into a scratch database and count what came back
 #   make seed / loadtest     rows from grobase's own seeder; k6 against Kong, inside the guest
+# Secrets live under $HOME, not in the repo: the campus wipes /goinfre and
+# took the restic password with it once (see setup/host/dc_lib.sh).
+B2B_SECRETS ?= $(or $(wildcard $(CURDIR)/.b2b-secrets),$(HOME)/.config/born2root/b2b-secrets)
+export B2B_SECRETS
 DC_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" SCRIPT_SH="$(SCRIPT_SH)"
 verify_platform:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/verify_platform.sh
@@ -1104,10 +1108,10 @@ restore:
 # REUSABLE key in .b2b-secrets; without one that step warns and goes on.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
-	@if grep -q '^TS_AUTHKEY=.' .b2b-secrets 2>/dev/null; then \
+	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
-	else printf '  ! no TS_AUTHKEY in .b2b-secrets: skipping tailscale (see .b2b-secrets.example)\n'; fi
+	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
 	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \

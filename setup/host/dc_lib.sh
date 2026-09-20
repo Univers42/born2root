@@ -4,8 +4,13 @@
 # the guest, and the secrets file. Sourced, never run.
 #
 # THE SECRETS FILE
-#   .b2b-secrets at the repo root, KEY=VALUE lines, mode 600, ignored by git
-#   (`*secret*` in .gitignore). It is read with sed, never sourced: a value
+#   ~/.config/born2root/b2b-secrets by default, KEY=VALUE lines, mode 600.
+#   A .b2b-secrets at the repo root is honoured when it exists (ignored by
+#   git, `*secret*`), and B2B_SECRETS= names any other path. It lives under
+#   $HOME and not beside the repo because the campus wipes /goinfre: on
+#   2026-09-20 a wipe took the VM, the repo clone and the file with the
+#   restic password, leaving five snapshots on sgoinfre nobody can open.
+#   $HOME survived that wipe. It is read with sed, never sourced: a value
 #   is data, not shell. born2root.toml is tracked and tests fail on a literal
 #   credential in it, which is why the Tailscale key, the restic password
 #   and the tunnel token live here and only here. Keys:
@@ -20,7 +25,13 @@
 set -u
 
 DC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
-SECRETS_FILE="${B2B_SECRETS:-$DC_ROOT/.b2b-secrets}"
+if [ -n "${B2B_SECRETS:-}" ]; then
+    SECRETS_FILE="$B2B_SECRETS"
+elif [ -f "$DC_ROOT/.b2b-secrets" ]; then
+    SECRETS_FILE="$DC_ROOT/.b2b-secrets"
+else
+    SECRETS_FILE="$HOME/.config/born2root/b2b-secrets"
+fi
 
 C_R='\033[0m'
 # shellcheck disable=SC2034 # for the scripts that source this
@@ -85,7 +96,8 @@ secret_get() {
 secret_set() {
     local tmp
     umask 077
-    tmp=$(mktemp "$DC_ROOT/.b2b-secrets.XXXXXX")
+    mkdir -p "$(dirname "$SECRETS_FILE")"
+    tmp=$(mktemp "$(dirname "$SECRETS_FILE")/.b2b-secrets.XXXXXX")
     if [ -f "$SECRETS_FILE" ]; then
         grep -v "^$1=" "$SECRETS_FILE" >"$tmp" || true
     fi
