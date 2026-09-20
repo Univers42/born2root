@@ -137,6 +137,23 @@ sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_
 n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' orchestrators/compose/base/observability.yml || true)
 [ "${n_open:-0}" = 0 ] || die "observability.yml still publishes $n_open port(s) off loopback after the patch"
 
+# ── second local patch: the WAF must let REST verbs and uploads through ─────
+# grobase ships infra/docker/services/waf/conf/crs-setup.conf widening the
+# CRS allowed methods to PUT/PATCH/DELETE, and the image installs it as
+# crs-setup-override.conf -- which setup.conf never includes. So the running
+# WAF enforces the CRS default (GET HEAD POST OPTIONS) and refuses image/png
+# bodies: every PostgREST update and every storage upload through 8443 got
+# an HTML 403 with no CORS headers (a browser sees "status 0"). Found by the
+# Laboratory bench on 2026-09-20. The CRS image honours these two variables
+# (its 95-configure-rules.sh rewrites crs-setup.conf from them), so they go
+# on the waf service, idempotently, until upstream includes its override.
+GATEWAY_YML=orchestrators/compose/base/gateway.yml
+if ! grep -q 'ALLOWED_METHODS' "$GATEWAY_YML"; then
+    sed -i '/^    container_name: mini-baas-waf$/a\    environment:\n      ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"\n      ALLOWED_REQUEST_CONTENT_TYPE: "|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json| |application/grpc| |application/octet-stream| |image/png| |image/jpeg| |image/gif| |image/webp| |image/svg+xml| |text/plain| |text/csv| |application/pdf|"' "$GATEWAY_YML"
+    log "waf: allowed methods widened to PUT/PATCH/DELETE, upload content types added"
+fi
+grep -q 'ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"' "$GATEWAY_YML" || die "gateway.yml: the WAF method patch did not land"
+
 # ── extra CORS origins, from [dc] cors_origins in the profile ───────────────
 # kong.yml renders one FRONTEND origin from .env at container start. A test
 # lab or a teammate's frontend on another port needs its own list item, and
