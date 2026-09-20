@@ -68,10 +68,21 @@ case "${1:-}" in
         ;;
     esac
     printf '%s\n' "$out" | sed 's/^/    /'
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://${name}/" 2>/dev/null || echo 000)
-    case "$code" in
+    # The 42 Madrid resolver answers NXDOMAIN for *.ts.net (2026-09-20:
+    # 1.1.1.1 returned three A records, systemd-resolved none), so a plain
+    # curl from a campus seat says "could not resolve" while the URL works
+    # from everywhere else. Resolve through a public resolver and pin the
+    # address with --resolve; that measures the Internet path, not the
+    # campus DNS. curl prints 000 *and* fails on a dead connection, so the
+    # old `|| echo 000` made it "000000".
+    ip=$(nslookup -type=A "$name" 1.1.1.1 2>/dev/null | awk '/^Address/ && !/#/ {print $2; exit}')
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 ${ip:+--resolve "${name}:443:${ip}"} "https://${name}/" 2>/dev/null)
+    case "${code:-000}" in
     000) warn "https://${name}/ not answering from this host yet (certificate issuance can take a minute; make funnel_status)" ;;
     *) ok "PUBLIC: https://${name}/ answers HTTP $code from the open Internet (that 404 is Kong: no route for /)" ;;
     esac
+    if ! getent hosts "$name" >/dev/null 2>&1; then
+        warn "this host's own resolver cannot resolve ${name}: campus DNS blocks *.ts.net; the URL works off-campus and from browsers using DNS over HTTPS"
+    fi
     ;;
 esac
