@@ -187,6 +187,21 @@ for attempt in 1 2 3; do
 done
 [ "$pull_ok" = 1 ] || die "images could not be pulled from ghcr.io (network?) -- make grobase, from the host, retries"
 
+# ── the realtime image that matches the clone ─────────────────────────────
+# `make pull` gives the realtime service its versioned image
+# (dlesieur/realtime-agnostic:0.2.1 in data-plane.yml), which predates
+# presence and broadcast; ghcr also publishes one image per commit
+# (grobase-realtime:sha-<commit>). The one tagged with GROBASE_REF is what
+# the clone's source describes, so it replaces the versioned tag locally.
+# Found by the Laboratory bench on 2026-09-20 (TRACK answered nothing).
+rt_name=$(grep -m1 -E '^\s+image:\s+\S*realtime\S*' orchestrators/compose/base/data-plane.yml | awk '{print $2}')
+rt_sha="ghcr.io/univers42/grobase-realtime:sha-$(git rev-parse HEAD)"
+if [ -n "$rt_name" ] && docker pull -q "$rt_sha" >/dev/null 2>&1; then
+    docker tag "$rt_sha" "$rt_name" && log "realtime: $rt_name is now the image built from $GROBASE_REF"
+else
+    log "realtime: no per-commit image for $GROBASE_REF on ghcr; keeping ${rt_name:-the pulled image}"
+fi
+
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
 
 # Readiness is the gateway answering, not `up` returning: Kong starts before
