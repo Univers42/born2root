@@ -56,7 +56,11 @@ set -u
 FEAT=/etc/b2b/features.conf
 BUILD=/etc/b2b/build.conf
 GROBASE_REPO="${GROBASE_REPO:-https://github.com/Univers42/grobase.git}"
-GROBASE_REF="${GROBASE_REF:-d74aa97}"
+# 98eb2b74 = branch fix/laboratory-findings (what the Laboratory bench found,
+# repaired in grobase itself: WAF methods + GraphQL exclusion, pg_graphql in the
+# server image, migration 087, PostgREST graphql_public, SDK topic, the ghcr
+# realtime image). Move to the merge commit once it lands on main.
+GROBASE_REF="${GROBASE_REF:-98eb2b74}"
 GROBASE_DIR="${GROBASE_DIR:-/opt/grobase}"
 CONF=/etc/b2b/grobase.conf
 
@@ -200,6 +204,23 @@ if [ -n "$rt_name" ] && docker pull -q "$rt_sha" >/dev/null 2>&1; then
     docker tag "$rt_sha" "$rt_name" && log "realtime: $rt_name is now the image built from $GROBASE_REF"
 else
     log "realtime: no per-commit image for $GROBASE_REF on ghcr; keeping ${rt_name:-the pulled image}"
+fi
+
+# ── images the tree changed but ghcr has not built yet ──────────────────────
+# `make pull` brings CI's images for main; until the fix branch merges (and
+# CI builds it) the postgres image lacks pg_graphql and the waf image lacks
+# the GraphQL exclusion, so each is built here FROM THE TREE, in Docker,
+# only when the pulled one lacks the artefact. Nothing is installed on the
+# VM. The postgres build compiles pg_graphql with pgrx: ~15 min on 8 vCPU.
+pg_img=$(grep -m1 -E '^\s+image:\s+\S*grobase-postgres' orchestrators/compose/base/data-engines.yml | awk '{print $2}')
+if [ -n "$pg_img" ] && ! docker run --rm --entrypoint sh "$pg_img" -c 'test -f /usr/local/share/postgresql/extension/pg_graphql.control' >/dev/null 2>&1; then
+    log "postgres: building $pg_img from the tree (pg_graphql)"
+    docker build -q -t "$pg_img" infra/docker/services/postgres >/dev/null || die "postgres image build failed"
+fi
+waf_img=$(grep -m1 -E '^\s+image:\s+\S*grobase-waf' orchestrators/compose/base/gateway.yml | awk '{print $2}')
+if [ -n "$waf_img" ] && ! docker run --rm --entrypoint sh "$waf_img" -c 'test -s /etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf' >/dev/null 2>&1; then
+    log "waf: building $waf_img from the tree (GraphQL exclusion, allowed methods)"
+    docker build -q -t "$waf_img" infra/docker/services/waf >/dev/null || die "waf image build failed"
 fi
 
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
