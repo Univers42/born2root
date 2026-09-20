@@ -202,6 +202,8 @@ echo "restore: stopped $(echo "$stopped" | wc -w) container(s) so databases can 
 docker exec mini-baas-postgres psql -U postgres -qtA -c "select pg_terminate_backend(pid) from pg_stat_activity where pid <> pg_backend_pid() and datname is not null" >/dev/null 2>&1
 if docker exec -i mini-baas-postgres psql -U postgres -q -v ON_ERROR_STOP=0 <"$pg" >"$work/pg.log" 2>&1; then :; fi
 pg_err=$(grep -c '^ERROR' "$work/pg.log" 2>/dev/null || echo 0)
+# Kept for diagnosis: which statements the load refused, and why.
+cp -f "$work/pg.log" /var/log/b2b-restore-pg.log 2>/dev/null || true
 # An old snapshot restored the superuser's OLD password over a cluster whose
 # .env says otherwise; grobase's db-bootstrap then refuses to run ("REJECTS
 # POSTGRES_USER/POSTGRES_PASSWORD"). Its own documented reconcile, over the
@@ -213,6 +215,12 @@ if [ "${reconcile:-0}" = 1 ]; then
 fi
 tables=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')" 2>/dev/null)
 echo "restore: postgres loaded ($pg_err error line(s), $tables table(s) in the default database)"
+# The tenants' API keys are the one table whose survival a client notices:
+# counted here, before grobase's own bootstrap runs, and again after it, so
+# a loss can be pinned to the load or to the bootstrap.
+keys_after_load=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from public.tenant_api_keys" 2>/dev/null)
+grep -iE 'tenant_api_keys' "$work/pg.log" | head -n3 | sed 's/^/restore:   psql: /'
+echo "restore: tenant_api_keys rows after the load: ${keys_after_load:-?}"
 if [ -n "$my" ]; then
     if docker exec -i mini-baas-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' <"$my" >"$work/my.log" 2>&1; then
         echo "restore: mysql loaded"
@@ -224,6 +232,8 @@ conf=/etc/b2b/grobase.conf
 if [ -f "$conf" ] && [ -d /opt/grobase ]; then
     pkg=$(sed -n 's/^GROBASE_PACKAGE=//p' "$conf"); add=$(sed -n 's/^GROBASE_ADDONS=//p' "$conf")
     (cd /opt/grobase && make --no-print-directory up PACKAGE="$pkg" ADDONS="$add" >/dev/null 2>&1) && echo "restore: stack back up (make up PACKAGE=$pkg)" || echo "restore: make up reported a problem -- check docker ps"
+    sleep 20
+    echo "restore: tenant_api_keys rows after grobase's bootstrap: $(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from public.tenant_api_keys" 2>/dev/null)"
 else
     for c in $stopped; do docker start "$c" >/dev/null 2>&1; done
     echo "restore: containers started again"

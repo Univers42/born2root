@@ -338,6 +338,13 @@ backup)
     ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
+# An ad-hoc script as root in the guest, through the same upload + sudo
+# plumbing the provisioners use: ROOT_SH=path/to/script.sh. For diagnosis
+# (reading root-only files, restic repositories) without opening a pty.
+root-sh)
+    [ -n "${ROOT_SH:-}" ] && [ -f "$ROOT_SH" ] || die "set ROOT_SH=path/to/script.sh"
+    run_provisioner "$ROOT_SH" "b2b-root-sh.$$" ROOTSH_ "$(basename "$ROOT_SH") as root"
+    ;;
 restore-drill)
     info "restoring the newest snapshot into a scratch database in the VM"
     vm_ssh_tty "${SUDO_CMD} /usr/local/sbin/b2b-restore-drill"

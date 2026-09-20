@@ -40,6 +40,22 @@ case "$TENANT" in *[!a-z0-9-]*) die "TENANT must be a slug: lowercase letters, d
 
 dc_connect
 
+# A key that still authenticates is kept: minting one per `make datacenter`
+# would strand every client on a stale key after each rebuild, when the
+# restore brought the old key rows back with the data. GET /v1/tenants/me
+# through Kong with the stored key is the proof; 200 means done.
+slug_var="BAAS_API_KEY_$(printf "%s" "$TENANT" | tr "a-z-" "A-Z_")"
+have=$(secret_get "$slug_var")
+if [ -n "$have" ]; then
+    code=$(printf '%s\n' "$have" | vm_ssh 'read -r k; curl -s -o /dev/null -w "%{http_code}" --max-time 8 -H "Authorization: Bearer $k" http://127.0.0.1:8000/v1/tenants/me' 2>/dev/null | tr -d '[:space:]')
+    if [ "$code" = 200 ]; then
+        secret_set BAAS_API_KEY "$have"
+        ok "tenant '$TENANT': the stored key still authenticates (HTTP 200); nothing minted"
+        exit 0
+    fi
+    warn "the stored key for '$TENANT' no longer authenticates (HTTP ${code:-000}); minting a new one"
+fi
+
 info "provisioning tenant '$TENANT' ($NAME) in the guest, signed with the service token"
 out=$(
     vm_ssh 'bash -s' <<GUESTEOF
@@ -65,7 +81,6 @@ case "$out" in *"HTTP 201"* | *"HTTP 200"*) ;; *) die "tenant-control did not ac
 
 key=$(vm_ssh 'cat ~/.b2b-tenant-key 2>/dev/null' | tr -d '\r\n' | grep -oE '^mbk_[A-Za-z0-9_-]+' || true)
 [ -n "$key" ] || die "no key came back for '$TENANT'"
-slug_var="BAAS_API_KEY_$(printf "%s" "$TENANT" | tr "a-z-" "A-Z_")"
 secret_set "$slug_var" "$key"
 # BAAS_API_KEY is the one `make seed` reads: the last tenant provisioned.
 secret_set BAAS_API_KEY "$key"
