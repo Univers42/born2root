@@ -1105,7 +1105,8 @@ restore:
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
 	@if grep -q '^TS_AUTHKEY=.' .b2b-secrets 2>/dev/null; then \
-		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)"; \
+		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in .b2b-secrets: skipping tailscale (see .b2b-secrets.example)\n'; fi
 	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
 	if [ -d "$$d/repo/snapshots" ]; then \

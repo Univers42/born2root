@@ -90,6 +90,14 @@ extra=""
 if [ -n "$minio_vol" ]; then
     extra="/var/lib/docker/volumes/$minio_vol/_data"
 fi
+# grobase's own secrets travel with the data: JWT secret, the engines' role
+# passwords, service tokens, the anon/service API keys. A dump restored into
+# a stack that re-minted those is unusable (db-bootstrap fails on the old
+# role passwords -- the 2026-09-20 rebuild). Encrypted in the repository
+# like everything else.
+for f in /opt/grobase/.env.secrets /opt/grobase/.env.local; do
+    [ -s "$f" ] && cp -p "$f" "$DUMPS/grobase$(basename "$f")" && n=$((n + 1))
+done
 for skipped in mini-baas-cockroach mini-baas-mssql; do
     have "$skipped" && echo "b2b-backup: $skipped is running and not dumped here (see the header of install_backup.sh)"
 done
@@ -163,10 +171,27 @@ trap 'rm -rf "$work"' EXIT
 snap=$(restic snapshots --json --latest 1 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | head -n1 | cut -d'"' -f4)
 [ -n "$snap" ] || { echo "restore: no snapshot in $REPO"; exit 1; }
 restic restore "$snap" --target "$work" >/dev/null 2>&1 || { echo "restore: restic restore of $snap FAILED"; exit 1; }
+reconcile=0
 pg=$(find "$work" -name 'postgres-*.sql' | head -n1)
 my=$(find "$work" -name 'mysql-*.sql' | head -n1)
 [ -n "$pg" ] || { echo "restore: snapshot $snap holds no postgres dump"; exit 1; }
 echo "restore: snapshot $snap ($(basename "$pg")$( [ -n "$my" ] && printf ', %s' "$(basename "$my")"))"
+# The platform secrets first: the dump's role passwords are the ones in the
+# snapshot's .env.secrets, not the ones this guest minted at first boot.
+# `make env` re-assembles .env; the `make up` below recreates every
+# container with them, and grobase's db-bootstrap then finds roles whose
+# passwords match.
+sec=$(find "$work" -name 'grobase.env.secrets' | head -n1)
+if [ -n "$sec" ] && [ -d /opt/grobase ]; then
+    owner=$(stat -c %U /opt/grobase/.env.secrets 2>/dev/null || stat -c %U /opt/grobase)
+    install -m 0600 -o "$owner" -g "$owner" "$sec" /opt/grobase/.env.secrets
+    loc=$(find "$work" -name 'grobase.env.local' | head -n1)
+    [ -n "$loc" ] && install -m 0600 -o "$owner" -g "$owner" "$loc" /opt/grobase/.env.local
+    (cd /opt/grobase && make --no-print-directory env >/dev/null 2>&1) && echo "restore: grobase .env.secrets restored and .env re-assembled" || echo "restore: WARN make env failed after restoring .env.secrets"
+else
+    echo "restore: snapshot carries no grobase.env.secrets (taken before 2026-09-20): keeping this guest's secrets and reconciling the postgres role after the load"
+    reconcile=1
+fi
 keep="mini-baas-postgres mini-baas-mysql"
 stopped=""
 for c in $(docker ps --format '{{.Names}}' | grep '^mini-baas-'); do
@@ -177,6 +202,15 @@ echo "restore: stopped $(echo "$stopped" | wc -w) container(s) so databases can 
 docker exec mini-baas-postgres psql -U postgres -qtA -c "select pg_terminate_backend(pid) from pg_stat_activity where pid <> pg_backend_pid() and datname is not null" >/dev/null 2>&1
 if docker exec -i mini-baas-postgres psql -U postgres -q -v ON_ERROR_STOP=0 <"$pg" >"$work/pg.log" 2>&1; then :; fi
 pg_err=$(grep -c '^ERROR' "$work/pg.log" 2>/dev/null || echo 0)
+# An old snapshot restored the superuser's OLD password over a cluster whose
+# .env says otherwise; grobase's db-bootstrap then refuses to run ("REJECTS
+# POSTGRES_USER/POSTGRES_PASSWORD"). Its own documented reconcile, over the
+# trust-authenticated socket:
+if [ "${reconcile:-0}" = 1 ]; then
+    pw=$(sed -n 's/^POSTGRES_PASSWORD=//p' /opt/grobase/.env 2>/dev/null | head -n1 | tr -d '"')
+    # Through stdin: psql interpolates :'p' in input it reads, not in -c.
+    [ -n "$pw" ] && printf "ALTER USER postgres WITH PASSWORD :'p';\n" | docker exec -i mini-baas-postgres psql -U postgres -q -v p="$pw" >/dev/null 2>&1 && echo "restore: postgres role password reconciled with this guest's .env"
+fi
 tables=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')" 2>/dev/null)
 echo "restore: postgres loaded ($pg_err error line(s), $tables table(s) in the default database)"
 if [ -n "$my" ]; then
@@ -274,6 +308,8 @@ if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
             die "restic check FAILED on the guest's repository"
         fi
     fi
+elif [ -s /etc/b2b/restic.pass ]; then
+    log "restore done; timer armed"
 else
     log "restic $(restic version 2>/dev/null | awk '{ print $2 }') installed; timer armed, idle until /etc/b2b/restic.pass exists (make backup)"
 fi
