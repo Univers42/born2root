@@ -147,7 +147,8 @@ n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' orchestrato
 KONG_YML=infra/docker/services/kong/conf/kong.yml
 for origin in $(printf '%s' "$(sed -n 's/^B2B_DC_CORS_ORIGINS=//p' "$BUILD" | head -n1 | tr -d '"')"); do
     if ! grep -qF -- "- ${origin}" "$KONG_YML"; then
-        sed -i "s|^\(\s*\)- __KONG_CORS_ORIGIN_FRONTEND__\$|&\n\1- ${origin}|" "$KONG_YML"
+        # single-quoted program, origin spliced in: hellish drops `\(` in double quotes
+        sed -i 's|^\(\s*\)- __KONG_CORS_ORIGIN_FRONTEND__$|&\n\1- '"${origin}"'|' "$KONG_YML"
         log "cors: allowed origin ${origin}"
     fi
 done

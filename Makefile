@@ -1095,11 +1095,10 @@ sql:
 	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='docker exec -i mini-baas-postgres psql -U postgres -v ON_ERROR_STOP=1 -q' < "$(FILE)"
 	@printf '  ✓ %s applied to the guest Postgres\n' "$(FILE)"
 
-# The same loop install_grobase.sh runs at first boot, for a VM that is
-# already up: paste each [dc] origin after Kong's FRONTEND placeholder (once),
-# restart Kong so its entrypoint re-renders the file, print the list.
+# setup/host/grobase_cors_guest.sh, piped into the guest with the profile's
+# origins as arguments (see its header for why not an inline CMD).
 grobase_cors:
-	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='cd /opt/grobase && f=infra/docker/services/kong/conf/kong.yml && for o in $(call b2b_conf,B2B_DC_CORS_ORIGINS); do grep -qF -- "- $$o" $$f || sed -i "s|^\(\s*\)- __KONG_CORS_ORIGIN_FRONTEND__$$|&\n\1- $$o|" $$f; done && docker restart mini-baas-kong >/dev/null && grep -nE "^\s+- (http|__KONG)" $$f'
+	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='bash -s -- $(call b2b_conf,B2B_DC_CORS_ORIGINS)' < setup/host/grobase_cors_guest.sh
 
 verify_platform:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/verify_platform.sh
