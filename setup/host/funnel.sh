@@ -56,9 +56,13 @@ case "${1:-}" in
     waf=$(vm_ssh "docker port mini-baas-waf 443/tcp 2>/dev/null | head -n1 | sed 's/.*://'" 2>/dev/null)
     case "$waf" in '' | *[!0-9]*) die "the WAF is not publishing 443 (docker port mini-baas-waf) -- is grobase up?" ;; esac
     info "funneling https://${name}/ -> WAF on 127.0.0.1:${waf} (which fronts Kong)"
-    out=$(vm_ssh "tailscale funnel --bg --https=443 https+insecure://127.0.0.1:${waf} 2>&1" || true)
+    # When Funnel is not yet enabled on the tailnet, `tailscale funnel`
+    # prints the enable-URL and then WAITS for someone to click it; the
+    # first make funnel_up sat there for two minutes. 20 s is enough to get
+    # the URL out; 124 is timeout's exit and means exactly that.
+    out=$(vm_ssh "timeout 20 tailscale funnel --bg --https=443 https+insecure://127.0.0.1:${waf} 2>&1; echo "rc=\$?"" || true)
     case "$out" in
-    *"not enabled"* | *"login.tailscale.com"*)
+    *"not enabled"* | *"login.tailscale.com"* | *"rc=124"*)
         printf '%s\n' "$out" | sed 's/^/    /'
         die "Funnel is not enabled on the tailnet yet: open the URL above once (and DNS -> HTTPS Certificates -> Enable), then rerun make funnel_up"
         ;;
