@@ -301,7 +301,7 @@ C_CYAN   := \033[36m
         groot groot_map groot_undo \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
-        tailscale backup backup_verify restore_drill seed loadtest grobase_status \
+        tailscale backup backup_verify restore_drill tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
@@ -1093,8 +1093,11 @@ backup_verify:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --verify
 restore_drill:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" restore-drill
+# A tenant and its mbk_ key, provisioned through the signed operator call.
+tenant_key:
+	@$(DC_ENV) TENANT="$(TENANT)" NAME="$(NAME)" $(SCRIPT_SH) setup/host/tenant_key.sh
 seed:
-	@$(DC_ENV) $(SCRIPT_SH) setup/host/loadtest.sh --seed
+	@$(DC_ENV) N="$(N)" $(SCRIPT_SH) setup/host/loadtest.sh --seed
 loadtest:
 	@$(DC_ENV) VUS="$(VUS)" DURATION="$(DURATION)" PATH_UNDER_TEST="$(PATH_UNDER_TEST)" $(SCRIPT_SH) setup/host/loadtest.sh
 # What grobase is running, straight from the guest.

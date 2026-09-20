@@ -21,7 +21,7 @@
 #
 #   make loadtest                         30 s, 20 VUs, against /
 #   make loadtest VUS=50 DURATION=2m PATH=/rest/v1/
-#   make seed                             grobase's live-demo seed
+#   make seed N=50000                     rows into public.b2b_seed, server-side
 set -u
 
 # shellcheck source=setup/host/dc_lib.sh
@@ -49,15 +49,27 @@ esac
 dc_connect
 
 if [ "${1:-}" = "--seed" ]; then
-    # grobase's seeder writes the demo rows under a TENANT key (mbk_...),
-    # the one a registered client app owns, and refuses without it: the
-    # seed is scoped to an app, not to the platform. Issue one for the app
-    # (or read VITE_BAAS_API_KEY from its env) and pass BAAS_API_KEY=.
-    info "seeding through grobase's own seeder in the guest (server-side)"
-    if ! vm_ssh "cd /opt/grobase && BAAS_API_KEY='${BAAS_API_KEY:-}' make --no-print-directory seed-live-demo 2>&1 | tail -n 6"; then
-        die "seed failed -- grobase's seeder needs a tenant API key: make seed BAAS_API_KEY=mbk_..."
-    fi
-    ok "seeded"
+    # Rows go straight into Postgres with generate_series, server-side, into
+    # public.b2b_seed, readable by PostgREST's anon role: that is the table
+    # `make loadtest PATH_UNDER_TEST=/rest/v1/b2b_seed?limit=100` then pages
+    # through, which is the "thousands of rows on a screen" question asked
+    # of the platform. grobase's own seed-live-demo is not used: it seeds the
+    # osionos demo and needs that app's checkout (apps/osionos/app/.env) --
+    # an app's fixture, not a platform tool. No pipe on the remote side: a
+    # `cmd | tail` returns tail's status and reported "seeded" on a failure.
+    N="${N:-50000}"
+    case "$N" in '' | *[!0-9]*) die "N must be a number of rows (got '$N')" ;; esac
+    info "seeding $N rows into public.b2b_seed in the guest's Postgres (server-side)"
+    count=$(vm_ssh "docker exec -i mini-baas-postgres psql -U postgres -d postgres -qtA -v ON_ERROR_STOP=1 <<'SQL'
+create table if not exists public.b2b_seed (id bigint primary key, ts timestamptz not null default now(), payload jsonb not null);
+truncate public.b2b_seed;
+insert into public.b2b_seed (id, payload) select g, jsonb_build_object('n', g, 'label', 'row ' || g, 'v', random()) from generate_series(1, $N) g;
+grant usage on schema public to anon; grant select on public.b2b_seed to anon;
+select count(*) from public.b2b_seed;
+SQL") || die "the seed SQL failed (is mini-baas-postgres up?)"
+    count=$(printf '%s' "$count" | tr -d '[:space:]')
+    [ "$count" = "$N" ] || die "expected $N rows, Postgres reports '$count'"
+    ok "$count rows in public.b2b_seed -- try: make loadtest PATH_UNDER_TEST='/rest/v1/b2b_seed?select=id,payload&limit=100'"
     exit 0
 fi
 
