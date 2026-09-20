@@ -301,7 +301,7 @@ C_CYAN   := \033[36m
         groot groot_map groot_undo \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
-        tailscale backup backup_verify restore_drill tenant_key seed loadtest grobase_status \
+        tailscale backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
@@ -1093,6 +1093,34 @@ backup_verify:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --verify
 restore_drill:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" restore-drill
+# The rebuild path: push the copy on BACKUP_DEST back into a fresh guest and
+# load the newest snapshot into the engines -- tenants, keys and rows return.
+restore:
+	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --restore
+# Everything a rebuilt guest needs after `make all`/`make re`, in the order
+# that keeps the backup copy safe: restore BEFORE the first backup (a fresh
+# repo must never overwrite the older copy), tenant_key after (it answers
+# "exists" when the restore brought the tenant back). Tailscale needs a
+# REUSABLE key in .b2b-secrets; without one that step warns and goes on.
+datacenter:
+	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
+	@if grep -q '^TS_AUTHKEY=.' .b2b-secrets 2>/dev/null; then \
+		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)"; \
+	else printf '  ! no TS_AUTHKEY in .b2b-secrets: skipping tailscale (see .b2b-secrets.example)\n'; fi
+	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
+	if [ -d "$$d/repo/snapshots" ]; then \
+		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
+	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
+	@$(MAKE_BIN) --no-print-directory tenant_key B2B_CONFIG="$(B2B_CONFIG)" TENANT="$(or $(TENANT),transcendence)"
+	@$(MAKE_BIN) --no-print-directory backup B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$(BACKUP_DEST)"
+	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)"
+# The public plane. Down by default; read setup/host/funnel.sh before the first up.
+funnel_up:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/funnel.sh
+funnel_status:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/funnel.sh --status
+funnel_down:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/funnel.sh --down
 # A tenant and its mbk_ key, provisioned through the signed operator call.
 tenant_key:
 	@$(DC_ENV) TENANT="$(TENANT)" NAME="$(NAME)" $(SCRIPT_SH) setup/host/tenant_key.sh

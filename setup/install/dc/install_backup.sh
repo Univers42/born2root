@@ -141,6 +141,63 @@ echo "restore-drill: OK -- $dbs database(s), $tables table(s) came back from sna
 DRILLEOF
 chmod 755 /usr/local/sbin/b2b-restore-drill
 
+# The restore itself, into the LIVE stack: the newest snapshot's Postgres
+# and MySQL dumps loaded back, which is what brings tenants, their keys and
+# every row home on a rebuilt VM. pg_dumpall --clean drops and recreates
+# databases, and a database with open connections cannot be dropped, so
+# every other mini-baas container is stopped for the duration and grobase's
+# own `make up` brings them back in order. Redis is a cache and is not
+# restored; Mongo, CockroachDB and MSSQL were never dumped (see above).
+cat >/usr/local/sbin/b2b-restore <<'RESTOREEOF'
+#!/bin/sh
+# b2b-restore — load the newest snapshot into the running engines. Installed
+# by setup/install/dc/install_backup.sh (born2root). Read its header first.
+set -u
+PASS=/etc/b2b/restic.pass
+REPO=/var/backups/b2b/repo
+[ -s "$PASS" ] || { echo "restore: no $PASS (make backup first)"; exit 1; }
+export RESTIC_PASSWORD_FILE="$PASS" RESTIC_REPOSITORY="$REPO"
+umask 077
+work=$(mktemp -d /var/tmp/b2b-restore.XXXXXX) || exit 1
+trap 'rm -rf "$work"' EXIT
+snap=$(restic snapshots --json --latest 1 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | head -n1 | cut -d'"' -f4)
+[ -n "$snap" ] || { echo "restore: no snapshot in $REPO"; exit 1; }
+restic restore "$snap" --target "$work" >/dev/null 2>&1 || { echo "restore: restic restore of $snap FAILED"; exit 1; }
+pg=$(find "$work" -name 'postgres-*.sql' | head -n1)
+my=$(find "$work" -name 'mysql-*.sql' | head -n1)
+[ -n "$pg" ] || { echo "restore: snapshot $snap holds no postgres dump"; exit 1; }
+echo "restore: snapshot $snap ($(basename "$pg")$( [ -n "$my" ] && printf ', %s' "$(basename "$my")"))"
+keep="mini-baas-postgres mini-baas-mysql"
+stopped=""
+for c in $(docker ps --format '{{.Names}}' | grep '^mini-baas-'); do
+    case " $keep " in *" $c "*) continue ;; esac
+    docker stop "$c" >/dev/null 2>&1 && stopped="$stopped $c"
+done
+echo "restore: stopped $(echo "$stopped" | wc -w) container(s) so databases can be replaced"
+docker exec mini-baas-postgres psql -U postgres -qtA -c "select pg_terminate_backend(pid) from pg_stat_activity where pid <> pg_backend_pid() and datname is not null" >/dev/null 2>&1
+if docker exec -i mini-baas-postgres psql -U postgres -q -v ON_ERROR_STOP=0 <"$pg" >"$work/pg.log" 2>&1; then :; fi
+pg_err=$(grep -c '^ERROR' "$work/pg.log" 2>/dev/null || echo 0)
+tables=$(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')" 2>/dev/null)
+echo "restore: postgres loaded ($pg_err error line(s), $tables table(s) in the default database)"
+if [ -n "$my" ]; then
+    if docker exec -i mini-baas-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' <"$my" >"$work/my.log" 2>&1; then
+        echo "restore: mysql loaded"
+    else
+        echo "restore: mysql load reported errors:"; head -n3 "$work/my.log"
+    fi
+fi
+conf=/etc/b2b/grobase.conf
+if [ -f "$conf" ] && [ -d /opt/grobase ]; then
+    pkg=$(sed -n 's/^GROBASE_PACKAGE=//p' "$conf"); add=$(sed -n 's/^GROBASE_ADDONS=//p' "$conf")
+    (cd /opt/grobase && make --no-print-directory up PACKAGE="$pkg" ADDONS="$add" >/dev/null 2>&1) && echo "restore: stack back up (make up PACKAGE=$pkg)" || echo "restore: make up reported a problem -- check docker ps"
+else
+    for c in $stopped; do docker start "$c" >/dev/null 2>&1; done
+    echo "restore: containers started again"
+fi
+[ "${tables:-0}" -gt 0 ]
+RESTOREEOF
+chmod 755 /usr/local/sbin/b2b-restore
+
 cat >/etc/systemd/system/b2b-backup.service <<'UNITEOF'
 [Unit]
 Description=born2root: dump the engines and snapshot them with restic
@@ -174,7 +231,27 @@ if [ -n "${BACKUP_PASS_FILE:-}" ] && [ -s "$BACKUP_PASS_FILE" ]; then
     log "restic password installed"
 fi
 
-if [ -s /etc/b2b/restic.pass ]; then
+# A repository the host pushed back (backup_pull.sh --restore): adopted only
+# when the guest has none, so a rebuilt VM starts from yesterday's snapshots
+# rather than an empty repo, and a guest that already has snapshots is never
+# overwritten from outside.
+if [ -n "${BACKUP_RESTORE_FROM:-}" ] && [ -d "$BACKUP_RESTORE_FROM/snapshots" ]; then
+    if [ -d /var/backups/b2b/repo/snapshots ] && [ -n "$(ls -A /var/backups/b2b/repo/snapshots 2>/dev/null)" ]; then
+        log "guest already has snapshots; the pushed repository was not adopted"
+    else
+        rm -rf /var/backups/b2b/repo
+        cp -a "$BACKUP_RESTORE_FROM" /var/backups/b2b/repo
+        chown -R root:root /var/backups/b2b/repo
+        log "adopted the pushed repository ($(find /var/backups/b2b/repo/snapshots -type f | wc -l) snapshot(s))"
+    fi
+    rm -rf "$BACKUP_RESTORE_FROM"
+fi
+if [ "${BACKUP_RESTORE:-0}" = 1 ]; then
+    [ -s /etc/b2b/restic.pass ] || die "cannot restore without /etc/b2b/restic.pass"
+    /usr/local/sbin/b2b-restore || die "the restore failed"
+fi
+
+if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
     log "password present; timer armed and a run follows"
     /usr/local/sbin/b2b-backup || die "the backup run failed"
     # The login pulls the repository off the guest (backup_pull.sh): group-

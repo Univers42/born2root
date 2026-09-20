@@ -53,7 +53,7 @@ info "logging the guest in (state was: ${state:-unknown})"
 EDGE_TS_AUTHKEY="$key" EDGE_NETMESH=1 EDGE_TUNNEL=0 EDGE_TS_OPERATOR="$VM_USER" \
     VM_PATH="${VM_PATH:-$DC_ROOT/disk_images}" \
     "${SCRIPT_SH:-bash}" "$DC_ROOT/setup/host/provision_vm.sh" "$VM_NAME" edge ||
-    die "install_edge.sh did not bring tailscale up (read the output above)"
+    die "install_edge.sh did not bring tailscale up. A key generated without REUSABLE is spent by the first VM that used it -- after a rebuild, generate a new one (Reusable + Ephemeral + Pre-approved) and put it in $SECRETS_FILE (see .b2b-secrets.example)"
 
 ip=$(vm_ssh 'tailscale ip -4 2>/dev/null | head -n1' || true)
 if [ -n "$ip" ]; then

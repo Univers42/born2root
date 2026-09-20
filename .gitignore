@@ -3,6 +3,7 @@ disk_images
 *.iso
 *.tar
 *secret*
+!.b2b-secrets.example
 
 # Downloaded hellish release binary (setup/fetch_hellish.sh)
 dist/

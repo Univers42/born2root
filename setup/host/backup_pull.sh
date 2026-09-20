@@ -24,6 +24,7 @@
 #
 #   make backup            password → backup in the guest → pull the repo
 #   make backup_verify     … and `restic check` the pulled copy (needs restic here)
+#   make restore           push the copy back into a (rebuilt) guest and load the newest snapshot
 set -u
 
 # shellcheck source=setup/host/dc_lib.sh
@@ -31,7 +32,8 @@ set -u
 
 DEST="${BACKUP_DEST:-/sgoinfre/$(id -un)/b2b-backups/$VM_NAME}"
 VERIFY="${BACKUP_VERIFY:-0}"
-[ "${1:-}" = "--verify" ] && VERIFY=1
+RESTORE=0
+case "${1:-}" in --verify) VERIFY=1 ;; --restore) RESTORE=1 ;; esac
 
 dc_connect
 
@@ -48,12 +50,46 @@ fi
 remote_tmp="/tmp/.b2b-restic.$$"
 printf '%s\n' "$pass" | vm_ssh "umask 077; cat > '$remote_tmp'" || die "could not upload the password"
 
-info "installing the password and taking a backup in the guest"
+# --restore: the copy on the host goes BACK into the guest (adopted only if
+# the guest has no snapshots of its own), and the newest snapshot is loaded
+# into the live engines. This is the rebuild path: `make re`, then this,
+# and tenants, keys and rows are where they were.
+restore_from=""
+if [ "$RESTORE" = 1 ]; then
+    [ -d "$DEST/repo/snapshots" ] || die "nothing to restore: no repository at $DEST/repo (BACKUP_DEST=...)"
+    restore_from="/tmp/.b2b-repo.$$"
+    info "pushing $DEST/repo ($(find "$DEST/repo/snapshots" -type f | wc -l) snapshot(s)) into the guest"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a -e "ssh $SSH_OPTS_STR" "$DEST/repo/" "${VM_USER}@127.0.0.1:$restore_from/" || die "push failed"
+    else
+        scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -P "$SSH_PORT" \
+            "$DEST/repo" "${VM_USER}@127.0.0.1:$restore_from" || die "push failed"
+    fi
+    info "restoring the newest snapshot into the running engines (the stack restarts)"
+else
+    info "installing the password and taking a backup in the guest"
+fi
 BACKUP_PASS_FILE="$remote_tmp" BACKUP_PULL_USER="$VM_USER" BACKUP_VERIFY="$VERIFY" \
+    BACKUP_RESTORE="$RESTORE" BACKUP_RESTORE_FROM="$restore_from" \
     VM_PATH="${VM_PATH:-$DC_ROOT/disk_images}" \
     "${SCRIPT_SH:-bash}" "$DC_ROOT/setup/host/provision_vm.sh" "$VM_NAME" backup ||
     die "install_backup.sh reported a problem (read the output above)"
 vm_ssh "rm -f '$remote_tmp'" 2>/dev/null || true
+if [ "$RESTORE" = 1 ]; then
+    ok "restored; the guest's repository now carries the pushed snapshots"
+    exit 0
+fi
+
+# Never let a young repository replace an older copy: a rebuilt guest's
+# repo has ONE snapshot, and rsync --delete would have erased every other
+# one on sgoinfre. The copy may only grow.
+if [ -d "$DEST/repo/snapshots" ]; then
+    have=$(find "$DEST/repo/snapshots" -type f 2>/dev/null | wc -l)
+    got=$(vm_ssh 'ls /var/backups/b2b/repo/snapshots 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]')
+    if [ "${got:-0}" -lt "$have" ]; then
+        die "the guest has ${got:-0} snapshot(s), the copy at $DEST/repo has $have: refusing to overwrite the larger copy. After a rebuild run 'make restore' first, then backup."
+    fi
+fi
 
 info "pulling the repository to $DEST"
 mkdir -p "$DEST" || die "cannot create $DEST"
