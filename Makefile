@@ -1073,6 +1073,7 @@ backup_install:
 #   make baas_access         host :8000 -> Kong, :8443 -> WAF, over SSH (loopback-bound in the guest)
 #   make tailscale           log the guest into the tailnet (TS_AUTHKEY from the secrets file, or asked once)
 #   make sql FILE=x.sql      pipe a SQL file into the guest's Postgres (an app's schema)
+#   make realtime_token      mint a publish-capable realtime token (NS="pg lab" DAYS=30) into the secrets file
 #   make grobase_cors        re-apply [dc] cors_origins to a live VM and restart Kong
 #   make backup              password -> backup in the guest -> pull the repo to sgoinfre
 #   make backup_verify       ... and restic check the pulled copy
@@ -1094,6 +1095,12 @@ sql:
 	@[ -f "$(FILE)" ] || { printf 'make sql: %s: no such file\n' "$(FILE)"; exit 1; }
 	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='docker exec -i mini-baas-postgres psql -U postgres -v ON_ERROR_STOP=1 -q' < "$(FILE)"
 	@printf '  ✓ %s applied to the guest Postgres\n' "$(FILE)"
+
+# Presence and broadcast on grobase's realtime plane need a JWT with the
+# publish claim, which GoTrue's user tokens never carry (see
+# setup/host/realtime_token_guest.sh). The VM owner mints one, scoped.
+realtime_token:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/realtime_token.sh
 
 # setup/host/grobase_cors_guest.sh, piped into the guest with the profile's
 # origins as arguments (see its header for why not an inline CMD).
