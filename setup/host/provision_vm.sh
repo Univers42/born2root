@@ -342,7 +342,9 @@ backup)
 # plumbing the provisioners use: ROOT_SH=path/to/script.sh. For diagnosis
 # (reading root-only files, restic repositories) without opening a pty.
 root-sh)
-    [ -n "${ROOT_SH:-}" ] && [ -f "$ROOT_SH" ] || die "set ROOT_SH=path/to/script.sh"
+    if [ -z "${ROOT_SH:-}" ] || [ ! -f "${ROOT_SH}" ]; then
+        die "set ROOT_SH=path/to/script.sh"
+    fi
     run_provisioner "$ROOT_SH" "b2b-root-sh.$$" ROOTSH_ "$(basename "$ROOT_SH") as root"
     ;;
 restore-drill)
