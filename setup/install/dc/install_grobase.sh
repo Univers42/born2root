@@ -308,6 +308,17 @@ for _ in $(seq 1 60); do
 done
 [ "$ready" = 1 ] || log "gateway not healthy after 5 minutes; services may still be starting (make grobase_status)"
 
+# realtime holds a LISTEN on Postgres and does not re-establish it when that
+# container is recreated under it -- which `up` does on a first install and on
+# every restore. The socket then accepts subscribers and never delivers a row
+# change: the Laboratory bench fails realtime.changes with "timed out waiting
+# for inserted" while every other probe is green, and nothing in the stack
+# looks unhealthy. Restarting it after the stack is up costs a second.
+if docker ps --format '{{.Names}}' | grep -q '^mini-baas-realtime$'; then
+    docker restart mini-baas-realtime >/dev/null 2>&1 &&
+        log "realtime restarted so its LISTEN attaches to the Postgres that is now running"
+fi
+
 # What this guest runs, for verify_platform and for `make grobase` reruns.
 {
     printf 'GROBASE_DIR=%s\n' "$GROBASE_DIR"
