@@ -56,11 +56,14 @@ set -u
 FEAT=/etc/b2b/features.conf
 BUILD=/etc/b2b/build.conf
 GROBASE_REPO="${GROBASE_REPO:-https://github.com/Univers42/grobase.git}"
-# 98eb2b74 = branch fix/laboratory-findings (what the Laboratory bench found,
-# repaired in grobase itself: WAF methods + GraphQL exclusion, pg_graphql in the
-# server image, migration 087, PostgREST graphql_public, SDK topic, the ghcr
-# realtime image). Move to the merge commit once it lands on main.
-GROBASE_REF="${GROBASE_REF:-98eb2b74}"
+# 67279b7d = head of branch fix/laboratory-findings (what the Laboratory bench
+# found, repaired in grobase itself: WAF methods + GraphQL exclusion, pg_graphql
+# in the server image, migration 087, PostgREST graphql_public, SDK topic, the
+# ghcr realtime image, and REALTIME_ALLOWED_ORIGINS at the WebSocket upgrade).
+# It was 98eb2b74, four commits earlier, which predates the origin check
+# grobase_cors_guest.sh writes -- the socket then took REALTIME_ALLOWED_ORIGINS
+# and ignored it. Move to the merge commit once it lands on main.
+GROBASE_REF="${GROBASE_REF:-67279b7d}"
 GROBASE_DIR="${GROBASE_DIR:-/opt/grobase}"
 CONF=/etc/b2b/grobase.conf
 
@@ -119,9 +122,20 @@ else
     log "cloning $GROBASE_REPO"
     git clone -q --depth 100 "$GROBASE_REPO" "$GROBASE_DIR" || die "clone failed"
 fi
+# A pin that lives on a side branch is not in the clone at all: `git clone
+# --depth` implies --single-branch, so the refspec only ever names the default
+# branch and --unshallow just deepens that one. The 2026-09-21 build died here
+# ("ref 98eb2b74 not found") although the commit was on the remote the whole
+# time. Widen the refspec first, then deepen; the ref-name fetch is the last
+# resort for a commit no branch reaches any more.
 if ! git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null; then
-    git -C "$GROBASE_DIR" fetch -q --unshallow origin 2>/dev/null || true
-    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" || die "ref $GROBASE_REF not found in $GROBASE_REPO"
+    git -C "$GROBASE_DIR" remote set-branches origin '*' 2>/dev/null || true
+    git -C "$GROBASE_DIR" fetch -q --unshallow origin 2>/dev/null ||
+        git -C "$GROBASE_DIR" fetch -q origin 2>/dev/null || true
+    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null ||
+        git -C "$GROBASE_DIR" fetch -q origin "$GROBASE_REF" 2>/dev/null || true
+    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" ||
+        die "ref $GROBASE_REF not found in $GROBASE_REPO"
 fi
 cd "$GROBASE_DIR" || die "cannot enter $GROBASE_DIR"
 
