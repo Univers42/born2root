@@ -268,6 +268,31 @@ if [ -n "$waf_img" ] && ! docker run --rm --entrypoint sh "$waf_img" -c 'test -s
     log "waf: building $waf_img from the tree (GraphQL exclusion, allowed methods)"
     docker build -q -t "$waf_img" infra/docker/services/waf >/dev/null || die "waf image build failed"
 fi
+# The same, for realtime, when ghcr has no per-commit image (the tag step
+# above says so). :latest is built from grobase's default branch and predates
+# both socket fixes on this ref: it ignores the REALTIME_ALLOWED_ORIGINS this
+# script writes, and it drops a closing socket instead of answering its Close
+# frame. The Laboratory bench fails exactly two probes on that image
+# (stranger.socket opens from the hostile origin, realtime.goodbye sees 1006)
+# -- which is how this was found on 2026-09-21. The runtime stage is
+# distroless, so the check copies the binary out instead of running a shell
+# in it. A Rust workspace release build: ~15 min on 8 vCPU.
+rt_img=${rt_name:-}
+if [ -n "$rt_img" ]; then
+    rt_cid=$(docker create "$rt_img" 2>/dev/null || true)
+    rt_knows=1
+    if [ -n "$rt_cid" ]; then
+        docker cp "$rt_cid:/app/realtime-server" - 2>/dev/null |
+            grep -qa REALTIME_ALLOWED_ORIGINS || rt_knows=0
+        docker rm -f "$rt_cid" >/dev/null 2>&1 || true
+    fi
+    if [ "$rt_knows" = 0 ]; then
+        log "realtime: building $rt_img from the tree (origin check, clean close)"
+        docker build -q -t "$rt_img" \
+            infra/docker/services/realtime/realtime-agnostic >/dev/null ||
+            die "realtime image build failed"
+    fi
+fi
 
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
 
