@@ -139,21 +139,28 @@ if ! git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null; then
 fi
 cd "$GROBASE_DIR" || die "cannot enter $GROBASE_DIR"
 
-# ── one local patch: observability binds loopback like everything else ──────
+# ── one local patch: every service but the door binds loopback ──────────────
 # At d74aa97 prometheus (9090), grafana (3030) and loki (3100) publish on
 # 0.0.0.0 while every other service in grobase publishes on 127.0.0.1 (its
 # own commit: "engine ports bind to loopback, like every other service").
 # Behind QEMU's NAT that is invisible; on the tailnet it is Grafana for
-# every peer. Docker's published ports also bypass UFW. So the three lines
-# are rewritten after checkout, idempotently (a line already starting with
+# every peer. Docker's published ports also bypass UFW. So those lines are
+# rewritten after checkout, idempotently (a line already starting with
 # 127.0.0.1 does not match), until upstream carries the fix and the ref
 # moves. verify_platform.sh's "no container publishes a port off loopback"
-# is what would catch a regression.
+# is what catches a regression -- and on 2026-09-21 it caught one this patch
+# did not cover: lakehouse.yml gives iceberg-rest 0.0.0.0:8181. Patching the
+# whole base/ directory instead of the one file is why the next such service
+# needs no edit here; gateway.yml is the single exception, since the WAF
+# (8880/8443) is deliberately the one door open off loopback.
 # Two spellings: a literal "9090:9090" and a defaulted "${LOKI_PORT:-3100}:3100".
-sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_]+:-[0-9]+\}:[0-9]+")/\1127.0.0.1:\2/' \
-    orchestrators/compose/base/observability.yml
-n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' orchestrators/compose/base/observability.yml || true)
-[ "${n_open:-0}" = 0 ] || die "observability.yml still publishes $n_open port(s) off loopback after the patch"
+for yml in orchestrators/compose/base/*.yml; do
+    [ "$(basename "$yml")" = gateway.yml ] && continue
+    sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_]+:-[0-9]+\}:[0-9]+")/\1127.0.0.1:\2/' \
+        "$yml"
+    n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' "$yml" || true)
+    [ "${n_open:-0}" = 0 ] || die "$yml still publishes $n_open port(s) off loopback after the patch"
+done
 
 # ── second local patch: the WAF must let REST verbs and uploads through ─────
 # grobase ships infra/docker/services/waf/conf/crs-setup.conf widening the
@@ -302,4 +309,33 @@ if [ -n "$LOGIN" ] && id "$LOGIN" >/dev/null 2>&1; then
 fi
 
 log "grobase $GROBASE_PACKAGE is up: gateway on 127.0.0.1:8000 in the guest ($(docker ps --format '{{.Names}}' | grep -c '^mini-baas') containers)"
+
+# A first boot that filed dc-gateway as failed leaves that line in
+# /etc/b2b/features.status, and verify_platform (hard check) reads it, so a
+# later `make grobase` that succeeds has to retract it -- and the twelve rows
+# first-boot-setup.sh copies dc-gateway's verdict onto with it, or the guest
+# claims grobase is up and its databases are not. Same helper as
+# install_claude_code.sh's mark_feature_ok; the reasoning is there. It flips
+# nothing at first boot, where feature_end writes the line after this returns.
+mark_feature_ok() {
+    local feature="$1" status="${B2B_FEATURES_STATUS:-/etc/b2b/features.status}" tmp
+    [ -f "$status" ] || return 0
+    grep -qE "^${feature} (failed|no-space) " "$status" 2>/dev/null || return 0
+    tmp="${status}.$$"
+    if awk -v f="$feature" '$1 == f && ($2 == "failed" || $2 == "no-space") { $2 = "ok" } { print }' \
+        "$status" >"$tmp" 2>/dev/null; then
+        cat "$tmp" >"$status" && rm -f "$tmp"
+        log "marked '${feature}' ok in ${status} (first boot had filed it as failed)"
+    else
+        rm -f "$tmp"
+    fi
+}
+
+if [ "$ready" = 1 ]; then
+    for f in dc-gateway dc-identity dc-realtime dc-secrets dc-db-postgres dc-db-mysql \
+        dc-db-mongo dc-db-redis dc-db-cockroach dc-db-mssql dc-objectstore \
+        dc-storage dc-observability; do
+        mark_feature_ok "$f"
+    done
+fi
 [ "$ready" = 1 ]
