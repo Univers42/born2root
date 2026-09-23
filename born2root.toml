@@ -213,6 +213,8 @@ interval_min = 10
 [network]
 forwards = [
   # { name = "grafana", guest = 3100, host = 3100 },
+  { name = "drawnosaurus-web", guest = 5273, host = 5273 },
+  { name = "drawnosaurus-api", guest = 4300, host = 4300 },
 ]
 
 # ── The disk ────────────────────────────────────────────────────────────────
