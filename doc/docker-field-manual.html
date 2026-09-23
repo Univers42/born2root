@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docker Field Manual — find it, understand it, fix it</title>
+<meta name="description" content="A searchable, symptom-driven cheat sheet: 50+ generic ways to observe, diagnose and repair Docker and Compose services, with grobase notes.">
+<style>
+/* ── palette: the slate of grobase's wiki/reports, plus a dark theme ─── */
+:root{
+  --ink:#0f172a;--bg:#f8fafc;--panel:#fff;--line:#e2e8f0;--muted:#64748b;--head:#f1f5f9;
+  --accent:#2563eb;--accent-ink:#fff;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;
+  --code-bg:#0f172a;--code-ink:#e2e8f0;--chip:#eef2ff;--chip-ink:#3730a3;
+  --gro:#fdf4ff;--gro-line:#e9d5ff;--gro-ink:#6b21a8;--shadow:0 1px 2px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e2e8f0;--bg:#0b1220;--panel:#111a2e;--line:#243049;--muted:#94a3b8;--head:#16213a;
+    --accent:#60a5fa;--accent-ink:#0b1220;--code-bg:#05080f;--code-ink:#d6deeb;
+    --chip:#1e2a4a;--chip-ink:#c7d2fe;--gro:#1f1230;--gro-line:#4c2a6e;--gro-ink:#e9d5ff;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:140px}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--ink);line-height:1.55}
+a{color:var(--accent)}
+code,pre,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+kbd{font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 6px;background:var(--head);color:var(--ink)}
+
+/* ── header ───────────────────────────────────────────────────────────── */
+header{background:#0f172a;color:#fff;padding:36px 40px 30px}
+header .wrap{max-width:1100px;margin:0 auto}
+header h1{margin:0 0 6px;font-size:28px;letter-spacing:-.01em}
+header h1 span{color:#60a5fa}
+header p{margin:0;color:#cbd5e1;font-size:14.5px;max-width:820px}
+header .keys{margin-top:14px;font-size:12.5px;color:#94a3b8}
+header .keys kbd{background:#1e293b;border-color:#334155;color:#e2e8f0}
+
+/* ── sticky toolbar ───────────────────────────────────────────────────── */
+.tools{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px}
+.tools .wrap{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.search{flex:1 1 320px;position:relative}
+.search input{width:100%;font-size:15px;padding:10px 40px 10px 40px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);outline:none}
+.search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.search .ico{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:15px;pointer-events:none}
+.search button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:16px}
+.count{font-size:13px;color:var(--muted);white-space:nowrap;min-width:120px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;width:100%}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:999px;padding:4px 11px;font-size:12.5px;cursor:pointer;user-select:none;transition:background .12s,border-color .12s}
+.chip:hover{border-color:var(--muted)}
+.chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chip .n{opacity:.65;margin-left:4px;font-size:11px}
+.chip.gro.on{background:var(--gro-ink);border-color:var(--gro-ink);color:#fff}
+.chip.reset{margin-left:auto;border-style:dashed}
+
+/* ── body ─────────────────────────────────────────────────────────────── */
+main{max-width:1100px;margin:0 auto;padding:22px 16px 80px}
+section{margin:22px 0}
+h2{font-size:21px;margin:8px 0 4px;letter-spacing:-.01em}
+h2 .tag{font-size:13px;font-weight:400;color:var(--muted);margin-left:8px}
+.kicker{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+.lead{color:var(--muted);font-size:14px;margin:0 0 14px}
+
+/* symptom cards */
+.symptoms{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.sym{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:14px 16px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .15s,box-shadow .15s,transform .15s}
+.sym:hover{border-color:var(--muted);box-shadow:0 3px 10px rgba(15,23,42,.10);transform:translateY(-1px)}
+.sym.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 35%,transparent)}
+.sym .st{font-weight:600;font-size:14.5px;margin:0 0 4px}
+.sym .sh{font-size:12.5px;color:var(--muted);margin:0}
+.sym .sn{font-size:11.5px;color:var(--accent);margin-top:8px}
+
+/* path strip */
+.path{display:none;margin:16px 0 0;background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:14px 16px}
+.path.on{display:block}
+.path .pt{font-weight:600;margin:0 0 10px;font-size:14px}
+.path ol{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px}
+.path li{display:flex;align-items:center;gap:8px}
+.path li a{display:inline-block;background:var(--chip);color:var(--chip-ink);text-decoration:none;font-size:13px;padding:6px 11px;border-radius:8px;border:1px solid transparent}
+.path li a:hover{border-color:var(--chip-ink)}
+.path li .num{font-size:11px;color:var(--muted);font-weight:700}
+.path li .arr{color:var(--muted)}
+.path .pclose{float:right;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
+
+/* recipes */
+.cat{margin-top:34px}
+.cat h2{display:flex;align-items:baseline;gap:8px}
+.cat .desc{color:var(--muted);font-size:13.5px;margin:0 0 12px}
+.rec{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:12px 0;box-shadow:var(--shadow);scroll-margin-top:150px}
+.rec:target{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 30%,transparent)}
+.rec h3{margin:0 0 4px;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rec h3 a.anchor{color:var(--muted);text-decoration:none;font-weight:400;font-size:13px;opacity:0;transition:opacity .12s}
+.rec:hover h3 a.anchor{opacity:1}
+.rec .why{margin:0 0 10px;font-size:14px;color:var(--ink)}
+.rec .tags{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 8px}
+.rec .tags span{font-size:11px;background:var(--chip);color:var(--chip-ink);border-radius:999px;padding:2px 8px}
+.step{margin:10px 0}
+.step .note{font-size:13px;color:var(--muted);margin:0 0 4px}
+pre{position:relative;background:var(--code-bg);color:var(--code-ink);border-radius:8px;padding:12px 44px 12px 14px;margin:0;font-size:12.8px;line-height:1.5;overflow-x:auto;white-space:pre}
+pre .copy{position:absolute;top:7px;right:7px;border:1px solid #334155;background:#1e293b;color:#cbd5e1;font-size:11px;border-radius:6px;padding:3px 8px;cursor:pointer;font-family:inherit}
+pre .copy:hover{background:#334155}
+pre .copy.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.read{margin:10px 0 0;font-size:13.5px;border-left:3px solid var(--line);padding:6px 12px;color:var(--ink)}
+.read b{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px}
+.gro{display:none;margin:10px 0 0;background:var(--gro);border:1px solid var(--gro-line);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--ink)}
+.gro b{color:var(--gro-ink);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px}
+.gro code{background:color-mix(in srgb,var(--gro-ink) 12%,transparent);padding:0 4px;border-radius:4px}
+body.show-gro .gro{display:block}
+.rec.hide,.cat.hide{display:none}
+.empty{display:none;text-align:center;color:var(--muted);padding:40px 0}
+.empty.on{display:block}
+
+/* footer tables */
+table{border-collapse:collapse;width:100%;font-size:13px;margin-top:10px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--head);font-weight:600}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--head) 50%,transparent)}
+.ref{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:12px 0}
+.ref h3{margin:0 0 6px;font-size:16px}
+.ref pre{margin-top:8px}
+footer{max-width:1100px;margin:0 auto;padding:0 16px 40px;color:var(--muted);font-size:12.5px}
+
+@media print{
+  header{background:#fff;color:#000;padding:0 0 12px}header h1 span,header p,header .keys{color:#000}
+  .tools,.symptoms,.path,.copy,.anchor{display:none!important}
+  .rec,.ref{break-inside:avoid;box-shadow:none}
+  pre{white-space:pre-wrap;color:#000;background:#f1f5f9}
+  body.show-gro .gro,.gro{display:block}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>Docker Field Manual <span>— find it, understand it, fix it</span></h1>
+    <p>Fifty-odd generic moves for when a containerised service misbehaves: what to look at first, what the output means, and the repair that follows. Start from a symptom, or search for a word.</p>
+    <p class="keys"><kbd>/</kbd> search &nbsp; <kbd>Esc</kbd> clear &nbsp; <kbd>g</kbd> grobase notes on/off &nbsp; · every recipe has a <kbd>#link</kbd> and a copy button</p>
+  </div>
+</header>
+
+<div class="tools">
+  <div class="wrap">
+    <div class="search">
+      <span class="ico">⌕</span>
+      <input id="q" type="search" placeholder="search: restart, 137, permission denied, port, dns, volume…" autocomplete="off" spellcheck="false">
+      <button id="qx" title="clear (Esc)" aria-label="clear search">✕</button>
+    </div>
+    <div class="count" id="count"></div>
+    <div class="chips" id="chips"></div>
+  </div>
+</div>
+
+<main>
+  <section id="symptoms-sec">
+    <p class="kicker">Start here</p>
+    <h2>What's wrong?<span class="tag">pick a symptom, follow the path</span></h2>
+    <p class="lead">Each card is an ordered path through the recipes below: the thing to check first, then the next. The list filters to those steps.</p>
+    <div class="symptoms" id="symptoms"></div>
+    <div class="path" id="path"></div>
+  </section>
+
+  <section id="recipes"></section>
+  <div class="empty" id="empty">Nothing matches. Fewer words, or clear the filters.</div>
+
+  <section id="reference">
+    <p class="kicker">Reference</p>
+    <h2>Exit codes, inspect templates, and how to add a recipe</h2>
+
+    <div class="ref">
+      <h3>Container exit codes</h3>
+      <p class="lead" style="margin:0 0 4px">The number after <code>Exited (…)</code> in <code>docker ps -a</code>. Anything ≥ 128 is a signal: subtract 128.</p>
+      <table>
+        <thead><tr><th style="width:80px">Code</th><th>Meaning</th><th>Usually</th></tr></thead>
+        <tbody>
+          <tr><td><code>0</code></td><td>clean exit</td><td>a one-shot job that finished (migrations, init containers); a server that was asked to stop</td></tr>
+          <tr><td><code>1</code></td><td>the application failed</td><td>read the last 50 log lines: config, credentials, a dependency not reachable</td></tr>
+          <tr><td><code>125</code></td><td>the <em>daemon</em> refused to run it</td><td>bad flag, port already allocated, mount path missing</td></tr>
+          <tr><td><code>126</code></td><td>command found but not executable</td><td>an entrypoint script without <code>+x</code>, or a directory</td></tr>
+          <tr><td><code>127</code></td><td>command not found</td><td>wrong <code>ENTRYPOINT</code>/<code>CMD</code>, missing shell, CRLF line endings in a script</td></tr>
+          <tr><td><code>137</code></td><td>SIGKILL (9)</td><td>OOM killer (<code>.State.OOMKilled</code>), <code>docker kill</code>, or a stop timeout that expired</td></tr>
+          <tr><td><code>139</code></td><td>SIGSEGV (11)</td><td>the binary crashed: wrong architecture image, a native module mismatch</td></tr>
+          <tr><td><code>143</code></td><td>SIGTERM (15)</td><td>a normal <code>docker stop</code>; only a problem if nobody asked for it</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="ref">
+      <h3><code>docker inspect</code> templates worth memorising</h3>
+      <p class="lead" style="margin:0">Go templates over the container's JSON. <code>-f</code> is <code>--format</code>; <code>{{json .X}}</code> dumps a subtree; <code>range</code> walks a list.</p>
+      <pre><button class="copy">copy</button>docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' NAME
+docker inspect -f '{{json .State.Health}}' NAME | python3 -m json.tool
+docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' NAME
+docker inspect -f '{{range .Mounts}}{{.Type}} {{.Name}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' NAME
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' NAME
+docker inspect -f '{{.Config.Image}} {{.Image}}' NAME
+docker inspect -f '{{.State.Pid}}' NAME
+docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' NAME</pre>
+    </div>
+
+    <div class="ref">
+      <h3>Maintaining this page</h3>
+      <p class="lead" style="margin:0">One file, no build step. The recipes are the JSON array in <code>&lt;script id="data-recipes"&gt;</code> near the end of the file; the symptom paths are in <code>&lt;script id="data-symptoms"&gt;</code>.</p>
+      <ul style="font-size:13.5px;margin:8px 0 0;padding-left:20px">
+        <li>Add a recipe: append one object <code>{ id, cat, title, why, tags, steps:[{cmd, note}], read, grobase }</code>. <code>id</code> must be unique (it is the anchor); <code>cat</code> must be one of the category keys listed in <code>CATS</code>. <code>grobase</code> is optional.</li>
+        <li>Add a symptom: <code>{ id, title, hint, path:[recipe ids…] }</code>. Order matters: it is the order to check things.</li>
+        <li>Commands are plain text: never put <code>&lt;/script</code> in one. HTML is escaped on render; <code>`…`</code> in prose becomes <code>&lt;code&gt;</code>.</li>
+        <li>Open the file in a browser after editing; a JSON typo shows as an error banner at the top instead of the recipes.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>Docker Field Manual · generic Docker / Compose practice, with grobase notes behind the toggle · lives next to the other guides; move it as one file.</footer>
+
+<!-- ═══════════════════════ DATA: recipes ═══════════════════════════ -->
+<script type="application/json" id="data-recipes">
+[
+{"id":"ps-format","cat":"observe","title":"See every container, its state and health at a glance","why":"The first command in any incident: who is up, who is restarting, who exited and with what.","tags":["ps","status","health","first"],
+ "steps":[{"cmd":"docker ps -a --format 'table {{.Names}}\\t{{.Status}}\\t{{.Image}}'","note":"-a includes stopped containers; the table format drops the noise."},
+          {"cmd":"docker ps -a --filter status=restarting --filter status=exited --format 'table {{.Names}}\\t{{.Status}}'\ndocker ps --filter health=unhealthy --format '{{.Names}}'","note":"Only the ones in trouble."},
+          {"cmd":"docker ps -a --format '{{.State}}' | sort | uniq -c","note":"A one-line census: how many running / exited / restarting."}],
+ "read":"`Up 3 minutes (healthy)` is fine. `Restarting (1) 4 seconds ago` is a crash loop: the number is the last exit code. `Exited (0)` on a name that ends in -init, -migrate or -bootstrap is normal: a one-shot job that finished. `Exited (1)` is not.",
+ "grobase":"Everything is prefixed `mini-baas-`. Normal `Exited (0)`: `pg-migrate`, `db-bootstrap`, `minio-iceberg-init`. `mongo-init` at `Exited (1)` with `mongo-api`, `ai-service` and `analytics-service` restarting means Mongo credentials no longer match its volume (see <a href=\"#secrets-first-init\">first-init secrets</a>)."},
+
+{"id":"exit-code","cat":"observe","title":"Read the exit code, the OOM flag and the restart count together","why":"Three fields tell you whether the app failed, was killed, or is being killed by the kernel.","tags":["exit","137","oom","restart count","inspect"],
+ "steps":[{"cmd":"docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} started={{.State.StartedAt}}' NAME","note":""}],
+ "read":"`exit=1 oom=false` → the application refused to start: go to the logs. `exit=137 oom=true` → the kernel killed it for memory. `exit=137 oom=false` → somebody or the stop timeout killed it. A `restarts` count that climbs while you watch is the loop. Codes are decoded in the reference table at the bottom."},
+
+{"id":"logs","cat":"observe","title":"Read the logs the right way: tail, since, both streams, follow","why":"`docker logs` prints the whole history by default and mixes stdout and stderr; the useful lines are the last ones before the crash.","tags":["logs","tail","since","stderr","follow"],
+ "steps":[{"cmd":"docker logs --tail 50 NAME","note":"Last 50 lines. Add -t for timestamps."},
+          {"cmd":"docker logs --since 10m NAME 2>&1 | grep -iE 'error|fatal|panic|refused|denied|timeout' | head -30","note":"Only what went wrong in the last 10 minutes. `2>&1` matters: errors usually go to stderr."},
+          {"cmd":"docker logs -f --tail 20 NAME","note":"Follow live while you reproduce the problem. Ctrl-C detaches, the container keeps running."},
+          {"cmd":"docker logs NAME 2>/dev/null | wc -l; docker logs NAME 2>&1 >/dev/null | wc -l","note":"How much is on stdout vs stderr, when a service seems silent."}],
+ "read":"For a restart loop, the meaningful lines are right before `Node.js v20…`, a Python traceback, or `exiting` / `shutting down`: the process prints its reason and dies. If the log is empty, the process never got to print: wrong entrypoint (exit 127), or the health check kills it before it logs.",
+ "grobase":"A Kong that loops with `error parsing declarative config file /tmp/kong.yml: NN:MM: did not find expected '-' indicator` has a broken line in `infra/docker/services/kong/conf/kong.yml`, which its entrypoint renders with `sed` at start; line NN of the rendered file is the culprit."},
+
+{"id":"events","cat":"observe","title":"Watch what the daemon is doing in real time","why":"When containers die, restart or get created and you do not know by whom, the event stream shows every action with its actor.","tags":["events","die","restart","who","timeline"],
+ "steps":[{"cmd":"docker events --since 15m --filter type=container --format '{{.Time}} {{.Action}} {{.Actor.Attributes.name}} {{.Actor.Attributes.exitCode}}'","note":"The last 15 minutes as a timeline: start, die (with exit code), kill, oom, health_status."},
+          {"cmd":"docker events --filter event=die --filter event=oom --filter event=health_status","note":"Live: leave it in a second terminal while you reproduce."}],
+ "read":"A `die` immediately followed by `start` every few seconds is the restart policy doing its job on a crashing process. `oom` events name the container the kernel picked. `health_status: unhealthy` before a `die` means Compose or an orchestrator killed it on purpose."},
+
+{"id":"top","cat":"observe","title":"See the processes inside a container without entering it","why":"Works even when the image has no shell. Shows whether the main process is the one you think, and whether children are piling up.","tags":["top","processes","pid","zombie"],
+ "steps":[{"cmd":"docker top NAME -eo pid,ppid,user,etime,cmd","note":"ps options after the name."}],
+ "read":"PID 1 inside should be the server, or a tiny init (`tini`, `dumb-init`) with the server as its child. Hundreds of `defunct` children mean PID 1 is not reaping: use `--init` or an init in the image. A `sleep infinity` as PID 1 is a debug container someone left behind."},
+
+{"id":"stats","cat":"observe","title":"Measure CPU, memory and I/O per container, live",
+ "why":"Before blaming a service for a slow host, see who is actually using the machine, and how close each container is to its memory limit.","tags":["stats","cpu","memory","limit","io"],
+ "steps":[{"cmd":"docker stats --no-stream --format 'table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.MemPerc}}\\t{{.NetIO}}\\t{{.BlockIO}}'","note":"One snapshot, sorted by nothing: pipe to `sort -k3 -h` for memory."},
+          {"cmd":"docker stats NAME","note":"Live for one container; Ctrl-C to stop."}],
+ "read":"`MemPerc` near 100% of a container with a memory limit is an OOM kill waiting to happen. Without a limit the column is relative to the whole host. A CPU above 100% is normal: it is per core.",
+ "grobase":"A `max` tier stack is ~35 containers on a 7.5 GB guest. `free -m` on the guest, then `docker stats`, tells you whether adding a service will fit before you find out from the OOM killer."},
+
+{"id":"inspect","cat":"observe","title":"Pull one fact out of `docker inspect` instead of 300 lines of JSON","why":"Everything Docker knows about a container is in inspect; a Go template gets the one field you need.","tags":["inspect","format","template","json","env","mounts","ip"],
+ "steps":[{"cmd":"docker inspect -f '{{json .State}}' NAME | python3 -m json.tool","note":"Whole subtree, pretty."},
+          {"cmd":"docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' NAME | sed -E 's/(PASS|SECRET|KEY|TOKEN)([A-Z_]*)=.*/\\1\\2=<hidden>/'","note":"Environment the process actually got, secrets masked before it hits your scrollback."},
+          {"cmd":"docker inspect -f '{{range .Mounts}}{{.Type}} {{.Name}}{{.Source}} -> {{.Destination}} rw={{.RW}}{{println}}{{end}}' NAME","note":"Every volume and bind mount."},
+          {"cmd":"docker inspect -f '{{range $n,$c := .NetworkSettings.Networks}}{{$n}}={{$c.IPAddress}} {{end}}' NAME","note":"IP on each network."}],
+ "read":"If a value here is not what your `.env` says, the container was created before the change: recreate it (see <a href=\"#recreate\">restart vs recreate</a>). The full template list is in the reference at the bottom."},
+
+{"id":"compose-config","cat":"observe","title":"See the Compose file as Compose actually understands it","why":"After variable substitution, profiles, overrides and `extends`, the effective config can differ from any single file you are reading.","tags":["compose","config","profiles","env","override","effective"],
+ "steps":[{"cmd":"docker compose config --services\ndocker compose --profile '*' config --services | wc -l","note":"Which services exist with the active profiles vs with every profile."},
+          {"cmd":"docker compose config | less","note":"The fully resolved YAML: ports, env, volumes after substitution."},
+          {"cmd":"docker compose config --profiles\ndocker compose ps --format 'table {{.Name}}\\t{{.Service}}\\t{{.Status}}\\t{{.Ports}}'","note":"All profile names; and the running set with published ports."}],
+ "read":"A service missing from `config --services` is behind a profile that is not active: `up` will never start it and `logs` says `no such service`. A `${VAR}` still literal in the output is an unset variable with no default.",
+ "grobase":"grobase resolves tiers to profiles: `make -n up PACKAGE=max` shows the `--profile` flags. Studio, playground and the tenant apps (gourmand, hypertube, vault42…) are profiles no tier enables."},
+
+{"id":"healthcheck","cat":"process","title":"Read the health check's own output, not just 'unhealthy'","why":"Docker stores the last few probe results with their stdout. That text says why the check fails, which the status never does.","tags":["health","unhealthy","probe","starting"],
+ "steps":[{"cmd":"docker inspect -f '{{range .State.Health.Log}}{{.Start}} exit={{.ExitCode}} {{.Output}}{{println}}{{end}}' NAME | tail -5","note":"Last probes with output."},
+          {"cmd":"docker inspect -f '{{json .Config.Healthcheck}}' NAME","note":"The probe itself: command, interval, retries, start period."},
+          {"cmd":"docker exec NAME sh -c 'PROBE_COMMAND_HERE'; echo exit=$?","note":"Run the probe by hand inside the container to see the real failure."}],
+ "read":"`(health: starting)` for longer than `StartPeriod` × retries turns into `unhealthy` and, with `depends_on: condition: service_healthy`, blocks everything behind it. A probe that uses `curl` in an image without curl fails forever with exit 127: the service may be fine.",
+ "grobase":"`dependency failed to start: container mini-baas-kong is unhealthy` at `make up` is Compose refusing to start Kong's dependants. Kong's health is the culprit, not theirs: read Kong's logs."},
+
+{"id":"oom","cat":"process","title":"Prove (or rule out) an out-of-memory kill","why":"Exit 137 with `OOMKilled=true` is the kernel, not the app; the fix is a limit, a leak hunt or more RAM, never a code retry.","tags":["oom","137","memory","kill","dmesg"],
+ "steps":[{"cmd":"docker inspect -f 'oom={{.State.OOMKilled}} limit={{.HostConfig.Memory}} exit={{.State.ExitCode}}' NAME","note":"limit=0 means no container limit: it was the host that ran out."},
+          {"cmd":"dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory' | tail -5\njournalctl -k --since -1h 2>/dev/null | grep -i oom | tail -5","note":"The kernel names the victim and the cgroup."}],
+ "read":"A container killed with `limit=0` means the whole host was short: check `free -m` and who else is big in `docker stats`. With a limit, either raise it (`mem_limit` / `deploy.resources.limits.memory`) or find the leak: memory that grows linearly over `docker stats` is the tell."},
+
+{"id":"restart-loop","cat":"process","title":"Break into a container that dies before you can exec into it","why":"A crash loop gives you a window of a second; override the entrypoint to get a shell in the same image, env and volumes.","tags":["restart loop","entrypoint","shell","debug","crash"],
+ "steps":[{"cmd":"docker compose run --rm --entrypoint sh SERVICE","note":"Same image, env, networks and volumes as the service, but a shell instead of the crashing command. Use `bash` if the image has it."},
+          {"cmd":"docker run --rm -it --entrypoint sh IMAGE","note":"The bare image, without the Compose wiring: does it even start alone?"},
+          {"cmd":"docker inspect -f 'entrypoint={{.Config.Entrypoint}} cmd={{.Config.Cmd}} workdir={{.Config.WorkingDir}} user={{.Config.User}}' NAME","note":"Then run exactly that command in your shell to watch it fail slowly."}],
+ "read":"Inside the shell, run the real command by hand: the error is now in front of you with time to read it, and you can `ls` the config it complains about, `env | grep`, or `nc -vz host port` a dependency."},
+
+{"id":"entrypoint","cat":"process","title":"Find out what really runs: entrypoint, cmd, user, workdir","why":"Exit 126/127 and 'file not found' are almost always an entrypoint problem: wrong path, no +x, CRLF line endings, a shell the image lacks.","tags":["entrypoint","cmd","127","126","crlf","user"],
+ "steps":[{"cmd":"docker inspect -f '{{.Config.Entrypoint}} {{.Config.Cmd}} user={{.Config.User}} wd={{.Config.WorkingDir}}' NAME","note":""},
+          {"cmd":"docker run --rm --entrypoint sh IMAGE -c 'ls -l /entrypoint.sh; head -c 200 /entrypoint.sh | od -c | head -3; ls /bin/bash'","note":"Is it there, executable, and do its first bytes look like a script (a `\\r` after `#!/bin/sh` is CRLF)?"}],
+ "read":"`exec /entrypoint.sh: no such file or directory` while the file exists is CRLF (`#!/bin/sh\\r`) or a missing interpreter named in the shebang. `permission denied` is the missing +x, often after a `COPY` from Windows or a bind mount with the wrong mode."},
+
+{"id":"run-alone","cat":"process","title":"Test an image on its own, outside the stack","why":"Separates 'the image is broken' from 'the wiring is broken': if it runs alone with the same env, the problem is a dependency, a network or a volume.","tags":["run","isolate","image","reproduce"],
+ "steps":[{"cmd":"docker run --rm -it --env-file .env -p 127.0.0.1:9999:8080 IMAGE","note":"Same env file, a scratch port on loopback, no volumes."},
+          {"cmd":"docker run --rm -it --network NETWORK --env-file .env IMAGE","note":"Add the stack's network when the service needs its peers (`docker network ls` to find it)."}],
+ "read":"Runs alone but not in Compose → look at what Compose adds: volumes (stale data), `depends_on` order, a health check, a `user:`. Fails alone the same way → it is the image or its configuration."},
+
+{"id":"diff","cat":"process","title":"See what a container changed on its own filesystem","why":"Files written at runtime tell you where a service keeps state you did not know about, and what an entrypoint generated.","tags":["diff","filesystem","changed","generated"],
+ "steps":[{"cmd":"docker diff NAME | head -40","note":"A = added, C = changed, D = deleted, relative to the image."}],
+ "read":"Config files under `C` were rewritten by the entrypoint (templates). Large trees under `A` outside a volume are data that will vanish on recreate: that is a volume you forgot to declare."},
+
+{"id":"cp","cat":"process","title":"Copy a file out of (or into) a container to read it comfortably","why":"The rendered config or a core dump is easier to read on the host with your own tools than through `docker exec cat`.","tags":["cp","copy","file","config","rendered"],
+ "steps":[{"cmd":"docker cp NAME:/etc/app/config.yml ./config.rendered.yml\ndocker cp ./patched.yml NAME:/etc/app/config.yml","note":"Works on stopped containers too. Into a container is a hotfix, not a fix: it does not survive recreate."}],
+ "read":"For a template that an entrypoint renders at start, the file inside is the truth: diff it against your source to see what substitution did.",
+ "grobase":"Kong's rendered config: `docker cp mini-baas-kong:/tmp/kong.yml /tmp/kong.rendered.yml`, then `sed -n 'NNp'` at the line the error names."},
+
+{"id":"port","cat":"network","title":"Find the port a service really got, never assume it","why":"Published ports can be bumped by tooling, changed by an override, or bound to loopback only. `docker port` reads the truth from the daemon.","tags":["port","published","moved","bump","hostfwd"],
+ "steps":[{"cmd":"docker port NAME\ndocker ps --format '{{.Names}}\\t{{.Ports}}' | column -t","note":"Container port → host address:port, one line each."},
+          {"cmd":"ss -ltnp 2>/dev/null | grep -E ':(8000|8443)\\b' || sudo ss -ltnp | grep docker","note":"From the host side: who listens on the port you expected."}],
+ "read":"`8000/tcp -> 127.0.0.1:8001` when you expected 8000: the port was taken when the stack came up and got bumped; whatever forwards to 8000 now talks to nothing. Fix by freeing the port and recreating, not by chasing the new number.",
+ "grobase":"grobase's `scripts/ops/resolve-ports.sh` bumps a busy port at `make up` (Kong 8000→8001, WAF 8443→8444, 8880→8881 seen when the previous tier was still up). Read them back with `docker port mini-baas-kong` / `mini-baas-waf`; a clean `make down` then `make up` returns to the defaults."},
+
+{"id":"loopback","cat":"network","title":"Loopback vs 0.0.0.0: why a NAT or a tunnel sees nothing behind an open port","why":"`127.0.0.1:8000:8000` publishes on the host's loopback only. A VM port forward or a remote client reaches the host NIC, where nothing listens.","tags":["loopback","0.0.0.0","bind","nat","tunnel","refused"],
+ "steps":[{"cmd":"docker port NAME | grep -E '^.*-> (0\\.0\\.0\\.0|\\[::\\]|127\\.0\\.0\\.1)'","note":"Which address each port is published on."},
+          {"cmd":"curl -sS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:PORT/\ncurl -sS -o /dev/null -w '%{http_code}\\n' http://$(hostname -I | awk '{print $1}'):PORT/","note":"Loopback answers, the NIC address does not → loopback-only publication."}],
+ "read":"Loopback-only is a good default for anything not meant to be public; reach it through SSH: `ssh -L 18000:127.0.0.1:8000 host`. Publishing on 0.0.0.0 is a deliberate exposure and needs the firewall's consent.",
+ "grobase":"Kong (:8000) is loopback-only by design; only the WAF (:8443/:8880) publishes off loopback. From the born2root host, `make baas_access` opens the SSH tunnel (host :18000 → guest Kong)."},
+
+{"id":"network-inspect","cat":"network","title":"See who is on which network, with what IP and alias","why":"Two services that cannot see each other are usually on different networks, or one was created before the network existed.","tags":["network","inspect","alias","ip","bridge"],
+ "steps":[{"cmd":"docker network ls\ndocker network inspect NETWORK -f '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{println}}{{end}}'","note":"Members of a network."},
+          {"cmd":"docker inspect -f '{{range $n,$c := .NetworkSettings.Networks}}{{$n}}: {{$c.IPAddress}} aliases={{$c.Aliases}}{{println}}{{end}}' NAME","note":"From the container's side: every network it joined, and the names it answers to."}],
+ "read":"The alias list is what DNS resolves: the service name, the container name, and any `aliases:` you declared. A container on only the default `bridge` network has no DNS to Compose services at all."},
+
+{"id":"dns","cat":"network","title":"Resolve a service name from inside, the way the app does","why":"'getaddrinfo ENOTFOUND db' means the container cannot resolve `db`: not a network problem yet, a naming one.","tags":["dns","resolve","enotfound","getent","nslookup","name"],
+ "steps":[{"cmd":"docker exec NAME getent hosts OTHER_SERVICE\ndocker exec NAME cat /etc/resolv.conf","note":"getent exists in almost every image; nslookup does not. Docker's resolver is 127.0.0.11."},
+          {"cmd":"docker exec NAME sh -c 'command -v nc && nc -vz OTHER_SERVICE PORT || (echo >/dev/tcp/OTHER_SERVICE/PORT && echo open)'","note":"Name resolves: is the port open? `/dev/tcp` needs bash."}],
+ "read":"No answer from getent → different networks or wrong name (service name, not container name with a project prefix, unless you declared it). Resolves but connection refused → the peer is up but not listening yet (start order) or listening on 127.0.0.1 inside its own container instead of 0.0.0.0."},
+
+{"id":"netshoot","cat":"network","title":"Borrow a toolbox: debug a container's network from a sidecar","why":"Production images ship no curl, dig, tcpdump or ss. A netshoot container in the same network namespace has them all, without touching the service.","tags":["netshoot","sidecar","tcpdump","curl","namespace","tools"],
+ "steps":[{"cmd":"docker run --rm -it --network container:NAME nicolaka/netshoot","note":"Same interfaces, IPs, ports and DNS as NAME: `ss -ltnp`, `curl localhost:PORT`, `tcpdump -i eth0 port 5432`, `dig db`."},
+          {"cmd":"docker run --rm -it --network NETWORK nicolaka/netshoot curl -sv http://SERVICE:PORT/health","note":"As a peer on the network instead: the client's point of view."}],
+ "read":"`ss -ltnp` inside the shared namespace shows the exact address the service binds: `127.0.0.1:8080` explains why peers get refused while `curl localhost` works."},
+
+{"id":"nsenter","cat":"network","title":"Run host tools inside a container's namespaces, no sidecar image needed","why":"Offline, or no registry access: nsenter with the container's PID gives you the host's `ss`, `ip`, `ls` inside its network or mount namespace.","tags":["nsenter","namespace","offline","ss","pid"],
+ "steps":[{"cmd":"PID=$(docker inspect -f '{{.State.Pid}}' NAME)\nsudo nsenter -t $PID -n ss -ltnp\nsudo nsenter -t $PID -n ip addr","note":"-n = network namespace only; the binaries are the host's."},
+          {"cmd":"sudo nsenter -t $PID -m -u -p -n sh","note":"Almost a full `exec` for an image with no shell: mount, uts, pid and net namespaces, host's sh."}],
+ "read":"Needs root on the host. The PID is 0 when the container is not running: nsenter cannot enter a stopped container, use <a href=\"#restart-loop\">an entrypoint override</a> instead."},
+
+{"id":"refused-vs-timeout","cat":"network","title":"Tell 'connection refused', 'reset' and 'timeout' apart",
+ "why":"The three failures point at three different layers; guessing costs an hour.","tags":["refused","reset","timeout","curl","layer"],
+ "steps":[{"cmd":"curl -sv --max-time 5 http://HOST:PORT/ 2>&1 | grep -E 'Connected|refused|reset|timed out|HTTP/'","note":"One probe, and the verb in the answer classifies it."}],
+ "read":"**refused** — the address answered: nothing listens on that port (wrong port, service not up yet, bound to another interface). **reset / empty reply** — something accepted then closed: a NAT that forwards into a void (VM hostfwd to a loopback-only port), a TLS server given plain HTTP, a proxy whose upstream is down. **timeout** — packets go nowhere: firewall, wrong network, wrong IP. `000` from `curl -w %{http_code}` is any of the three; read the verbose line.",
+ "grobase":"From the born2root host, QEMU's hostfwd to guest :8000 accepts and then drops (Kong is loopback-only in the guest) — that is 'reset', and the SSH tunnel is the fix, not Kong."},
+
+{"id":"curl-inside-outside","cat":"network","title":"Probe a service from inside the container, from a peer, and from the host — in that order","why":"Where the first failure appears tells you the layer: the process, the Docker network, or the host publication.","tags":["curl","health","inside","outside","layer","502"],
+ "steps":[{"cmd":"docker exec NAME sh -c 'command -v curl >/dev/null && curl -s -o /dev/null -w \"%{http_code}\\n\" http://127.0.0.1:PORT/health || wget -qO- http://127.0.0.1:PORT/health'","note":"1. inside: the process itself."},
+          {"cmd":"docker run --rm --network NETWORK curlimages/curl -s -o /dev/null -w '%{http_code}\\n' http://SERVICE:PORT/health","note":"2. from a peer: DNS + network."},
+          {"cmd":"curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:HOSTPORT/health","note":"3. from the host: publication."}],
+ "read":"Inside OK, peer fails → network or bind address. Peer OK, host fails → publication (port moved, loopback, firewall). A gateway returning 502/503 while its upstream answers step 1 → the gateway's upstream name or port is wrong, or the upstream is not yet healthy."},
+
+{"id":"system-df","cat":"storage","title":"See where Docker's disk went",
+ "why":"`no space left on device` first: images, containers' writable layers, volumes and build cache each have their own reclaim command.","tags":["disk","df","space","volumes","cache","reclaim"],
+ "steps":[{"cmd":"docker system df\ndocker system df -v | sed -n '/^Local Volumes/,/^$/p' | sort -k3 -h | tail -10","note":"Summary, then the ten biggest volumes."},
+          {"cmd":"docker system df -v | sed -n '/^Images space/,/^$/p' | sort -k7 -h | tail -10","note":"The biggest images."},
+          {"cmd":"df -h $(docker info -f '{{.DockerRootDir}}')","note":"The filesystem Docker actually writes to: it is often not `/`."}],
+ "read":"`RECLAIMABLE` is what `prune` would free. A volume that dwarfs the rest is a database or a log directory; do not prune it, look inside. If the root dir's filesystem is at 100%, nothing works until something is freed, including `docker logs`.",
+ "grobase":"Docker's root is on `/var` (its own LVM volume in born2root). `df -h /var` is the number that matters; the `var-gc` timer prunes images and build cache but never volumes."},
+
+{"id":"biggest","cat":"storage","title":"Find the biggest containers' writable layers and log files","why":"A container writing outside its volumes, or a json-file log without rotation, grows the writable layer until the disk is full.","tags":["size","writable layer","logs","json-file","growth"],
+ "steps":[{"cmd":"docker ps -as --format 'table {{.Names}}\\t{{.Size}}' | sort -k2 -h | tail -8","note":"`virtual` is the image; the first number is the container's own writes."},
+          {"cmd":"sudo du -sh $(docker info -f '{{.DockerRootDir}}')/containers/*/*-json.log 2>/dev/null | sort -h | tail -5","note":"Log files by size."}],
+ "read":"A multi-GB writable layer is data that belongs in a volume (it vanishes on recreate). A multi-GB json log needs `logging: options: max-size` (see <a href=\"#log-rotation\">log rotation</a>); `truncate -s 0` on the file is the emergency valve."},
+
+{"id":"no-space","cat":"storage","title":"Triage 'no space left on device' in the right order","why":"Reclaim what is safe first (build cache, dangling images), and only then decide about stopped containers and volumes.","tags":["no space","prune","disk full","enospc","emergency"],
+ "steps":[{"cmd":"docker builder prune -f\ndocker image prune -f","note":"1. Safe: build cache and dangling (untagged) images."},
+          {"cmd":"docker image prune -a -f --filter 'until=168h'","note":"2. Unused images older than a week. Pulling again costs bandwidth, nothing else."},
+          {"cmd":"docker container prune -f","note":"3. Stopped containers: their writable layers go, their volumes stay."},
+          {"cmd":"docker volume ls -f dangling=true\n# docker volume rm NAME   -- one by one, after reading what is in it","note":"4. Volumes: never `prune`; list and decide, they are the data."}],
+ "read":"Check `df -h` between steps; stop when there is room. Inodes count too: `df -i`. If `docker` itself fails with ENOSPC, free something outside Docker first (apt cache, journal: `journalctl --vacuum-size=200M`).",
+ "grobase":"`sudo make var-gc` on the guest is steps 1–3 with the project's exclusions; it refuses `--volumes` on purpose (exit 2)."},
+
+{"id":"volume-inspect","cat":"storage","title":"Find a volume's real path and look inside it","why":"To know what a volume holds before deleting it, or to read a database's files when the database will not start.","tags":["volume","inspect","mountpoint","path","contents"],
+ "steps":[{"cmd":"docker volume ls\ndocker volume inspect NAME -f '{{.Mountpoint}} {{.CreatedAt}}'","note":""},
+          {"cmd":"sudo ls -la $(docker volume inspect NAME -f '{{.Mountpoint}}') | head\nsudo du -sh $(docker volume inspect NAME -f '{{.Mountpoint}}')","note":"Root: Docker's root dir is 700."},
+          {"cmd":"docker run --rm -v NAME:/v alpine sh -c 'ls -la /v | head; du -sh /v'","note":"Without root on the host: mount it in a throwaway container."}],
+ "read":"`CreatedAt` tells you whether the volume predates the current containers, which matters for <a href=\"#secrets-first-init\">first-init secrets</a>. An empty volume behind a database that 'lost' its data means it is mounted at the wrong path: compare with the image's documented data dir."},
+
+{"id":"permissions","cat":"storage","title":"Fix 'permission denied' on a bind mount or volume","why":"The process runs as a UID inside; the files on the host belong to another. Numeric UIDs are all that matters across the boundary.","tags":["permission denied","uid","gid","chown","user","bind mount"],
+ "steps":[{"cmd":"docker exec NAME id\ndocker exec NAME ls -ln /path/in/container | head","note":"Who the process is, and who owns the files, numerically."},
+          {"cmd":"ls -ln /path/on/host | head","note":"Same files from the host: the UIDs must agree with the process's."},
+          {"cmd":"sudo chown -R $(docker exec NAME id -u):$(docker exec NAME id -g) /path/on/host\n# or, in compose:  user: \"1000:1000\"","note":"Either give the files to the container's UID, or run the container as the files' owner."}],
+ "read":"Named volumes are chowned to the image's directory owner on first use; bind mounts never are. `user:` changes who the process is but not what the image expects to own. SELinux hosts additionally need `:z` on the mount."},
+
+{"id":"anonymous-volumes","cat":"storage","title":"Why data 'vanished' after a recreate: anonymous volumes and layer writes","why":"An image `VOLUME` you did not name gets a fresh anonymous volume on every recreate; a path with no volume at all lives in the writable layer and dies with the container.","tags":["data loss","anonymous","volume","recreate","vanished"],
+ "steps":[{"cmd":"docker inspect -f '{{range .Mounts}}{{.Type}} name={{.Name}} -> {{.Destination}}{{println}}{{end}}' NAME","note":"A 64-hex `name=` is anonymous. No entry for the data dir at all → writable layer."},
+          {"cmd":"docker volume ls -f dangling=true --format '{{.Name}} {{.CreatedAt}}'","note":"The orphaned anonymous volumes; the old data is usually in one of them."},
+          {"cmd":"docker run --rm -v OLD_VOLUME:/from -v NEW_NAMED_VOLUME:/to alpine sh -c 'cp -a /from/. /to/'","note":"Rescue: copy into a named volume, then declare it in the compose file."}],
+ "read":"The permanent fix is a named volume in the compose file for every path the service writes. `docker compose down -v` deletes named volumes too: read the flag before pressing Enter."},
+
+{"id":"log-rotation","cat":"storage","title":"Stop container logs from eating the disk","why":"The default json-file driver has no size limit; a chatty service fills the disk in weeks.","tags":["logs","rotation","max-size","json-file","daemon.json"],
+ "steps":[{"cmd":"docker inspect -f '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}}' NAME","note":"`map[]` = no limits."},
+          {"cmd":"# per service, compose:\n#   logging: { driver: json-file, options: { max-size: \"20m\", max-file: \"5\" } }\n# for every new container, /etc/docker/daemon.json:\n#   { \"log-driver\": \"json-file\", \"log-opts\": { \"max-size\": \"20m\", \"max-file\": \"5\" } }\nsudo systemctl restart docker","note":"daemon.json applies to containers created after the restart; recreate the old ones."}],
+ "read":"Emergency, when the disk is full now: `sudo truncate -s 0 /var/lib/docker/containers/ID/ID-json.log`. It loses history, not data."},
+
+{"id":"env-truth","cat":"config","title":"Env inside the container vs `.env` vs the compose file: which one wins",
+ "why":"Three places can set the same variable; the container got exactly one value, at creation time.","tags":["env","environment",".env","substitution","precedence"],
+ "steps":[{"cmd":"docker exec NAME sh -c 'echo $VAR'\ndocker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' NAME | grep '^VAR='","note":"What the process has. exec inherits the container env, so both agree."},
+          {"cmd":"docker compose config | grep -A30 'SERVICE:' | grep -E 'VAR|environment'","note":"What Compose would give a new container: `.env` (substitution) and `environment:`/`env_file:` merged."}],
+ "read":"Precedence, highest first: shell env of the person running `compose` → `.env` file → defaults in `${VAR:-default}`. `environment:` beats `env_file:`. If inspect disagrees with `compose config`, the container is stale: `up -d` recreates only when Compose sees a diff; force it with `--force-recreate`."},
+
+{"id":"secrets-first-init","cat":"config","title":"Database passwords are read once, on an empty volume",
+ "why":"Postgres, MySQL/MariaDB, Mongo, MSSQL create their superuser from `*_PASSWORD` only when the data directory is empty. Change the variable later and the container starts fine, but every client fails to authenticate.","tags":["password","authentication failed","first init","volume","postgres","mongo","mysql"],
+ "steps":[{"cmd":"docker logs --tail 20 CLIENT 2>&1 | grep -iE 'auth|password|denied'\ndocker volume inspect DB_VOLUME -f '{{.CreatedAt}}'; docker inspect DB -f '{{.Created}}'","note":"Clients say `Authentication failed` / `password authentication failed`; the volume is older than the secret."},
+          {"cmd":"docker inspect DB -f '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'PASSWORD|USER' | sed 's/=.*/=<set>/'","note":"Confirm the container was given the new value (it was; that is the point)."}],
+ "read":"Two exits: reset the password in place, keeping the data (<a href=\"#rotate-db-password\">rotate a database password</a>), or drop the volume so the next start initialises with the current secret (data gone — only when the database holds nothing worth keeping). The trap is a restore that brings back an older `.env.secrets` over a freshly initialised volume.",
+ "grobase":"Seen 2026-09-23: `make datacenter`'s restore put back `/opt/grobase/.env.secrets` from the backup, while `mini-baas_mongo-data` had been initialised at first boot with a newer password. `mongo-init` exited 1 and mongo-api / ai-service / analytics-service looped. Mongo is not in the backup set, so its volume held nothing to keep."},
+
+{"id":"mounted-config","cat":"config","title":"Read the config file the container actually has, not the one in git","why":"Bind mounts can point at another path, an entrypoint can rewrite the file, an old container can hold an old copy.","tags":["config","mounted","bind","rendered","cat"],
+ "steps":[{"cmd":"docker inspect -f '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' NAME | grep -i conf","note":"Which host file is mounted where."},
+          {"cmd":"docker exec NAME cat /etc/app/config.yml | diff - ./config/config.yml","note":"Inside vs your copy. An empty diff clears this whole line of inquiry."},
+          {"cmd":"docker exec NAME sh -c 'ls -l /etc/app/; stat -c %i /etc/app/config.yml'; stat -c %i ./config/config.yml","note":"Same inode = same file. A bind-mounted single file that you replaced with an editor (new inode) is not seen by the container until recreate."}],
+ "read":"Editors that write a new file and rename it over the old one (vim, sed -i) break single-file bind mounts: the container keeps the old inode. Mount the directory, or recreate after editing."},
+
+{"id":"template-entrypoint","cat":"config","title":"When the entrypoint renders a template: find the source, the rendered file, and the substitution","why":"A YAML or nginx config that 'looks fine in git' can be broken after the entrypoint substitutes variables into it.","tags":["template","entrypoint","sed","envsubst","render","yaml"],
+ "steps":[{"cmd":"docker inspect -f '{{.Config.Entrypoint}} {{.Config.Cmd}}' NAME\ndocker inspect -f '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' NAME | grep -i tmpl","note":"The command usually shows the `sed`/`envsubst` and the template's mount."},
+          {"cmd":"docker cp NAME:/path/to/rendered.yml /tmp/rendered.yml\nsed -n 'LINEp' /tmp/rendered.yml","note":"Go to the line the parser named."},
+          {"cmd":"python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' /tmp/rendered.yml","note":"Parse it yourself for a precise error (YAML here; `nginx -t`, `kong config parse` for theirs)."}],
+ "read":"A substituted value containing `|`, `&`, a newline or an unbalanced quote breaks the surrounding syntax. Fix the source template or quote the value; do not patch the rendered copy, it is regenerated at every start.",
+ "grobase":"`mini-baas-kong` runs `sed -e s|__KONG_…__|${KONG_…}|g …` over `/etc/kong/kong.yml.tmpl` into `/tmp/kong.yml`. The 2026-09-23 failure: born2root's installer, run by hellish 3.1.3, pasted the literal text `$(printf`, `'%s'`, `\")` as origin lines into the template — 'did not find expected '-' indicator' at line 41."},
+
+{"id":"profiles","cat":"config","title":"'no such service' and services that never start: Compose profiles",
+ "why":"A service with `profiles:` exists only when one of its profiles is activated; nothing else in Compose will mention it.","tags":["profiles","no such service","missing","compose"],
+ "steps":[{"cmd":"docker compose config --profiles\ndocker compose --profile NAME config --services | grep SERVICE","note":"Every profile; whether SERVICE appears once NAME is active."},
+          {"cmd":"COMPOSE_PROFILES=a,b docker compose up -d\ndocker compose --profile a --profile b up -d","note":"Two ways to activate."}],
+ "read":"`depends_on` a profiled service from an unprofiled one is an error at parse time; if `up` succeeds, the missing service is simply not in any active profile.",
+ "grobase":"Tiers are sets of profiles: `basic` → go, rust; `essential` adds adapter, background; `pro` adds data, storage, realtime; `max` adds analytics, observability, functions, engines. Tenant apps and studio are extra profiles no tier turns on."},
+
+{"id":"image-drift","cat":"config","title":"Know which image bytes are running: tags move, digests do not","why":"`:latest` on two machines can be two different images; 'works on the other VM' often ends here.","tags":["image","digest","tag","latest","drift","pull"],
+ "steps":[{"cmd":"docker inspect -f '{{.Config.Image}} {{.Image}}' NAME\ndocker image inspect IMAGE -f '{{.RepoDigests}} created={{.Created}}'","note":"The container's image ID, and the registry digest it came from."},
+          {"cmd":"docker pull IMAGE 2>&1 | tail -2\ndocker compose images","note":"`Image is up to date` or a new digest; and every service's image ID."}],
+ "read":"A pulled image only takes effect on recreate: `docker compose up -d` recreates the services whose image changed. Pin `image: repo@sha256:…` where reproducibility matters."},
+
+{"id":"recreate","cat":"repair","title":"Restart vs recreate: which one your change needs",
+ "why":"`restart` reruns the same process in the same container; env, image, mounts and ports are frozen at creation. Anything in the compose file needs recreate.","tags":["restart","recreate","force-recreate","up","env change"],
+ "steps":[{"cmd":"docker compose restart SERVICE","note":"Same container: after editing a mounted config the process re-reads."},
+          {"cmd":"docker compose up -d SERVICE","note":"Recreates only if Compose sees a diff (image, env, ports, volumes)."},
+          {"cmd":"docker compose up -d --force-recreate --no-deps SERVICE","note":"Recreate unconditionally, without touching its dependencies."}],
+ "read":"Changed `.env` and nothing happened → `restart` was used where `up -d` was needed. `--no-deps` keeps a database up while you recreate the app in front of it."},
+
+{"id":"pull-one","cat":"repair","title":"Update one service to its newest image without touching the rest","why":"A fix landed upstream; you want it, and you want the databases left alone.","tags":["pull","update","one service","no-deps"],
+ "steps":[{"cmd":"docker compose pull SERVICE && docker compose up -d --no-deps SERVICE\ndocker compose images SERVICE","note":""}],
+ "read":"If `up -d` says `Running` without `Recreated`, the pull brought no new digest: the tag did not move. Check <a href=\"#image-drift\">image drift</a>."},
+
+{"id":"rollback","cat":"repair","title":"Roll back to the image that worked","why":"The previous image is still on disk until pruned; pointing the service back at it is a one-line change.","tags":["rollback","previous","digest","image history"],
+ "steps":[{"cmd":"docker images --digests REPO | head\ndocker image ls --format '{{.ID}} {{.CreatedAt}} {{.Repository}}:{{.Tag}}' | grep REPO","note":"The older image ID / digest is here if nothing pruned it."},
+          {"cmd":"# compose: image: REPO@sha256:OLD_DIGEST   (or docker tag OLD_ID REPO:rollback)\ndocker compose up -d --no-deps SERVICE","note":"Pin it, recreate."}],
+ "read":"A database image rollback after its data format was upgraded does not work: the old binary refuses the new data directory. Roll back application images freely; roll back databases from a backup."},
+
+{"id":"clean-restart","cat":"repair","title":"Restart the whole stack cleanly to reclaim ports and orphans",
+ "why":"Half-updated stacks keep old containers holding ports, and 'orphan' containers from removed services keep running.","tags":["down","up","orphans","ports","clean"],
+ "steps":[{"cmd":"docker compose down --remove-orphans\ndocker compose up -d\ndocker compose ps","note":"Volumes stay. `--remove-orphans` drops containers of services no longer in the file."},
+          {"cmd":"ss -ltnp | grep -E ':(8000|8443)\\b'","note":"Before `up`: nothing should hold the ports you expect to publish."}],
+ "read":"Never `down -v` here: that deletes named volumes. If a port is still held after `down`, a non-Compose process or another project owns it: `ss -ltnp` names it.",
+ "grobase":"`cd /opt/grobase && sudo make down && sudo make up PACKAGE=max` (or the born2root `make grobase GROBASE_PACKAGE=max` from the host). Then `docker port mini-baas-kong` must say 8000 again."},
+
+{"id":"reset-volume","cat":"repair","title":"Reset one service's data volume, deliberately","why":"When a volume holds nothing worth keeping (a cache, a failed first init) and re-initialising is the fastest correct fix.","tags":["volume","reset","delete","reinit","destructive"],
+ "steps":[{"cmd":"docker compose stop SERVICE && docker compose rm -f SERVICE\ndocker volume inspect PROJECT_VOLUME -f '{{.Mountpoint}} {{.CreatedAt}}'","note":"Stop it; make sure you are naming the right volume."},
+          {"cmd":"docker run --rm -v PROJECT_VOLUME:/v alpine tar czf - -C /v . > volume-backup-$(date +%F).tgz","note":"Cheap insurance: a tarball first."},
+          {"cmd":"docker volume rm PROJECT_VOLUME\ndocker compose up -d SERVICE","note":"Recreated empty; the entrypoint initialises with today's secrets."}],
+ "read":"Volume names are `PROJECT_name` (`docker compose config --volumes` lists the short names). Removing fails with `volume is in use` while any container, even a stopped one, references it: `rm -f` that container first."},
+
+{"id":"rotate-db-password","cat":"repair","title":"Rotate a database's password in place, keeping the data",
+ "why":"The non-destructive answer to a first-init mismatch: start the engine once with authentication off, on the same volume, and set the password the clients expect.","tags":["password","rotate","mongo","postgres","mysql","noauth","in place"],
+ "steps":[{"cmd":"docker compose stop DB\nP=$(docker inspect DB -f '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^MONGO_INITDB_ROOT_PASSWORD=//p')","note":"Stop the real one; read the password the stack expects (from its env), never type it."},
+          {"cmd":"docker run -d --name fix -v PROJECT_mongo-data:/data/db --entrypoint mongod IMAGE --bind_ip 127.0.0.1 --noauth\ndocker exec -e P=\"$P\" fix mongosh --quiet --eval 'db.getSiblingDB(\"admin\").changeUserPassword(\"mongo\", process.env.P)'\ndocker rm -f fix","note":"Mongo: a standalone no-auth instance on the same volume, then `changeUserPassword`."},
+          {"cmd":"docker run -d --name fix -v PROJECT_pg-data:/var/lib/postgresql/data -e POSTGRES_HOST_AUTH_METHOD=trust IMAGE\ndocker exec -e P=\"$P\" fix psql -U postgres -c \"ALTER USER postgres PASSWORD '$P'\"\ndocker rm -f fix","note":"Postgres: `trust` auth is honoured on an existing data dir for local connections."},
+          {"cmd":"docker run -d --name fix -v PROJECT_mysql-data:/var/lib/mysql IMAGE --skip-grant-tables --skip-networking\ndocker exec fix mysql -e \"FLUSH PRIVILEGES; ALTER USER 'root'@'%' IDENTIFIED BY '$P';\"\ndocker rm -f fix","note":"MySQL/MariaDB: `--skip-grant-tables`."},
+          {"cmd":"docker compose up -d DB && docker compose logs --tail 5 CLIENT","note":"Bring the real one back; the clients stop failing to authenticate."}],
+ "read":"Bind the maintenance instance to 127.0.0.1 and publish nothing: it has no authentication for those seconds. A replica-set member (`--replSet`) can be started standalone for this; the users collection is the same.",
+ "grobase":"The Mongo variant above is exactly the 2026-09-23 repair for `mini-baas_mongo-data` (image `ghcr.io/univers42/grobase-mongo`, root user `mongo`). Then `sudo make up PACKAGE=max`; `mongo-init` exits 0."},
+
+{"id":"stuck-removal","cat":"repair","title":"Unstick a container in 'Removal In Progress' or one that refuses to stop","why":"A container whose process ignores SIGTERM, or whose mount is busy, hangs `stop` and `rm`.","tags":["stuck","removal in progress","kill","force","dead"],
+ "steps":[{"cmd":"docker stop -t 5 NAME || docker kill NAME\ndocker rm -f NAME","note":"Shorter grace, then SIGKILL, then force-remove."},
+          {"cmd":"PID=$(docker inspect -f '{{.State.Pid}}' NAME); sudo kill -9 $PID\nsudo systemctl restart docker","note":"When the daemon itself is confused: kill the process, restart the daemon (containers with `restart: unless-stopped` come back)."}],
+ "read":"'device or resource busy' on removal is a mount still held by another namespace: `sudo umount` the path from `docker inspect -f '{{.GraphDriver.Data.MergedDir}}'`, or restart the daemon."},
+
+{"id":"kill-inside","cat":"repair","title":"Kill a runaway process inside a container without killing the container","why":"A stuck worker or a runaway child; the service can stay up.","tags":["kill","process","inside","exec","signal"],
+ "steps":[{"cmd":"docker top NAME -eo pid,cmd\ndocker exec NAME kill -TERM INNER_PID","note":"PIDs from `docker top` are host PIDs; inside, use `exec ps` if the image has it, or the host PID with `sudo kill`."},
+          {"cmd":"docker kill --signal=HUP NAME","note":"Signal PID 1 only: reload for nginx, Kong, Postgres."}],
+ "read":"Killing PID 1 ends the container. `docker kill -s HUP` is the safe reload for servers that support it; check the image's docs for which signal means what."},
+
+{"id":"restart-policy","cat":"repair","title":"Set the restart policy that matches the service's role","why":"`no` leaves a crashed database down after a reboot; `always` resurrects a debug container forever.","tags":["restart policy","always","unless-stopped","on-failure","reboot"],
+ "steps":[{"cmd":"docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' NAME\ndocker update --restart unless-stopped NAME","note":"Read, then change on a live container (Compose will re-apply its own on recreate)."}],
+ "read":"`unless-stopped` for long-running services: survives reboots, respects a manual stop. `on-failure:5` for jobs that may retry. `no` for one-shot init containers, so an `Exited (0)` stays exited. A loop on `always` is a crash you have not read the logs of."},
+
+{"id":"one-service-logs","cat":"compose","title":"Follow the logs of the services that matter, together","why":"A request crosses a gateway, an app and a database; three interleaved logs show the hand-off that fails.","tags":["compose","logs","follow","multiple","interleaved"],
+ "steps":[{"cmd":"docker compose logs -f --tail 20 gateway app db","note":"Prefixed by service name, in time order."},
+          {"cmd":"docker compose logs --since 5m --no-log-prefix app | grep -c ERROR","note":"Counting."}],
+ "read":"`no such service` → a profile (see <a href=\"#profiles\">profiles</a>) or the wrong project directory (`docker compose ls` shows projects)."},
+
+{"id":"depends-on","cat":"compose","title":"Start order and 'dependency failed to start'","why":"`depends_on` orders starts; only `condition: service_healthy` waits for readiness. A dependency's bad health blocks everything behind it.","tags":["depends_on","service_healthy","order","dependency failed"],
+ "steps":[{"cmd":"docker compose config | grep -B2 -A6 'depends_on' | grep -E 'depends_on|condition|^\\s+[a-z-]+:' | head -40","note":"Who waits on whom, and how."},
+          {"cmd":"docker compose up -d --no-deps SERVICE","note":"Start one without its dependencies while you fix them."}],
+ "read":"'dependency failed to start: container X is unhealthy' — the fault is X's health check (<a href=\"#healthcheck\">read its output</a>), not the service that reported it. `service_completed_successfully` on an init job that exited 1 blocks the same way.",
+ "grobase":"`optional dependency \"mongo-init\" didn't complete successfully: exit 1` is a warning, `up` continues; `container mini-baas-kong is unhealthy` is fatal for the gateway's dependants."},
+
+{"id":"scale-nodeps","cat":"compose","title":"Run a second copy, or none, of a service for a test","why":"Scale to 0 to take a service out without deleting anything; scale to 2 to check it can share its state.","tags":["scale","replicas","no-deps","take out"],
+ "steps":[{"cmd":"docker compose up -d --scale worker=0 --no-deps worker\ndocker compose up -d --scale worker=2 --no-deps worker","note":"A service with a published host port cannot scale past 1 (port clash)."}],
+ "read":"Two replicas both fine → the service is stateless enough. One crashes with a lock error → it needs a volume of its own or a leader; keep it at 1."},
+
+{"id":"compose-ls","cat":"compose","title":"Several projects on one host: which one owns this container",
+ "why":"Two checkouts of the same stack, or a rename, leave containers a `compose` in the wrong directory cannot see.","tags":["compose","project","ls","labels","orphans"],
+ "steps":[{"cmd":"docker compose ls -a\ndocker inspect -f '{{index .Config.Labels \"com.docker.compose.project\"}} / {{index .Config.Labels \"com.docker.compose.service\"}} from {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}' NAME","note":"Every project; and which project and directory a container belongs to."},
+          {"cmd":"docker compose -p PROJECT down","note":"Address a project by name from anywhere."}],
+ "read":"Networks and volumes carry the project prefix: `PROJECT_default`, `PROJECT_pg-data`. Two projects with the same name in different directories fight over them.",
+ "grobase":"The project is `mini-baas` (hence `mini-baas-kong`, `mini-baas_mongo-data`), from `/opt/grobase`."},
+
+{"id":"daemon-status","cat":"daemon","title":"When `docker` itself does not answer: the daemon and its journal","why":"'Cannot connect to the Docker daemon' or a hanging `docker ps` is the daemon, not a container.","tags":["daemon","systemctl","journalctl","socket","hang"],
+ "steps":[{"cmd":"systemctl status docker --no-pager | head -12\nsudo journalctl -u docker --since -30m --no-pager | tail -30","note":"Is it running; what did it say last."},
+          {"cmd":"ls -l /var/run/docker.sock; id | grep -o 'docker'","note":"Permission denied on the socket: you are not in the `docker` group (log out and in after adding)."},
+          {"cmd":"sudo systemctl restart docker","note":"Containers with a restart policy come back; the others need `docker start` / `compose up`."}],
+ "read":"A daemon that restarts in a loop after a config edit: `journalctl -u docker` names the bad key in `daemon.json`. `containerd` has its own unit and journal (`-u containerd`)."},
+
+{"id":"docker-info","cat":"daemon","title":"Read `docker info` once: storage driver, root dir, cgroups, warnings",
+ "why":"The bottom of `docker info` prints warnings nobody reads: no swap limit, bridge-nf disabled, low disk.","tags":["info","storage driver","root dir","cgroup","warnings"],
+ "steps":[{"cmd":"docker info -f 'root={{.DockerRootDir}} driver={{.Driver}} cgroup={{.CgroupVersion}} containers={{.Containers}} running={{.ContainersRunning}} images={{.Images}}'\ndocker info 2>&1 | sed -n '/WARNING/,$p'","note":""}],
+ "read":"`driver=overlay2` is what you want. `WARNING: No swap limit support` means memory limits are soft-ish. `bridge-nf-call-iptables is disabled` breaks published ports on some hosts: `sudo sysctl net.bridge.bridge-nf-call-iptables=1`."},
+
+{"id":"root-dir","cat":"daemon","title":"Know which filesystem Docker lives on, and move it if it is the wrong one",
+ "why":"Docker's root fills `/` by default; on a small root disk that takes the whole host down with it.","tags":["data-root","move","filesystem","var/lib/docker","df"],
+ "steps":[{"cmd":"df -h $(docker info -f '{{.DockerRootDir}}')\nfindmnt -T $(docker info -f '{{.DockerRootDir}}')","note":"Which mount, how full."},
+          {"cmd":"# /etc/docker/daemon.json:  { \"data-root\": \"/srv/docker\" }\nsudo systemctl stop docker && sudo rsync -aHAX /var/lib/docker/ /srv/docker/ && sudo systemctl start docker","note":"Move: stop, copy preserving everything, start on the new root."}],
+ "read":"After a move, `docker info` must show the new root and `docker ps -a` the same containers; only then remove the old directory.",
+ "grobase":"born2root gives `/var` its own logical volume sized as the remainder of the disk (`share = \"rest\"` in `[disk]`), precisely so Docker can grow without touching `/`."},
+
+{"id":"daemon-json","cat":"daemon","title":"The `daemon.json` settings that prevent the next incident",
+ "why":"Log limits, address pools and a live-restore flag are set once per host and forgotten; without them the same three problems return.","tags":["daemon.json","log-opts","address-pools","live-restore","defaults"],
+ "steps":[{"cmd":"cat /etc/docker/daemon.json 2>/dev/null || echo '(none: all defaults)'","note":""},
+          {"cmd":"# {\n#   \"log-driver\": \"json-file\",\n#   \"log-opts\": { \"max-size\": \"20m\", \"max-file\": \"5\" },\n#   \"live-restore\": true,\n#   \"default-address-pools\": [ { \"base\": \"172.20.0.0/14\", \"size\": 24 } ]\n# }\nsudo systemctl reload docker || sudo systemctl restart docker","note":"`live-restore` keeps containers running across a daemon restart. The address pool stops Compose networks from colliding with a VPN or the LAN."}],
+ "read":"A daemon that will not start after the edit: the JSON is invalid (a trailing comma). `journalctl -u docker` quotes the line."}
+]
+</script>
+
+<!-- ═══════════════════════ DATA: symptom paths ═════════════════════ -->
+<script type="application/json" id="data-symptoms">
+[
+{"id":"s-restarting","title":"A container keeps restarting","hint":"Restarting (1) … every few seconds","path":["ps-format","exit-code","logs","restart-loop","entrypoint","recreate"]},
+{"id":"s-port-silent","title":"A port answers nothing","hint":"curl gets 000, refused or reset","path":["port","loopback","refused-vs-timeout","curl-inside-outside","clean-restart"]},
+{"id":"s-unhealthy","title":"Healthy? Unhealthy? Blocked behind it","hint":"dependency failed to start: X is unhealthy","path":["healthcheck","logs","depends-on","recreate"]},
+{"id":"s-auth","title":"Clients say 'authentication failed'","hint":"the database is up but nobody can log in","path":["logs","secrets-first-init","volume-inspect","rotate-db-password","reset-volume"]},
+{"id":"s-dns","title":"Can't reach another service by name","hint":"ENOTFOUND, getaddrinfo, no such host","path":["dns","network-inspect","netshoot","profiles"]},
+{"id":"s-permission","title":"Permission denied on a file or volume","hint":"EACCES, cannot open, read-only","path":["permissions","inspect","volume-inspect"]},
+{"id":"s-disk","title":"No space left on device","hint":"ENOSPC, docker logs empty, pulls fail","path":["system-df","biggest","no-space","log-rotation","root-dir"]},
+{"id":"s-env","title":"Changed .env / config, nothing changed","hint":"the old value is still in effect","path":["env-truth","mounted-config","template-entrypoint","recreate"]},
+{"id":"s-137","title":"Exit code 137 or killed out of nowhere","hint":"OOMKilled, SIGKILL","path":["exit-code","oom","stats","restart-policy"]},
+{"id":"s-502","title":"Gateway says 502/503 but the app looks fine","hint":"upstream unreachable, connect() failed","path":["curl-inside-outside","dns","port","healthcheck","template-entrypoint"]},
+{"id":"s-data-lost","title":"Data vanished after a restart","hint":"empty database, fresh install screen","path":["anonymous-volumes","volume-inspect","inspect","compose-ls"]},
+{"id":"s-daemon","title":"docker itself hangs or refuses","hint":"Cannot connect to the Docker daemon","path":["daemon-status","docker-info","daemon-json","stuck-removal"]},
+{"id":"s-missing","title":"A service does not exist / never starts","hint":"no such service, not in docker ps","path":["compose-config","profiles","compose-ls","depends-on"]},
+{"id":"s-image","title":"Works on the other machine","hint":"same tag, different behaviour","path":["image-drift","pull-one","rollback","run-alone"]}
+]
+</script>
+
+<script>
+(function(){
+  'use strict';
+  const CATS = [
+    ['observe','Observe','See what is happening before touching anything.'],
+    ['process','Diagnose: the process','Why it exits, what it runs, what it changed.'],
+    ['network','Diagnose: network & ports','Who listens where, and who can reach whom.'],
+    ['storage','Diagnose: storage & disk','Volumes, permissions, and the disk they fill.'],
+    ['config','Diagnose: config & secrets','What the container was really given.'],
+    ['repair','Repair','The fix that follows the diagnosis.'],
+    ['compose','Compose specifics','Profiles, order, projects, logs.'],
+    ['daemon','Daemon & host','When it is not the container at all.']
+  ];
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  // prose: escape, then `code` and **bold**, and re-allow the internal <a href="#…"> links
+  const prose = s => esc(s)
+    .replace(/&lt;a href=&quot;(#[a-z0-9-]+)&quot;&gt;(.*?)&lt;\/a&gt;/g, '<a href="$1">$2</a>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+  let recipes, symptoms;
+  try {
+    recipes = JSON.parse($('#data-recipes').textContent);
+    symptoms = JSON.parse($('#data-symptoms').textContent);
+  } catch (e) {
+    const b = document.createElement('div');
+    b.style.cssText = 'background:#dc2626;color:#fff;padding:14px 20px;font-weight:600';
+    b.textContent = 'This page\'s data block is not valid JSON: ' + e.message;
+    document.body.prepend(b);
+    return;
+  }
+  const byId = Object.fromEntries(recipes.map(r => [r.id, r]));
+  const catName = Object.fromEntries(CATS.map(c => [c[0], c[1]]));
+
+  // ── render recipes, grouped by category ─────────────────────────────
+  const sec = $('#recipes');
+  for (const [key, name, desc] of CATS) {
+    const list = recipes.filter(r => r.cat === key);
+    if (!list.length) continue;
+    const div = document.createElement('div');
+    div.className = 'cat'; div.dataset.cat = key;
+    div.innerHTML = `<h2>${esc(name)}<span class="tag">${list.length} recipes</span></h2><p class="desc">${esc(desc)}</p>`;
+    for (const r of list) {
+      const a = document.createElement('article');
+      a.className = 'rec'; a.id = r.id; a.dataset.cat = key;
+      a.dataset.text = [r.title, r.why, r.read, (r.tags||[]).join(' '), (r.steps||[]).map(s => s.cmd + ' ' + s.note).join(' '), r.grobase||'', name].join(' ').toLowerCase();
+      a.innerHTML =
+        `<h3>${esc(r.title)} <a class="anchor" href="#${r.id}" title="link to this recipe">#${r.id}</a></h3>` +
+        `<p class="why">${prose(r.why)}</p>` +
+        `<div class="tags">${(r.tags||[]).map(t => `<span>${esc(t)}</span>`).join('')}</div>` +
+        (r.steps||[]).map(s =>
+          `<div class="step">${s.note ? `<p class="note">${prose(s.note)}</p>` : ''}` +
+          `<pre><button class="copy" type="button">copy</button>${esc(s.cmd)}</pre></div>`).join('') +
+        (r.read ? `<div class="read"><b>Reading the output</b>${prose(r.read)}</div>` : '') +
+        (r.grobase ? `<div class="gro"><b>grobase</b>${prose(r.grobase)}</div>` : '');
+      div.appendChild(a);
+    }
+    sec.appendChild(div);
+  }
+
+  // ── symptom cards ───────────────────────────────────────────────────
+  const symBox = $('#symptoms');
+  for (const s of symptoms) {
+    const d = document.createElement('div');
+    d.className = 'sym'; d.dataset.id = s.id; d.tabIndex = 0; d.setAttribute('role','button');
+    d.innerHTML = `<p class="st">${esc(s.title)}</p><p class="sh">${esc(s.hint)}</p><div class="sn">${s.path.length} steps →</div>`;
+    d.addEventListener('click', () => selectSymptom(s.id));
+    d.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectSymptom(s.id); } });
+    symBox.appendChild(d);
+  }
+
+  // ── category chips + grobase toggle ────────────────────────────────
+  const chips = $('#chips');
+  const state = { q: '', cats: new Set(), symptom: null };
+  for (const [key, name] of CATS) {
+    const n = recipes.filter(r => r.cat === key).length;
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip'; b.dataset.cat = key;
+    b.innerHTML = `${esc(name)}<span class="n">${n}</span>`;
+    b.addEventListener('click', () => { state.cats.has(key) ? state.cats.delete(key) : state.cats.add(key); state.symptom = null; apply(); });
+    chips.appendChild(b);
+  }
+  const gro = document.createElement('button');
+  gro.type = 'button'; gro.className = 'chip gro'; gro.textContent = 'grobase notes';
+  gro.title = 'show the grobase-specific notes (g)';
+  gro.addEventListener('click', toggleGro);
+  chips.appendChild(gro);
+  const reset = document.createElement('button');
+  reset.type = 'button'; reset.className = 'chip reset'; reset.textContent = 'clear filters';
+  reset.addEventListener('click', () => { state.q = ''; $('#q').value = ''; state.cats.clear(); state.symptom = null; apply(); });
+  chips.appendChild(reset);
+
+  function toggleGro() {
+    document.body.classList.toggle('show-gro');
+    const on = document.body.classList.contains('show-gro');
+    gro.classList.toggle('on', on);
+    try { localStorage.setItem('dfm-grobase', on ? '1' : '0'); } catch (_) {}
+  }
+  try { if (localStorage.getItem('dfm-grobase') === '1') toggleGro(); } catch (_) {}
+
+  // ── symptom path ────────────────────────────────────────────────────
+  const path = $('#path');
+  function selectSymptom(id) {
+    if (state.symptom === id) { state.symptom = null; apply(); return; }
+    state.symptom = id; state.cats.clear(); state.q = ''; $('#q').value = '';
+    apply();
+    path.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  function renderPath() {
+    const s = symptoms.find(x => x.id === state.symptom);
+    document.querySelectorAll('.sym').forEach(el => el.classList.toggle('on', el.dataset.id === state.symptom));
+    if (!s) { path.classList.remove('on'); path.innerHTML = ''; return; }
+    path.classList.add('on');
+    path.innerHTML = `<button class="pclose" type="button" title="close">✕ close</button><p class="pt">${esc(s.title)} — check in this order</p><ol>` +
+      s.path.map((id, i) => {
+        const r = byId[id];
+        const label = r ? r.title : id + ' (missing)';
+        return `<li><span class="num">${i+1}</span><a href="#${id}">${esc(label)}</a>${i < s.path.length-1 ? '<span class="arr">→</span>' : ''}</li>`;
+      }).join('') + '</ol>';
+    path.querySelector('.pclose').addEventListener('click', () => { state.symptom = null; apply(); });
+  }
+
+  // ── filtering ───────────────────────────────────────────────────────
+  function apply() {
+    renderPath();
+    const tokens = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+    const sym = symptoms.find(x => x.id === state.symptom);
+    const allowed = sym ? new Set(sym.path) : null;
+    let shown = 0;
+    document.querySelectorAll('.rec').forEach(el => {
+      let ok = true;
+      if (allowed && !allowed.has(el.id)) ok = false;
+      if (ok && state.cats.size && !state.cats.has(el.dataset.cat)) ok = false;
+      if (ok && tokens.length) ok = tokens.every(t => el.dataset.text.includes(t));
+      el.classList.toggle('hide', !ok);
+      if (ok) shown++;
+    });
+    document.querySelectorAll('.cat').forEach(c => c.classList.toggle('hide', !c.querySelector('.rec:not(.hide)')));
+    document.querySelectorAll('.chip[data-cat]').forEach(b => b.classList.toggle('on', state.cats.has(b.dataset.cat)));
+    $('#count').textContent = `${shown} of ${recipes.length} recipes`;
+    $('#empty').classList.toggle('on', shown === 0);
+  }
+
+  const q = $('#q');
+  q.addEventListener('input', () => { state.q = q.value; state.symptom = null; apply(); });
+  $('#qx').addEventListener('click', () => { q.value = ''; state.q = ''; apply(); q.focus(); });
+  document.addEventListener('keydown', e => {
+    const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (e.key === '/' && !typing) { e.preventDefault(); q.focus(); q.select(); }
+    else if (e.key === 'Escape') { q.value = ''; state.q = ''; state.symptom = null; apply(); q.blur(); }
+    else if (e.key === 'g' && !typing) toggleGro();
+  });
+
+  // ── copy buttons (event delegation) ─────────────────────────────────
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.copy'); if (!b) return;
+    const text = b.parentNode.textContent.replace(/^copy/, '');
+    const done = () => { b.textContent = 'copied'; b.classList.add('done'); setTimeout(() => { b.textContent = 'copy'; b.classList.remove('done'); }, 1200); };
+    if (navigator.clipboard && window.isSecureContext !== false) navigator.clipboard.writeText(text).then(done, () => fallback(text, done));
+    else fallback(text, done);
+  });
+  function fallback(text, done) {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (_) {}
+    ta.remove();
+  }
+
+  // ── a deep link must not be hidden by a filter ──────────────────────
+  function reveal() {
+    const id = location.hash.slice(1);
+    if (id && byId[id]) { state.symptom = null; state.cats.clear(); state.q = ''; q.value = ''; apply(); }
+  }
+  window.addEventListener('hashchange', reveal);
+  apply(); reveal();
+})();
+</script>
+</body>
+</html>

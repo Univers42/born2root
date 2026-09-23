@@ -351,6 +351,9 @@ use, so never assume 4242: read the port back the way `orchestrate.sh` and
   access, the VS Code SSH timeout fix). `doc/HANDOFF_SPACE_AND_PROFILES.md` is
   the measured record behind the sizing model and the feature costs.
   `doc/README.md` is a Born2beRoot command cheat sheet, not an index.
+  `doc/docker-field-manual.html` is a self-contained, searchable Docker
+  debugging manual (recipes in its JSON block) meant to move to grobase's
+  `wiki/guides/` as one file.
 
 ## Working economically in this repo
 

@@ -137,7 +137,10 @@ DEFAULTS = {
     # grobase's own defaults (a test lab or a teammate's frontend on another
     # port). Origins only -- scheme://host[:port] -- because the value lands
     # in build.conf (sourced) and in kong.yml (YAML list item).
-    "dc": {"cors_origins": []},
+    # package: grobase's service tier. "auto" derives it from the dc-* features
+    # (pro for dc-full); "max" adds analytics and functions, which no feature
+    # asks for, so it can only be chosen here.
+    "dc": {"cors_origins": [], "package": "auto"},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -972,6 +975,7 @@ class Validator:
             for name in ("id_ed25519", "id_rsa")
         )
 
+    DC_PACKAGES = ("auto", "basic", "essential", "pro", "max")
     ORIGIN_RE = re.compile(r"^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$")
 
     def dc(self):
@@ -996,6 +1000,12 @@ class Validator:
             if origin in seen:
                 self.err(where, "%s is listed twice" % origin)
             seen.add(origin)
+        package = self.c.dc.get("package")
+        if package not in self.DC_PACKAGES:
+            self.err(
+                "dc.package",
+                "%r is not a grobase tier (one of: %s)" % (package, ", ".join(self.DC_PACKAGES)),
+            )
 
     def network(self):
         forwards = self._list("network.forwards", self.c.network["forwards"])
@@ -1215,6 +1225,7 @@ LEGACY = {
     "B2B_DC_CORS_ORIGINS": lambda c: " ".join(
         o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)
     ),
+    "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
@@ -1348,6 +1359,8 @@ def guest_view(config):
         "B2B_FORWARD_PORTS",
         # [dc] cors_origins: what install_grobase.sh adds to kong.yml.
         "B2B_DC_CORS_ORIGINS",
+        # [dc] package: the grobase tier install_grobase.sh starts.
+        "B2B_DC_PACKAGE",
     )
     for key in keys:
         if key == "B2B_VOLUMES":

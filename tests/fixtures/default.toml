@@ -78,6 +78,7 @@ forwards = []
 
 [dc]
 cors_origins = []
+package = "auto"
 
 [disk]
 swap_mb = "auto"

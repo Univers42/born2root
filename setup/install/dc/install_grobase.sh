@@ -13,7 +13,9 @@
 # WHICH TIER
 #   grobase ships product tiers (basic, essential, pro, max -- measured RAM
 #   shapes, see its orchestrators/makes/00-config.mk) and add-on planes.
-#   The dc-* rows that are on in /etc/b2b/features.conf pick the tier:
+#   [dc] package in born2root.toml pins it (B2B_DC_PACKAGE in build.conf);
+#   max is reachable only that way. With "auto", the dc-* rows that are on
+#   in /etc/b2b/features.conf pick the tier:
 #     any of dc-db-{mysql,mongo,redis,cockroach} / dc-realtime / dc-storage
 #     / dc-objectstore              → pro
 #     dc-identity or dc-db-postgres → essential
@@ -82,6 +84,12 @@ if [ -z "$LOGIN" ] && [ -f "$BUILD" ]; then
     LOGIN=$(sed -n 's/^B2B_LOGIN=//p' "$BUILD" | head -n1 | tr -d '"')
 fi
 
+# [dc] package in born2root.toml, through build.conf; "auto" (or an older
+# build.conf without it) falls through to the feature mapping below.
+if [ -z "${GROBASE_PACKAGE:-}" ] && [ -f "$BUILD" ]; then
+    GROBASE_PACKAGE=$(sed -n 's/^B2B_DC_PACKAGE=//p' "$BUILD" | head -n1 | tr -d '"')
+    [ "$GROBASE_PACKAGE" != auto ] || GROBASE_PACKAGE=""
+fi
 if [ -z "${GROBASE_PACKAGE:-}" ]; then
     if on dc-db-mysql || on dc-db-mongo || on dc-db-redis || on dc-db-cockroach ||
         on dc-realtime || on dc-storage || on dc-objectstore; then
@@ -186,14 +194,25 @@ grep -q 'ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"' "$GATEWAY_YM
 # in build.conf (B2B_DC_CORS_ORIGINS, validated as bare origins) and is
 # pasted after the FRONTEND placeholder here, one line each, idempotently.
 # `make grobase_cors` on the host runs the same loop on a live VM.
+# One origin per line. Fed to `while read` through a heredoc rather than
+# `for o in $(printf '%s' "$(sed ...)")`: hellish v3.1.3 splits that nested
+# substitution as literal words, and `$(printf`, `'%s'` and `")` went into
+# kong.yml as origins, so Kong refused its config and dc-gateway failed
+# (2026-09-23). An empty list yields one empty line, hence the skip.
+cors_origins() {
+    sed -n 's/^B2B_DC_CORS_ORIGINS=//p' "$BUILD" | head -n1 | tr -d '"' | tr -s '[:blank:]' '\n' | grep .
+}
 KONG_YML=infra/docker/services/kong/conf/kong.yml
-for origin in $(printf '%s' "$(sed -n 's/^B2B_DC_CORS_ORIGINS=//p' "$BUILD" | head -n1 | tr -d '"')"); do
+while IFS= read -r origin; do
+    [ -n "$origin" ] || continue
     if ! grep -qF -- "- ${origin}" "$KONG_YML"; then
         # single-quoted program, origin spliced in: hellish drops `\(` in double quotes
         sed -i 's|^\(\s*\)- __KONG_CORS_ORIGIN_FRONTEND__$|&\n\1- '"${origin}"'|' "$KONG_YML"
         log "cors: allowed origin ${origin}"
     fi
-done
+done <<ORIGINS
+$(cors_origins)
+ORIGINS
 
 # ── env, certs, images, up ──────────────────────────────────────────────────
 # grobase's own steps. `make env` mints .env.secrets (mode 600) on first run
@@ -212,12 +231,15 @@ make --no-print-directory certs >/dev/null || die "make certs failed"
 # is always allowed. Written after `make env` because that is what creates
 # .env, and before `up` so the first container already has it.
 rt_origins=$(sed -n 's/^KONG_CORS_ORIGIN_[A-Z]*=//p' .env | grep . | tr '\n' ',')
-for origin in $(printf '%s' "$(sed -n 's/^B2B_DC_CORS_ORIGINS=//p' "$BUILD" | head -n1 | tr -d '"')"); do
+while IFS= read -r origin; do
+    [ -n "$origin" ] || continue
     case ",${rt_origins}" in
     *",${origin},"*) ;;
     *) rt_origins="${rt_origins}${origin}," ;;
     esac
-done
+done <<ORIGINS
+$(cors_origins)
+ORIGINS
 rt_origins=${rt_origins%,}
 if grep -q '^REALTIME_ALLOWED_ORIGINS=' .env; then
     sed -i 's|^REALTIME_ALLOWED_ORIGINS=.*|REALTIME_ALLOWED_ORIGINS='"${rt_origins}"'|' .env

@@ -122,15 +122,18 @@ forwards = [
 # expected" probe stays meaningful.
 [dc]
 cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
+# the full backend: pro + analytics, observability, functions, engines.
+# Frontends and tenant apps stay out whatever the tier.
+package = "max"
 
 [disk]
 swap_mb = "auto"
 volumes = [
-  { name = "root",    mount = "/",        floor_mb = 2816, share = 15,     cap_mb = 30720  },
-  { name = "home",    mount = "/home",    floor_mb = 512,  share = 5,      cap_mb = 102400 },
-  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 5,      cap_mb = 20480  },
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 6,      cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 512,  share = 2,      cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 3,      cap_mb = 20480  },
   { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
-  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 3,      cap_mb = 10240  },
-  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 3,      cap_mb = 20480  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 1,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 2,      cap_mb = 20480  },
   { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
 ]
