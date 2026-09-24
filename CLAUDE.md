@@ -35,6 +35,9 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
 | Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
+| Build another machine from a profile instead of the personal file | `make all B2B_CONFIG=profiles/server.toml` |
+| Bring up / check the grobase datacenter in a built guest | `make grobase`, `make datacenter`, `make verify_platform`, `make grobase_status` |
+| Datacenter day-to-day (secrets in `.b2b-secrets`) | `make tailscale`, `make backup`, `make restore`, `make tenant_key TENANT=…`, `make seed`, `make loadtest`, `make funnel_up` |
 
 `make all` runs `prepare` first: `make deps`, then
 `git pull --autostash --ff-only origin main`, then downloads the hellish
@@ -103,8 +106,26 @@ everything a user may change: `[vm]` (the Makefile knobs), `[system]`
 fullname, sudo, groups, ssh_keys, nvim), `[packages] apt`, `[features]`
 (`"auto"`/true/false per optional feature), `[policy.password|sudo|ssh|
 monitoring]` (the subject is the floor: stricter accepted, weaker refused),
-`[network] forwards`, `[disk]` (swap, the volume table as inline tables) and
-`[ai]` (host-side llama.cpp models for opencode, below).
+`[network] forwards`, `[disk]` (swap, the volume table as inline tables),
+`[ai]` (host-side llama.cpp models for opencode, below) and `[dc]`
+(grobase CORS origins, package tier and backup destination, below).
+
+Two keys name host paths, both absolute-or-empty and validated by `--check`:
+`[vm] path` (where `<name>/` is created; empty means the repo's `disk_images/`)
+and `[dc] backup_dest` (where `make backup` copies the restic repository;
+empty means the 42 `/sgoinfre` default, which exists on no other machine).
+`$USER` in `backup_dest` is the host login, the rule `[ai] models_dir` already
+follows, so a tracked profile can name a home directory without naming a
+person. Neither reaches the guest: a host path in `build.conf` would be a lie.
+
+`B2B_CONFIG=path` points every read — Makefile and scripts alike — at another
+file with the same schema. `profiles/` holds the alternatives to the personal
+root file: `profiles/school.toml` and `profiles/server.toml` (the backend-only
+`baas` machine: no editor, `dc-full` on, `/var` given the share `/` and `/home`
+release). Their headers explain every departure from the shipped defaults, so
+read the one you are building before changing it. A profile names its own
+`[vm] name`, so its disk lives beside — not on top of — the workstation's.
+`tests/test_profiles.sh` pins them.
 
 - `utils/b2b_config.py` is the only reader, and with `--set-ai KEY JSON` the
   only writer: it replaces one `[ai]` line in place, keeps every comment, and
@@ -302,14 +323,45 @@ after `_build`. Refusals and the confirmation both come before the install.
 `tests/test_llm_host.sh` fakes curl, df and llama-server;
 `tests/test_llm_select.sh` scripts the dialogue through `B2B_LLM_TTY`.
 
+### The datacenter layer (grobase)
+
+A second, optional layer on top of a built guest: grobase (Kong, the identity
+plane, the engines, object storage, observability) in Docker inside the VM,
+driven from the host by the `dc-*` features and the `[dc]` table. The host
+scripts all source `setup/host/dc_lib.sh`, which resolves the guest's SSH port
+and login the way `provision_vm.sh` does and reads the secrets file.
+
+- Secrets are **not** in `born2root.toml` (tracked, and a literal credential
+  in it fails `tests/test_b2b_config.sh`). They live in `.b2b-secrets`:
+  `~/.config/born2root/b2b-secrets` by default, a repo-root `.b2b-secrets`
+  when present, or `B2B_SECRETS=`. `KEY=VALUE`, mode 600, read with sed and
+  never sourced. Keys: `TS_AUTHKEY`, `RESTIC_PASSWORD`, `CF_TUNNEL_TOKEN`.
+  Under `$HOME` on purpose: the campus wipe of /goinfre on 2026-09-20 took the
+  repo clone and the restic password with it. See `.b2b-secrets.example`.
+- `make datacenter` is the ordered rebuild path after `make all`/`make re`:
+  verify, tailscale, **restore before the first backup** (a fresh repo must
+  never overwrite the older copy on `BACKUP_DEST`), tenant_key, backup,
+  verify again. Each step is also a target on its own, and missing secrets
+  warn and continue rather than abort.
+- `make verify_platform` is the session self-test — run it before and after
+  touching anything in this layer. `make grobase_status` reads
+  `/etc/b2b/grobase.conf` and `docker ps` straight from the guest.
+- Anything that has to run inside the guest is a script piped over SSH
+  (`setup/host/grobase_cors_guest.sh` through `make qemu_ssh`), never an
+  inline `sed` in a recipe.
+
 ### Two backends, one guest
 
 Everything a backend writes lives under `$VM_PATH/$VM_NAME/`: the `.vdi` or
 `.qcow2`, pidfile, monitor socket, `serial.log`, and the `.built-on`,
-`.installed` and `.phase` stamps. `VM_PATH` defaults to `disk_images/` and is
-remembered in `disk_images/.vm_path.<vm>`, so a relocated VM needs no repeated
-`VM_PATH=`. Host ports (SSH from 4242, HTTP from 8082, HTTPS from 8443, and the
-app ports) are allocated by `utils/host_ports.sh`, walking past ports already in
+`.installed` and `.phase` stamps. `VM_PATH` comes from four places, most
+specific first: an explicit `VM_PATH=`, then `disk_images/.vm_path.<vm>`,
+then `[vm] path`, then `disk_images/`. The registry beats the config file on
+purpose — it records where a guest actually is, so editing the file never
+orphans a built VM. Moving one therefore means moving the directory *and*
+rewriting that file. Host ports (SSH from 4242, HTTP from 8082, HTTPS from
+8443, and the app ports) are allocated by `utils/host_ports.sh`, walking past
+ports already in
 use, so never assume 4242: read the port back the way `orchestrate.sh` and
 `provision_vm.sh` do.
 
