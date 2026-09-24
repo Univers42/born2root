@@ -186,14 +186,24 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     check "$name: waits out a job by its cwd" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
 
     # curl's shape: no cwd of its own, an --output path in ~/.cache/nvim.
-    sh -c 'sleep 3' --output "$TMP/home/alice/.cache/nvim/tree-sitter-c.tar.gz" &
+    #
+    # The `; :` is load-bearing, not decoration. `sh -c 'sleep 3' --output X`
+    # is a single simple command, so the shell execs it instead of forking:
+    # the process becomes a bare `sleep 3` and X is gone from its argv. There
+    # is then no argument to find, so this case passed only by never testing
+    # anything, and once ps stopped showing X it failed outright. A second
+    # command in the list makes sh stay alive as the parent, with the full
+    # argv ps needs, which is the shape curl really has. Same below, where a
+    # vanished argument would have made the language-server case pass for the
+    # wrong reason -- it must be REJECTED on its path, not missed.
+    sh -c 'sleep 3; :' --output "$TMP/home/alice/.cache/nvim/tree-sitter-c.tar.gz" &
     sleep 0.3
     t0=$(date +%s)
     wait_nvim_jobs "$me" "$TMP/home/alice"
     check "$name: waits out a job by its argument" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
 
     # A language server an open Neovim is running is not left-behind work.
-    sh -c 'sleep 4' "$TMP/home/alice/.local/share/nvim/mason/packages/lua-language-server/bin" &
+    sh -c 'sleep 4; :' "$TMP/home/alice/.local/share/nvim/mason/packages/lua-language-server/bin" &
     lsp=$!
     sleep 0.3
     t0=$(date +%s)
