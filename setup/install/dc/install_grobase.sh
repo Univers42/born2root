@@ -248,6 +248,191 @@ else
 fi
 log "realtime: sockets allowed from ${rt_origins}"
 
+# ── trino's catalog.management, which nothing else sets ────────────────────
+# grobase's infra/docker/services/trino/conf/config.properties has
+# `catalog.management=${ENV:CATALOG_MANAGEMENT}`, but the trino service in
+# orchestrators/compose/base/lakehouse.yml sets only MYSQL_* and MINIO_*, and
+# `make env` never writes CATALOG_MANAGEMENT. Trino refuses to boot on a
+# config placeholder it cannot resolve -- "Configuration is invalid ...
+# Environment variable is not set: CATALOG_MANAGEMENT" -- so on the first max
+# build (2026-09-24) mini-baas-trino was Restarting (100) while every other
+# engine was healthy. The tier only ever mounts static catalog files
+# (postgresql, mongodb, mysql, iceberg), so `static` is the value that matches
+# what is on disk; `dynamic` would expose a catalog REST API nothing calls.
+# Written here, beside REALTIME_ALLOWED_ORIGINS, for the same reason: after
+# `make env` creates .env, before `up` reads it.
+if grep -q '^CATALOG_MANAGEMENT=' .env; then
+    sed -i 's|^CATALOG_MANAGEMENT=.*|CATALOG_MANAGEMENT=static|' .env
+else
+    printf 'CATALOG_MANAGEMENT=%s\n' static >>.env
+fi
+log "trino: catalog.management=static"
+
+# ── healthchecks that cannot run: CMD-SHELL in a shell-less image ───────────
+# grobase gives prometheus and loki `test: ["CMD-SHELL", "wget -qO- …"]`.
+# CMD-SHELL means `/bin/sh -c`, and both images are distroless: the probe died
+# with `exec: "/bin/sh": stat /bin/sh: no such file or directory` on every
+# interval, so the two were permanently (unhealthy) while answering 200 on the
+# very URLs the probe names (measured 2026-09-24, first max build).
+#
+# Both ship /bin/busybox. Going through `busybox sh -c` fixes the shell but not
+# the command: busybox only answers to an applet name when it is argv[0] (a
+# symlink) or the first argument, so that intermediate form still failed with
+# `sh: wget: not found`. The exec form below names the applet directly, which
+# needs no shell at all, and -O /dev/null keeps the body out of the health log
+# while wget's exit status still carries the verdict.
+#
+# Matched by the endpoint rather than the service name because these two
+# healthchecks appear in several compose files (base/observability.yml and the
+# monolith); the other CMD-SHELL probes in the tree are in images that do have
+# a shell and are deliberately left alone. Idempotent by the busybox+wget
+# guard, which also upgrades a half-patched tree left by an earlier run.
+#
+# The same pass gives promtail and dynamodb-local the healthcheck grobase never
+# wrote for them. Without one `docker ps` reports no health at all, so "every
+# container healthy" could not be asserted for the tier: 33 of 35 was the
+# ceiling. Both images do carry a probe tool (promtail wget, dynamodb-local
+# curl, checked in the guest). dynamodb-local answers a bare GET with 400 --
+# it wants a signed POST -- so curl runs WITHOUT -f: connecting is the health
+# signal, the status code is not, and a dead port still exits 7.
+python3 - "$@" <<'HEALTHEOF' || log "healthcheck patch skipped (python3 refused it)"
+import glob
+import re
+
+URL = re.compile(r'https?://localhost:(?:9090/-/healthy|3100/ready)[^"\s]*')
+DONE = '"/bin/busybox", "wget"'
+NAME = re.compile(r"^(\s*)container_name:\s*(\S+)\s*$")
+PROBES = {
+    "mini-baas-promtail": '"CMD", "/usr/bin/wget", "-q", "-O", "/dev/null", "http://localhost:9080/ready"',
+    "mini-baas-dynamodb-local": '"CMD", "/usr/bin/curl", "-s", "-o", "/dev/null", "http://localhost:8000/"',
+}
+
+
+def block_start(lines, i, indent):
+    """First line of the service block holding line i."""
+    for j in range(i, -1, -1):
+        ln = lines[j]
+        if ln.strip() and (len(ln) - len(ln.lstrip())) < len(indent):
+            return j + 1
+    return 0
+
+
+def has_hc(lines, i, indent):
+    """A healthcheck: key already in this service block, wherever in it.
+
+    Scanned over the whole block, not just the next line: grobase writes the
+    healthcheck BEFORE container_name as often as after, and a second
+    healthcheck: key would not error -- YAML keeps the last one silently.
+    """
+    for j in range(i, len(lines)):
+        ln = lines[j]
+        if not ln.strip():
+            continue
+        cur = len(ln) - len(ln.lstrip())
+        if j != i and cur < len(indent):
+            return False
+        if ln.strip() == "healthcheck:" and cur == len(indent):
+            return True
+    return False
+
+
+fixed = added = 0
+for path in glob.glob("orchestrators/compose/**/*.yml", recursive=True):
+    with open(path) as fh:
+        lines = fh.read().split("\n")
+    out, n, skip = [], 0, False
+    for i, line in enumerate(lines):
+        if skip:
+            skip = False
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        found = URL.search(nxt)
+        if found and '"CMD' in line and DONE not in line:
+            indent = line[: len(line) - len(line.lstrip())]
+            out.append('%s"CMD", "/bin/busybox", "wget", "-q", "-O", "/dev/null",' % indent)
+            out.append('%s"%s",' % (indent, found.group(0)))
+            n, skip = n + 1, True
+            fixed += 1
+            continue
+        out.append(line)
+        named = NAME.match(line)
+        if not named:
+            continue
+        indent, name = named.group(1), named.group(2)
+        probe = PROBES.get(name)
+        if probe is None or has_hc(lines, block_start(lines, i, indent), indent):
+            continue
+        out += [
+            "%shealthcheck:" % indent,
+            "%s  test: [%s]" % (indent, probe),
+            "%s  interval: 15s" % indent,
+            "%s  timeout: 5s" % indent,
+            "%s  start_period: 20s" % indent,
+            "%s  retries: 5" % indent,
+        ]
+        n += 1
+        added += 1
+    if n:
+        with open(path, "w") as fh:
+            fh.write("\n".join(out))
+print(
+    "healthcheck: %d shell-less probe(s) rewritten, %d missing probe(s) added"
+    % (fixed, added)
+)
+HEALTHEOF
+
+# ── the gateway port that would not sit still ───────────────────────────────
+# grobase's `up` recipe (orchestrators/makes/20-stack.mk) runs
+#   eval "$(bash scripts/ops/resolve-ports.sh)"; docker compose up -d
+# and that resolver calls a port busy when anything at all is LISTENING on it
+# (ss -tlnH), with no exception for the stack's own containers. So the second
+# `up` finds kong holding 8000, declares 8000 taken, exports
+# KONG_HTTP_PORT=8001 -- which is KONG_ADMIN_PORT's own default -- and compose
+# recreates kong there; the next `up` finds 8001 taken and moves it back.
+# Measured 2026-09-24: up #1 -> 8000, up #2 -> 8001, and verify_platform's
+# "the gateway answers on 127.0.0.1:8000" failed on exactly the even runs,
+# while `make grobase` reruns silently moved the door the WAF proxies to.
+#
+# The fix is one exception: a host port already published by a mini-baas
+# container is not a conflict, it is this stack's port being rebound to the
+# same container. Patched rather than worked around because every consumer --
+# the WAF, the host forwards, verify_platform -- assumes a stable 8000.
+python3 - "$@" <<'PORTEOF' || log "port-resolver patch skipped (python3 refused it)"
+path = "scripts/ops/resolve-ports.sh"
+try:
+    with open(path) as fh:
+        src = fh.read()
+except OSError:
+    raise SystemExit(0)
+if "_own_ports" in src:
+    print("port resolver: already patched")
+    raise SystemExit(0)
+anchor = '_used_ports="" # track ports we\'ve already claimed in this run'
+probe = "port_in_use() {\n  local p=$1"
+if anchor not in src or probe not in src:
+    print("port resolver: shape changed upstream, left alone")
+    raise SystemExit(0)
+src = src.replace(
+    anchor,
+    anchor
+    + "\n# Host ports THIS stack already publishes are not a conflict: they are the\n"
+    + "# ports the imminent `up` is about to rebind to the same containers.\n"
+    + "_own_ports=$(docker ps --filter name=mini-baas --format '{{.Ports}}' 2>/dev/null \\\n"
+    + "  | grep -oE '(127\\.0\\.0\\.1|0\\.0\\.0\\.0):[0-9]+' | cut -d: -f2 | sort -u | tr '\\n' ' ')",
+    1,
+)
+src = src.replace(
+    probe,
+    probe
+    + "\n  # Ours already: rebinding our own published port is not a conflict.\n"
+    + '  if [[ " $_own_ports " == *" $p "* ]]; then\n    return 1\n  fi',
+    1,
+)
+with open(path, "w") as fh:
+    fh.write(src)
+print("port resolver: own published ports no longer count as conflicts")
+PORTEOF
+
 pull_ok=0
 for attempt in 1 2 3; do
     if make --no-print-directory pull PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS"; then
@@ -329,6 +514,47 @@ for _ in $(seq 1 60); do
     sleep 5
 done
 [ "$ready" = 1 ] || log "gateway not healthy after 5 minutes; services may still be starting (make grobase_status)"
+
+# ── the settle pass: what asked for a dependency once and never asked again ──
+# Several grobase services resolve a dependency exactly at startup and keep the
+# failure for the life of the process, so bringing 35 containers up at once
+# leaves casualties that nothing retries. Measured on the first max build
+# (2026-09-24), all three with healthy dependencies by the time anyone looked:
+#
+#   mongo-init   exited 1 on ECONNREFUSED -- mongo's healthcheck went green
+#                before it accepted connections. restart: "no", so rs0 was
+#                never initiated and ai-service, analytics-service and
+#                mongo-api restart-looped on MongoServerSelectionError.
+#   realtime     "PostgreSQL connect failed" 32 ms after listening, then
+#                "producer stream ended" when mongo stepped down under it.
+#                /v1/health then answers 503 degraded with both producers
+#                detached, for ever, while psql and a replication connection
+#                on its OWN url both succeed.
+#
+# Re-running the one-shot and restarting what is still unhealthy is the whole
+# fix: the dependencies are up by now, and these services are correct on a
+# second attempt. Ordered -- the init first, since the restarts depend on it.
+# Idempotent and cheap on a guest that does not need it: an initiated replica
+# set makes mongo-init exit 0, and a healthy container is never restarted.
+if docker ps -a --format '{{.Names}}' | grep -qx mini-baas-mongo-init; then
+    if [ "$(docker inspect -f '{{.State.ExitCode}}' mini-baas-mongo-init 2>/dev/null)" != 0 ]; then
+        log "settle: re-running mongo-init (it lost the race with mongo)"
+        docker start -a mini-baas-mongo-init 2>&1 | sed 's/^/  [mongo-init] /' || true
+    fi
+fi
+settled=0
+for _ in 1 2 3; do
+    sick=$(docker ps --filter name=mini-baas --filter health=unhealthy --format '{{.Names}}')
+    [ -n "$sick" ] || {
+        settled=1
+        break
+    }
+    log "settle: restarting $(printf '%s' "$sick" | tr '\n' ' ')"
+    # shellcheck disable=SC2086 # one name per line, none of them can contain a space
+    docker restart $sick >/dev/null 2>&1 || true
+    sleep 45
+done
+[ "$settled" = 1 ] || log "still unhealthy after the settle pass: $(docker ps --filter name=mini-baas --filter health=unhealthy --format '{{.Names}}' | tr '\n' ' ')(make grobase_status)"
 
 # What this guest runs, for verify_platform and for `make grobase` reruns.
 {
