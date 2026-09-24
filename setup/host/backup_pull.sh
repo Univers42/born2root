@@ -30,7 +30,18 @@ set -u
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
 
-DEST="${BACKUP_DEST:-/sgoinfre/$(id -un)/b2b-backups/$VM_NAME}"
+# BACKUP_DEST= beats [dc] backup_dest beats the campus default. The default is
+# only right on a 42 seat: on a personal machine /sgoinfre does not exist and /
+# is not writable, so `make datacenter` used to complete every step and then
+# die on `mkdir: cannot create directory '/sgoinfre'` (2026-09-24).
+DEST="${BACKUP_DEST:-$(b2b_get B2B_DC_BACKUP_DEST)}"
+[ -n "$DEST" ] || DEST="/sgoinfre/$(id -un)/b2b-backups/$VM_NAME"
+# $USER and ${USER} are the host login, the same rule ai.models_dir follows, so
+# a tracked profile can point at a home directory without naming anybody.
+_login=$(id -un)
+DEST=${DEST//\$\{USER\}/$_login}
+DEST=${DEST//\$USER/$_login}
+unset _login
 VERIFY="${BACKUP_VERIFY:-0}"
 RESTORE=0
 case "${1:-}" in --verify) VERIFY=1 ;; --restore) RESTORE=1 ;; esac

@@ -39,6 +39,14 @@
 [vm]
 name    = "baas"
 backend = "qemu"
+# The 1 TB disk, not the 98 GB one the repo sits on: a max-tier datacenter is
+# ~16 GB the moment it boots and keeps growing as the engines fill /var, and
+# `make space` counts the repo tree, not this. Empty would mean disk_images/
+# inside the repo. An existing VM is NOT moved by editing this -- the registry
+# at disk_images/.vm_path.baas wins so a built guest is never orphaned -- so
+# relocate one with `make all VM_PATH=…` or by moving the directory and that
+# file together.
+path    = "/mnt/storage/born2root"
 disk_gb = 44
 ram_mb  = "auto"
 cpus    = "auto"
@@ -122,6 +130,12 @@ forwards = [
 # expected" probe stays meaningful.
 [dc]
 cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
+# backup_dest: deliberately NOT on the disk that holds the VM. /mnt/storage is
+# nvme1n1, $HOME is on the ubuntu-vg volume group on the other NVMe, so a copy
+# here survives the disk the guest lives on. The shipped default is a 42
+# campus /sgoinfre path that does not exist on a personal machine. Absolute
+# paths only; $HOME is not expanded, so this names the user.
+backup_dest = "/home/$USER/b2b-backups/baas"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"

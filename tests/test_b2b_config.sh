@@ -97,9 +97,37 @@ refuse_add() { # <label> <key it must name> <appended text>
 # ── The shipped file and the fixture ────────────────────────────────────────
 check "born2root.toml is valid" "$(rc_of born2root.toml --check)" 0
 check "the fixture is valid" "$(rc_of "$DEFAULTS" --check)" 0
+# Two keys are allowed to differ, and nothing else.
+#
+#   path              the resolved location of the config file itself, which
+#                     is by definition a different string for the two files.
+#   network.forwards  the documented per-machine escape hatch. The fixture has
+#                     to keep `forwards = []` because eight refusal cases below
+#                     sed that exact literal into the list they test, so the
+#                     moment born2root.toml carries a real forward -- it has
+#                     since bf250f0 published drawnosaurus on 5273/4300 -- the
+#                     two can never match here. derived.forwards is the same
+#                     value in the guest's shape and goes with it.
+#
+# Dropped by key rather than by `grep -v`, which used to take the line out of
+# both dumps: that also silently hid vm.path (a `"path"` line too) from the
+# only check that would catch it drifting, and left the forward LIST's inner
+# lines behind while removing the key that named them.
+dump_comparable() { # <config file>
+    env B2B_CONFIG="$1" "${CFG[@]}" --dump | python3 -c '
+import json
+import sys
+
+d = json.load(sys.stdin)
+d.pop("path", None)
+d.get("network", {}).pop("forwards", None)
+d.get("derived", {}).pop("forwards", None)
+json.dump(d, sys.stdout, indent=2, sort_keys=True)
+'
+}
 check "the fixture resolves exactly like the shipped file" \
-    "$(diff <(env B2B_CONFIG=born2root.toml "${CFG[@]}" --dump | grep -v '"path"') \
-        <(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --dump | grep -v '"path"') >/dev/null && echo same || echo differs)" same
+    "$(diff <(dump_comparable born2root.toml) \
+        <(dump_comparable "$DEFAULTS") >/dev/null && echo same || echo differs)" same
 
 # ── get: every key the repo asks for ────────────────────────────────────────
 check "get B2B_LOGIN" "$(get_of "$DEFAULTS" B2B_LOGIN)" dlesieur

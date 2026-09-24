@@ -5,6 +5,7 @@
 [vm]
 name    = "debian"
 backend = "auto"
+path    = ""
 disk_gb = 15
 ram_mb  = "auto"
 cpus    = "auto"
@@ -79,6 +80,7 @@ forwards = []
 [dc]
 cors_origins = []
 package = "auto"
+backup_dest = ""
 
 [disk]
 swap_mb = "auto"
