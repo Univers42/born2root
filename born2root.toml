@@ -23,6 +23,14 @@
 name    = "debian"
 # auto | virtualbox | qemu   (`make backend` explains what auto would pick)
 backend = "auto"
+# Where <name>/ (the disk, serial.log, the stamps) is created. Empty is the
+# repo's own disk_images/. Absolute paths only. Point it at a big filesystem
+# -- path = "/mnt/storage/born2root" -- when the disk holding the repo cannot
+# take disk_gb: a datacenter at the max tier is ~16 GB the moment it boots.
+# An existing VM is not moved by editing this: disk_images/.vm_path.<name>
+# records where a built guest actually is and wins, so nothing is orphaned.
+# Relocate one with `make all VM_PATH=…`, or move the directory and that file.
+path    = ""
 # Disk size in GB. 15 is the school quota; the layout below and the install
 # set are both derived from it.
 disk_gb = 15
@@ -226,6 +234,12 @@ forwards = [
 [dc]
 cors_origins = []
 package = "auto"
+# Where `make backup` copies the restic repository off the guest. Empty keeps
+# the 42 default, /sgoinfre/students/$USER/b2b-backups/<vm>, which exists only
+# on a campus seat. Absolute paths only; $USER is the host login, as in
+# [ai] models_dir. Worth putting on a different physical disk from [vm] path
+# -- a copy beside the guest survives a rebuild, not a dead disk.
+backup_dest = ""
 
 [disk]
 # "auto" is the guest's RAM clamped to 1024-4096 MB and to a quarter of the

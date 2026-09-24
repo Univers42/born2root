@@ -139,8 +139,17 @@ endif
 # last create/boot recorded it (utils/vm_path.sh remember_vm_dir), so after a
 # `make all VM_PATH=/mnt/storage/qemu` no later `make qemu_*` needs VM_PATH.
 # An explicit VM_PATH (command line or environment) always wins.
+#
+# Three sources, most specific first: the registry, then [vm] path, then the
+# repo's own disk_images/. The REGISTRY BEATS THE FILE on purpose -- it records
+# where a VM actually is, the file records where the next one should go, and
+# letting an edit to born2root.toml win would point every qemu_* target at an
+# empty directory while a built 44 GB guest sat somewhere else, unreachable and
+# uncounted by `make space`. Moving an existing VM therefore means moving the
+# directory AND rewriting disk_images/.vm_path.<vm>, which is what vm_path.sh
+# does when a build passes VM_PATH= explicitly.
 ifeq ($(origin VM_PATH),undefined)
-VM_PATH      := $(shell cat $(CURDIR)/disk_images/.vm_path.$(VM_NAME) 2>/dev/null || echo $(CURDIR)/disk_images)
+VM_PATH      := $(shell cat $(CURDIR)/disk_images/.vm_path.$(VM_NAME) 2>/dev/null || echo $(or $(call b2b_conf,B2B_VM_PATH),$(CURDIR)/disk_images))
 endif
 VM_SCRIPT    := ./setup/install/vms/install_vm_debian.sh
 ISO_BUILDER  := ./generate/create_custom_iso.sh
@@ -1138,7 +1147,9 @@ datacenter:
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
-	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
+	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="$(call b2b_conf,B2B_DC_BACKUP_DEST)"; \
+	[ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
+	d=$$(printf '%s' "$$d" | sed -e "s|[$$]{USER}|$$(id -un)|g" -e "s|[$$]USER|$$(id -un)|g"); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi

@@ -101,6 +101,15 @@ DEFAULTS = {
     "vm": {
         "name": "debian",
         "backend": "auto",
+        # Where $VM_NAME/ (the disk, serial.log, the stamps) is created. ""
+        # keeps the historical default, the repo's own disk_images/. Point it
+        # at a big filesystem -- "/mnt/storage/born2root" -- when the disk the
+        # repo lives on cannot hold a 44 GB image; a datacenter build at the
+        # max tier fills ~16 GB immediately and grows with every engine's
+        # volumes. An explicit VM_PATH= on the command line still wins, and
+        # disk_images/.vm_path.<vm> still remembers the last one used, so a
+        # VM that already exists is never orphaned by editing this.
+        "path": "",
         "disk_gb": 15,
         "ram_mb": "auto",
         "cpus": "auto",
@@ -140,7 +149,14 @@ DEFAULTS = {
     # package: grobase's service tier. "auto" derives it from the dc-* features
     # (pro for dc-full); "max" adds analytics and functions, which no feature
     # asks for, so it can only be chosen here.
-    "dc": {"cors_origins": [], "package": "auto"},
+    # backup_dest: where `make backup` copies the restic repository OFF the
+    # guest. It was hardcoded to /sgoinfre in two places that disagreed --
+    # the Makefile said /sgoinfre/students/$USER, backup_pull.sh said
+    # /sgoinfre/$USER -- and neither exists outside a 42 seat, so `make
+    # datacenter` died at its last step on a personal machine (2026-09-24).
+    # "" keeps that campus default; set it to a path on a disk that is not
+    # the VM's own, which is the only thing that makes the copy worth taking.
+    "dc": {"cors_origins": [], "package": "auto", "backup_dest": ""},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -601,6 +617,7 @@ class Validator:
             self.err("vm.profile", "auto, minimal, standard or full")
         if vm["ai_mode"] not in ("off", "client", "local"):
             self.err("vm.ai_mode", "off, client or local")
+        self._abs_path("vm.path", vm.get("path"))
 
     def ai(self):
         """[ai]: judged here, before `make all` downloads or starts anything."""
@@ -1006,6 +1023,23 @@ class Validator:
                 "dc.package",
                 "%r is not a grobase tier (one of: %s)" % (package, ", ".join(self.DC_PACKAGES)),
             )
+        self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
+
+    def _abs_path(self, where, value):
+        """A host path that is empty (keep the default) or absolute.
+
+        Relative would resolve against whatever directory the caller happened
+        to be in -- make runs these scripts from the repo root, the systemd
+        backup timer does not -- so a relative path here is a silent wrong
+        destination rather than an error. Refused at --check, before the ISO
+        build, like every other knob.
+        """
+        if value in (None, ""):
+            return
+        if not isinstance(value, str):
+            self.err(where, "%r is not a path" % (value,))
+        elif not value.startswith("/"):
+            self.err(where, "%r is not absolute (it must start with /)" % (value,))
 
     def network(self):
         forwards = self._list("network.forwards", self.c.network["forwards"])
@@ -1204,6 +1238,9 @@ LEGACY = {
     "B2B_VM_RAM_MB": lambda c: "" if c.vm.get("ram_mb") == "auto" else c.vm.get("ram_mb"),
     "B2B_VM_CPUS": lambda c: "" if c.vm.get("cpus") == "auto" else c.vm.get("cpus"),
     "B2B_VM_NAME": lambda c: c.vm.get("name") or "",
+    # Host-side only, both of these: the guest has no use for a host path, and
+    # build.conf is sourced in the guest, so they stay out of the guest view.
+    "B2B_VM_PATH": lambda c: c.vm.get("path") or "",
     "B2B_BACKEND": lambda c: c.vm.get("backend") or "",
     "B2B_PROFILE": lambda c: c.vm.get("profile") or "",
     "B2B_AI_MODE": lambda c: c.vm.get("ai_mode") or "",
@@ -1226,6 +1263,7 @@ LEGACY = {
         o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)
     ),
     "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
+    "B2B_DC_BACKUP_DEST": lambda c: c.dc.get("backup_dest") or "",
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
