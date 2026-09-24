@@ -120,9 +120,8 @@ import sys
 
 d = json.load(sys.stdin)
 d.pop("path", None)
-for section, key in (("network", "forwards"), ("derived", "forwards")):
-    if isinstance(d.get(section), dict):
-        d[section].pop(key, None)
+d.get("network", {}).pop("forwards", None)
+d.get("derived", {}).pop("forwards", None)
 json.dump(d, sys.stdout, indent=2, sort_keys=True)
 '
 }
