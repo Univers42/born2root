@@ -117,7 +117,13 @@ credentials that must not enter the repo or the ISO:
 - `BAAS_API_KEY` — grobase tenant key; written by `make tenant_key`.
 - `CF_TUNNEL_TOKEN` — cloudflared tunnel token, only once a domain exists.
 
-Bootstrap: `cp .b2b-secrets.example ~/.config/born2root/b2b-secrets && chmod 600 ~/.config/born2root/b2b-secrets`.
+Bootstrap:
+
+```bash
+cp .b2b-secrets.example ~/.config/born2root/b2b-secrets
+chmod 600 ~/.config/born2root/b2b-secrets
+```
+
 A `.b2b-secrets` at the repo root is also honoured (ignored by git). The
 campus `/goinfre` is wiped periodically — keep the file under `$HOME` (which
 survives wipes) and in a password manager.
