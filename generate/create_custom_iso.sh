@@ -107,18 +107,35 @@ download() {
 }
 
 # ── Dynamically discover the latest Debian netinst ISO ───────────────────────
-BASE_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/"
+# cdimage.debian.org/debian-cd/current/ sometimes returns HTTP 500 (the path
+# moved to /cdimage/release/current/ on that host); try it first then fall
+# back to two known-good mirrors so a transient upstream failure doesn't stop
+# a build.
+_ISO_MIRRORS=(
+    "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/"
+    "https://cdimage.debian.org/cdimage/release/current/amd64/iso-cd/"
+    "https://mirrors.kernel.org/debian-cd/current/amd64/iso-cd/"
+)
 
 echo "===== Creating Custom Debian ISO with Preseed ====="
-echo "Querying $BASE_URL for the latest ISO filename..."
 
-ISO_FILENAME=$(curl -fsSL "$BASE_URL" 2>/dev/null |
-    grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' |
-    head -n1)
+ISO_FILENAME=""
+BASE_URL=""
+for _mirror in "${_ISO_MIRRORS[@]}"; do
+    echo "Querying $_mirror for the latest ISO filename..."
+    ISO_FILENAME=$(curl -fsSL --max-time 15 "$_mirror" 2>/dev/null |
+        grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' |
+        head -n1)
+    if [ -n "$ISO_FILENAME" ]; then
+        BASE_URL="$_mirror"
+        break
+    fi
+    echo "  (no response or no matching filename, trying next mirror)"
+done
 
 if [ -z "$ISO_FILENAME" ]; then
-    echo "Error: Could not determine the latest Debian ISO filename from $BASE_URL"
-    echo "The Debian mirrors may be temporarily unavailable."
+    echo "Error: Could not determine the latest Debian ISO filename from any mirror."
+    echo "Tried: ${_ISO_MIRRORS[*]}"
     exit 1
 fi
 
