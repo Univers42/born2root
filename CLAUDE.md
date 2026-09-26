@@ -35,6 +35,15 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
 | Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
+| Build with a preset config (school eval or server profile) | `make all B2B_CONFIG=profiles/school.toml` |
+| Full datacenter setup after a rebuild (restore → tailscale → backup) | `make datacenter` |
+| Expose grobase API/WAF on the host over SSH tunnels | `make baas_access`, `make baas_access_undo` |
+| Reach a guest-loopback-bound app (groot, drawnosaurus) over SSH tunnels | `make groot`, `make drawnosaurus`, `make drawnosaurus_undo` |
+| Grobase status (config + docker ps, read from the guest) | `make grobase_status` |
+| Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
+| Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
+| Mint a realtime publish JWT / apply CORS origins | `make realtime_token`, `make grobase_cors` |
+| Provision/re-run a datacenter component in the guest | `make grobase`, `make edge`, `make backup_install` |
 
 `make all` runs `prepare` first: `make deps`, then
 `git pull --autostash --ff-only origin main`, then downloads the hellish
@@ -93,6 +102,37 @@ with hellish, so also check an edited script with `hellish -n` as well as
 `bash -n` (`doc/HANDOFF_SPACE_AND_PROFILES.md` lists the known differences,
 e.g. a one-line `case … esac; }` that shfmt collapses into something hellish
 cannot parse).
+
+## Secrets file
+
+`~/.config/born2root/b2b-secrets` (mode 600, `KEY=VALUE` lines) holds
+credentials that must not enter the repo or the ISO:
+
+- `TS_AUTHKEY` — Tailscale auth key; must be **reusable + ephemeral + pre-approved**
+  (a one-off key is spent by the first VM; ephemeral removes the old tailnet
+  node automatically on rebuild).
+- `RESTIC_PASSWORD` — restic backup repository password; `make backup` mints
+  one when absent, but copy it to a password manager immediately — every
+  snapshot on sgoinfre is unreadable without it.
+- `BAAS_API_KEY` — grobase tenant key; written by `make tenant_key`.
+- `CF_TUNNEL_TOKEN` — cloudflared tunnel token, only once a domain exists.
+
+Bootstrap: `cp .b2b-secrets.example ~/.config/born2root/b2b-secrets && chmod 600 ~/.config/born2root/b2b-secrets`.
+A `.b2b-secrets` at the repo root is also honoured (ignored by git). The
+campus `/goinfre` is wiped periodically — keep the file under `$HOME` (which
+survives wipes) and in a password manager.
+
+## Profile presets
+
+`profiles/school.toml` — Born2beRoot subject only (no Docker, WordPress,
+language toolchains; nvim stays). Use for evaluations:
+
+```bash
+make all B2B_CONFIG=profiles/school.toml
+```
+
+`profiles/server.toml` — server deployment preset. Both files follow the same
+schema as `born2root.toml`; read their headers before editing.
 
 ## born2root.toml: the one file people personalise
 
@@ -158,9 +198,13 @@ hardcoded `bash`.
 - Host side (runs on your machine): `Makefile`, `generate/`, `setup/host/`,
   `setup/install/vms/`, `utils/`, `unlock_vm.sh`.
 - Guest side (baked into the ISO, runs inside the VM): `preseeds/`, and the
-  provisioners `setup/install/{nvim,hellish,tools,ai}/*.sh`, which
+  provisioners `setup/install/{nvim,hellish,tools,ai,dc}/*.sh`, which
   `first-boot-setup.sh` runs from `/root` and `setup/host/provision_vm.sh`
-  re-pushes over SSH later.
+  re-pushes over SSH later. The `dc/` provisioners install grobase, edge
+  (Tailscale/cloudflared), and backup (restic).
+- `setup/host/dc_lib.sh` is a shared library sourced by all datacenter host
+  scripts. It resolves the secrets file, provides SSH helpers, and defines
+  color output functions. Never run directly.
 - Ad hoc and mostly historical: `diagnostic/`, `fixes/`, `management_tools/`,
   `monitore/`, `wordpress/`, `bak_conf/`, the other root-level scripts.
 
@@ -312,6 +356,17 @@ remembered in `disk_images/.vm_path.<vm>`, so a relocated VM needs no repeated
 app ports) are allocated by `utils/host_ports.sh`, walking past ports already in
 use, so never assume 4242: read the port back the way `orchestrate.sh` and
 `provision_vm.sh` do.
+
+`[network] forwards` in `born2root.toml` only ever works for a guest service
+bound to `0.0.0.0`: both backends' NAT reaches the guest's real NIC
+(`10.0.2.15`), never its loopback, so a `127.0.0.1`-bound service (a project's
+"local machine only" entrance, e.g. drawnosaurus's gateway on 5273 or
+grobase's Kong on 8000) needs an SSH tunnel instead — a
+`setup/host/*_host_access.sh` script that opens `ssh -L` into the guest and
+is wired to a `make <name>` / `make <name>_undo` pair (`groot`,
+`baas_access`, `drawnosaurus`). Adding such a port to `[network] forwards`
+anyway does not just fail silently: the NAT/natpf rule it creates squats the
+host port forever, so even a correct tunnel can no longer bind it.
 
 ### Guards on destructive paths
 

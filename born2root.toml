@@ -210,11 +210,16 @@ interval_min = 10
 #
 # SSH (4242) and the ports Inception and the web stack need are forwarded
 # already — these are extras.
+#
+# Only for a service the guest binds to 0.0.0.0: a NAT/natpf rule forwards to
+# the guest's real NIC, never to its loopback, so a port the guest binds to
+# 127.0.0.1 (drawnosaurus's gateway on 5273 and API on 4300 among them) can
+# never be reached this way -- the rule looks fine and just squats the host
+# port forever. `make drawnosaurus` opens an SSH tunnel for those instead; see
+# setup/host/drawnosaurus_host_access.sh for the full story.
 [network]
 forwards = [
   # { name = "grafana", guest = 3100, host = 3100 },
-  { name = "drawnosaurus-web", guest = 5273, host = 5273 },
-  { name = "drawnosaurus-api", guest = 4300, host = 4300 },
 ]
 
 # ── The disk ────────────────────────────────────────────────────────────────

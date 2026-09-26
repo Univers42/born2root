@@ -220,6 +220,12 @@ note "Re-run after 'make certs' in the guest"
 cmd "make groot_map" "Just print the app to port map"
 cmd "make groot_undo" "Close the tunnel, drop the CA"
 
+sec "drawnosaurus (the other other project inside the VM)"
+cmd "make drawnosaurus" "Tunnel host :5273/:4300 to its loopback-bound gateway/API" "${BLD}${GRN}"
+note "Same numbers on purpose: http://localhost:5273/ for everyone"
+cmd "make drawnosaurus_status" "Is the tunnel up, does the gateway answer"
+cmd "make drawnosaurus_undo" "Close the tunnel"
+
 sec "Editor + shell inside the VM"
 cmd "make provision" "Neovim + kickstart + extras + hellishrc" "${BLD}${GRN}"
 note "Already done at first boot; this re-runs it"

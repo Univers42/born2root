@@ -299,6 +299,7 @@ C_CYAN   := \033[36m
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
         groot groot_map groot_undo \
+        drawnosaurus drawnosaurus_status drawnosaurus_undo \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
         tailscale backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
@@ -980,6 +981,19 @@ groot_map:
 
 groot_undo:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/groot_host_access.sh --undo
+
+# =========@@ drawnosaurus: host access over the SAME port numbers @@==========
+# Same obstacle as groot: drawnosaurus's gateway (full access) and API bind
+# the guest's loopback at 5273/4300, which QEMU/VirtualBox NAT can never
+# reach. Unlike groot this tunnel keeps the exact host port numbers, so
+# http://localhost:5273/ works for every colleague without a bespoke URL.
+# See the script header for why [network] forwards must never list these two.
+drawnosaurus:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh
+drawnosaurus_status:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh --status
+drawnosaurus_undo:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh --undo
 
 # Clone (or upload) Inception into the VM, build it, wire up the host, verify.
 #   make inception                    clone github.com/Univers42/inception
