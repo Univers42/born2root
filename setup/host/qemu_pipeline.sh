@@ -149,8 +149,32 @@ ok "ssh b2b works: $(ssh_q hostname)"
 # shellcheck disable=SC2059
 printf "  ${C_DIM}waiting for first boot to finish (nvim, hellish, then the profile's features)${C_RESET}\n"
 last=""
+last_changed_at=0
 until [ "$(ssh_q 'grep -c first-boot-setup /etc/crontab 2>/dev/null || true')" = 0 ]; do
-    [ "$waited" -ge "$FIRST_BOOT_TIMEOUT" ] && die "first boot is still running after $((waited / 60)) min. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
+    if [ "$waited" -ge "$FIRST_BOOT_TIMEOUT" ]; then
+        # A build that outlives FIRST_BOOT_TIMEOUT is not necessarily a stuck
+        # one: first-boot-setup.sh runs a dozen features end to end (nvim,
+        # nvim-extras, docker, the dc-* provisioners...), and a slow network or
+        # a big profile can legitimately spend longer than the estimate below
+        # ssh into the guest still answers. The 2026-09-30 incident is the
+        # failure mode this replaces: the host called this a build failure
+        # while the guest was still inside a bounded retry and finished on its
+        # own a few minutes later (verify_guest: 41/41). features.status
+        # growing in the last 5 min is "still working"; unchanged that long
+        # (with every per-feature retry loop now capped -- see
+        # NVIM_TOTAL_BUDGET in install_nvim.sh/install_nvim_extras.sh -- is
+        # the closest this script can come to "actually stuck" without a
+        # process-tree view into the guest.
+        if [ "$((waited - last_changed_at))" -lt 300 ]; then
+            printf "\n  ${C_DIM}… first boot is still provisioning after %d min (features.status is still moving; guest reachable over SSH).${C_RESET}\n" "$((waited / 60))"
+            printf "  ${C_DIM}  Follow it with: make qemu_watch  |  make qemu_console  |  guest: /var/log/b2b-provision.log${C_RESET}\n\n"
+            # sysexits.h EX_TEMPFAIL: a real failure exits 1 above and below;
+            # this is neither success nor a proven failure, so `make all`
+            # should not report it as either.
+            exit 75
+        fi
+        die "first boot has not touched /etc/b2b/features.status in $((( waited - last_changed_at) / 60)) min — looks actually stuck, not just slow. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
+    fi
     spin_sleep 15 "first boot is provisioning the guest  $((waited / 60))m$((waited % 60))s"
     waited=$((waited + 15))
     cur=$(ssh_q 'tail -n1 /etc/b2b/features.status 2>/dev/null')
@@ -158,6 +182,7 @@ until [ "$(ssh_q 'grep -c first-boot-setup /etc/crontab 2>/dev/null || true')" =
         # shellcheck disable=SC2059
         printf "  ${C_DIM}  %s${C_RESET}\n" "$cur"
         last=$cur
+        last_changed_at=$waited
     fi
 done
 ok "first boot finished after $((waited / 60))m$((waited % 60))s"
