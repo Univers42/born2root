@@ -122,6 +122,12 @@ if [ -z "${NVIM_USERS}" ]; then
 fi
 NVIM_BOOTSTRAP="${NVIM_BOOTSTRAP:-1}"
 NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-1200}"
+# See install_nvim.sh's NVIM_IDLE_TIMEOUT/NVIM_TOTAL_BUDGET comment: a flat
+# timeout waits out a STUCK run just as patiently as a working one, which is
+# what let the 2026-09-30 incident's idle `nvim --headless` burn a full
+# NVIM_BOOTSTRAP_TIMEOUT three times over.
+NVIM_IDLE_TIMEOUT="${NVIM_IDLE_TIMEOUT:-180}"
+NVIM_TOTAL_BUDGET="${NVIM_TOTAL_BUDGET:-1800}"
 NVIM_SESSION_DIR_NAME="${NVIM_SESSION_DIR_NAME:-.nvim-sessions}"
 # Must match install_nvim.sh — that script builds the venv (for pynvim), this
 # one adds debugpy to it and points nvim-dap at the same interpreter.
@@ -2363,6 +2369,67 @@ wait_nvim_jobs() {
 # CFLAGS=-Wno-uninitialized: this layer's B2B.parsers is what adds gitcommit,
 # whose parser tree-sitter's default -Wall compile cannot fit in a 2 GB guest
 # (the measurement is in install_nvim.sh).
+#
+# Same inactivity guard as install_nvim.sh's run_as_user, and for the same
+# incident: a flat `timeout` waits out a STUCK run exactly as patiently as a
+# working one.
+_nvim_guard_pid_tree() {
+    local root="$1" qfile sfile pid kid
+    qfile=$(mktemp /var/tmp/b2b-guard-q.XXXXXX) || return 1
+    sfile=$(mktemp /var/tmp/b2b-guard-s.XXXXXX) || {
+        rm -f "$qfile"
+        return 1
+    }
+    printf '%s\n' "$root" >"$qfile"
+    printf '%s\n' "$root" >"$sfile"
+    while [ -s "$qfile" ]; do
+        pid=$(head -n1 "$qfile")
+        sed -i '1d' "$qfile"
+        ps -o pid= --ppid "$pid" 2>/dev/null | while read -r kid; do
+            [ -n "$kid" ] || continue
+            grep -qx "$kid" "$sfile" 2>/dev/null && continue
+            printf '%s\n' "$kid" >>"$sfile"
+            printf '%s\n' "$kid" >>"$qfile"
+        done
+    done
+    cat "$sfile"
+    rm -f "$qfile" "$sfile"
+}
+_nvim_guard_cpu_ticks() {
+    local pid
+    _nvim_guard_pid_tree "$1" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        awk '{n = split($0, a, ")"); rest = a[n]; split(rest, f); print f[12] + f[13] + 0}' \
+            "/proc/${pid}/stat" 2>/dev/null
+    done | awk '{s += $1} END {print s + 0}'
+}
+run_with_inactivity_guard() {
+    local idle_secs="${1:-180}" hard_secs="${2:-1200}" pid elapsed=0 idle_elapsed=0 poll="${NVIM_GUARD_POLL:-10}" last=-1 now
+    shift 2
+    "$@" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep "$poll"
+        elapsed=$((elapsed + poll))
+        now=$(_nvim_guard_cpu_ticks "$pid")
+        if [ "$now" = "$last" ]; then
+            idle_elapsed=$((idle_elapsed + poll))
+        else
+            idle_elapsed=0
+        fi
+        last="$now"
+        if [ "$idle_elapsed" -ge "$idle_secs" ] || [ "$elapsed" -ge "$hard_secs" ]; then
+            warn "pid ${pid}: $([ "$idle_elapsed" -ge "$idle_secs" ] && echo "no CPU progress in its process tree for ${idle_elapsed}s" || echo "hard limit ${hard_secs}s reached") — killing instead of waiting out the rest of ${hard_secs}s"
+            kill -TERM "$pid" 2>/dev/null
+            sleep 2
+            kill -KILL "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            return 124
+        fi
+    done
+    wait "$pid"
+    return $?
+}
 run_as_user() {
     local user="$1" home rc
     shift
@@ -2370,8 +2437,11 @@ run_as_user() {
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
         "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
     if [ "$user" = "root" ]; then
-        timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
-    else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
+    else
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" \
+            runuser -u "$user" -- "$@"
+    fi
     rc=$?
     wait_nvim_jobs "$user" "${home:-/nonexistent}" || true
     return "$rc"
@@ -2719,6 +2789,10 @@ bootstrap_user() {
             sed 's/^/[nvim-extras]     /' || true
     fi
 
+    # See install_nvim.sh's bootstrap_user for why this is wall-clock
+    # (date +%s) and bounds the whole loop, not one attempt of it.
+    local _bootstrap_start _bootstrap_now
+    _bootstrap_start=$(date +%s)
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"
@@ -2730,6 +2804,12 @@ bootstrap_user() {
         if [ "$NVIM_ENOSPC" = "1" ]; then
             warn "${user}: stopping after attempt ${attempt} — the volume is full, retrying cannot help"
             check_home_space "$user" || true
+            BOOTSTRAP_FAILED=1
+            return 1
+        fi
+        _bootstrap_now=$(date +%s)
+        if [ "$((_bootstrap_now - _bootstrap_start))" -ge "$NVIM_TOTAL_BUDGET" ]; then
+            warn "${user}: stopping after attempt ${attempt} — ${NVIM_TOTAL_BUDGET}s total budget spent, retrying would only cost more of it"
             BOOTSTRAP_FAILED=1
             return 1
         fi

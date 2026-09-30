@@ -55,6 +55,11 @@ PATH="$TMP/bin:$PATH"
 export PATH
 # shellcheck disable=SC2034 # read by the run_as_user bodies eval'd below
 NVIM_BOOTSTRAP_TIMEOUT=20
+# Fast polling (see run_with_inactivity_guard): production's 10 s cadence
+# would make every run_as_user call below pay up to one full poll tick just
+# to notice a command that already exited, which is fine at first boot and
+# very slow in a test that calls it a dozen times.
+export NVIM_GUARD_POLL=1
 unset NVIM_TERM NVIM_CFLAGS
 
 # shellcheck disable=SC2317,SC2329 # called by the function bodies eval'd below
@@ -66,6 +71,12 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     name=$(basename "$script")
     eval "$(awk '/^nvim_jobs_left\(\) \{/,/^}/' "$REPO/$script")"
     eval "$(awk '/^wait_nvim_jobs\(\) \{/,/^}/' "$REPO/$script")"
+    # run_as_user now runs through the inactivity guard (see
+    # test_nvim_inactivity_guard.sh for that guard's own tests); it has to be
+    # defined here too or run_as_user's body just fails to find it.
+    eval "$(awk '/^_nvim_guard_pid_tree\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^_nvim_guard_cpu_ticks\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^run_with_inactivity_guard\(\) \{/,/^}/' "$REPO/$script")"
     body=$(awk '/^run_as_user\(\) \{/,/^}/' "$REPO/$script")
     if [ -z "$body" ]; then
         check "$name: run_as_user found" "missing" "present"
