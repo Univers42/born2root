@@ -375,6 +375,15 @@ _build:
 		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
+		qrc=$$?; \
+		if [ "$$qrc" = 75 ]; then \
+			printf "\n$(C_BLUE)>$(C_RESET) not an error -- first boot is still provisioning. Run 'make all' again later, or:\n"; \
+			printf "    $(C_BOLD)make qemu_watch$(C_RESET)     follow it live\n"; \
+			printf "    $(C_BOLD)make qemu_console$(C_RESET)   see the guest's serial console\n\n"; \
+			exit 0; \
+		elif [ "$$qrc" != 0 ]; then \
+			exit 1; \
+		fi; \
 	else \
 		$(MAKE_BIN) --no-print-directory check_driver && \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
