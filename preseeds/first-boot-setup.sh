@@ -330,6 +330,112 @@ else
     feature_end nvim ok
 fi
 
+### ─── 4a. Claude Code, optional local AI, and Docker ───────────────────────
+# Moved ahead of nvim-extras, devtools-extra and webstack on purpose: those
+# are cosmetic (an IDE layer, optional dev tools, a demo WordPress site) and
+# nvim-extras' plugin bootstrap is the one that hung for up to an hour on the
+# 2026-09-30 build (see run_with_inactivity_guard in install_nvim_extras.sh,
+# which now bounds that). Essential features -- and whatever a teammate
+# actually asked born2root.toml for -- must not sit behind a cosmetic one
+# that is slow, retrying, or stuck. Docker and Claude Code have no
+# dependency on anything nvim, hellish or apt-packages installs, so nothing
+# below needs them to have run first either.
+echo "--- Installing Claude Code ---"
+if ! feature_on claude-code; then
+    feature_off claude-code
+elif [ ! -f /root/install_claude_code.sh ]; then
+    echo "[FAIL] claude-code — /root/install_claude_code.sh is not in the ISO"
+    printf 'claude-code failed - 0\n' >>/etc/b2b/features.status
+else
+    feature_begin claude-code /
+    chmod +x /root/install_claude_code.sh 2>/dev/null || true
+    # 450, not 320: the download is staged on /var but lands on /, and the
+    # binary is copied there before the staging copy goes away.
+    if ! check_disk_space / 450; then
+        echo "[SKIP] Claude Code — insufficient disk space"
+        feature_end claude-code no-space
+    elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_claude_code.sh; then
+        feature_end claude-code ok
+    else
+        echo "[FAIL] Claude Code install reported errors — see /var/log/b2b-provision.log"
+        feature_end claude-code failed
+    fi
+fi
+
+B2B_AI_MODE="${B2B_AI_MODE:-off}"
+if [ "$B2B_AI_MODE" = "off" ]; then
+    echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
+elif [ -f /root/install_ai.sh ]; then
+    echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
+    chmod +x /root/install_ai.sh 2>/dev/null || true
+    # A model is gigabytes; refuse rather than filling the volume it lands on.
+    if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
+        run_logged /var/log/b2b-provision.log env AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh ||
+            echo "[WARN] AI install reported errors"
+    else
+        echo "[SKIP] AI — not enough free space on /opt for a model"
+    fi
+else
+    echo "[SKIP] AI — /root/install_ai.sh not present"
+fi
+
+if ! feature_on docker; then
+    feature_off docker
+else
+    feature_begin docker /var
+    ### ─── 1. Docker installation (official method) ─────────────────────────────
+    echo "--- Installing Docker ---"
+
+    # Add Docker official GPG key
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+
+    # Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
+    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
+        # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
+        apt-get update -qq 2>/dev/null
+        if ! apt-cache show docker-ce >/dev/null 2>&1; then
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
+            apt-get update -qq
+        fi
+    else
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+    fi
+
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
+
+    # Who may use Docker is born2root.toml's call: b2b-setup.sh already put
+    # every account whose groups list docker into the group (it exists before
+    # Docker does). This used to add the login unconditionally, so
+    # `groups = []` still meant a docker user.
+    #
+    # Kill those accounts' running VS Code servers so they restart with the
+    # docker group loaded. Without this, a server inherits the old group list
+    # (no docker GID) and every Docker command from the VS Code terminal fails
+    # with "permission denied". The next reconnect spawns a fresh server.
+    awk -F: '("," $3 ",") ~ /,docker,/ { print $1 }' /etc/b2b/users 2>/dev/null |
+        while read -r docker_user; do
+            pkill -u "$docker_user" -f "vscode-server" 2>/dev/null || true
+        done
+
+    # Enable and start Docker
+    systemctl enable docker
+    systemctl start docker
+    echo "[OK] Docker installed and running"
+
+    ### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
+    ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
+
+    feature_end docker ok
+fi
+
 # The IDE layer on top is the STANDARD feature nvim-extras, with its own
 # manifest row, so it is measured apart from nvim: on / (apt: fzf, lazygit,
 # gdb, ...), on /home (its plugins) and on /opt (the Excalidraw editor).
@@ -961,12 +1067,12 @@ echo "[OK] Third-party tools check complete"
 
 feature_end nodejs ok
 if feature_on pytools; then printf "pytools ok /opt -\n" >>/etc/b2b/features.status; else feature_off pytools; fi
-### ─── 4c. Herdr, opencode, Claude Code, and the optional local AI ──────────
-# Herdr and opencode are the STANDARD feature devtools-extra, measured on /
-# where both binaries live (see install_devtools.sh for why not /opt). The
-# installer exits non-zero when a tool it was asked for is not on PATH
-# afterwards, and that records the feature as failed. AI_MODE travels in
-# features.conf; it defaults to "off", so a stock build downloads nothing here.
+### ─── 4c. Herdr and opencode ────────────────────────────────────────────────
+# The STANDARD feature devtools-extra, measured on / where both binaries live
+# (see install_devtools.sh for why not /opt). The installer exits non-zero
+# when a tool it was asked for is not on PATH afterwards, and that records
+# the feature as failed. Claude Code and the optional local AI moved to
+# section 4a, ahead of nvim-extras; see the comment there for why.
 echo "--- Installing Herdr + opencode ---"
 if ! feature_on devtools-extra; then
     feature_off devtools-extra
@@ -987,109 +1093,13 @@ else
     fi
 fi
 
-# Claude Code is its own feature, claude-code, and it sits BESIDE opencode --
-# setup/install/ai/install_claude_code.sh has the argument for keeping both.
-# It is off in the default 15 GB build: its single binary is 320 MB on /, and
-# beside the standard set that leaves 144 MB of the 20% headroom -- it fits,
-# but by less than a default should spend. `full` (30 GB+) gets it
-# automatically and FEATURES="+claude-code" (or the picker) asks for it on a
-# 15-29 GB disk. Either way the host already checked it fits before this ISO
-# existed, so reaching here means the space was budgeted.
-echo "--- Installing Claude Code ---"
-if ! feature_on claude-code; then
-    feature_off claude-code
-elif [ ! -f /root/install_claude_code.sh ]; then
-    echo "[FAIL] claude-code — /root/install_claude_code.sh is not in the ISO"
-    printf 'claude-code failed - 0\n' >>/etc/b2b/features.status
-else
-    feature_begin claude-code /
-    chmod +x /root/install_claude_code.sh 2>/dev/null || true
-    # 450, not 320: the download is staged on /var but lands on /, and the
-    # binary is copied there before the staging copy goes away.
-    if ! check_disk_space / 450; then
-        echo "[SKIP] Claude Code — insufficient disk space"
-        feature_end claude-code no-space
-    elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_claude_code.sh; then
-        feature_end claude-code ok
-    else
-        echo "[FAIL] Claude Code install reported errors — see /var/log/b2b-provision.log"
-        feature_end claude-code failed
-    fi
-fi
-
-B2B_AI_MODE="${B2B_AI_MODE:-off}"
-if [ "$B2B_AI_MODE" = "off" ]; then
-    echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
-elif [ -f /root/install_ai.sh ]; then
-    echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
-    chmod +x /root/install_ai.sh 2>/dev/null || true
-    # A model is gigabytes; refuse rather than filling the volume it lands on.
-    if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
-        run_logged /var/log/b2b-provision.log env AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh ||
-            echo "[WARN] AI install reported errors"
-    else
-        echo "[SKIP] AI — not enough free space on /opt for a model"
-    fi
-else
-    echo "[SKIP] AI — /root/install_ai.sh not present"
-fi
-
-if ! feature_on docker; then
-    feature_off docker
-else
-    feature_begin docker /var
-    ### ─── 1. Docker installation (official method) ─────────────────────────────
-    echo "--- Installing Docker ---"
-
-    # Add Docker official GPG key
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-
-    # Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
-    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-    if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
-        # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
-        apt-get update -qq 2>/dev/null
-        if ! apt-cache show docker-ce >/dev/null 2>&1; then
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
-            apt-get update -qq
-        fi
-    else
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
-        apt-get update -qq
-    fi
-
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
-
-    # Who may use Docker is born2root.toml's call: b2b-setup.sh already put
-    # every account whose groups list docker into the group (it exists before
-    # Docker does). This used to add the login unconditionally, so
-    # `groups = []` still meant a docker user.
-    #
-    # Kill those accounts' running VS Code servers so they restart with the
-    # docker group loaded. Without this, a server inherits the old group list
-    # (no docker GID) and every Docker command from the VS Code terminal fails
-    # with "permission denied". The next reconnect spawns a fresh server.
-    awk -F: '("," $3 ",") ~ /,docker,/ { print $1 }' /etc/b2b/users 2>/dev/null |
-        while read -r docker_user; do
-            pkill -u "$docker_user" -f "vscode-server" 2>/dev/null || true
-        done
-
-    # Enable and start Docker
-    systemctl enable docker
-    systemctl start docker
-    echo "[OK] Docker installed and running"
-
-    ### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
-    ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
-
-    feature_end docker ok
-fi
+# Claude Code, AI and Docker used to run HERE, after devtools-extra and
+# before the datacenter section. They moved up, right after nvim core (see
+# that comment above): essential features running behind a cosmetic one is
+# exactly what let the 2026-09-30 incident matter as much as it did -- an
+# idle `nvim --headless` inside nvim-extras' retry loop sat between Docker
+# and every account that needed it, for up to an hour, on a VM whose network
+# was fine again within a minute of the guest-side IPv6 fix above.
 
 ### ─── 4b. The datacenter: dc-* features ────────────────────────────────────
 # Four provisioners, in dependency order, each gated by the dc-* rows that
