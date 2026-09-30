@@ -167,13 +167,14 @@ until [ "$(ssh_q 'grep -c first-boot-setup /etc/crontab 2>/dev/null || true')" =
         # process-tree view into the guest.
         if [ "$((waited - last_changed_at))" -lt 300 ]; then
             printf "\n  ${C_DIM}… first boot is still provisioning after %d min (features.status is still moving; guest reachable over SSH).${C_RESET}\n" "$((waited / 60))"
+            # shellcheck disable=SC2059
             printf "  ${C_DIM}  Follow it with: make qemu_watch  |  make qemu_console  |  guest: /var/log/b2b-provision.log${C_RESET}\n\n"
             # sysexits.h EX_TEMPFAIL: a real failure exits 1 above and below;
             # this is neither success nor a proven failure, so `make all`
             # should not report it as either.
             exit 75
         fi
-        die "first boot has not touched /etc/b2b/features.status in $((( waited - last_changed_at) / 60)) min — looks actually stuck, not just slow. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
+        die "first boot has not touched /etc/b2b/features.status in $(((waited - last_changed_at) / 60)) min — looks actually stuck, not just slow. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
     fi
     spin_sleep 15 "first boot is provisioning the guest  $((waited / 60))m$((waited % 60))s"
     waited=$((waited + 15))
