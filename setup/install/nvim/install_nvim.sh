@@ -594,35 +594,63 @@ _nvim_guard_pid_tree() {
     cat "$sfile"
     rm -f "$qfile" "$sfile"
 }
-# Sum of utime+stime (jiffies) across $1's whole process tree. /proc/pid/stat's
-# comm field can itself contain spaces or parentheses, so the split is on the
-# LAST ")" rather than the first space, and awk does both splits itself rather
-# than relying on shell word-splitting of an unquoted variable, which hellish
-# does not do the way bash does (see b2b_config.sh's guest-side notes).
-_nvim_guard_cpu_ticks() {
+# "Activity" is CPU time (utime+stime, /proc/pid/stat) OR I/O moved
+# (rchar+wchar, /proc/pid/io -- this includes socket reads) across $1's
+# whole process tree, either one. CPU alone calls a slow-but-alive download
+# "stalled": a process blocked in read() on a throttled pipe or a slow HTTPS
+# transfer can sit at ~0% CPU for minutes while still making real progress
+# (nvim-extras' own curl steps -- markdown-preview's server, kulala's
+# grammar -- are exactly that shape), and a tight compile loop can burn CPU
+# with no I/O at all. Printing both sums on one line means either one
+# changing is enough to reset the idle clock, with no extra bookkeeping to
+# keep two separate counters in sync. /proc/pid/stat's comm field can itself
+# contain spaces or parentheses, so its split is on the LAST ")" rather than
+# the first space, and both splits are done in awk rather than relying on
+# shell word-splitting of an unquoted variable, which hellish does not do
+# the way bash does (see b2b_config.sh's guest-side notes). /proc/pid/io is
+# root-or-same-uid-readable, which first-boot-setup.sh always is here: it
+# runs as root, and every command this guard wraps is either root's own or
+# spawned under runuser.
+_nvim_guard_activity() {
     local pid
     _nvim_guard_pid_tree "$1" | while read -r pid; do
         [ -n "$pid" ] || continue
         awk '{n = split($0, a, ")"); rest = a[n]; split(rest, f); print f[12] + f[13] + 0}' \
             "/proc/${pid}/stat" 2>/dev/null
-    done | awk '{s += $1} END {print s + 0}'
+        awk '/^rchar:/ { r = $2 } /^wchar:/ { w = $2 } END { print "io", r + w + 0 }' \
+            "/proc/${pid}/io" 2>/dev/null
+    done | awk '$1 == "io" {i += $2; next} {c += $1} END {print c + 0, i + 0}'
+}
+# Backgrounding with `&` puts the job in THIS script's own process group
+# (job control is off, so there is no new one to target), so a plain
+# `kill $pid` only reaches the direct child and leaves anything IT
+# background-spawned (vim.pack's git, a curl, tree-sitter's cc1) running
+# orphaned. Sends $2 to every pid in $1's tree, root last so a parent does
+# not lose the ability to reap a child still being signaled.
+_nvim_guard_kill_tree() {
+    local root="$1" sig="$2" pid
+    _nvim_guard_pid_tree "$root" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        kill "-$sig" "$pid" 2>/dev/null
+    done
+    kill "-$sig" "$root" 2>/dev/null
 }
 # run_with_inactivity_guard <idle_secs> <hard_secs> <cmd...>
 # A flat `timeout` bounds a WORKING command; it does nothing for a STUCK one,
-# since it only fires once its whole budget is spent. This polls the CPU time
-# of the command's entire process tree and kills it the moment nothing in
-# that tree has burned a CPU tick for <idle_secs>, or at <hard_secs> if it
-# somehow never goes idle first. See the NVIM_IDLE_TIMEOUT comment above for
-# the incident this replaces.
+# since it only fires once its whole budget is spent. This polls CPU time and
+# I/O bytes across the command's entire process tree and kills it the moment
+# NEITHER has moved for <idle_secs>, or at <hard_secs> if it somehow never
+# goes idle first. See the NVIM_IDLE_TIMEOUT comment above for the incident
+# this replaces.
 run_with_inactivity_guard() {
-    local idle_secs="${1:-180}" hard_secs="${2:-1200}" pid elapsed=0 idle_elapsed=0 poll="${NVIM_GUARD_POLL:-10}" last=-1 now
+    local idle_secs="${1:-180}" hard_secs="${2:-1200}" pid elapsed=0 idle_elapsed=0 poll="${NVIM_GUARD_POLL:-10}" last="" now
     shift 2
     "$@" &
     pid=$!
     while kill -0 "$pid" 2>/dev/null; do
         sleep "$poll"
         elapsed=$((elapsed + poll))
-        now=$(_nvim_guard_cpu_ticks "$pid")
+        now=$(_nvim_guard_activity "$pid")
         if [ "$now" = "$last" ]; then
             idle_elapsed=$((idle_elapsed + poll))
         else
@@ -630,10 +658,10 @@ run_with_inactivity_guard() {
         fi
         last="$now"
         if [ "$idle_elapsed" -ge "$idle_secs" ] || [ "$elapsed" -ge "$hard_secs" ]; then
-            warn "pid ${pid}: $([ "$idle_elapsed" -ge "$idle_secs" ] && echo "no CPU progress in its process tree for ${idle_elapsed}s" || echo "hard limit ${hard_secs}s reached") — killing instead of waiting out the rest of ${hard_secs}s"
-            kill -TERM "$pid" 2>/dev/null
+            warn "pid ${pid}: $([ "$idle_elapsed" -ge "$idle_secs" ] && echo "no CPU or I/O progress in its process tree for ${idle_elapsed}s" || echo "hard limit ${hard_secs}s reached") — killing instead of waiting out the rest of ${hard_secs}s"
+            _nvim_guard_kill_tree "$pid" TERM
             sleep 2
-            kill -KILL "$pid" 2>/dev/null
+            _nvim_guard_kill_tree "$pid" KILL
             wait "$pid" 2>/dev/null
             return 124
         fi

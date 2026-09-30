@@ -75,7 +75,8 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     # test_nvim_inactivity_guard.sh for that guard's own tests); it has to be
     # defined here too or run_as_user's body just fails to find it.
     eval "$(awk '/^_nvim_guard_pid_tree\(\) \{/,/^}/' "$REPO/$script")"
-    eval "$(awk '/^_nvim_guard_cpu_ticks\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^_nvim_guard_activity\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^_nvim_guard_kill_tree\(\) \{/,/^}/' "$REPO/$script")"
     eval "$(awk '/^run_with_inactivity_guard\(\) \{/,/^}/' "$REPO/$script")"
     body=$(awk '/^run_as_user\(\) \{/,/^}/' "$REPO/$script")
     if [ -z "$body" ]; then
