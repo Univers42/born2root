@@ -858,6 +858,26 @@ git config --system http.lowSpeedTime 60
 git config --system core.compression 0
 echo "[OK] Git configured"
 
+### ─── 10b. Prefer IPv4 when a host offers both ─────────────────────────────
+# Belt-and-braces beside qemu_vm.sh's ipv6=off: that fix removes the address
+# QEMU's slirp hands out, but this guest image also boots under VirtualBox
+# and, later, real bridged networking, where a genuinely dual-stack address
+# CAN show up. glibc's getaddrinfo() sorts a AAAA ahead of an A record by
+# default (RFC 3484/6724), so a guest that picks up any IPv6 address at all
+# -- routable or not -- tries it first for every dual-stack host (GitHub,
+# Fastly, Cloudflare all answer AAAA), and the 2026-09-30 incident is what
+# happens next if that address doesn't actually route: first-boot downloads
+# stall on ACK/FIN retransmits UFW logs as blocked inbound, not as a failed
+# connection. This does not touch net.ipv6.conf.*.disable_ipv6: an address
+# that DOES work is left alone, only de-prioritized behind IPv4.
+cat >/etc/gai.conf <<'GAICONF'
+# born2root: prefer IPv4 over IPv6 when a host has both (see b2b-setup.sh
+# section 10b). precedence ::ffff:0:0/96 100 ranks an IPv4-mapped address
+# above a native IPv6 one without disabling IPv6 itself.
+precedence ::ffff:0:0/96  100
+GAICONF
+echo "[OK] getaddrinfo set to prefer IPv4 over IPv6 (/etc/gai.conf)"
+
 ### ─── 11. Monitoring script ────────────────────────────────────────────────
 # Already copied to /usr/local/bin/monitoring.sh by late_command
 chmod +x /usr/local/bin/monitoring.sh 2>/dev/null || true
