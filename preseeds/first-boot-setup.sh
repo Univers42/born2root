@@ -132,11 +132,18 @@ feature_off() {
     echo "[OFF] $1 — not in the '$B2B_PROFILE' profile"
 }
 # A BASE feature that failed: the build is wrong, say so where it is seen.
+# The console line is what the orchestrator's serial-log parser fails the
+# build on, but the console is not persisted anywhere -- a build examined
+# after the fact (e.g. after a manual kill, see qemu_vm.sh's ipv6=off note
+# for why one might be) has no way to answer "what actually failed" beyond
+# re-reading every provisioner's own log. This line puts the same verdict in
+# the one file that survives: /var/log/b2b-provision.log.
 feature_fail() {
     _FEAT_STATUS=failed
     echo "[FAIL] $1: $2"
     printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
     echo "B2B-FEATURE-FAILED $1: $2" >/dev/console 2>/dev/null || true
+    echo "B2B-FEATURE-FAILED $1: $2" >>/var/log/b2b-provision.log 2>/dev/null || true
 }
 # Free space on a mount, in MB, or "?" when df cannot say. Used in messages.
 avail_mb() { df -k "$1" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1024; f=1} END {if (!f) print "?"}'; }
