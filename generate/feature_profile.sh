@@ -84,6 +84,32 @@ RECIPE="$HERE/partition_recipe.sh"
 #                 /opt 110 -> 0    /usr/local/bin (install_devtools.sh). Claude
 #                                  Code's 414 MB were on / too, uncounted: the
 #                                  npm prefix never moved to /opt.
+#
+# 2026-09-27 -- Playwright, so the agents in the guest have a browser. An agent
+# that cannot see a page cannot check its own work, and the guest has no
+# display by design (a graphics server scores 0), so the browser is headless
+# and the screenshot is taken from inside.
+#
+# Its own feature row, and the `full` tier, because 700 MB does not fit
+# beside the standard set at the school quota: folded into devtools-extra, the
+# smallest build this project could offer went from SIZE_B2B=15 to 17 -- and
+# from 15 to 33 with the browsers on /opt. Same reason claude-code is `full`
+# and ai-local is `explicit`. On a 30 GB+ build it turns on by itself; at
+# 15 GB the picker offers it and the fit check says what it costs.
+#
+#   playwright       / 0 -> 700       658 MB measured for the browsers in
+#                                   /usr/lib/ms-playwright (chromium, its
+#                                   headless shell and ffmpeg -- what an agent
+#                                   actually launches) and ~40 MB of npm
+#                                   packages in /opt/npm-global (playwright +
+#                                   @playwright/mcp). On /, not /opt and not
+#                                   ~/.cache: /opt is a 569 MB volume at the
+#                                   school quota and 700 MB of browser there
+#                                   pushes the smallest build from SIZE_B2B=15
+#                                   to 33, while / is where nvim, Docker and
+#                                   Claude Code already are. firefox and webkit
+#                                   are named in install_devtools.sh but not
+#                                   downloaded -- another ~900 MB if asked.
 #   nvim-extras   /opt  0 -> 30    the bundled Excalidraw editor
 #   nvim, nvim-extras /home 300, 400: the plugin sets, 57 plugins + parsers +
 #                                  Mason, measured 321 MB in all on the
@@ -135,7 +161,13 @@ RECIPE="$HERE/partition_recipe.sh"
 #                                    install_nvim_extras.sh and pointed at by
 #                                    kulala_core.path, so it is one copy on the
 #                                    volume that exists for exactly this, and
-#                                    the /home column is honest again.
+#                                    the /home column is honest again. The 105
+#                                    is an upper bound kept on purpose: as of
+#                                    2026-09-27 the plugin's own repository is
+#                                    gone (see kulala_upstream in
+#                                    install_nvim_extras.sh), so nothing is
+#                                    spent, and the number has to still be
+#                                    right the day it comes back.
 #
 # 2026-09-12, fifth pass -- Claude Code returns, beside opencode rather than
 # instead of it (setup/install/ai/install_claude_code.sh explains why both).
@@ -249,6 +281,7 @@ nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
 nvim-extras        standard  214   135   0     259    nvim
 devtools-extra     standard  200   0     0     0      nodejs
+playwright         full      700   0     0     0      devtools-extra
 claude-code        full      320   0     0     0      -
 docker             standard  400   0     3300  0      -
 inception-data     standard  0     0     0     200    docker

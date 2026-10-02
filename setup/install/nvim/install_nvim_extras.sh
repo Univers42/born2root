@@ -46,7 +46,10 @@
 #   symbol outline        aerial.nvim
 #   breadcrumbs           nvim-navic, in the winbar
 #   project management    project.nvim + its telescope picker
-#   REST client           kulala.nvim (run .http files from the buffer)
+#   REST client           kulala.nvim (run .http files from the buffer), and
+#                         only while its repository is on github — it is not
+#                         as of 2026-09-27, so it is left out rather than
+#                         declared: see kulala_upstream
 #   SQL client            vim-dadbod + dadbod-ui + dadbod-completion — the VM
 #                         already runs MariaDB for WordPress, so this is wired
 #                         to it out of the box
@@ -1726,6 +1729,45 @@ LUAEOF
     chmod 644 "${cfg}/plugin/50-b2b-markdown.lua"
 }
 
+# ── Is kulala's repository still there? ─────────────────────────────────────
+# 2026-09-27: github.com answers 401 (which is what git sees for a repository
+# that is private or gone) for mistweaverco/kulala.nvim, and the same for the
+# kulala-core backend it downloads and for kulala.vscode, while their siblings
+# in the same account (kulala-ls, kulala-fmt, kulala-desktop) still clone: the
+# REST client and its backend were withdrawn, with no successor announced on
+# kulala.app, which still links the same dead URLs. That is not something this
+# project can fix, and a spec for a repository that no longer exists can never
+# install, so it must not be one the build tries six times and then fails on:
+# on the 2026-09-27 build the preinstall pass, two headless starts per attempt
+# and three attempts later, the whole nvim-extras feature was filed as failed
+# and `make all` stopped -- for a plugin whose only loss is <leader>ks.
+#
+# So the question is asked once, here, and the answer decides whether the REST
+# client is written into the config at all. Asked with git's own endpoint, so
+# it is the answer git itself would get, and only a POSITIVE 401/404/410 counts
+# as gone: a 000 (no network at all), a 403 (rate limit) or a curl that cannot
+# run leaves the plugin declared on purpose, because that is the transient kind
+# of failure the build is right to stop on.
+KULALA_SRC="https://github.com/mistweaverco/kulala.nvim"
+KULALA_UPSTREAM=""
+kulala_upstream() {
+    if [ -z "${KULALA_UPSTREAM:-}" ]; then
+        local code
+        code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            "${KULALA_SRC}/info/refs?service=git-upload-pack" 2>/dev/null) || code="000"
+        case "$code" in
+        401 | 404 | 410) KULALA_UPSTREAM="gone" ;;
+        200) KULALA_UPSTREAM="ok" ;;
+        *)
+            KULALA_UPSTREAM="unknown"
+            warn "could not tell whether ${KULALA_SRC} is reachable (HTTP ${code}) —"
+            warn "  assuming it is, so a real network problem still fails the build"
+            ;;
+        esac
+    fi
+    printf '%s\n' "$KULALA_UPSTREAM"
+}
+
 # ── The rest of the VS Code feature list ────────────────────────────────────
 # linting, debugger, tests, terminal, git UI, outline, breadcrumbs, REST, SQL, AI.
 #
@@ -1747,10 +1789,15 @@ LUAEOF
 # box wants. They are all lazy — nothing below starts a process until you press
 # its key — but if you routinely run several, give the VM more RAM.
 write_ide_lua() {
-    local cfg="$1" venv="$2"
+    local cfg="$1" venv="$2" kulala="true"
+    # The one thing in this file that can be false: kulala's repository is
+    # asked about once per run (see kulala_upstream), and a spec that cannot
+    # possibly install is left out instead of failing the build forever.
+    [ "$(kulala_upstream)" = "gone" ] && kulala="false"
     cat >"${cfg}/plugin/60-b2b-ide.lua" <<LUAHEAD
 -- 60-b2b-ide.lua — written by setup/install/nvim/install_nvim_extras.sh
 local VENV = '${venv}'
+local B2B_KULALA = ${kulala}
 LUAHEAD
     cat >>"${cfg}/plugin/60-b2b-ide.lua" <<'LUAEOF'
 
@@ -1762,7 +1809,7 @@ LUAHEAD
 --   <leader>o    symbol outline (aerial)
 --   <leader>gg   lazygit
 --   <C-\>        terminal
---   <leader>k…   REST client (kulala) — run .http files
+--   <leader>k…   REST client (kulala) — run .http files, only when B2B_KULALA
 --   <leader>D    SQL client (dadbod-ui)
 --   <leader>a…   AI assistant (codecompanion), when a backend is configured
 --
@@ -1781,7 +1828,7 @@ local function map(lhs, rhs, desc, mode)
 end
 local function exe(bin) return vim.fn.executable(bin) == 1 end
 
-B2B.add {
+local specs = {
   -- linting
   { src = gh 'mfussenegger/nvim-lint' },
   -- debugger. nvim-nio is a shared dependency of dap-ui AND neotest.
@@ -1796,8 +1843,6 @@ B2B.add {
   -- symbol outline + breadcrumbs
   { src = gh 'stevearc/aerial.nvim' },
   { src = gh 'SmiteshP/nvim-navic' },
-  -- REST client
-  { src = gh 'mistweaverco/kulala.nvim' },
   -- SQL client
   { src = gh 'tpope/vim-dadbod' },
   { src = gh 'kristijanhusak/vim-dadbod-ui' },
@@ -1805,6 +1850,22 @@ B2B.add {
   -- AI assistant
   { src = gh 'olimorris/codecompanion.nvim' },
 }
+
+-- REST client, last, and only when B2B_KULALA says its upstream is still
+-- there. github.com answers HTTP 404 for mistweaverco/kulala.nvim (and for
+-- the kulala-core backend it downloads), so a spec for it can only ever fail
+-- to clone -- and a spec that cannot install is what turned a convenience
+-- plugin somebody deleted upstream into a failed VM. It is a warning with a
+-- name, not a build this project can never finish; the spec comes back by
+-- itself on the next `make nvim` when the repository does.
+--
+-- The B2B_NO_PREINSTALL marker on that line is load-bearing in the other
+-- direction too: nvim-preinstall.lua (install_nvim.sh) reads declarations out
+-- of the config text, without running it, and would otherwise find this one
+-- and ask for the plugin the line above just said not to.
+if B2B_KULALA then specs[#specs + 1] = { src = gh 'mistweaverco/kulala.nvim' } end -- B2B_NO_PREINSTALL
+
+B2B.add(specs)
 
 -- ── Linting ────────────────────────────────────────────────────────────────
 -- kickstart already ships a working nvim-lint module (lua/kickstart/plugins/
@@ -2070,6 +2131,13 @@ end
 -- Write a .http file, put the cursor in a request, press <leader>ks. kulala
 -- drives `curl` and renders the response in a split.
 --
+-- The whole block is behind B2B_KULALA, which the installer writes after
+-- asking github.com whether the repository is still there. When it is not,
+-- none of this runs: no require to fail, no <leader>k mapping left defined to
+-- press, and — the part that matters to the build — no spec for the
+-- preinstall pass and the three attempts to try to clone. The reasoning is
+-- the long one above the spec, in the B2B.add list.
+--
 -- kulala parses .http files with its OWN treesitter grammar (kulala_http, from
 -- mistweaverco/tree-sitter-kulala-http), not the generic `http` one, and it
 -- manages that grammar itself: on setup it git-fetches the repo and shells out
@@ -2106,19 +2174,21 @@ end
 -- and default_view = 'body' are already the defaults, and they live under `ui`,
 -- not at the top level, so setting them there does nothing at all.
 local KULALA_CORE = '/opt/kulala/bin/kulala-core'
-try('kulala', function()
-  require('kulala').setup {
-    treesitter = { enable = exe 'tree-sitter' },
-    -- nil, not '', when it is absent: an empty string is falsy-but-set to
-    -- kulala's own check and would disable the download without providing a
-    -- binary, which is the one combination that cannot work.
-    kulala_core = { path = vim.fn.executable(KULALA_CORE) == 1 and KULALA_CORE or nil },
-  }
-  map('<leader>ks', function() require('kulala').run() end, '[K]ulala: [s]end request')
-  map('<leader>ka', function() require('kulala').run_all() end, '[K]ulala: send [a]ll')
-  map('<leader>kt', function() require('kulala').toggle_view() end, '[K]ulala: [t]oggle body/headers')
-  map('<leader>kc', function() require('kulala').copy() end, '[K]ulala: [c]opy as curl')
-end)
+if B2B_KULALA then
+  try('kulala', function()
+    require('kulala').setup {
+      treesitter = { enable = exe 'tree-sitter' },
+      -- nil, not '', when it is absent: an empty string is falsy-but-set to
+      -- kulala's own check and would disable the download without providing a
+      -- binary, which is the one combination that cannot work.
+      kulala_core = { path = vim.fn.executable(KULALA_CORE) == 1 and KULALA_CORE or nil },
+    }
+    map('<leader>ks', function() require('kulala').run() end, '[K]ulala: [s]end request')
+    map('<leader>ka', function() require('kulala').run_all() end, '[K]ulala: send [a]ll')
+    map('<leader>kt', function() require('kulala').toggle_view() end, '[K]ulala: [t]oggle body/headers')
+    map('<leader>kc', function() require('kulala').copy() end, '[K]ulala: [c]opy as curl')
+  end)
+end
 
 -- ── SQL client ─────────────────────────────────────────────────────────────
 -- This VM runs MariaDB for WordPress, so a SQL client earns its place. No
@@ -2367,8 +2437,13 @@ run_as_user() {
     local user="$1" home rc
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
+    # GIT_TERMINAL_PROMPT=0 for the reason install_nvim.sh gives at its own
+    # run_as_user: a clone of a private or deleted repository answers 401, git
+    # opens /dev/tty to ask for a username, and a process with no terminal in
+    # its group is stopped there (SIGTTIN) until the timeout kills it. Silent,
+    # and it costs the whole run.
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
-        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
+        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "GIT_TERMINAL_PROMPT=0" "$@"
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
@@ -2628,6 +2703,13 @@ install_kulala_core() {
 # trap, and the same shape of answer, as the markdown-preview binary.
 install_kulala_runtime() {
     local user="$1" home plugin
+    if [ "$(kulala_upstream)" = "gone" ]; then
+        # Nothing to set up, and nothing is wrong: the config does not declare
+        # the plugin (see kulala_upstream), so there is no checkout to build a
+        # grammar for and no backend to fetch.
+        log "${user}: kulala's repository is gone upstream — no REST client to set up"
+        return 0
+    fi
     home=$(getent passwd "$user" | cut -d: -f6)
     plugin="${home}/.local/share/nvim/site/pack/core/opt/kulala.nvim"
     [ -d "$plugin" ] || {
@@ -2870,6 +2952,21 @@ mark_feature_ok() {
 
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Neovim extras (buffers, files, git, sessions, movement) ==="
+
+# Asked before anything is written, so the loss is on the record in the log
+# that `make all` (and the guest's /var/log/b2b-nvim-install.log) keeps --
+# not something you find out by pressing <leader>ks on a guest that built fine.
+case "$(kulala_upstream)" in
+gone)
+    warn "kulala's repository is gone: ${KULALA_SRC} is not on github any more"
+    warn "  (HTTP 404, and the same for the kulala-core backend it downloads)."
+    warn "  The REST client is therefore NOT part of this guest: no <leader>k"
+    warn "  mappings, no .http requests, and 105 MB of /opt left unspent."
+    warn "  Nothing else is affected. The spec comes back by itself on the next"
+    warn "  'make nvim' once the repository is published again."
+    ;;
+esac
+
 install_deps
 install_mermaid_ascii || true
 write_profile

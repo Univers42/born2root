@@ -298,8 +298,14 @@ global)
     ok "global scope configured"
     ;;
 devtools)
+    # Playwright is 700 MB and its own manifest row, so `make devtools` on a
+    # build that did not ask for it must not quietly grow the disk by three
+    # quarters of a gigabyte. The guest is the record of what the fit check
+    # allowed, so ask it (as the claude-code step below does) and let
+    # INSTALL_PLAYWRIGHT=1 override for a machine that wants it anyway.
     run_provisioner setup/install/tools/install_devtools.sh \
-        install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_" "Herdr + opencode"
+        install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_ INSTALL_PLAYWRIGHT" \
+        "Herdr + opencode + Playwright"
     ok "devtools provisioning finished"
     ;;
 claude-code)

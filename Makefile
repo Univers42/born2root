@@ -1062,6 +1062,11 @@ global_scope:
 # Herdr (persistent terminal panes over SSH) + opencode (the AI coding agent).
 devtools:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
+# Herdr, opencode and Playwright. Playwright (the browser the AI agents drive)
+# is 700 MB and its own feature row, so the provisioner installs it only when
+# the guest's features.conf lists it -- a 30 GB+ build, or FEATURES=+playwright.
+#   make devtools INSTALL_PLAYWRIGHT=1    install it whatever the build asked for
+#   make devtools INSTALL_PLAYWRIGHT=0    leave it out even if features.conf says on
 
 # =========@@ datacenter: rerun a dc-* provisioner in a built guest @@=========
 # The same scripts first boot ran from the ISO (setup/install/dc/), pushed

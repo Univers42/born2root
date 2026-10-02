@@ -29,9 +29,21 @@ disk_gb = 15
 # Guest RAM in MB: "auto" is a quarter of this machine's, clamped to
 # 2048-8192 MB, on both backends. A number (10240 = 10 GB) is taken as is;
 # it applies at the next boot (make qemu_stop qemu_start, or make start_vm).
-ram_mb  = "auto"
-# Guest cores: "auto" is half of this machine's, clamped to 2-8.
-cpus    = "auto"
+#
+# 20480, not "auto": on a 30.5 GB seat "auto" tops out at 8192 MB, and that is
+# what this guest ran on -- which is fine for the school build and not fine for
+# agents working in it (several at once, each with a language server, plus a
+# build or a test run). 20 GB leaves the host ~10 GB, which is what the desktop
+# and the agent harnesses actually use. QEMU cannot change RAM on a live guest,
+# so this took effect at the next `make qemu_restart`; the value is kept here so
+# a rebuild boots the same size.
+ram_mb  = 20480
+# Guest cores: "auto" is half of this machine's, clamped to 2-8. 12 of this
+# seat's 16 vCPUs (8 physical cores + SMT): the 4 left are what the host needs
+# to stay responsive while the guest is saturated. More than the physical core
+# count buys SMT threads, which help agents waiting on I/O far more than they
+# help a compile -- hence 12 and not 16.
+cpus    = 12
 # auto | minimal | standard | full   (auto follows the disk size: minimal
 # under 15 GB, standard 15-29, full 30+)
 profile = "auto"

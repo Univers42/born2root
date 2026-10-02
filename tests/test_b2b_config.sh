@@ -126,8 +126,18 @@ check "get ai.budget_gb" "$(get_of "$DEFAULTS" ai.budget_gb)" 15
 check "get ai.llama_cpp" "$(get_of "$DEFAULTS" ai.llama_cpp)" b10970
 check "get ai.gpu" "$(get_of "$DEFAULTS" ai.gpu)" auto
 check "get B2B_SWAP_MB" "$(get_of "$DEFAULTS" B2B_SWAP_MB)" auto
+# Both spellings of vm.ram_mb / vm.cpus have to keep working: "auto" resolves to
+# empty so the Makefile applies its own 25%-and-clamp rule, and a number comes
+# through as itself. The shipped file says a number (20480/12), so "auto" is
+# asked of a variant rather than of it.
 check 'get B2B_VM_RAM_MB: "auto" is empty, as the Makefile expects' \
-    "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" ""
+    "$(get_of "$(variant ramauto 's/^ram_mb  = .*/ram_mb  = "auto"/')" B2B_VM_RAM_MB)" ""
+check 'get B2B_VM_CPUS: "auto" is empty, same reason' \
+    "$(get_of "$(variant cpuauto 's/^cpus    = .*/cpus    = "auto"/')" B2B_VM_CPUS)" ""
+check "get B2B_VM_RAM_MB: a number comes through" \
+    "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" 20480
+check "get B2B_VM_CPUS: a number comes through" \
+    "$(get_of "$DEFAULTS" B2B_VM_CPUS)" 12
 check "get B2B_FEATURES: all auto means empty, so the picker still runs" \
     "$(get_of "$DEFAULTS" B2B_FEATURES)" ""
 check "get B2B_NVIM_USERS" "$(get_of "$DEFAULTS" B2B_NVIM_USERS)" dlesieur
@@ -179,7 +189,8 @@ refuse "vm.name with a space" vm.name 's/^name    = "debian"/name    = "my vm"/'
 refuse "vm.backend nonsense" vm.backend 's/^backend = "auto"/backend = "hyperv"/'
 refuse "vm.disk_gb below 8" vm.disk_gb 's/^disk_gb = 15/disk_gb = 4/'
 refuse "vm.disk_gb quoted" vm.disk_gb 's/^disk_gb = 15/disk_gb = "15"/'
-refuse "vm.ram_mb below 512" vm.ram_mb 's/^ram_mb  = "auto"/ram_mb  = 128/'
+refuse "vm.ram_mb below 512" vm.ram_mb 's/^ram_mb  = .*/ram_mb  = 128/'
+refuse "vm.cpus of zero" vm.cpus 's/^cpus    = .*/cpus    = 0/'
 refuse "vm.profile nonsense" vm.profile 's/^profile = "auto"/profile = "enormous"/'
 refuse "vm.ai_mode nonsense" vm.ai_mode 's/^ai_mode = "off"/ai_mode = "maybe"/'
 refuse "an unknown key in [vm]" "vm.nmae" 's/^name    = "debian"/nmae = "debian"/'

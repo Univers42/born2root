@@ -557,8 +557,18 @@ run_as_user() {
     local user="$1" home rc
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
+    # GIT_TERMINAL_PROMPT=0 because a git that wants a username must not ask
+    # for one here. A private or deleted repository answers 401, git opens
+    # /dev/tty to ask for credentials, and these runs have no terminal in
+    # their group: the clone is STOPPED (SIGTTIN) and stays that way until the
+    # `timeout` above kills it, so one unreachable plugin costs the whole
+    # 900 s of this run and the log says nothing at all. Measured 2026-09-27
+    # on mistweaverco/kulala.nvim, whose repository is no longer public: git
+    # sat in state T for the full timeout. With this set it fails in a second,
+    # with "could not read Username ... terminal prompts disabled", which is
+    # the reason worth having.
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
-        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
+        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "GIT_TERMINAL_PROMPT=0" "$@"
     if [ "$user" = "root" ]; then
         timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else
@@ -724,6 +734,24 @@ local mode = vim.g.b2b_verify_mode or 'all'
 local problems = {}
 local function problem(fmt, ...) problems[#problems + 1] = fmt:format(...) end
 
+-- A PROBLEM line is one line, but it has to be the one that says something.
+-- vim.pack's aggregate error is a bare "vim.pack:" on the first line and puts
+-- the reason -- which plugin, and what git said -- on the lines after it, so
+-- the first-line-only flattening this replaces reported "vim.pack:" and
+-- nothing else for every clone failure in the build. Measured 2026-09-27, on
+-- the kulala one: three PROBLEM lines, none of which named a cause, and a
+-- failed `make all` that took a reader to github.com to explain.
+local function oneline(err)
+  local kept = {}
+  for line in tostring(err):gmatch '[^\n]+' do
+    line = vim.trim(line)
+    if line ~= '' and not line:match '^vim%.pack:$' then kept[#kept + 1] = line end
+  end
+  if #kept == 0 then return (tostring(err):gsub('\n.*', '')) end
+  local out = table.concat(kept, ' | ')
+  return #out > 220 and (out:sub(1, 217) .. '...') or out
+end
+
 -- 1. Plugins: everything vim.pack knows about is on disk with code in it. A
 -- directory is not enough -- a repository whose default branch was emptied
 -- upstream clones perfectly and installs nothing (leap.nvim on GitHub).
@@ -748,7 +776,7 @@ if _G.B2B then
     if st ~= 'ok' then problem('extras %s: %s', st, name) end
   end
   for _, err in ipairs(_G.B2B.problems or {}) do
-    problem('extras setup: %s', (err:gsub('\n.*', '')))
+    problem('extras setup: %s', oneline(err))
   end
 end
 
@@ -872,6 +900,13 @@ end
 
 -- Only declarations are read, never comments: the configs are full of
 -- documentation links, and https://docs.docker.com/... is not a plugin.
+--
+-- One exception to "every line that names a repository is a declaration": a
+-- line marked B2B_NO_PREINSTALL. A declaration the config makes CONDITIONAL
+-- (kulala's, which 60-b2b-ide.lua only asks for while its repository is
+-- published) is not one this pass may resurrect -- it has no way to know the
+-- condition held, and a plugin the config just decided to leave out must not
+-- come back as a clone attempt, a MISSING line and an error in this log.
 local hosts = { ['github.com'] = true, ['codeberg.org'] = true, ['gitlab.com'] = true }
 local cfg = vim.fn.stdpath 'config'
 local seen, specs = {}, {}
@@ -899,7 +934,7 @@ end
 local function name_of(url) return (url:gsub('%.git$', ''):match '[^/]+$') end
 for _, file in ipairs(vim.fn.globpath(cfg, '**/*.lua', false, true)) do
   for _, line in ipairs(vim.fn.readfile(file)) do
-    if not line:match '^%s*%-%-' then
+    if not line:match '^%s*%-%-' and not line:find('B2B_NO_PREINSTALL', 1, true) then
       local urls = {}
       -- `gh 'owner/repo'`: the helper both kickstart and the b2b layer use,
       -- and it is only ever used for a plugin.
@@ -939,7 +974,13 @@ for _, spec in ipairs(specs) do
 end
 print(('preinstall: %d declared, %d on disk, %d missing%s'):format(
   #specs, #specs - #missing, #missing, ok and '' or ' (vim.pack.add errored)'))
-if not ok then print('  ' .. tostring(err):gsub('\n.*', '')) end
+if not ok then
+  -- Not the first line, and not the first line only: vim.pack's aggregate
+  -- error opens with a bare "vim.pack:" and names the cause on the lines
+  -- after it, so printing only the first line printed "vim.pack:" and told
+  -- the reader nothing about which plugin or why.
+  print('  ' .. (tostring(err):gsub('\n%s*\n?', ' | '):sub(1, 300)))
+end
 -- Move the pinned plugins onto their declared version. A fresh clone is
 -- already there and this is one fetch each; a checkout an earlier pass made
 -- without the pin (the blink.cmp v2 above, on every guest built before this

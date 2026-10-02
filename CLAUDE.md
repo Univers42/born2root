@@ -288,6 +288,60 @@ parser, language server or prebuilt binary is missing. A headless
 to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
 `/opt/excalidraw` and smoke-tests its server before returning.
 
+**The one exception is a repository that no longer exists.**
+`install_nvim_extras.sh`'s `kulala_upstream()` asks github with git's own
+endpoint (`/info/refs?service=git-upload-pack`) and only a positive
+401/404/410 counts as gone; that leaves kulala's spec, its setup block and its
+`<leader>k…` mappings out of the generated config entirely (a flag in the
+LUAHEAD header, so the heredoc never needs a second copy), which is what keeps
+`nvim-verify.lua`'s verdict clean. A 403, a 000 or a curl that cannot run keeps
+the spec declared on purpose — those are machine faults, and the build should
+still stop on them. The same reasoning is why the error text of a clone failure
+is flattened onto one line *keeping* the reason: `vim.pack`'s aggregate error
+opens with a bare `vim.pack:` and names the cause below it, and the old
+first-line-only flattening printed "vim.pack:" for every failure.
+`tests/test_nvim_kulala_upstream.sh` pins all of it (stubbed curl, the real
+`write_ide_lua`, the real preinstall scraper, and the generated config executed
+in a headless nvim).
+
+A third trap lives in `run_as_user`, in both installers: every headless run
+gets `GIT_TERMINAL_PROMPT=0`. A clone of a private or deleted repository
+answers 401, `git` opens `/dev/tty` for a username, and a process with no
+terminal in its process group is **stopped** there (SIGTTIN) until the `timeout`
+kills it — 900 s of nothing, per run, per attempt, and no line in any log.
+`tests/test_nvim_bootstrap_env.sh` checks the variable reaches the command. A
+conditional declaration also carries a `B2B_NO_PREINSTALL` marker on its own
+line: `nvim-preinstall.lua` reads declarations out of the config as text, so it
+would otherwise resurrect exactly the plugin the config just decided to leave
+out.
+
+**Playwright, for the agents.** `install_devtools.sh` installs `playwright` and
+`@playwright/mcp`, registers two MCP servers per agent (`playwright` for its own
+headless browser, `playwright-host` for the host's Chrome over the
+`RemoteForward 9222` in the generated ssh block) and verifies both with a
+bounded handshake (`playwright-mcp-check.js`). Four things there are not
+obvious and each one cost a run:
+
+- The feature is a **`playwright` row in the `full` tier**, not part of
+  `devtools-extra`: 700 MB beside the standard set pushes the smallest build from
+  `SIZE_B2B=15` to 17. The provisioner reads `/etc/b2b/features.conf`; a build
+  that said no must never grow by 700 MB because a default crept in.
+- **Browsers on `/`** (`/usr/lib/ms-playwright`), not `~/.cache` and not `/opt`:
+  one copy for every account, and `/opt` is a 569 MB volume at the school quota
+  where 700 MB of browser would push the minimum build to 33.
+- **The profile file carries values, not expressions.** Its heredoc is
+  unquoted, so a literal `${NODE_PATH:-}` in it is expanded by the root
+  installer writing it — and shipped an empty `NODE_PATH`, which is
+  `MODULE_NOT_FOUND` on the next run with a working install.
+- **Never register through an agent's CLI.** `claude mcp add` verifies by
+  launching the server; through `runuser` with a pty that wait does not end
+  (120 s a call, the launched server left holding the terminal, `make devtools`
+  returning nothing after the script had exited). The configs are merged
+  directly, and `run_as_agent` writes to a file with stdin on `/dev/null` so
+  nothing a command launches can hold the pty.
+
+`tests/test_devtools_playwright.sh` pins all of it, hermetically (npm stubbed).
+
 ### One number: `SIZE_B2B`
 
 `SIZE_B2B` (GB, default 15 = the school quota) derives everything:

@@ -1226,7 +1226,16 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          # listen on the guest's loopback only; carrying them over the ssh
          # session makes the URLs Neovim prints work in the host's browser.
          "    LocalForward 8420 127.0.0.1:8420",
-         "    LocalForward 8421 127.0.0.1:8421", ""]
+         "    LocalForward 8421 127.0.0.1:8421",
+         # The other way round: Chrome's DevTools protocol on the HOST, at
+         # 127.0.0.1:9222 (started with --remote-debugging-port=9222
+         # --user-data-dir=/tmp/chrome-cdp-profile). A browser MCP server or
+         # an agent inside the guest can only drive a browser it can reach, and
+         # the host's Chrome is the one with a logged-in profile, so the guest's
+         # localhost:9222 is forwarded BACK to the host's. Costs nothing when
+         # nothing is listening there: a forward that is never used binds
+         # nothing in the guest but the one loopback port.
+         "    RemoteForward 9222 localhost:9222", ""]
 text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(block)
 open(path, "w").write(text)
 print("wrote the b2b block for port " + port)

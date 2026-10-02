@@ -85,6 +85,12 @@ nodejs         = false
 pytools        = false
 devtools-extra = false
 claude-code    = false
+# The browser the agents drive. Off here for the same reason as the rows above:
+# a server image has no editor and no agent, and the feature is `full` tier, so
+# leaving it to size would switch on 700 MB of chromium for a machine that will
+# never call it -- and it requires devtools-extra, which is off here. A host that
+# does want agents on its server image asks by name: FEATURES="+playwright".
+playwright     = false
 # the machine
 docker         = true
 # the datacenter (a bundle: generate/feature_profile.sh expands it)

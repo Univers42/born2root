@@ -3,13 +3,18 @@
 # verdict a successful re-run leaves behind. Both are host-testable: the
 # functions are lifted out of the scripts, with runuser and getent stubbed.
 #
-# 1. run_as_user runs from the user's HOME. The bug this pins: at first boot
+# 1. run_as_user runs from the user's HOME, and hands git a no-prompt
+#    environment. The HOME bug this pins: at first boot
 #    install_nvim.sh runs from cron's /root (mode 700), runuser kept that
 #    directory, and vim.pack -- which spawns git with nvim's working directory
 #    as `cwd` -- hit EACCES inside its async task and dropped the error. On the
 #    2026-09-12 QEMU build that was 0 of 58 plugins on disk with every run
 #    saying "100% Installing plugins" and exiting 0. The cwd here is a mode-000
 #    directory, so the old function prints it and the fixed one prints $HOME.
+#    The GIT_TERMINAL_PROMPT half: a clone of a private or deleted repository
+#    (kulala's, on 2026-09-27) answers 401, git opens /dev/tty for a username,
+#    and with no terminal in its process group it is stopped there (SIGTTIN)
+#    until the `timeout` kills it -- 900 s of silence per run.
 #
 # 2. mark_feature_ok flips only its own feature's failed lines. The bug: a
 #    `make nvim` that fixed the guest cleared PROVISION_FAILED, but the "nvim
@@ -85,6 +90,9 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     # shellcheck disable=SC2016 # $CFLAGS is meant for the inner shell
     check "$name: parser compiles skip -Wuninitialized" \
         "$(run_as_user alice "${SCRIPT_SH:-bash}" -c 'printf %s "$CFLAGS"')" "-Wno-uninitialized"
+    # shellcheck disable=SC2016 # $GIT_TERMINAL_PROMPT is meant for the inner shell
+    check "$name: git may not ask for a username" \
+        "$(run_as_user alice "${SCRIPT_SH:-bash}" -c 'printf %s "$GIT_TERMINAL_PROMPT"')" "0"
     chmod 755 "$TMP/locked"
     cd "$REPO"
 done

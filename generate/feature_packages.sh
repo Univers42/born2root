@@ -34,6 +34,7 @@ webstack          apt: lighttpd mariadb-server php-fpm php-mysql img: -
 nodejs            apt: nodejs npm img: -
 pytools           apt: pipx img: -
 devtools-extra    apt: - img: -
+playwright        apt: (the libraries chromium needs, fetched by playwright install --with-deps) img: -
 claude-code       apt: - img: -
 docker            apt: docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin img: -
 inception-data    apt: (a reservation: the Inception volumes under ~/data) img: -
