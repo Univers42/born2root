@@ -30,7 +30,7 @@ check() {
     fi
 }
 
-# shellcheck disable=SC2329 # called by run_with_inactivity_guard, eval'd below
+# shellcheck disable=SC2317,SC2329 # called by run_with_inactivity_guard, eval'd below
 warn() { printf '[test] WARN: %s\n' "$*" >&2; }
 
 eval "$(awk '/^_nvim_guard_pid_tree\(\) \{/,/^}/' "$REPO/setup/install/nvim/install_nvim.sh")"
