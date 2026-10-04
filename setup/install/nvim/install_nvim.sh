@@ -850,6 +850,10 @@ LUAEOF
 local mode = vim.g.b2b_verify_mode or 'all'
 local problems = {}
 local function problem(fmt, ...) problems[#problems + 1] = fmt:format(...) end
+-- Said, never counted: something absent ON PURPOSE, with the reason that
+-- install_nvim_extras.sh wrote down when it decided to leave it out.
+local notes = {}
+local function note(fmt, ...) notes[#notes + 1] = fmt:format(...) end
 
 -- A PROBLEM line is one line, but it has to be the one that says something.
 -- vim.pack's aggregate error is a bare "vim.pack:" on the first line and puts
@@ -958,7 +962,17 @@ if mode == 'all' then
   if vim.fn.isdirectory(opt_all .. 'kulala.nvim') == 1
     and vim.fn.executable '/opt/kulala/bin/kulala-core' ~= 1
     and vim.fn.executable(vim.fn.stdpath 'data' .. '/kulala.nvim/bin/kulala-core') ~= 1 then
-    problem 'kulala-core missing (/opt/kulala/bin/kulala-core) — .http requests cannot run'
+    -- install_kulala_core() leaves /opt/kulala/kulala-core.skipped when the
+    -- asset is gone upstream (HTTP 404, now license-gated). That is a decision
+    -- with a reason, not a failed install: a NOTE keeps the message and does
+    -- not turn a feature that installed everything it could into a failure.
+    local mark = vim.env.B2B_KULALA_SKIP_MARK or '/opt/kulala/kulala-core.skipped'
+    if vim.fn.filereadable(mark) == 1 then
+      note('kulala-core skipped on purpose (%s) — .http requests cannot run',
+        vim.trim(table.concat(vim.fn.readfile(mark), ' ')))
+    else
+      problem 'kulala-core missing (/opt/kulala/bin/kulala-core) — .http requests cannot run'
+    end
   end
 
   -- Its treesitter grammar is the other half, and the other message you would
@@ -983,6 +997,7 @@ if mode == 'all' then
 end
 
 print(('verify (%s): %d plugins, %d parsers, %d problem(s)'):format(mode, #plugins, parsers_installed, #problems))
+for _, n in ipairs(notes) do print('  NOTE ' .. n) end
 for _, p in ipairs(problems) do print('  PROBLEM ' .. p) end
 if #problems > 0 then vim.cmd 'cquit 1' else vim.cmd 'qa' end
 LUAEOF

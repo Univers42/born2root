@@ -2727,6 +2727,15 @@ install_mkdp_binary() {
 # The version is read from the plugin checkout rather than pinned here, so it
 # follows kulala instead of drifting from it.
 KULALA_CORE_DIR="${KULALA_CORE_DIR:-/opt/kulala/bin}"
+# A skip that is a DECISION, not a failure, leaves this file behind and
+# nvim-verify.lua reads it: the asset answering 404 is upstream's change (the
+# download moved behind a license token), nothing a retry or a rebuild fixes,
+# and the 2026-10-04 build filed nvim-extras as failed over it -- verify
+# counted the missing binary as a PROBLEM, exit 1, a warning for a feature
+# that had installed everything it could. A download that failed any other way
+# (no network, a 5xx, a rate limit) writes nothing, so it still fails the
+# feature and `make nvim` retries it.
+KULALA_SKIP_MARK="${KULALA_SKIP_MARK:-$(dirname "$KULALA_CORE_DIR")/kulala-core.skipped}"
 install_kulala_core() {
     local plugin="$1" ver arch url dest tmp
     dest="${KULALA_CORE_DIR}/kulala-core"
@@ -2754,6 +2763,8 @@ install_kulala_core() {
     url="https://github.com/mistweaverco/kulala-core/releases/download/v${ver}/kulala-core-linux-${arch}"
     log "fetching kulala-core ${ver} (~103 MB) into ${KULALA_CORE_DIR}"
     mkdir -p "$KULALA_CORE_DIR"
+    # Whatever an earlier run decided, this attempt decides again.
+    rm -f "$KULALA_SKIP_MARK"
     tmp=$(mktemp "${KULALA_CORE_DIR}/.kulala-core.XXXXXX") || {
         warn "mktemp in ${KULALA_CORE_DIR} failed"
         return 0
@@ -2777,6 +2788,8 @@ install_kulala_core() {
         warn "url: ${url}"
         if [ "$http" = 404 ]; then
             warn "the asset no longer exists: upstream now serves kulala-core from core.kulala.app with a license token"
+            printf 'v%s: HTTP 404, upstream now serves it from core.kulala.app with a license token\n' \
+                "$ver" >"$KULALA_SKIP_MARK" 2>/dev/null || true
         fi
         warn "skipping kulala-core — .http requests will not run (everything else is installed)"
         warn "to add it later: set KULALA_CORE_LICENSE_TOKEN and open an .http file in nvim, or set kulala_core.path"
@@ -2799,6 +2812,7 @@ install_kulala_core() {
         return 0
     }
     printf '%s\n' "$ver" >"${KULALA_CORE_DIR}/version.txt"
+    rm -f "$KULALA_SKIP_MARK"
     log "kulala-core ${ver} installed at ${dest}"
 }
 
