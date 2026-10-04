@@ -605,6 +605,15 @@ launch() {
     # B2B_QEMU_LEGACY_HW=1 restores the old AHCI + e1000 line exactly, slots
     # included. No snapshot is needed to roll back: swapping the controller
     # does not alter a byte of the disk image.
+    #
+    # -netdev user's slirp hands the guest an fec0::/64 SLAAC address whether
+    # or not the host has real IPv6 connectivity. On a host that only has
+    # IPv4 (measured 2026-09-30: curl -6 to github.com timed out, curl -4
+    # answered 200), the guest still preferred that address for every dual-
+    # stack download (GitHub, Fastly, Cloudflare), so first-boot provisioning
+    # stalled on retransmits that UFW logged as blocked inbound ACK/FIN, not
+    # as a failure to connect. ipv6=off removes the address at the source, so
+    # the guest never has a broken route to prefer.
     local disk_args=() net_args=()
     if [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
         disk_args=(
@@ -637,7 +646,7 @@ launch() {
         -m "$VM_RAM_MB" \
         "${disk_args[@]}" \
         "${cd_args[@]}" \
-        -netdev "user,id=net0$(build_hostfwd)" \
+        -netdev "user,id=net0,ipv6=off$(build_hostfwd)" \
         "${net_args[@]}" \
         -device virtio-rng-pci \
         -device virtio-balloon-pci,free-page-reporting=on \

@@ -125,6 +125,12 @@ if [ -z "${NVIM_USERS}" ]; then
 fi
 NVIM_BOOTSTRAP="${NVIM_BOOTSTRAP:-1}"
 NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-1200}"
+# See install_nvim.sh's NVIM_IDLE_TIMEOUT/NVIM_TOTAL_BUDGET comment: a flat
+# timeout waits out a STUCK run just as patiently as a working one, which is
+# what let the 2026-09-30 incident's idle `nvim --headless` burn a full
+# NVIM_BOOTSTRAP_TIMEOUT three times over.
+NVIM_IDLE_TIMEOUT="${NVIM_IDLE_TIMEOUT:-180}"
+NVIM_TOTAL_BUDGET="${NVIM_TOTAL_BUDGET:-1800}"
 NVIM_SESSION_DIR_NAME="${NVIM_SESSION_DIR_NAME:-.nvim-sessions}"
 # Must match install_nvim.sh — that script builds the venv (for pynvim), this
 # one adds debugpy to it and points nvim-dap at the same interpreter.
@@ -2433,6 +2439,84 @@ wait_nvim_jobs() {
 # CFLAGS=-Wno-uninitialized: this layer's B2B.parsers is what adds gitcommit,
 # whose parser tree-sitter's default -Wall compile cannot fit in a 2 GB guest
 # (the measurement is in install_nvim.sh).
+#
+# Same inactivity guard as install_nvim.sh's run_as_user, and for the same
+# incident: a flat `timeout` waits out a STUCK run exactly as patiently as a
+# working one.
+_nvim_guard_pid_tree() {
+    local root="$1" qfile sfile pid kid
+    qfile=$(mktemp /var/tmp/b2b-guard-q.XXXXXX) || return 1
+    sfile=$(mktemp /var/tmp/b2b-guard-s.XXXXXX) || {
+        rm -f "$qfile"
+        return 1
+    }
+    printf '%s\n' "$root" >"$qfile"
+    printf '%s\n' "$root" >"$sfile"
+    while [ -s "$qfile" ]; do
+        pid=$(head -n1 "$qfile")
+        sed -i '1d' "$qfile"
+        ps -o pid= --ppid "$pid" 2>/dev/null | while read -r kid; do
+            [ -n "$kid" ] || continue
+            grep -qx "$kid" "$sfile" 2>/dev/null && continue
+            printf '%s\n' "$kid" >>"$sfile"
+            printf '%s\n' "$kid" >>"$qfile"
+        done
+    done
+    cat "$sfile"
+    rm -f "$qfile" "$sfile"
+}
+# See install_nvim.sh's _nvim_guard_activity comment: activity is CPU time
+# (utime+stime) OR I/O moved (rchar+wchar, including socket reads) across
+# the whole process tree, either one, computed in one tree walk.
+_nvim_guard_activity() {
+    local pid
+    _nvim_guard_pid_tree "$1" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        awk '{n = split($0, a, ")"); rest = a[n]; split(rest, f); print f[12] + f[13] + 0}' \
+            "/proc/${pid}/stat" 2>/dev/null
+        awk '/^rchar:/ { r = $2 } /^wchar:/ { w = $2 } END { print "io", r + w + 0 }' \
+            "/proc/${pid}/io" 2>/dev/null
+    done | awk '$1 == "io" {i += $2; next} {c += $1} END {print c + 0, i + 0}'
+}
+# See install_nvim.sh's _nvim_guard_kill_tree comment: backgrounding with `&`
+# shares this script's own process group, so a plain `kill $pid` only reaches
+# the direct child and leaves anything IT background-spawned running
+# orphaned.
+_nvim_guard_kill_tree() {
+    local root="$1" sig="$2" pid
+    _nvim_guard_pid_tree "$root" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        kill "-$sig" "$pid" 2>/dev/null
+    done
+    kill "-$sig" "$root" 2>/dev/null
+}
+run_with_inactivity_guard() {
+    local idle_secs="${1:-180}" hard_secs="${2:-1200}" pid elapsed=0 idle_elapsed=0 poll="${NVIM_GUARD_POLL:-10}" last="" now
+    shift 2
+    "$@" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep "$poll"
+        elapsed=$((elapsed + poll))
+        now=$(_nvim_guard_activity "$pid")
+        if [ "$now" = "$last" ]; then
+            idle_elapsed=$((idle_elapsed + poll))
+        else
+            idle_elapsed=0
+        fi
+        last="$now"
+        if [ "$idle_elapsed" -ge "$idle_secs" ] || [ "$elapsed" -ge "$hard_secs" ]; then
+            warn "pid ${pid}: $([ "$idle_elapsed" -ge "$idle_secs" ] && echo "no CPU or I/O progress in its process tree for ${idle_elapsed}s" || echo "hard limit ${hard_secs}s reached") — killing instead of waiting out the rest of ${hard_secs}s"
+            _nvim_guard_kill_tree "$pid" TERM
+            sleep 2
+            _nvim_guard_kill_tree "$pid" KILL
+            wait "$pid" 2>/dev/null
+            return 124
+        fi
+    done
+    wait "$pid"
+    return $?
+}
 run_as_user() {
     local user="$1" home rc
     shift
@@ -2445,8 +2529,11 @@ run_as_user() {
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
         "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "GIT_TERMINAL_PROMPT=0" "$@"
     if [ "$user" = "root" ]; then
-        timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
-    else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
+    else
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" \
+            runuser -u "$user" -- "$@"
+    fi
     rc=$?
     wait_nvim_jobs "$user" "${home:-/nonexistent}" || true
     return "$rc"
@@ -2671,12 +2758,32 @@ install_kulala_core() {
         warn "mktemp in ${KULALA_CORE_DIR} failed"
         return 0
     }
-    if ! curl -fL --retry 3 --retry-delay 2 --max-time 600 -o "$tmp" "$url" 2>/dev/null; then
-        warn "could not download kulala-core — .http requests will not run"
-        warn "retry with: ${SCRIPT_SH:-bash} install_nvim_extras.sh, or set kulala_core.path yourself"
-        rm -f "$tmp"
+    # curl's own words are the only record of WHY: the 2026-10-04 build lost
+    # this download with no reason in any log, because stderr went to
+    # /dev/null. -f turns an HTTP error into exit 22 and hides the status, so
+    # -w brings it back. A 404 is final (the retry is for network blips), and
+    # it is what this URL answers today: kulala-core left the mistweaverco
+    # org for a license-gated download at core.kulala.app (kulala.nvim's
+    # lua/kulala/backend.lua reads KULALA_CORE_LICENSE_TOKEN), so there is
+    # nothing to retry or to time out -- the editor keeps working without it.
+    local errf http rc
+    errf=$(mktemp "${KULALA_CORE_DIR}/.curl-err.XXXXXX") || errf=/dev/null
+    http=$(curl -fL --retry 3 --retry-delay 2 --max-time 600 -sS \
+        -w '%{http_code}' -o "$tmp" "$url" 2>"$errf")
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        warn "could not download kulala-core ${ver}: curl exit ${rc}, HTTP ${http:-none}"
+        [ -s "$errf" ] && warn "curl said: $(tr '\n' ' ' <"$errf")"
+        warn "url: ${url}"
+        if [ "$http" = 404 ]; then
+            warn "the asset no longer exists: upstream now serves kulala-core from core.kulala.app with a license token"
+        fi
+        warn "skipping kulala-core — .http requests will not run (everything else is installed)"
+        warn "to add it later: set KULALA_CORE_LICENSE_TOKEN and open an .http file in nvim, or set kulala_core.path"
+        rm -f "$tmp" "$errf"
         return 0
     fi
+    rm -f "$errf"
     # Upstream publishes no checksum beside the asset. What a rate-limited or
     # redirected download actually gives you is an HTML page saved under the
     # right name, so prove it is a Linux executable before installing it.
@@ -2801,6 +2908,10 @@ bootstrap_user() {
             sed 's/^/[nvim-extras]     /' || true
     fi
 
+    # See install_nvim.sh's bootstrap_user for why this is wall-clock
+    # (date +%s) and bounds the whole loop, not one attempt of it.
+    local _bootstrap_start _bootstrap_now
+    _bootstrap_start=$(date +%s)
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"
@@ -2812,6 +2923,12 @@ bootstrap_user() {
         if [ "$NVIM_ENOSPC" = "1" ]; then
             warn "${user}: stopping after attempt ${attempt} — the volume is full, retrying cannot help"
             check_home_space "$user" || true
+            BOOTSTRAP_FAILED=1
+            return 1
+        fi
+        _bootstrap_now=$(date +%s)
+        if [ "$((_bootstrap_now - _bootstrap_start))" -ge "$NVIM_TOTAL_BUDGET" ]; then
+            warn "${user}: stopping after attempt ${attempt} — ${NVIM_TOTAL_BUDGET}s total budget spent, retrying would only cost more of it"
             BOOTSTRAP_FAILED=1
             return 1
         fi

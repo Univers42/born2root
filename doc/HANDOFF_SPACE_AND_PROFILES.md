@@ -362,3 +362,36 @@ Fixed in born2root (both patches checked in under `fixes/`):
 Verified: with the guest's Dockerfile reverted to upstream's broken version,
 `make inception VM_NAME=b2r` detects the five lines, patches, builds, and ends
 `All required checks passed.` with exit 0. All four CI linters clean.
+
+## How `/var` is sized, and why it looks stuck at 60 GB
+
+The 2026-10-04 build with `VM_SIZE=60` showed `/var` at 26.2 G and it looked
+as if a bigger disk did nothing. It does grow; it just takes a fixed share.
+
+- `[disk] volumes` in `born2root.toml:254-261` gives every volume a floor, a
+  share of the *surplus* and a cap. `/var` is `share = "rest"` with no cap.
+- `generate/partition_recipe.sh:148-177`: `AVAIL` is the disk minus boot and
+  overhead; `SURPLUS = AVAIL - sum(floors) - swap`.
+- `generate/partition_recipe.sh:198-208`: every other volume gets
+  `floor + SURPLUS * share / 100` (clamped to its cap), and `/var` gets
+  `REST = AVAIL - everything else`. The shares of the others sum to 54 %
+  (`/` 25, `/home` 18, `/opt` 5, `/tmp` 3, `/var/log` 3), so `/var` ends up
+  with its 2 GB floor plus about 46 % of the surplus.
+- Measured with `make partitions SIZE_B2B=<n>`:
+
+| `SIZE_B2B` | `/var` (partman MB) |
+| --- | --- |
+| 15 | 4932 |
+| 50 | 21417 |
+| 60 | 26128 |
+| 100 | 44969 |
+
+26128 MB is 25.5 GiB: the guest's `df` shows 25-26 G after ext4 overhead. A
+bigger `VM_SIZE` therefore grows `/var` by about 0.46 GB per extra GB.
+Two things hide it:
+
+- `.b2b-features` pins the disk (`B2B_SELECT_SIZE_GB`, here 60) and the
+  Makefile builds at that size even when the command line asks for another;
+  check with `make features_select ARGS=--show`.
+- A relocated `/var` share needs a different table, not a bigger disk: raise
+  `/var`'s weight by lowering the other shares, or give `/var` a floor.
