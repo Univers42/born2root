@@ -2683,12 +2683,32 @@ install_kulala_core() {
         warn "mktemp in ${KULALA_CORE_DIR} failed"
         return 0
     }
-    if ! curl -fL --retry 3 --retry-delay 2 --max-time 600 -o "$tmp" "$url" 2>/dev/null; then
-        warn "could not download kulala-core — .http requests will not run"
-        warn "retry with: ${SCRIPT_SH:-bash} install_nvim_extras.sh, or set kulala_core.path yourself"
-        rm -f "$tmp"
+    # curl's own words are the only record of WHY: the 2026-10-04 build lost
+    # this download with no reason in any log, because stderr went to
+    # /dev/null. -f turns an HTTP error into exit 22 and hides the status, so
+    # -w brings it back. A 404 is final (the retry is for network blips), and
+    # it is what this URL answers today: kulala-core left the mistweaverco
+    # org for a license-gated download at core.kulala.app (kulala.nvim's
+    # lua/kulala/backend.lua reads KULALA_CORE_LICENSE_TOKEN), so there is
+    # nothing to retry or to time out -- the editor keeps working without it.
+    local errf http rc
+    errf=$(mktemp "${KULALA_CORE_DIR}/.curl-err.XXXXXX") || errf=/dev/null
+    http=$(curl -fL --retry 3 --retry-delay 2 --max-time 600 -sS \
+        -w '%{http_code}' -o "$tmp" "$url" 2>"$errf")
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        warn "could not download kulala-core ${ver}: curl exit ${rc}, HTTP ${http:-none}"
+        [ -s "$errf" ] && warn "curl said: $(tr '\n' ' ' <"$errf")"
+        warn "url: ${url}"
+        if [ "$http" = 404 ]; then
+            warn "the asset no longer exists: upstream now serves kulala-core from core.kulala.app with a license token"
+        fi
+        warn "skipping kulala-core — .http requests will not run (everything else is installed)"
+        warn "to add it later: set KULALA_CORE_LICENSE_TOKEN and open an .http file in nvim, or set kulala_core.path"
+        rm -f "$tmp" "$errf"
         return 0
     fi
+    rm -f "$errf"
     # Upstream publishes no checksum beside the asset. What a rate-limited or
     # redirected download actually gives you is an HTML page saved under the
     # right name, so prove it is a Linux executable before installing it.
