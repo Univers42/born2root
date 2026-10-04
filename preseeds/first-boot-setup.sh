@@ -98,11 +98,13 @@ feature_on() {
 # guest's shell (hellish) does not do the way bash does.
 _FEAT_BEFORE=""
 _FEAT_STATUS=ok
+_FEAT_ANNOUNCED=""
 _used_mb() { df -km "$1" 2>/dev/null | awk 'NR==2 {print $3}'; }
 feature_begin() {
     local name="$1" m
     shift
     _FEAT_STATUS=ok
+    _FEAT_ANNOUNCED=""
     _FEAT_BEFORE=""
     for m in "$@"; do
         _FEAT_BEFORE="${_FEAT_BEFORE}${m} $(_used_mb "$m")
@@ -126,10 +128,60 @@ feature_end() {
 $_FEAT_BEFORE
 FEATEOF
     echo "--- [$name] $status ($summary) ---"
+    # A feature that did not install is announced exactly once, as fatal or as
+    # a warning, whichever section noticed first: the sections used to flag
+    # only some of their failure paths, so the log the host reads back could
+    # say nothing about a feature the status file called failed.
+    case "$status" in
+    failed | no-space)
+        if [ -z "$_FEAT_ANNOUNCED" ]; then
+            if feature_essential "$name"; then
+                feature_fail "$name" "$status — see /var/log/first-boot.log, section [$name]"
+            else
+                feature_warn "$name" "$status — see /var/log/first-boot.log, section [$name]"
+            fi
+        fi
+        ;;
+    esac
 }
 feature_off() {
     printf '%s off - 0\n' "$1" >>/etc/b2b/features.status
     echo "[OFF] $1 — not in the '$B2B_PROFILE' profile"
+}
+# Which failures stop `make all`. Chosen from generate/feature_profile.sh's
+# manifest: the base and core tiers (debian-base, b2b-mandatory, devtools-apt,
+# nvim: the Born2beRoot subject and the editor first boot promises), plus what
+# the user asked for by name (hellish, apt-packages, nvim-shared) and the two
+# features everything else is ordered behind (docker, claude-code). Every other
+# row -- nvim-extras, devtools-extra, webstack, nodejs, pytools, ai-*, dc-* --
+# is a layer on a machine that is already good, and `make <name>` reruns it.
+ESSENTIAL_FEATURES=" debian-base b2b-mandatory devtools-apt nvim nvim-shared hellish apt-packages docker claude-code "
+feature_essential() {
+    case "$ESSENTIAL_FEATURES" in
+    *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+# The command that reruns an optional feature from the host.
+feature_retry() {
+    case "$1" in
+    nvim-extras) echo "make nvim" ;;
+    devtools-extra) echo "make devtools" ;;
+    dc-*) echo "make grobase (or make edge / make backup_install)" ;;
+    *) echo "make provision" ;;
+    esac
+}
+# An OPTIONAL feature that failed: filed as failed in features.status, listed in
+# /etc/b2b/FEATURE_WARNINGS, and printed as B2B-FEATURE-WARN to the console and
+# to /var/log/b2b-provision.log. The host reports it and exits 0; only
+# feature_fail (and PROVISION_FAILED) fails the build.
+feature_warn() {
+    _FEAT_STATUS=failed
+    _FEAT_ANNOUNCED=1
+    echo "[WARN] $1: $2"
+    printf '%s %s (retry: %s)\n' "$1" "$2" "$(feature_retry "$1")" >>/etc/b2b/FEATURE_WARNINGS
+    echo "B2B-FEATURE-WARN $1: $2 (retry: $(feature_retry "$1"))" >/dev/console 2>/dev/null || true
+    echo "B2B-FEATURE-WARN $1: $2 (retry: $(feature_retry "$1"))" >>/var/log/b2b-provision.log 2>/dev/null || true
 }
 # A BASE feature that failed: the build is wrong, say so where it is seen.
 # The console line is what the orchestrator's serial-log parser fails the
@@ -140,6 +192,7 @@ feature_off() {
 # the one file that survives: /var/log/b2b-provision.log.
 feature_fail() {
     _FEAT_STATUS=failed
+    _FEAT_ANNOUNCED=1
     echo "[FAIL] $1: $2"
     printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
     echo "B2B-FEATURE-FAILED $1: $2" >/dev/console 2>/dev/null || true
@@ -454,7 +507,7 @@ else
     # Same guard as the nvim section above, for the same reason: this layer's
     # plugins go to /home, and a full /home fails it invisibly.
     if ! check_disk_space /home 200; then
-        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
+        feature_warn nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
         NVIM_EXTRAS_STATUS=failed
     fi
     chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
@@ -463,6 +516,7 @@ else
         echo "[OK] Neovim extras installed (log: /var/log/b2b-nvim-install.log)"
     else
         echo "[FAIL] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+        feature_warn nvim-extras "install_nvim_extras.sh failed — see /var/log/b2b-nvim-install.log"
         NVIM_EXTRAS_STATUS=failed
     fi
     # The Excalidraw editor Neovim opens in the host's browser (:Excalidraw),
@@ -475,10 +529,12 @@ else
             echo "[OK] Excalidraw editor built (log: /var/log/b2b-nvim-install.log)"
         else
             echo "[FAIL] Excalidraw build reported errors — see /var/log/b2b-nvim-install.log"
+            feature_warn nvim-extras "install_excalidraw.sh failed — see /var/log/b2b-nvim-install.log"
             NVIM_EXTRAS_STATUS=failed
         fi
     else
         echo "[FAIL] Excalidraw — /root/install_excalidraw.sh is not in the ISO"
+        feature_warn nvim-extras "/root/install_excalidraw.sh is not in the ISO"
         NVIM_EXTRAS_STATUS=failed
     fi
     feature_end nvim-extras "$NVIM_EXTRAS_STATUS"
