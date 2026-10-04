@@ -140,6 +140,10 @@ make all B2B_CONFIG=profiles/school.toml
 `profiles/server.toml` — server deployment preset. Both files follow the same
 schema as `born2root.toml`; read their headers before editing.
 
+A project's own VM (a large `/var`, a fixed feature set) is one more file of
+the same kind, passed with `B2B_CONFIG`; `born2root.toml` stays the general
+defaults. How: `doc/PROJECT_VM.md`.
+
 ## born2root.toml: the one file people personalise
 
 `born2root.toml` at the repo root (TOML, tracked, edited in place) holds

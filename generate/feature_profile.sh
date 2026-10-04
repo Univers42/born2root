@@ -39,6 +39,7 @@
 #   feature_profile.sh --check      exit 1 with a reason when it does not fit
 #   feature_profile.sh --conf       the /etc/b2b/features.conf body
 #   feature_profile.sh --table      for humans (make features)
+#   feature_profile.sh --has NAME   exit 0 when NAME is on, 1 when it is off
 #
 # Env
 #   SIZE_B2B (15)  DISK_SIZE_MB  VM_RAM_MB (2048)   -- same as partition_recipe.sh
@@ -718,6 +719,12 @@ emit_table() {
 case "$MODE" in
 --resolve) emit_resolve ;;
 --conf) emit_conf ;;
+--has)
+    # Exit 0 when the feature is in this profile, 1 when it is not. What the
+    # host side asks before it touches the user's machine (make all, Inception).
+    known "${2:-}" || die "--has: unknown feature '${2:-}' (see --table)"
+    is_on "$2"
+    ;;
 --table)
     emit_table
     [ -z "$OVERFLOW" ]
@@ -730,7 +737,7 @@ case "$MODE" in
     printf 'profile=%s fits at SIZE_B2B=%s\n' "$PROFILE" "$SIZE_GB"
     ;;
 *)
-    echo "usage: $0 --resolve | --check | --conf | --table" >&2
+    echo "usage: $0 --resolve | --check | --conf | --table | --has <feature>" >&2
     exit 2
     ;;
 esac
