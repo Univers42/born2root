@@ -391,7 +391,17 @@ _build:
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
+# Inception's host side edits the user's browsers, desktop proxy and
+# ~/.local/bin, so it is opt-in: only a profile that includes the Inception
+# feature gets it. A build of anything else (a project VM, a server) leaves the
+# host alone; `make host_access` is the explicit way in.
+	@if SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
+		$(SCRIPT_SH) generate/feature_profile.sh --has inception-data; then \
+		VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh; \
+	else \
+		printf "$(C_BLUE)>$(C_RESET) host access for $(DOMAIN) skipped: no Inception in this profile ($(C_BOLD)make host_access$(C_RESET) to opt in)\n"; \
+	fi
 	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" $(SCRIPT_SH) setup/host/llm_host.sh build
 
 # Which backend would `make all` pick right now, and why?
