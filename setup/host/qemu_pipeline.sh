@@ -37,6 +37,7 @@ C_BOLD=$'\033[1m'
 C_GREEN=$'\033[32m'
 C_BLUE=$'\033[34m'
 C_RED=$'\033[31m'
+C_YELLOW=$'\033[33m'
 C_DIM=$'\033[2m'
 if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
     C_RESET=''
@@ -44,6 +45,7 @@ if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
     C_GREEN=''
     C_BLUE=''
     C_RED=''
+    C_YELLOW=''
     C_DIM=''
 fi
 phase() { printf "\n${C_BLUE}▶${C_RESET} ${C_BOLD}%s${C_RESET}\n" "$*"; }
@@ -196,13 +198,32 @@ if failed=$(ssh_q 'cat /etc/b2b/PROVISION_FAILED 2>/dev/null') && [ -n "$failed"
     ssh_q 'cat /etc/b2b/features.status 2>/dev/null' | sed 's/^/      /' >&2
     die "a required feature did not install at first boot — the profile was checked against the layout, so this is a wrong cost estimate or a network failure. Guest log: /var/log/b2b-provision.log"
 fi
-if bad=$(ssh_q 'grep -E " (failed|no-space) " /etc/b2b/features.status 2>/dev/null') && [ -n "$bad" ]; then
-    printf '%s\n' "$bad" | sed 's/^/      /' >&2
+# Failures split in two by the guest, not guessed here: an optional feature
+# (nvim-extras, devtools-extra, dc-*...) lists itself in
+# /etc/b2b/FEATURE_WARNINGS with the command that retries it, and is reported
+# with exit 0. Anything else recorded as failed is essential (see
+# ESSENTIAL_FEATURES in first-boot-setup.sh) and stops the build. One
+# nvim-extras failure on 2026-10-04 used to fail a build whose first boot had
+# otherwise finished in six minutes.
+warned=$(ssh_q 'cat /etc/b2b/FEATURE_WARNINGS 2>/dev/null' || true)
+bad=$(ssh_q 'grep -E " (failed|no-space) " /etc/b2b/features.status 2>/dev/null' || true)
+fatal=$(printf '%s\n' "$bad" | while read -r line; do
+    [ -n "$line" ] || continue
+    printf '%s\n' "$warned" | grep -q "^${line%% *} " || printf '%s\n' "$line"
+done)
+if [ -n "$warned" ]; then
+    # shellcheck disable=SC2059
+    printf "\n  ${C_YELLOW}!${C_RESET} optional features that did not install (the build still succeeded):\n" >&2
+    printf '%s\n' "$warned" | sed 's/^/      /' >&2
+    printf '    details: /var/log/first-boot.log and /var/log/b2b-provision.log in the guest\n' >&2
+fi
+if [ -n "$fatal" ]; then
+    printf '%s\n' "$fatal" | sed 's/^/      /' >&2
     # The why is in the guest, and a CI guest is gone once this exits: a
     # hellish CI run reported "devtools-extra failed / 23" and nothing else.
     # first-boot.log (0644) holds each feature between its "--- [name] ---"
     # and "--- [name] <status>" lines; print the last 60 of that section.
-    for name in $(printf '%s\n' "$bad" | awk '{ print $1 }' | sort -u); do
+    for name in $(printf '%s\n' "$fatal" | awk '{ print $1 }' | sort -u); do
         printf '\n    %s, from /var/log/first-boot.log:\n' "$name" >&2
         ssh_q awk -v n="$name" -f - /var/log/first-boot.log <<'AWK' | sed 's/^/      /' >&2
 index($0, "--- [" n "] ---") == 1 { on = 1 }
@@ -211,7 +232,7 @@ on && k > 1 && index($0, "--- [" n "] ") == 1 { exit }
 END { for (i = (k > 60 ? k - 59 : 1); i <= k; i++) print buf[i] }
 AWK
     done
-    die "features.status records a failure — see above. Guest log: /var/log/b2b-provision.log"
+    die "features.status records a failure of an essential feature — see above. Guest log: /var/log/b2b-provision.log"
 fi
 status=$(ssh_q 'cat /etc/b2b/features.status 2>/dev/null' || true)
 if [ -n "$status" ]; then
