@@ -13,13 +13,16 @@
 #                that pulls. Frontends (groot, osionos, transcendence) live
 #                on the host and talk to the gateway.
 #
-#   [disk]       / and /home give up share, /var takes it. The workstation
-#                image spent 11 GB on / and 6.4 GB on /home at 44 GB for
-#                nvim, npm caches and VS Code servers; without them those
-#                volumes need a fraction of that, and /var is the `rest`
-#                volume, so every point of share they release lands where
-#                the engines and their data live. Measured layout:
-#                `make partitions B2B_CONFIG=profiles/server.toml`.
+#   [disk]       50 GB, and / and /home give up share, /var takes it. The
+#                workstation image spent 11 GB on / and 6.4 GB on /home at
+#                44 GB for nvim, npm caches and VS Code servers; without
+#                them / needs 2 GB (3.6 GiB here) and /home only holds its
+#                floor, 1 GB for the VS Code and Inception reservations.
+#                /var is the `rest` volume, so every point of share they
+#                release lands where Docker, the engines and their data
+#                live: 34 GiB of 50, for 16.3 GB the dc-full set needs.
+#                Measured layout:
+#                `make partitions B2B_CONFIG=profiles/server.toml SIZE_B2B=50`.
 #
 #   [vm] name    "baas", not "debian": a different machine under
 #                disk_images/, so the destructive targets never confuse the
@@ -39,7 +42,7 @@
 [vm]
 name    = "baas"
 backend = "qemu"
-disk_gb = 44
+disk_gb = 50
 ram_mb  = "auto"
 cpus    = "auto"
 profile = "auto"
@@ -169,11 +172,11 @@ package = "max"
 [disk]
 swap_mb = "auto"
 volumes = [
-  { name = "root",    mount = "/",        floor_mb = 2816, share = 6,      cap_mb = 30720  },
-  { name = "home",    mount = "/home",    floor_mb = 512,  share = 2,      cap_mb = 102400 },
-  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 3,      cap_mb = 20480  },
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 1024, share = 0,      cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },
   { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
-  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 1,      cap_mb = 10240  },
-  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 2,      cap_mb = 20480  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 512,  share = 1,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 1024, share = 2,      cap_mb = 20480  },
   { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
 ]
