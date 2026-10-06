@@ -1,7 +1,8 @@
 #!/usr/bin/env hellish
 #
 # install_var_gc.sh — keeps /var and /var/log below 90% on every build
-# (var-gc), and the one command it will never run.
+# (var-gc), and the one command it will never run; and, the other half of
+# keeping a container host alive, restarts any container left unhealthy.
 #
 # WHY
 #   Docker lives on /var, the `rest` volume, and /var is what fills: the 44 GB
@@ -46,6 +47,7 @@
 #   sudo ./install_var_gc.sh          install the cleaner, its timers, the log caps, run once
 #   sudo b2b-var-gc                   run it now
 #   sudo b2b-var-gc --if-full         what the watch timer runs
+#   sudo b2b-autoheal                 restart every unhealthy container now
 set -u
 
 log() { printf '[var-gc] %s\n' "$*"; }
@@ -187,10 +189,64 @@ OnUnitActiveSec=10min
 [Install]
 WantedBy=timers.target
 UNITEOF
+
+# ── containers that lose a boot race ────────────────────────────────────────
+# At boot dockerd starts every `restart: unless-stopped` container at once,
+# with no regard for compose's depends_on, and it never acts on a healthcheck
+# by itself. A service that connects a second too early and does not retry
+# stays unhealthy for good: grobase's realtime (47e34af) logs "Failed to
+# start producer: PostgreSQL connect failed" (cold boot of 2026-10-07: 33/34
+# healthy, realtime unhealthy at +144 s, restarts=0). So once a minute every
+# container docker reports unhealthy is restarted. The real fix is a retry
+# in the service; this keeps the next such race from needing a person.
+# Caveat: a container unhealthy for a reason a restart cannot cure is
+# restarted each time it fails its healthcheck again; the journal
+# (journalctl -u b2b-autoheal) shows that loop rather than hiding it.
+cat >/usr/local/sbin/b2b-autoheal <<'HEALEOF'
+#!/bin/sh
+# b2b-autoheal — restart every container docker reports unhealthy. Installed
+# by setup/install/dc/install_var_gc.sh (born2root); its header says why.
+set -u
+command -v docker >/dev/null 2>&1 || exit 0
+docker info >/dev/null 2>&1 || exit 0
+rc=0
+for id in $(docker ps -q --filter health=unhealthy); do
+    name=$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null)
+    if docker restart "$id" >/dev/null 2>&1; then
+        printf 'b2b-autoheal: restarted %s (unhealthy)\n' "${name#/}"
+    else
+        printf 'b2b-autoheal: could not restart %s\n' "${name#/}" >&2
+        rc=1
+    fi
+done
+exit "$rc"
+HEALEOF
+chmod 755 /usr/local/sbin/b2b-autoheal
+cat >/etc/systemd/system/b2b-autoheal.service <<'UNITEOF'
+[Unit]
+Description=born2root: restart containers docker reports unhealthy
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/b2b-autoheal
+UNITEOF
+cat >/etc/systemd/system/b2b-autoheal.timer <<'UNITEOF'
+[Unit]
+Description=born2root: look for unhealthy containers every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+UNITEOF
+
 systemctl daemon-reload
-for t in b2b-var-gc.timer b2b-var-gc-watch.timer; do
+for t in b2b-var-gc.timer b2b-var-gc-watch.timer b2b-autoheal.timer; do
     systemctl enable --now "$t" >/dev/null 2>&1 || die "could not enable $t"
 done
 
 /usr/local/sbin/b2b-var-gc || log "WARN: /var or /var/log is still at 90% or more; see the lines above"
-log "timers active: systemctl list-timers 'b2b-var-gc*'"
+log "timers active: systemctl list-timers 'b2b-var-gc*' b2b-autoheal.timer"

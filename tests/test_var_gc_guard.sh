@@ -1,6 +1,7 @@
 #!/usr/bin/env hellish
 # The /var garbage collector must never touch a named volume, and must clean
-# harder, not wider, once /var or /var/log reaches 90%.
+# harder, not wider, once /var or /var/log reaches 90%. Its sibling, the
+# unhealthy-container watchdog, restarts and never removes.
 #
 # THE FAILURE IT PINS
 #   `docker system prune -a --volumes` and `docker volume prune` delete
@@ -50,6 +51,10 @@ cat >"$TMP/bin/docker" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$STUB_DIR/docker.log"
 case "$2" in prune) if [ -f "$STUB_DIR/drop" ]; then echo 50 >"$STUB_DIR/use"; fi ;; esac
+case "$1" in
+ps) cat "$STUB_DIR/unhealthy" 2>/dev/null ;;
+inspect) echo "/svc-$4" ;;
+esac
 exit 0
 EOF
 cat >"$TMP/bin/df" <<'EOF'
@@ -137,5 +142,27 @@ check "deep: rotated logs, /var/log/sudo pruned out" "$(grep -c -- '/var/log -xd
 check "deep: reports what is left" "$(printf '%s\n' "$out" | grep -c 'still 95% full' || true)" 1
 check "deep: shows docker's own accounting" "$(count '^system df$')" 1
 never_unsafe deep
+
+# --- b2b-autoheal ---------------------------------------------------------------
+awk "/^cat >\/usr\/local\/sbin\/b2b-autoheal <<'HEALEOF'\$/ { on = 1; next } /^HEALEOF\$/ { on = 0 } on" \
+    setup/install/dc/install_var_gc.sh >"$TMP/b2b-autoheal"
+chmod +x "$TMP/b2b-autoheal"
+heal() {
+    : >"$TMP/docker.log"
+    rc=0
+    out=$("$TMP/b2b-autoheal" 2>&1) || rc=$?
+    log=$(cat "$TMP/docker.log")
+}
+: >"$TMP/unhealthy"
+heal
+check "autoheal, all healthy: exit 0" "$rc" 0
+check "autoheal, all healthy: restarts nothing" "$(count '^restart')" 0
+printf 'a1\nb2\n' >"$TMP/unhealthy"
+heal
+check "autoheal asks docker for the unhealthy ones" "$(count '^ps -q --filter health=unhealthy$')" 1
+check "autoheal restarts each unhealthy container" "$(count '^restart ')" 2
+check "... by id" "$(count '^restart b2$')" 1
+check "... and names it" "$(printf '%s\n' "$out" | grep -c 'restarted svc-a1 (unhealthy)' || true)" 1
+check "autoheal never stops, kills or removes" "$(count '^stop\|^kill\|^rm\|prune')" 0
 
 exit "$fail"

@@ -224,7 +224,9 @@ hardcoded `bash`.
   re-pushes over SSH later. The `dc/` provisioners install grobase, edge
   (Tailscale/cloudflared), and backup (restic). `dc/install_var_gc.sh` is the
   exception, base tier in every build: a daily pass plus a 10-minute watch
-  that cleans harder once `/var` or `/var/log` reaches 90%, never volumes.
+  that cleans harder once `/var` or `/var/log` reaches 90%, never volumes,
+  and `b2b-autoheal`, which restarts any container left unhealthy (dockerd
+  ignores `depends_on` at boot, so a service can lose the race to postgres).
 - `setup/host/dc_lib.sh` is a shared library sourced by all datacenter host
   scripts. It resolves the secrets file, provides SSH helpers, and defines
   color output functions. Never run directly.

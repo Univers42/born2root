@@ -263,6 +263,7 @@ printf "\n${C_BOLD}Services${C_RESET}\n"
 row "docker" "$(g 'systemctl is-active docker')" "active"
 row "ssh" "$(g 'systemctl is-active ssh')" "active"
 row "var-gc 90% watch" "$(g 'systemctl is-active b2b-var-gc-watch.timer')" "active"
+row "unhealthy-container watchdog" "$(g 'systemctl is-active b2b-autoheal.timer')" "active"
 
 printf "\n"
 if [ "$fail" -eq 0 ]; then

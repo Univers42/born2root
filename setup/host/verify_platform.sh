@@ -13,7 +13,7 @@
 #   Kong container running                     snapshot younger than 2 h
 #   gateway answers on 127.0.0.1:8000        cloudflared present (dc-tunnel)
 #   NO engine port published off loopback
-#   var-gc timers (daily, 90% watch) active, refuses --volumes
+#   var-gc timers (daily, 90% watch, autoheal) active, refuses --volumes
 #   backup timer active
 #
 #   make verify_platform
@@ -77,6 +77,7 @@ fi
 # ── the two timers ──────────────────────────────────────────────────────────
 hard "var-gc daily timer active" "systemctl is-active b2b-var-gc.timer" active
 hard "var-gc 90% watch timer active" "systemctl is-active b2b-var-gc-watch.timer" active
+hard "unhealthy-container watchdog active" "systemctl is-active b2b-autoheal.timer" active
 hard "var-gc refuses --volumes (exit 2)" "/usr/local/sbin/b2b-var-gc --volumes >/dev/null 2>&1; echo rc=\$?" rc=2
 if on dc-backup; then
     hard "backup timer active" "systemctl is-active b2b-backup.timer" active
