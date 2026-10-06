@@ -1176,7 +1176,7 @@ datacenter:
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
-	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
+	@d=$$($(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --where); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi

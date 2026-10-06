@@ -15,7 +15,7 @@
 #   password manager too. That is the price of an encrypted backup.
 #
 # WHERE THE COPY GOES
-#   /sgoinfre/dlesieur/b2b-backups/<vm>/repo by default (BACKUP_DEST=…):
+#   /sgoinfre/students/<login>/b2b-backups/<vm>/repo by default (BACKUP_DEST=…):
 #   sgoinfre is off-limits for the VM DISK, by standing rule; a restic
 #   repository of a few hundred MB is what it is for. rsync when there is
 #   one, scp -r otherwise. The repository is plain files, encrypted at rest,
@@ -25,15 +25,32 @@
 #   make backup            password → backup in the guest → pull the repo
 #   make backup_verify     … and `restic check` the pulled copy (needs restic here)
 #   make restore           push the copy back into a (rebuilt) guest and load the newest snapshot
+#   backup_pull.sh --where print where the copy is (what `make datacenter` checks)
 set -u
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
 
-DEST="${BACKUP_DEST:-/sgoinfre/$(id -un)/b2b-backups/$VM_NAME}"
+# The default lives here and only here: /sgoinfre/students/<login>, like every
+# other sgoinfre path in the repo. It used to be /sgoinfre/<login> while
+# `make datacenter` looked for the copy under students/, so the rebuild path
+# never found the copy `make backup` had made. A copy at the old path is
+# still the one used when there is none at the new one.
+DEST="${BACKUP_DEST:-/sgoinfre/students/$(id -un)/b2b-backups/$VM_NAME}"
+legacy_dest="/sgoinfre/$(id -un)/b2b-backups/$VM_NAME"
+if [ -z "${BACKUP_DEST:-}" ] && [ ! -d "$DEST/repo" ] && [ -d "$legacy_dest/repo" ]; then
+    DEST=$legacy_dest
+fi
 VERIFY="${BACKUP_VERIFY:-0}"
 RESTORE=0
-case "${1:-}" in --verify) VERIFY=1 ;; --restore) RESTORE=1 ;; esac
+case "${1:-}" in
+--verify) VERIFY=1 ;;
+--restore) RESTORE=1 ;;
+--where)
+    printf '%s\n' "$DEST"
+    exit 0
+    ;;
+esac
 
 dc_connect
 
