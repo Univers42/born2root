@@ -58,14 +58,20 @@ set -u
 FEAT=/etc/b2b/features.conf
 BUILD=/etc/b2b/build.conf
 GROBASE_REPO="${GROBASE_REPO:-https://github.com/Univers42/grobase.git}"
-# 67279b7d = head of branch fix/laboratory-findings (what the Laboratory bench
-# found, repaired in grobase itself: WAF methods + GraphQL exclusion, pg_graphql
-# in the server image, migration 087, PostgREST graphql_public, SDK topic, the
-# ghcr realtime image, and REALTIME_ALLOWED_ORIGINS at the WebSocket upgrade).
-# It was 98eb2b74, four commits earlier, which predates the origin check
-# grobase_cors_guest.sh writes -- the socket then took REALTIME_ALLOWED_ORIGINS
-# and ignored it. Move to the merge commit once it lands on main.
-GROBASE_REF="${GROBASE_REF:-67279b7d}"
+# The pin is a commit on grobase's main that its CI built images for, because
+# the images are not built from this tree: they are pulled as :latest, which
+# CI builds from main's head, and only main commits get a per-commit
+# sha-<full sha> tag. A tree older than its images is a skew nobody sees until
+# a container dies: on 2026-10-06, at 5af95cdf (where fix/laboratory-findings
+# landed, 435 commits behind main), the :latest trino image stopped on the
+# old tree's config ("Environment variable is not set: CATALOG_MANAGEMENT";
+# main's tree no longer names it) and restarted forever, and mongo-init lost
+# the dial race that main's mongo-init retries. Before that the pin
+# was 67279b7d, on the fix branch itself, which a force-push erased ("ref not
+# found", every dc-* feature failed). So: main's head, by its full SHA (the
+# `git fetch origin <sha>` below takes no abbreviation). Moving it means
+# checking ghcr has sha-<new pin> images, the way realtime is tagged below.
+GROBASE_REF="${GROBASE_REF:-47e34af14a925e4b350191f6b75be7d075a4d49e}"
 GROBASE_DIR="${GROBASE_DIR:-/opt/grobase}"
 CONF=/etc/b2b/grobase.conf
 
@@ -136,13 +142,17 @@ fi
 # ("ref 98eb2b74 not found") although the commit was on the remote the whole
 # time. Widen the refspec first, then deepen; the ref-name fetch is the last
 # resort for a commit no branch reaches any more.
-if ! git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null; then
+# The checkout is forced: the patches below edit tracked compose files, so a
+# rerun at a new pin was refused ("local changes would be overwritten") and
+# reported as "ref not found". They are reapplied after every checkout, and
+# untracked files (.env, the secrets) are left alone.
+if ! git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" 2>/dev/null; then
     git -C "$GROBASE_DIR" remote set-branches origin '*' 2>/dev/null || true
     git -C "$GROBASE_DIR" fetch -q --unshallow origin 2>/dev/null ||
         git -C "$GROBASE_DIR" fetch -q origin 2>/dev/null || true
-    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null ||
+    git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" 2>/dev/null ||
         git -C "$GROBASE_DIR" fetch -q origin "$GROBASE_REF" 2>/dev/null || true
-    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" ||
+    git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" ||
         die "ref $GROBASE_REF not found in $GROBASE_REPO"
 fi
 cd "$GROBASE_DIR" || die "cannot enter $GROBASE_DIR"
