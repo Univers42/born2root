@@ -1208,10 +1208,23 @@ dc_run() { # <feature> <script> <mounts...>
         return 1
     fi
 }
+# A row whose cost is measured under another (one install serves both) takes
+# that row's status, and a failure is filed as a warning like the row's own:
+# the 2026-10-06 build warned dc-gateway's failure but filed its eleven
+# siblings as bare failures, which the host reads as essential, so an optional
+# grobase stopped the build (utils/first_boot.sh).
+dc_fold() { # <feature> <its row> <mount>
+    local status=failed
+    if grep -q "^$2 ok" /etc/b2b/features.status; then status=ok; fi
+    printf '%s %s %s 0\n' "$1" "$status" "$3" >>/etc/b2b/features.status
+    if [ "$status" = failed ]; then
+        printf '%s %s (retry: %s)\n' "$1" "failed with $2" "$(feature_retry "$1")" >>/etc/b2b/FEATURE_WARNINGS
+    fi
+}
 if feature_on dc-var-gc; then dc_run dc-var-gc install_var_gc.sh /var; fi
 if feature_on dc-netmesh || feature_on dc-tunnel; then
     dc_run dc-netmesh install_edge.sh / || true
-    feature_on dc-tunnel && printf 'dc-tunnel %s / 0\n' "$(grep -q '^dc-netmesh ok' /etc/b2b/features.status && echo ok || echo failed)" >>/etc/b2b/features.status
+    if feature_on dc-tunnel; then dc_fold dc-tunnel dc-netmesh /; fi
 fi
 if feature_on dc-gateway; then
     dc_run dc-gateway install_grobase.sh /var /opt || true
@@ -1220,7 +1233,7 @@ if feature_on dc-gateway; then
     for f in dc-identity dc-realtime dc-secrets dc-db-postgres dc-db-mysql dc-db-mongo \
         dc-db-redis dc-db-cockroach dc-db-mssql dc-objectstore dc-storage dc-observability; do
         if feature_on "$f"; then
-            printf '%s %s /var 0\n' "$f" "$(grep -q '^dc-gateway ok' /etc/b2b/features.status && echo ok || echo failed)" >>/etc/b2b/features.status
+            dc_fold "$f" dc-gateway /var
         else
             feature_off "$f"
         fi

@@ -192,12 +192,13 @@ crow() {
 # dashboard read "VM Start done" for the next 20 minutes while Debian was still
 # partitioning. A step is only allowed to say "done" once the thing it names has
 # actually finished.
-STEPS=("VirtualBox" "Preseeded ISO" "VM Setup" "OS Install" "First Boot")
-STEP_STATUS=("pending" "pending" "pending" "pending" "pending")
-STEP_DETAIL=("" "" "" "" "")
+STEPS=("VirtualBox" "Preseeded ISO" "VM Setup" "OS Install" "First Boot" "Provisioning")
+STEP_STATUS=("pending" "pending" "pending" "pending" "pending" "pending")
+STEP_DETAIL=("" "" "" "" "" "")
 DASHBOARD_LINES=0
 S_INSTALL=3
 S_BOOT=4
+S_PROV=5
 
 # Braille spinner (static frame per step — no background process)
 SPIN_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
@@ -1229,6 +1230,42 @@ setup_ssh_key_auth() {
     echo "  ℹ SSH key will be auto-copied to VM after first boot (via orchestrator wait loop)"
 }
 
+# Step 6 — first-boot-setup.sh has to finish, and finish clean: UFW, Docker
+# and the profile's features are installed there, after the unlock. The run
+# used to end at the unlock, so a failure there only reached the guest's MOTD
+# (utils/first_boot.sh has the whole story, shared with the QEMU pipeline).
+# The verdict's details wait in a file until the dashboard is done drawing.
+# shellcheck source=utils/first_boot.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/first_boot.sh"
+# shellcheck disable=SC2034 # read by utils/first_boot.sh
+FB_SSH=(ssh -p "$P_SSH" "${GUEST_LOGIN}@127.0.0.1")
+FB_LAST=""
+# shellcheck disable=SC2317 # both hooks are called by first_boot_wait
+fb_wait_tick() {
+    set_step "$S_PROV" working "$(($1 / 60))m$(($1 % 60))s  ${FB_LAST:-first-boot-setup.sh is running}"
+    sleep 15
+}
+# shellcheck disable=SC2317
+fb_progress() { FB_LAST=$1; }
+if [ "${STEP_STATUS[$S_BOOT]}" != "done" ]; then
+    set_step $S_PROV warn "skipped: the VM did not come up unlocked"
+else
+    set_step $S_PROV working "waiting for first-boot-setup.sh..."
+    fb_rc=0
+    first_boot_wait "${FIRST_BOOT_TIMEOUT:-1800}" || fb_rc=$?
+    case "$fb_rc" in
+    0)
+        if first_boot_verdict 2>"$LOG_DIR/first-boot-verdict"; then
+            set_step $S_PROV "done" "$FB_SUMMARY"
+        else
+            set_step $S_PROV fail "$FB_SUMMARY"
+        fi
+        ;;
+    75) set_step $S_PROV warn "still provisioning after $((FB_WAITED / 60))m (features.status moving): ssh b2b, then /var/log/b2b-provision.log" ;;
+    *) set_step $S_PROV fail "first boot never finished: features.status sat still 5 min (make console)" ;;
+    esac
+fi
+
 setup_host_ssh_config 2>/dev/null || true
 setup_vscode_remote_ssh 2>/dev/null || true
 setup_ssh_key_auth 2>/dev/null || true
@@ -1421,6 +1458,11 @@ row "    ${BLU}make re${RST}          destroy and rebuild"
 blank
 bot
 printf "\n"
+
+if [ -s "$LOG_DIR/first-boot-verdict" ]; then
+    cat "$LOG_DIR/first-boot-verdict" >&2
+    printf '\n' >&2
+fi
 
 # Exit non-zero when a step failed, so `make all` reports failure to the shell
 # instead of returning 0 after printing a red banner.

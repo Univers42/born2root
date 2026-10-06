@@ -283,9 +283,11 @@ Docker, WordPress, third-party tools, nvim, hellish plugins. It sources
 cost of each to `/etc/b2b/features.status` (one line per mount a feature
 touches), and on a required feature failing, or a firewall that is inactive or
 misses a configured port, prints `B2B-FEATURE-FAILED` to the serial console and
-records why in `/etc/b2b/PROVISION_FAILED`. A QEMU `make all` reads that file
-after first boot and fails; the VirtualBox orchestrator does not wait for first
-boot and never reads it, so there a failure only shows in the guest's MOTD.
+records why in `/etc/b2b/PROVISION_FAILED`. Both backends wait for first boot
+to finish (its `@reboot` line gone from `/etc/crontab`) and read that verdict
+through `utils/first_boot.sh`: an essential failure fails `make all`, an
+optional one (`/etc/b2b/FEATURE_WARNINGS`) is listed, and a timeout while
+`features.status` still moves exits 75.
 Provisioners are run through `run_logged`, never `provisioner | tee log`:
 without `pipefail` a pipeline's status is `tee`'s, so every provisioner used to
 report success whatever it did.

@@ -41,7 +41,6 @@ C_BOLD=$'\033[1m'
 C_GREEN=$'\033[32m'
 C_BLUE=$'\033[34m'
 C_RED=$'\033[31m'
-C_YELLOW=$'\033[33m'
 C_DIM=$'\033[2m'
 if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
     C_RESET=''
@@ -49,7 +48,6 @@ if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
     C_GREEN=''
     C_BLUE=''
     C_RED=''
-    C_YELLOW=''
     C_DIM=''
 fi
 phase() { printf "\n${C_BLUE}▶${C_RESET} ${C_BOLD}%s${C_RESET}\n" "$*"; }
@@ -128,122 +126,37 @@ phase "Host configuration"
 "${SCRIPT_SH:-bash}" "$QEMU_VM" ssh-config || die "could not write ~/.ssh/config"
 
 # ── 6. First boot must have FINISHED, and finished clean ────────────────────
-# The install watcher fails the build on B2B-FEATURE-FAILED, but only while
-# d-i runs. Most of the provisioning happens later, at first boot, from an
-# @reboot crontab entry with no watcher on it: a base feature failing there
-# wrote /etc/b2b/PROVISION_FAILED and flagged the MOTD, and `make all` still
-# exited 0 with "QEMU build finished". A build is not finished until first
-# boot is, so this waits for it and then reads the verdict off the guest.
-#
-# "Finished" is the marker first-boot-setup.sh leaves itself: its last step
-# removes its own @reboot line from /etc/crontab (world-readable, no sudo).
-# /etc/b2b/{PROVISION_FAILED,features.status} are 0644 for the same reason.
-ssh_q() {
-    timeout 25 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
-        b2b "$@" 2>/dev/null
-}
-FIRST_BOOT_TIMEOUT="${FIRST_BOOT_TIMEOUT:-1800}"
-waited=0
-until ssh_q 'echo ok' >/dev/null; do
-    [ "$waited" -ge 300 ] && die "ssh b2b never answered after the unlock. Look: make qemu_screenshot  |  make qemu_console"
-    sleep 10
-    waited=$((waited + 10))
-done
-ok "ssh b2b works: $(ssh_q hostname)"
+# Why, and how "finished" is read: utils/first_boot.sh.
+# shellcheck source=utils/first_boot.sh
+. "$REPO_ROOT/utils/first_boot.sh"
+fb_wait_tick() { spin_sleep 15 "first boot is provisioning the guest  $(($1 / 60))m$(($1 % 60))s"; }
+# shellcheck disable=SC2059
+fb_progress() { printf "  ${C_DIM}  %s${C_RESET}\n" "$1"; }
+
+first_boot_reachable || die "ssh b2b never answered after the unlock. Look: make qemu_screenshot  |  make qemu_console"
+ok "ssh b2b works: $(fb_ssh hostname)"
 
 # shellcheck disable=SC2059
 printf "  ${C_DIM}waiting for first boot to finish (nvim, hellish, then the profile's features)${C_RESET}\n"
-last=""
-last_changed_at=0
-until [ "$(ssh_q 'grep -c first-boot-setup /etc/crontab 2>/dev/null || true')" = 0 ]; do
-    if [ "$waited" -ge "$FIRST_BOOT_TIMEOUT" ]; then
-        # A build that outlives FIRST_BOOT_TIMEOUT is not necessarily a stuck
-        # one: first-boot-setup.sh runs a dozen features end to end (nvim,
-        # nvim-extras, docker, the dc-* provisioners...), and a slow network or
-        # a big profile can legitimately spend longer than the estimate below
-        # ssh into the guest still answers. The 2026-09-30 incident is the
-        # failure mode this replaces: the host called this a build failure
-        # while the guest was still inside a bounded retry and finished on its
-        # own a few minutes later (verify_guest: 41/41). features.status
-        # growing in the last 5 min is "still working"; unchanged that long
-        # (with every per-feature retry loop now capped -- see
-        # NVIM_TOTAL_BUDGET in install_nvim.sh/install_nvim_extras.sh -- is
-        # the closest this script can come to "actually stuck" without a
-        # process-tree view into the guest.
-        if [ "$((waited - last_changed_at))" -lt 300 ]; then
-            printf "\n  ${C_DIM}… first boot is still provisioning after %d min (features.status is still moving; guest reachable over SSH).${C_RESET}\n" "$((waited / 60))"
-            # shellcheck disable=SC2059
-            printf "  ${C_DIM}  Follow it with: make qemu_watch  |  make qemu_console  |  guest: /var/log/b2b-provision.log${C_RESET}\n\n"
-            # sysexits.h EX_TEMPFAIL: a real failure exits 1 above and below;
-            # this is neither success nor a proven failure, so `make all`
-            # should not report it as either.
-            exit 75
-        fi
-        die "first boot has not touched /etc/b2b/features.status in $(((waited - last_changed_at) / 60)) min — looks actually stuck, not just slow. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
-    fi
-    spin_sleep 15 "first boot is provisioning the guest  $((waited / 60))m$((waited % 60))s"
-    waited=$((waited + 15))
-    cur=$(ssh_q 'tail -n1 /etc/b2b/features.status 2>/dev/null')
-    if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
-        # shellcheck disable=SC2059
-        printf "  ${C_DIM}  %s${C_RESET}\n" "$cur"
-        last=$cur
-        last_changed_at=$waited
-    fi
-done
-ok "first boot finished after $((waited / 60))m$((waited % 60))s"
-
-if failed=$(ssh_q 'cat /etc/b2b/PROVISION_FAILED 2>/dev/null') && [ -n "$failed" ]; then
+fb_rc=0
+first_boot_wait "${FIRST_BOOT_TIMEOUT:-1800}" || fb_rc=$?
+case "$fb_rc" in
+0) ok "first boot finished after $((FB_WAITED / 60))m$((FB_WAITED % 60))s" ;;
+75)
     # shellcheck disable=SC2059
-    printf "\n  ${C_RED}✗${C_RESET} provisioning failed inside the guest (/etc/b2b/PROVISION_FAILED):\n" >&2
-    printf '%s\n' "$failed" | sed 's/^/      /' >&2
-    printf "\n    per feature (/etc/b2b/features.status):\n" >&2
-    ssh_q 'cat /etc/b2b/features.status 2>/dev/null' | sed 's/^/      /' >&2
-    die "a required feature did not install at first boot — the profile was checked against the layout, so this is a wrong cost estimate or a network failure. Guest log: /var/log/b2b-provision.log"
-fi
-# Failures split in two by the guest, not guessed here: an optional feature
-# (nvim-extras, devtools-extra, dc-*...) lists itself in
-# /etc/b2b/FEATURE_WARNINGS with the command that retries it, and is reported
-# with exit 0. Anything else recorded as failed is essential (see
-# ESSENTIAL_FEATURES in first-boot-setup.sh) and stops the build. One
-# nvim-extras failure on 2026-10-04 used to fail a build whose first boot had
-# otherwise finished in six minutes.
-warned=$(ssh_q 'cat /etc/b2b/FEATURE_WARNINGS 2>/dev/null' || true)
-bad=$(ssh_q 'grep -E " (failed|no-space) " /etc/b2b/features.status 2>/dev/null' || true)
-fatal=$(printf '%s\n' "$bad" | while read -r line; do
-    [ -n "$line" ] || continue
-    printf '%s\n' "$warned" | grep -q "^${line%% *} " || printf '%s\n' "$line"
-done)
-if [ -n "$warned" ]; then
+    printf "\n  ${C_DIM}… first boot is still provisioning after %d min (features.status is still moving; guest reachable over SSH).${C_RESET}\n" "$((FB_WAITED / 60))"
     # shellcheck disable=SC2059
-    printf "\n  ${C_YELLOW}!${C_RESET} optional features that did not install (the build still succeeded):\n" >&2
-    printf '%s\n' "$warned" | sed 's/^/      /' >&2
-    printf '    details: /var/log/first-boot.log and /var/log/b2b-provision.log in the guest\n' >&2
-fi
-if [ -n "$fatal" ]; then
-    printf '%s\n' "$fatal" | sed 's/^/      /' >&2
-    # The why is in the guest, and a CI guest is gone once this exits: a
-    # hellish CI run reported "devtools-extra failed / 23" and nothing else.
-    # first-boot.log (0644) holds each feature between its "--- [name] ---"
-    # and "--- [name] <status>" lines; print the last 60 of that section.
-    for name in $(printf '%s\n' "$fatal" | awk '{ print $1 }' | sort -u); do
-        printf '\n    %s, from /var/log/first-boot.log:\n' "$name" >&2
-        ssh_q awk -v n="$name" -f - /var/log/first-boot.log <<'AWK' | sed 's/^/      /' >&2
-index($0, "--- [" n "] ---") == 1 { on = 1 }
-on { buf[++k] = $0 }
-on && k > 1 && index($0, "--- [" n "] ") == 1 { exit }
-END { for (i = (k > 60 ? k - 59 : 1); i <= k; i++) print buf[i] }
-AWK
-    done
-    die "features.status records a failure of an essential feature — see above. Guest log: /var/log/b2b-provision.log"
-fi
-status=$(ssh_q 'cat /etc/b2b/features.status 2>/dev/null' || true)
-if [ -n "$status" ]; then
-    ok "every feature installed: $(printf '%s\n' "$status" | grep -c ' ok ') ok, $(printf '%s\n' "$status" | grep -c ' off ') off by profile"
-else
-    ok "no /etc/b2b/features.status on this guest (built before feature accounting) — nothing to verify"
-fi
+    printf "  ${C_DIM}  Follow it with: make qemu_watch  |  make qemu_console  |  guest: /var/log/b2b-provision.log${C_RESET}\n\n"
+    # sysexits.h EX_TEMPFAIL: neither success nor a proven failure, so
+    # `make all` should not report it as either.
+    exit 75
+    ;;
+*)
+    die "first boot has not touched /etc/b2b/features.status in the last 5 min ($((FB_WAITED / 60)) min in) — looks actually stuck, not just slow. Look: make qemu_console  |  guest: /var/log/b2b-provision.log"
+    ;;
+esac
+first_boot_verdict || die "$FB_SUMMARY"
+ok "$FB_SUMMARY"
 
 # shellcheck disable=SC2059
 printf "\n${C_GREEN}${C_BOLD}  QEMU build finished.${C_RESET}\n\n"
