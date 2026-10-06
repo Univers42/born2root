@@ -42,6 +42,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(readlink -f "$HERE/..")"
+. "$HERE/vm_path.sh"
 
 SPACE_BUDGET_GB="${SPACE_BUDGET_GB:-auto}"
 [ -n "$SPACE_BUDGET_GB" ] || SPACE_BUDGET_GB=auto
@@ -87,10 +88,17 @@ human() { awk -v k="$1" 'BEGIN { printf (k >= 1048576) ? "%.1f GB" : "%.0f MB", 
 # the report never implies the repo is holding something it is not.
 VM_KB=$(kb_of "$VM_PATH/$VM_NAME")
 
+# iso_dir, and the repo root where builds before it left theirs. Only the
+# ones inside the repo come off REPO_KB below.
 ISO_KB=0
-for iso in "$REPO_ROOT"/debian-*.iso; do
+ISO_IN_REPO_KB=0
+for iso in "$(iso_dir)"/debian-*.iso "$REPO_ROOT"/debian-*.iso; do
     [ -e "$iso" ] || continue
-    ISO_KB=$((ISO_KB + $(kb_of "$iso")))
+    iso_kb=$(kb_of "$iso")
+    ISO_KB=$((ISO_KB + iso_kb))
+    case "$(readlink -f "$iso")" in
+    "$REPO_ROOT"/*) ISO_IN_REPO_KB=$((ISO_IN_REPO_KB + iso_kb)) ;;
+    esac
 done
 
 # Disk images sitting in the repo that are NOT the VM being asked about. After
@@ -113,6 +121,7 @@ case "$VM_PATH_REAL" in
     for d in "$REPO_DISKS"/*; do
         [ -d "$d" ] || continue
         [ "${d##*/}" = "$VM_NAME" ] && continue
+        [ "${d##*/}" = iso ] && continue
         OTHER_VM_KB=$((OTHER_VM_KB + $(kb_of "$d")))
         OTHER_VM_LIST="$OTHER_VM_LIST $d"
     done
@@ -128,7 +137,7 @@ REPO_KB=$(kb_of "$REPO_ROOT")
 case "$VM_PATH_REAL/" in
 "$REPO_ROOT"/*) REPO_KB=$((REPO_KB - VM_KB)) ;;
 esac
-REPO_KB=$((REPO_KB - ISO_KB - OTHER_VM_KB))
+REPO_KB=$((REPO_KB - ISO_IN_REPO_KB - OTHER_VM_KB))
 [ "$REPO_KB" -lt 0 ] && REPO_KB=0
 
 TOTAL_KB=$((REPO_KB + ISO_KB + OTHER_VM_KB + VM_KB))

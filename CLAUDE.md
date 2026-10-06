@@ -435,7 +435,10 @@ after `_build`. Refusals and the confirmation both come before the install.
 
 Everything a backend writes lives under `$VM_PATH/$VM_NAME/`: the `.vdi` or
 `.qcow2`, pidfile, monitor socket, `serial.log`, and the `.built-on`,
-`.installed` and `.phase` stamps. `VM_PATH` defaults to `disk_images/` and is
+`.installed` and `.phase` stamps. The ISOs (netinst, extraction, preseeded
+image) sit beside them in `$VM_PATH/iso`: `iso_dir` in `utils/vm_path.sh` is
+the one answer, and `tests/test_iso_dir.sh` refuses a repo-root lookup coming
+back. `VM_PATH` defaults to `disk_images/` and is
 remembered in `disk_images/.vm_path.<vm>`, so a relocated VM needs no repeated
 `VM_PATH=`. Host ports (SSH from 4242, HTTP from 8082, HTTPS from 8443, and the
 app ports) are allocated by `utils/host_ports.sh`, walking past ports already in

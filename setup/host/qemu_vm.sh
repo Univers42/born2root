@@ -224,7 +224,7 @@ find_iso() {
     }
     # The glob is mode-specific (utils/luks_mode.sh): booting the other mode's
     # ISO would install the opposite of what was asked for, and say nothing.
-    find "$REPO_ROOT" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
+    find "$(iso_dir)" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
 # The passphrase the preseed was rendered with: VM_PASS, else born2root.toml.

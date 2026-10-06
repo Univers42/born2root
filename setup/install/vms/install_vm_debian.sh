@@ -5,10 +5,11 @@ set -e # Exit on any error
 # ── Locate the preseeded ISO (built by create_custom_iso.sh) ─────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$SCRIPT_DIR"
+. "$SCRIPT_DIR/utils/vm_path.sh"
 
-PRESEED_ISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
+PRESEED_ISO=$(find "$(iso_dir)" -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' 2>/dev/null | head -n1)
 if [ -z "$PRESEED_ISO" ]; then
-    echo "Error: No preseeded ISO found in $SCRIPT_DIR"
+    echo "Error: No preseeded ISO found in $(iso_dir)"
     echo "Run 'make gen_iso' first."
     exit 1
 fi
@@ -33,7 +34,7 @@ VM_PATH="${VM_PATH:-$(pwd)/disk_images}"
 . "$SCRIPT_DIR/utils/vm_path.sh"
 ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
 
-ISO_PATH="$(pwd)/$PRESEED_ISO"
+ISO_PATH="$(readlink -f "$PRESEED_ISO")"
 VM_DISK_PATH="$VM_PATH/$VM_NAME/$VM_NAME.vdi"
 # Disk size in MB. The VDI is dynamically allocated, but treat this as a hard
 # ceiling on what the VM can cost rather than a free upper bound: this used to

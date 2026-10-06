@@ -764,7 +764,7 @@ gen_iso: shell
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
 		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
-		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" $(SCRIPT_SH) $(ISO_BUILDER)
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
@@ -796,7 +796,7 @@ gui_vm: check_system
 
 # =========@@ Status @@========================================================
 status:
-	@$(SCRIPT_SH) generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
 
 # =========@@ Serial console @@================================================
 # The whole pipeline is headless, so nothing ever renders the VM's screen. The
@@ -883,9 +883,11 @@ prune_vms:
 	done; \
 	printf "$(C_GREEN)✓$(C_RESET) All VMs removed\n"
 
+# The ISOs live in $(VM_PATH)/iso (utils/vm_path.sh, iso_dir); the repo-root
+# names are where builds before that left theirs.
 clean:
-	@chmod -R u+w debian_iso_extract 2>/dev/null || true
-	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed*.iso debian_iso_extract
+	@chmod -R u+w "$(VM_PATH)/iso" debian_iso_extract 2>/dev/null || true
+	$(RM) "$(VM_PATH)/iso" debian-*-amd64-netinst.iso debian-*-amd64-*preseed*.iso debian_iso_extract
 
 # =========@@ Space @@=========================================================
 # What this project costs, and whether that is still allowed. Fails (exit 1)

@@ -145,9 +145,17 @@ if [ -z "$ISO_FILENAME" ]; then
 fi
 
 URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
+# Beside the VM disks, never in the source tree (iso_dir, utils/vm_path.sh).
+. "$REPO_ROOT/utils/vm_path.sh"
+ISO_HOME=$(iso_dir)
+mkdir -p "$ISO_HOME" || {
+    echo "Error: cannot create $ISO_HOME -- point VM_PATH (or B2B_ISO_DIR) at a writable directory."
+    exit 1
+}
+ISO_LOCAL="$ISO_HOME/$ISO_FILENAME"
 # Both overridable so a test build can run beside a real one without sharing
 # the extraction tree or overwriting the ISO a running VM booted from.
-ISO_DIR="${ISO_DIR:-debian_iso_extract}"
+ISO_DIR="${ISO_DIR:-$ISO_HOME/debian_iso_extract}"
 # A template: @B2B_*@ placeholders filled from born2root.toml below.
 PRESEED_FILE="preseeds/preseed.cfg.in"
 # Encrypted unless explicitly told otherwise; see utils/luks_mode.sh for why
@@ -160,7 +168,7 @@ LUKS_SUFFIX=$(luks_iso_suffix "$LUKS")
 # without it, `make gen_iso LUKS=OFF` would find the encrypted ISO sitting in
 # the repo root, decide there was nothing to do, and hand back an image that is
 # the opposite of what was asked for.
-OUTPUT_ISO="${OUTPUT_ISO:-${ISO_FILENAME%.iso}-preseed${LUKS_SUFFIX}.iso}"
+OUTPUT_ISO="${OUTPUT_ISO:-$ISO_HOME/${ISO_FILENAME%.iso}-preseed${LUKS_SUFFIX}.iso}"
 # xorriso runs from inside $ISO_DIR, so it needs the output as an absolute path.
 case "$OUTPUT_ISO" in
 /*) OUTPUT_ABS="$OUTPUT_ISO" ;;
@@ -240,11 +248,11 @@ if [ -f "$OUTPUT_ISO" ]; then
 fi
 
 # ── Download the base ISO if needed ──────────────────────────────────────────
-if [ -f "$ISO_FILENAME" ]; then
-    echo "✓ ISO file found locally: $ISO_FILENAME"
+if [ -f "$ISO_LOCAL" ]; then
+    echo "✓ ISO file found locally: $ISO_LOCAL"
 else
     echo "Downloading ISO from $URL_IMAGE_ISO ..."
-    download "$URL_IMAGE_ISO" "$ISO_FILENAME" || {
+    download "$URL_IMAGE_ISO" "$ISO_LOCAL" || {
         echo "Error: Failed to download ISO"
         exit 1
     }
@@ -282,11 +290,11 @@ mkdir -p "$ISO_DIR"
 
 # Use xorriso (most portable for ISO manipulation), fallback to bsdtar, then 7z
 if command -v xorriso >/dev/null 2>&1; then
-    xorriso -osirrox on -indev "$ISO_FILENAME" -extract / "$ISO_DIR" 2>/dev/null
+    xorriso -osirrox on -indev "$ISO_LOCAL" -extract / "$ISO_DIR" 2>/dev/null
 elif command -v bsdtar >/dev/null 2>&1; then
-    bsdtar -C "$ISO_DIR" -xf "$ISO_FILENAME"
+    bsdtar -C "$ISO_DIR" -xf "$ISO_LOCAL"
 elif command -v 7z >/dev/null 2>&1; then
-    7z x -o"$ISO_DIR" "$ISO_FILENAME" >/dev/null
+    7z x -o"$ISO_DIR" "$ISO_LOCAL" >/dev/null
 else
     echo "Error: No ISO extraction tool found. Install xorriso, bsdtar, or p7zip."
     exit 1
