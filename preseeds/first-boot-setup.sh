@@ -83,7 +83,7 @@ else
     echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
 fi
 feature_on() {
-    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    case "$1" in debian-base | b2b-mandatory | devtools-apt | var-gc | nvim) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
     grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
 }
 # Every feature records what it actually cost, so the estimates in
@@ -150,12 +150,13 @@ feature_off() {
 }
 # Which failures stop `make all`. Chosen from generate/feature_profile.sh's
 # manifest: the base and core tiers (debian-base, b2b-mandatory, devtools-apt,
-# nvim: the Born2beRoot subject and the editor first boot promises), plus what
+# var-gc, nvim: the Born2beRoot subject, the cleaner that keeps /var alive and
+# the editor first boot promises), plus what
 # the user asked for by name (hellish, apt-packages, nvim-shared) and the two
 # features everything else is ordered behind (docker, claude-code). Every other
 # row -- nvim-extras, devtools-extra, webstack, nodejs, pytools, ai-*, dc-* --
 # is a layer on a machine that is already good, and `make <name>` reruns it.
-ESSENTIAL_FEATURES=" debian-base b2b-mandatory devtools-apt nvim nvim-shared hellish apt-packages docker claude-code "
+ESSENTIAL_FEATURES=" debian-base b2b-mandatory devtools-apt var-gc nvim nvim-shared hellish apt-packages docker claude-code "
 feature_essential() {
     case "$ESSENTIAL_FEATURES" in
     *" $1 "*) return 0 ;;
@@ -323,6 +324,23 @@ if command -v fstrim >/dev/null 2>&1; then
     # build where the discard chain did not come up simply trims nothing here
     # rather than failing first boot over it.
     fstrim -av 2>&1 | sed 's/^/[TRIM] /' || echo "[WARN] fstrim found nothing to trim — check: lsblk -D"
+fi
+
+### ─── 3d. /var below 90%: the garbage collector, before Docker ───────────
+# Every build, base tier (setup/install/dc/install_var_gc.sh says what it
+# reclaims and what it never touches). Here, ahead of 4a, on purpose: the
+# daemon.json log caps it writes apply only to containers created after
+# dockerd read them, and no dockerd exists yet, so they cover every container
+# this guest will ever run.
+feature_begin var-gc /var
+if [ ! -f /root/install_var_gc.sh ]; then
+    echo "[FAIL] var-gc — /root/install_var_gc.sh is not in the ISO"
+    feature_end var-gc failed
+elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_var_gc.sh; then
+    feature_end var-gc ok
+else
+    echo "[FAIL] var-gc install reported errors — see /var/log/b2b-provision.log"
+    feature_end var-gc failed
 fi
 
 ### ─── 4b. Neovim + kickstart.nvim, and the hellishrc plugin framework ───────
@@ -1168,7 +1186,7 @@ fi
 # was fine again within a minute of the guest-side IPv6 fix above.
 
 ### ─── 4b. The datacenter: dc-* features ────────────────────────────────────
-# Four provisioners, in dependency order, each gated by the dc-* rows that
+# Three provisioners, in dependency order, each gated by the dc-* rows that
 # are on in features.conf (generate/feature_profile.sh names them; the
 # server profile turns them all on with dc-full). They are opt-in, not base:
 # a failure is filed in features.status and shown, but does not raise
@@ -1176,8 +1194,6 @@ fi
 # tonight is still a good machine, and `make grobase` / `make edge` from the
 # host rerun the same scripts over SSH.
 #
-#   var-gc   FIRST: it writes docker's daemon.json log caps, and the daemon
-#            must restart with them before grobase starts a container.
 #   edge     Tailscale and cloudflared, software only (no key in the ISO).
 #   grobase  the BaaS itself, at the tier the dc-* rows imply.
 #   backup   restic and its timer, idle until the host sends the password.
@@ -1221,7 +1237,6 @@ dc_fold() { # <feature> <its row> <mount>
         printf '%s %s (retry: %s)\n' "$1" "failed with $2" "$(feature_retry "$1")" >>/etc/b2b/FEATURE_WARNINGS
     fi
 }
-if feature_on dc-var-gc; then dc_run dc-var-gc install_var_gc.sh /var; fi
 if feature_on dc-netmesh || feature_on dc-tunnel; then
     dc_run dc-netmesh install_edge.sh / || true
     if feature_on dc-tunnel; then dc_fold dc-tunnel dc-netmesh /; fi

@@ -121,9 +121,12 @@ check "-nvim takes npm-cache with it" "$(SIZE_B2B=15 FEATURES='-nvim -nvim-extra
 check "-nvim alone at standard is an error (nvim-extras needs it)" "$(rc_of env SIZE_B2B=15 FEATURES=-nvim "${FP[@]}" --resolve)" 1
 check "-nvim with nvim-extras still on is an error" "$(rc_of env SIZE_B2B=15 FEATURES='-nvim +nvim-extras' "${FP[@]}" --resolve)" 1
 check "-b2b-mandatory (base) is an error" "$(rc_of env SIZE_B2B=15 FEATURES=-b2b-mandatory "${FP[@]}" --resolve)" 1
-check "+dc-minimal expands to its members" "$(SIZE_B2B=15 FEATURES=+dc-minimal "${FP[@]}" --resolve | grep -c '^feature=dc-')" 7
+check "+dc-minimal expands to its members" "$(SIZE_B2B=15 FEATURES=+dc-minimal "${FP[@]}" --resolve | grep -c '^feature=dc-')" 6
 check "+dc-standard -dc-tunnel: a member can be taken back out" "$(SIZE_B2B=15 FEATURES='+dc-standard -dc-tunnel' "${FP[@]}" --resolve | grep -c '^feature=dc-tunnel$')" 0
-check "+dc-full expands recursively" "$(SIZE_B2B=44 FEATURES=+dc-full "${FP[@]}" --resolve | grep -c '^feature=dc-')" 18
+check "+dc-full expands recursively" "$(SIZE_B2B=44 FEATURES=+dc-full "${FP[@]}" --resolve | grep -c '^feature=dc-')" 17
+check "var-gc is base: on in every build" "$(SIZE_B2B=8 "${FP[@]}" --resolve | grep -c '^feature=var-gc$')" 1
+check "-var-gc (base) is an error" "$(rc_of env SIZE_B2B=15 FEATURES=-var-gc "${FP[@]}" --resolve)" 1
+check "+dc-var-gc, its old name, is still accepted" "$(rc_of env SIZE_B2B=15 FEATURES=+dc-var-gc "${FP[@]}" --resolve)" 0
 check "dc-identity without dc-gateway is an error" "$(rc_of env SIZE_B2B=15 FEATURES=+dc-identity "${FP[@]}" --resolve)" 1
 check "-nodejs with devtools-extra on is an error" "$(rc_of env SIZE_B2B=15 FEATURES=-nodejs "${FP[@]}" --resolve)" 1
 check "-nodejs -devtools-extra is fine" "$(rc_of env SIZE_B2B=15 FEATURES='-nodejs -devtools-extra' "${FP[@]}" --resolve)" 0

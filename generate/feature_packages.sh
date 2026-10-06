@@ -26,6 +26,7 @@ PACKAGES='
 debian-base       apt: (what debian-installer lays down) img: -
 b2b-mandatory     apt: sudo ufw openssh-server libpam-pwquality apparmor cron haveged img: -
 devtools-apt      apt: git curl wget tmux htop tree jq ripgrep fd-find unzip build-essential img: -
+var-gc            apt: - img: -
 nvim              apt: neovim nodejs npm img: -
 npm-cache         apt: (a reservation: ~/.npm for the editor tooling) img: -
 vscode-remote     apt: (a reservation: ~/.vscode-server, written on first remote connect) img: -
@@ -43,7 +44,6 @@ ai-local          apt: - img: (a GGUF model under /opt, sized from RAM by instal
 dc-netmesh        apt: tailscale img: -
 dc-tunnel         apt: cloudflared img: -
 dc-backup         apt: restic img: -
-dc-var-gc         apt: - img: -
 dc-gateway        apt: git make img: ghcr.io/univers42/grobase-kong ghcr.io/univers42/grobase-waf ghcr.io/univers42/grobase-tenant-control ghcr.io/univers42/grobase-data-plane-router
 dc-identity       apt: - img: ghcr.io/univers42/grobase-gotrue ghcr.io/univers42/grobase-session-service ghcr.io/univers42/grobase-permission-engine
 dc-realtime       apt: - img: ghcr.io/univers42/grobase-realtime

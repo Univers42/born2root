@@ -60,7 +60,8 @@ v=$(resolve server)
 check "server: nvim off" "$(printf '%s\n' "$v" | grep -c '^feature=nvim$')" 0
 check "server: nvim-extras off" "$(printf '%s\n' "$v" | grep -c '^feature=nvim-extras$')" 0
 check "server: docker on" "$(printf '%s\n' "$v" | grep -c '^feature=docker$')" 1
-check "server: every dc-* row on" "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" 18
+check "server: every dc-* row on" "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" 17
+check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^feature=var-gc$')" 1
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
 
 # The reweight is the point of the server profile: /var must be the largest

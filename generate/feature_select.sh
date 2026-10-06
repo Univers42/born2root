@@ -469,7 +469,7 @@ blurb() {
     nvim) echo "Neovim + kickstart (untick for a server image)" ;;
     dc-netmesh) echo "Tailscale: private access from anywhere, no inbound port" ;;
     dc-backup) echo "restic + timers: encrypted dumps of every engine" ;;
-    dc-var-gc) echo "circular cleaning of /var (never volumes)" ;;
+    var-gc) echo "keeps /var below 90% (never volumes)" ;;
     dc-gateway) echo "Kong: the one public door (grobase)" ;;
     dc-tunnel) echo "cloudflared: public HTTPS through an outbound tunnel" ;;
     dc-identity) echo "GoTrue: signup, login, JWT, MFA" ;;

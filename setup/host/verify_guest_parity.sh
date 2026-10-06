@@ -262,6 +262,7 @@ row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/nul
 printf "\n${C_BOLD}Services${C_RESET}\n"
 row "docker" "$(g 'systemctl is-active docker')" "active"
 row "ssh" "$(g 'systemctl is-active ssh')" "active"
+row "var-gc 90% watch" "$(g 'systemctl is-active b2b-var-gc-watch.timer')" "active"
 
 printf "\n"
 if [ "$fail" -eq 0 ]; then

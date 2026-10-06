@@ -269,11 +269,12 @@ RECIPE="$HERE/partition_recipe.sh"
 #   dc-gateway    /opt    0 -> 273    the clone.
 #   dc-netmesh    /      50 -> 110    tailscale 1.102 with its deps.
 #   dc-backup     /      30  (24)     within a third, left alone.
-#   dc-var-gc     /var    0  (-177)   it reclaims: apt clean on a fresh guest.
+#   var-gc        /var    0  (-177)   it reclaims: apt clean on a fresh guest.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      8     0     0     1      -
 devtools-apt       base      279   0     0     0      -
+var-gc             base      0     0     0     0      -
 nvim               core      382   120   0     138    devtools-apt
 npm-cache          core      0     0     0     55     nvim
 vscode-remote      standard  0     0     0     500    -
@@ -290,7 +291,6 @@ ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -
 dc-netmesh         explicit  110   0     0     0      -
 dc-backup          explicit  30    0     0     0      -
-dc-var-gc          explicit  0     0     0     0      docker
 dc-gateway         explicit  0     273   3041  0      docker
 dc-tunnel          explicit  60    0     0     0      dc-gateway
 dc-identity        explicit  0     0     80    0      dc-gateway
@@ -314,14 +314,18 @@ dc-data            explicit  0     0     4096  0      dc-gateway
 # names(), field(), feature_select.sh and utils/b2b_config.py all rely on. A
 # bundle may name another bundle; expansion is recursive.
 #
-#   dc-minimal   one gateway, one identity, one engine, private access, a
-#                backup and the garbage collector: the smallest thing that is
-#                still a BaaS, and everything it needs to stay alive.
+#   dc-minimal   one gateway, one identity, one engine, private access and a
+#                backup: the smallest thing that is still a BaaS, and
+#                everything it needs to stay alive (the /var garbage
+#                collector is base, in every build).
+#   dc-var-gc    the old name of var-gc, from when it was a dc-* row: a saved
+#                .b2b-features or a FEATURES= that still says it keeps working.
 #   dc-standard  + object storage, observability and a public tunnel.
 #   dc-full      + every other engine and plane grobase ships.
 BUNDLES='
-dc-minimal   dc-gateway dc-identity dc-db-postgres dc-netmesh dc-backup dc-var-gc dc-data
+dc-minimal   dc-gateway dc-identity dc-db-postgres dc-netmesh dc-backup dc-data
 dc-standard  dc-minimal dc-objectstore dc-observability dc-tunnel
+dc-var-gc    var-gc
 dc-full      dc-standard dc-db-mysql dc-db-mongo dc-db-redis dc-db-cockroach dc-db-mssql dc-realtime dc-storage dc-secrets
 '
 # vscode-remote and inception-data are SPACE, not steps: nothing installs them
