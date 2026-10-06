@@ -82,22 +82,45 @@ printf 'ssh=4242\nmariadb=3307\nfrontend=5173\n' >"$VM_DIR/ports.env"
 check "host_port_of reads ports.env (ssh)" "$(host_port_of ssh)" 4242
 check "host_port_of reads ports.env (mariadb)" "$(host_port_of mariadb)" 3307
 
-# ── [network] forwards from born2root.toml join the spec ────────────────────
-# Appended even though PORTS_SPEC is overridden here, walked past a busy port
-# like the built-in ones, and not appended twice when the script is sourced
-# again by a child (qemu_pipeline.sh exports PORTS_SPEC to qemu_vm.sh).
-sed 's|^forwards = \[\]|forwards = [ { name = "grafana", guest = 3100, host = 3000 } ]|' \
+# ── [network] forwards from born2root.toml ARE the spec ─────────────────────
+# With PORTS_SPEC unset the list is the config's, in its order; sourcing the
+# script again in a child (qemu_pipeline.sh exports PORTS_SPEC to qemu_vm.sh)
+# keeps it as is, and a config forward walks past a busy port like any other.
+sed '/^forwards = \[/,/^]$/c\forwards = [ { name = "ssh", guest = 4242, host = 4242 }, { name = "grafana", guest = 3100, host = 3000 } ]' \
     tests/fixtures/default.toml >"$TMP/fwd.toml"
 # shellcheck disable=SC2016 # expanded by the child shell, on purpose
 fwd_spec=$("${SCRIPT_SH:-bash}" -c '
-    export B2B_CONFIG="$1" VM_NAME=debian VM_PATH="$2" PORTS_SPEC="ssh:4242:4242"
+    unset PORTS_SPEC
+    export B2B_CONFIG="$1" VM_NAME=debian VM_PATH="$2"
     . ./setup/host/qemu_vm.sh
+    export PORTS_SPEC
     . ./setup/host/qemu_vm.sh
     is_host_port_free() { [ "$1" != 3000 ]; }
     resolve_ports >/dev/null 2>&1
     printf "%s|%s" "$PORTS_SPEC" "$RESOLVED_SPEC"' _ "$TMP/fwd.toml" "$TMP")
-check "config forward appended once" "${fwd_spec%%|*}" "ssh:4242:4242 grafana:3000:3100"
+check "the spec is the config's forwards, once" "${fwd_spec%%|*}" "ssh:4242:4242 grafana:3000:3100"
 check "config forward walks past a busy port" \
     "$(printf '%s\n' "${fwd_spec#*|}" | tr ' ' '\n' | awk -F: '$1=="grafana"{print $2 ":" $3}')" "3001:3100"
+# The shipped config carries the full list, the FTP passive range included
+# (QEMU used to forward none of it, so an FTP listing hung).
+# shellcheck disable=SC2016 # expanded by the child shell, on purpose
+shipped=$("${SCRIPT_SH:-bash}" -c '
+    unset PORTS_SPEC
+    export B2B_CONFIG=tests/fixtures/default.toml VM_NAME=debian VM_PATH="$1"
+    . ./setup/host/qemu_vm.sh
+    printf "%s" "$PORTS_SPEC"' _ "$TMP")
+check "the shipped spec starts with ssh" "${shipped%% *}" "ssh:4242:4242"
+check "the shipped spec forwards the FTP passive range" \
+    "$(printf '%s\n' "$shipped" | tr ' ' '\n' | grep -c '^inception-ftp-pasv-')" 11
+# No ssh forward is refused before QEMU starts, not discovered by a timeout.
+# shellcheck disable=SC2016 # expanded by the child shell, on purpose
+nossh=$("${SCRIPT_SH:-bash}" -c '
+    export B2B_CONFIG=tests/fixtures/default.toml VM_NAME=debian VM_PATH="$1" PORTS_SPEC="web:8082:80"
+    . ./setup/host/qemu_vm.sh
+    resolve_ports 2>&1 && echo resolved' _ "$TMP" || true)
+case "$nossh" in
+*"no ssh forward"*) check "a spec without ssh is refused" refused refused ;;
+*) check "a spec without ssh is refused" "$nossh" refused ;;
+esac
 
 exit "$fail"

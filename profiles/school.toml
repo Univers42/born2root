@@ -85,6 +85,7 @@ interval_min = 10
 
 [network]
 forwards = [
+  { name = "ssh", guest = 4242, host = 4242 },
 ]
 
 [disk]

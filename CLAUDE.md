@@ -182,9 +182,15 @@ monitoring]` (the subject is the floor: stricter accepted, weaker refused),
   watchdog re-reads it with sed). Free text and secrets travel one record per
   line: `users` (`name:fullname:groups`), `ssh_keys`, `extra_users.shadow`
   (SHA-512, `!` for an empty password), `apt-packages`.
-- Built-in forwards, feature names and ports are scraped from the scripts
-  (`PORTS_SPEC`, `add_natpf`, `ensure_vm_nat_forward`, the `MANIFEST`), never
-  copied: rename one and the validator follows.
+- `[network] forwards` is the only port list: every VirtualBox natpf rule,
+  every QEMU hostfwd and every guest UFW rule (`B2B_FIREWALL` in `build.conf`,
+  `name:guest`) comes from it, so a profile file carries its own full list
+  (`school.toml`: `ssh` only). `ssh` with guest 4242 is required; host ports
+  walk past busy ones. Scripts look ports up by name (`b2b_forward NAME` in
+  `utils/b2b_config.sh`), so renaming an entry loses its tool the port.
+  `tests/test_firewall_forwards.sh` refuses a literal list coming back.
+- Feature names are scraped from the scripts (the `MANIFEST`), never copied:
+  rename one and the validator follows.
 - A literal `dlesieur`, `temp*123`, `vm_pass.txt` or `born2root.conf` in
   non-comment code fails `tests/test_b2b_config.sh`. Tests pin
   `tests/fixtures/default.toml` (the shipped values without comments), never
@@ -267,18 +273,22 @@ NAT accepts connections whether or not the guest is listening.
 
 The rendered preseed's `late_command` copies the scripts into `/target` and runs
 `b2b-setup.sh` via `in-target`. That is a chroot with no systemd and limited
-network, so it does every mandatory Born2beRoot setting (SSH on 4242, UFW,
-sudo, pwquality, AppArmor, cron monitoring, TRIM via crypttab, `lvm.conf` and
-`fstrim.timer`) from Debian repo packages only, before any network download.
-`first-boot-setup.sh` runs once via an `@reboot` crontab and self-deletes:
+network, so it does every mandatory Born2beRoot setting (SSH on 4242, ufw's
+package, sudo, pwquality, AppArmor, cron monitoring, TRIM via crypttab,
+`lvm.conf` and `fstrim.timer`) from Debian repo packages only, before any
+network download. `first-boot-setup.sh` runs once via an `@reboot` crontab and
+self-deletes: UFW (`apply_firewall`; ufw cannot load rules in the chroot),
 Docker, WordPress, third-party tools, nvim, hellish plugins. It sources
 `/etc/b2b/features.conf`, installs required features first, writes the measured
 cost of each to `/etc/b2b/features.status` (one line per mount a feature
-touches), and on a required feature failing prints `B2B-FEATURE-FAILED` to the
-serial console, which fails `make all`, and records why in
-`/etc/b2b/PROVISION_FAILED`. Provisioners are run through `run_logged`, never
-`provisioner | tee log`: without `pipefail` a pipeline's status is `tee`'s, so
-every provisioner used to report success whatever it did.
+touches), and on a required feature failing, or a firewall that is inactive or
+misses a configured port, prints `B2B-FEATURE-FAILED` to the serial console and
+records why in `/etc/b2b/PROVISION_FAILED`. A QEMU `make all` reads that file
+after first boot and fails; the VirtualBox orchestrator does not wait for first
+boot and never reads it, so there a failure only shows in the guest's MOTD.
+Provisioners are run through `run_logged`, never `provisioner | tee log`:
+without `pipefail` a pipeline's status is `tee`'s, so every provisioner used to
+report success whatever it did.
 
 A new provisioner has to be named in three places that nothing but
 `tests/test_late_command.sh` holds together: the `/root/install_*.sh` call in

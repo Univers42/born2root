@@ -1,10 +1,18 @@
 #!/usr/bin/env hellish
-# Repair VirtualBox NAT forwarding for the osionos / ft_transcendence app stack.
+# Re-apply born2root.toml's [network] forwards to an existing VirtualBox VM,
+# each rule at its configured host port, so an edited list reaches the VM
+# without a rebuild (the guest's firewall still needs `make re` to follow).
 # Run this on the host, not inside the VM.
+#
+# Rules bind 127.0.0.1 like install_vm_debian.sh's NATPF_BIND: this script
+# used to leave the host IP empty, which VirtualBox reads as 0.0.0.0, so every
+# repaired port was reachable from the whole LAN.
 
 set -euo pipefail
 
 VM_NAME="${1:-${VM_NAME:-debian}}"
+NATPF_BIND="${NATPF_BIND:-127.0.0.1}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/utils/b2b_config.sh"
 
 if ! command -v VBoxManage >/dev/null 2>&1; then
     echo "VBoxManage is not installed or not in PATH. Run this from the VirtualBox host."
@@ -26,34 +34,22 @@ apply_rule() {
 
     if [ "$vm_state" = "running" ]; then
         VBoxManage controlvm "$VM_NAME" natpf1 delete "$name" >/dev/null 2>&1 || true
-        VBoxManage controlvm "$VM_NAME" natpf1 "$name,tcp,,${host_port},,${guest_port}"
+        VBoxManage controlvm "$VM_NAME" natpf1 "$name,tcp,${NATPF_BIND},${host_port},,${guest_port}"
     else
         VBoxManage modifyvm "$VM_NAME" --natpf1 delete "$name" >/dev/null 2>&1 || true
-        VBoxManage modifyvm "$VM_NAME" --natpf1 "$name,tcp,,${host_port},,${guest_port}"
+        VBoxManage modifyvm "$VM_NAME" --natpf1 "$name,tcp,${NATPF_BIND},${host_port},,${guest_port}"
     fi
 
     printf '  %-18s host:%-5s -> guest:%s\n' "$name" "$host_port" "$guest_port"
 }
 
 echo "Repairing NAT forwarding for VM '$VM_NAME' (${vm_state:-unknown})"
-apply_rule website 4322 4322
-apply_rule osionos-app 3001 3001
-apply_rule osionos-mail 3002 3002
-apply_rule osionos-calendar 3003 3003
-apply_rule osionos-bridge 4000 4000
-apply_rule mail-bridge 4100 4100
-apply_rule calendar-bridge 4200 4200
-apply_rule baas-gateway 8000 8000
-apply_rule baas-admin 8001 8001
-apply_rule mailpit 8025 8025
-apply_rule auth-gateway 8787 8787
-apply_rule vault 18200 18200
-
+for fwd in $(b2b_get B2B_FORWARDS); do
+    rest=${fwd#*:}
+    apply_rule "${fwd%%:*}" "${rest%%:*}" "${rest#*:}"
+done
 echo ""
 echo "Current rules:"
 VBoxManage showvminfo "$VM_NAME" --machinereadable |
     awk -F'"' '/^Forwarding/ { print "  " $2 }' |
     sort
-
-echo ""
-echo "Open from the host: https://localhost:4322"

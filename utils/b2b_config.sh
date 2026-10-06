@@ -19,7 +19,7 @@
 #     parse time for every target, `make help` included.
 #
 #   . utils/b2b_config.sh                  library: b2b_get KEY, b2b_volumes,
-#                                          b2b_luks_passphrase, b2b_render, ...
+#                                          b2b_forward NAME, b2b_render, ...
 #   utils/b2b_config.sh get KEY            one resolved value; always exit 0.
 #                                          KEY is a B2B_* name or a dotted
 #                                          path (vm.name, users.bob.sudo)
@@ -74,6 +74,19 @@ b2b_locale_country() { b2b_get B2B_LOCALE_COUNTRY; }
 # invalid table the way --check would, so partition_recipe.sh never sizes a
 # layout the installer could not create.
 b2b_volumes() { _b2b_py --volumes; }
+
+# One [network] forwards entry by name, as "host guest"; exit 1 when the
+# config has no such forward. The list itself is B2B_FORWARDS (name:host:guest).
+b2b_forward() {
+    local fwd rest
+    for fwd in $(b2b_get B2B_FORWARDS); do
+        [ "${fwd%%:*}" = "$1" ] || continue
+        rest=${fwd#*:}
+        printf '%s %s\n' "${rest%%:*}" "${rest#*:}"
+        return 0
+    done
+    return 1
+}
 
 # Extra accounts as the guest sees them: "name:groups" per line.
 b2b_extra_users() { b2b_get B2B_EXTRA_USERS | tr ' ' '\n' | grep -v '^$' || true; }

@@ -251,7 +251,7 @@ cmd "make deps" "Install VirtualBox + host tools"
 cmd "make gen_iso" "Download Debian ISO + inject the preseed"
 cmd "make setup_vm" "Create the VirtualBox VM"
 cmd "make shell" "Download the latest hellish release"
-cmd "make fix_app_ports" "Repair the VM's NAT port forwards"
+cmd "make fix_app_ports" "Re-apply [network] forwards to a VirtualBox VM"
 cmd "make extpack" "VirtualBox Extension Pack (optional)"
 note "not used here; needs your host sudo password"
 

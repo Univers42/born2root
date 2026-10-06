@@ -417,6 +417,20 @@ feature_env --conf >"$ISO_DIR/features.conf" ||
 feature_env --resolve | sed 's/^/    /'
 echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") feature(s) on"
 
+# Inception's host access (run at the very end of `make all`) reads its four
+# ports from [network] forwards, the list the guest's firewall opens; without
+# them the browser side would point at ports UFW keeps closed. Refuse here,
+# before the install, rather than 20 minutes in.
+if feature_env --has inception-data; then
+    for INCEPTION_FWD in https http inception-static inception-adminer; do
+        if ! b2b_forward "$INCEPTION_FWD" >/dev/null; then
+            echo "Error: Inception is in this build but [network] forwards has no '$INCEPTION_FWD'" >&2
+            echo "       (born2root.toml, or the B2B_CONFIG profile). Nothing was built." >&2
+            exit 1
+        fi
+    done
+fi
+
 # Nerd Font icons in the guest's Neovim, resolved at the top of this script
 # (see resolve_nerd_font). Appended after the feature count above, which counts
 # =on lines. install_nvim.sh reads it back as B2B_NERD_FONT.

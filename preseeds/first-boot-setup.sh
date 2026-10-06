@@ -252,50 +252,63 @@ systemctl restart ssh 2>/dev/null || true
 sysctl --system >/dev/null 2>&1 || true
 echo "[OK] NAT keepalive + sshd-watchdog + SSH stability ensured"
 
-### ─── 3c. UFW — configure and enable it for real ────────────────────────────
-# b2b-setup.sh already runs the `ufw allow` rules, but it runs them in the d-i
-# CHROOT, and they do not survive: measured on a fresh build, /etc/ufw/user.rules
-# contained no rule for 4242 and /etc/ufw/ufw.conf still said ENABLED=no, while
-# `systemctl is-active ufw` cheerfully reported "active". The service was up and
-# the firewall was doing nothing -- the worst of both worlds, because every
-# obvious check says it is fine.
+### ─── 3c. UFW — the firewall, from [network] forwards ──────────────────────
+# Configured here, on the first real boot, because ufw needs a running kernel
+# with netfilter to load a ruleset and the installer chroot has neither:
+# measured on a fresh build, rules applied from b2b-setup.sh left
+# /etc/ufw/user.rules with no rule for 4242 and ufw.conf at ENABLED=no, while
+# `systemctl is-active ufw` cheerfully reported "active".
 #
-# The cause is the usual one for this project: ufw needs a running kernel with
-# netfilter to load a ruleset, and the installer chroot has neither. So the
-# rules are applied HERE, on the first real boot, where they take effect and
-# persist. Born2beRoot requires the firewall to be on with only 4242 open, so
-# this is mandatory-part correctness, not a nicety.
-echo "--- Configuring UFW ---"
-if command -v ufw >/dev/null 2>&1; then
-    ufw --force reset >/dev/null 2>&1 || true
-    ufw default deny incoming >/dev/null 2>&1 || true
-    ufw default allow outgoing >/dev/null 2>&1 || true
-
-    # 4242 is the subject's requirement; the rest are the bonus web stack and
-    # the app ports the NAT forwards already expose.
-    ufw allow 4242/tcp comment 'SSH' >/dev/null 2>&1 || true
-    for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
-        ufw allow "${p}/tcp" >/dev/null 2>&1 || true
-    done
-    # [network] forwards in born2root.toml: the guest side of each one.
-    for p in ${B2B_FORWARD_PORTS:-}; do
-        ufw allow "${p}/tcp" comment 'born2root.toml' >/dev/null 2>&1 ||
-            echo "[WARN] ufw could not open ${p}/tcp from born2root.toml"
-    done
-
-    ufw --force enable >/dev/null 2>&1 || true
-    systemctl enable ufw >/dev/null 2>&1 || true
-
-    # Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
-    # what actually decides whether packets are filtered, unlike systemd's view.
-    if ufw status 2>/dev/null | grep -q "Status: active"; then
-        echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
-    else
-        echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
+# The rules are B2B_FIREWALL from build.conf ("name:guest", one per
+# [network] forwards entry in born2root.toml) -- the list the host's NAT
+# forwards are built from too, so a port is open in the guest exactly when the
+# host forwards to it, and `ufw status` names each rule after its forward.
+#
+# Every ufw call here used to end in `>/dev/null 2>&1 || true`: an enable that
+# failed left one [WARN] in this log, a VM with no firewall, and a `make all`
+# that reported success. Now the output stays in this log and the result is
+# read back from `ufw status`; a firewall that is not active, or that misses a
+# configured port, fails the build like a required feature. Born2beRoot
+# requires it on, so this is mandatory-part correctness, not a nicety.
+apply_firewall() {
+    local rule port status count=0 missing=""
+    if ! command -v ufw >/dev/null 2>&1; then
+        feature_fail firewall "ufw is not installed (b2b-setup.sh installs it)"
+        return 1
     fi
-else
-    echo "[SKIP] ufw not installed"
-fi
+    # 4242 whatever the list says: a guest whose firewall shut SSH out is left
+    # with the serial console. (--check already refuses a config without it.)
+    case " ${B2B_FIREWALL:-} " in
+    *":4242 "*) ;;
+    *) B2B_FIREWALL="ssh:4242 ${B2B_FIREWALL:-}" ;;
+    esac
+    ufw --force reset
+    ufw default deny incoming
+    ufw default allow outgoing
+    for rule in $B2B_FIREWALL; do
+        ufw allow "${rule##*:}/tcp" comment "${rule%%:*}"
+    done
+    ufw --force enable
+    systemctl enable ufw
+    status=$(ufw status 2>&1)
+    printf '%s\n' "$status"
+    if ! printf '%s\n' "$status" | grep -q '^Status: active'; then
+        feature_fail firewall "ufw is not active after enabling it: $(printf '%s\n' "$status" | head -n 1)"
+        return 1
+    fi
+    for rule in $B2B_FIREWALL; do
+        port=${rule##*:}
+        count=$((count + 1))
+        printf '%s\n' "$status" | grep -qE "^${port}/tcp +ALLOW" || missing="$missing $port"
+    done
+    if [ -n "$missing" ]; then
+        feature_fail firewall "ufw does not allow${missing} (tcp) from [network] forwards"
+        return 1
+    fi
+    echo "[OK] UFW active: ${count} port(s) from [network] forwards, everything else denied"
+}
+echo "--- Configuring UFW ---"
+apply_firewall || true
 
 # First TRIM of the new system. b2b-setup.sh wires discard through crypttab,
 # lvm.conf, fstab and fstrim.timer, but that all runs under in-target, before
@@ -482,9 +495,6 @@ https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.lis
     systemctl enable docker
     systemctl start docker
     echo "[OK] Docker installed and running"
-
-    ### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
-    ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
 
     feature_end docker ok
 fi

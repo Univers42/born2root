@@ -372,7 +372,7 @@ the vendored parser on Python 3.10).
 | `[policy.sudo]`       | tries, wrong-password message, log directory                   |
 | `[policy.ssh]`        | `password_login = false` for keys only                         |
 | `[policy.monitoring]` | how often `monitoring.sh` broadcasts                           |
-| `[network]`           | `forwards = [ { name, guest, host } ]`, extra ports            |
+| `[network]`           | `forwards = [ { name, guest, host } ]`: every NAT forward and every port UFW opens |
 | `[disk]`              | swap and the logical volume table                              |
 
 Accounts are a table each, created in file order. **The first one is you**:
@@ -453,11 +453,8 @@ make all
   │
   ├─ 4. Create VirtualBox VM
   │     ├─ 2048 MB RAM, 3 CPUs, 64 GB dynamic disk
-  │     ├─ VirtualBox NAT networking with port forwarding:
-  │     │   SSH:4242  HTTP:80  HTTPS:443  Frontend:5173
-  │     │   Backend:3000  Docker:5000  MariaDB:3306  Redis:6379
-  │     │   Website:4322  osionos:3001-3003  Bridges:4000/4100/4200
-  │     │   BaaS:8000-8001  Mailpit:8025  Auth:8787  Vault:18200
+  │     ├─ VirtualBox NAT networking, one forward per [network] forwards
+  │     │   entry in born2root.toml (SSH:4242 always), bound to 127.0.0.1
   │     └─ Attach the custom ISO
   │
   ├─ 5. Boot and install (unattended)
@@ -493,7 +490,7 @@ make all
 | `make qemu_stop`        | Stop the QEMU guest (frees VT-x/AMD-V for VirtualBox)                       |
 | `make deps`             | Install VirtualBox + tools                                                  |
 | `make extpack`          | Install the VirtualBox Extension Pack (optional)                            |
-| `make fix_app_ports`    | Repair VirtualBox NAT forwarding for the osionos/ft_transcendence app ports |
+| `make fix_app_ports`    | Re-apply born2root.toml's `[network] forwards` to a VirtualBox VM |
 | `make gen_iso`          | Download Debian ISO + inject preseed                                        |
 | `make setup_vm`         | Create the VirtualBox VM                                                    |
 | `make clean`            | Remove downloaded ISOs                                                      |
@@ -757,7 +754,8 @@ there before building, and `make all` prints the ones it used.
 - ✅ LUKS encrypted disk + LVM partitions (root, swap, home, var, srv, tmp,
   var-log)
 - ✅ SSH on port 4242 (no root login)
-- ✅ UFW firewall (only 4242, 80, 443 open)
+- ✅ UFW firewall (default deny; only `[network] forwards` open — 4242 with
+  `profiles/school.toml`)
 - ✅ sudo with strict rules (3 tries, TTY required, full logging)
 - ✅ Password policy (min 10 chars, uppercase, lowercase, digit, max 3 repeats)
 - ✅ AppArmor enabled at boot

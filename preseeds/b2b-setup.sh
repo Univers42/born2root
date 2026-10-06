@@ -645,32 +645,11 @@ chmod 600 "$HOST_PUBKEY_DIR/id_ed25519" 2>/dev/null || true
 sed -i 's/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 grep -q '^PubkeyAuthentication' /etc/ssh/sshd_config || echo 'PubkeyAuthentication yes' >>/etc/ssh/sshd_config
 
-### ─── 6. UFW — only port 4242 + web ports + dev ports ───────────────────────
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 4242/tcp comment 'SSH'
-ufw allow 80/tcp comment 'HTTP'
-ufw allow 443/tcp comment 'HTTPS'
-ufw allow 5173/tcp comment 'Vite Frontend'
-ufw allow 3000/tcp comment 'Backend API'
-ufw allow 3001/tcp comment 'osionos app'
-ufw allow 3002/tcp comment 'osionos Mail'
-ufw allow 3003/tcp comment 'osionos Calendar'
-ufw allow 4000/tcp comment 'osionos bridge API'
-ufw allow 4100/tcp comment 'Mail bridge'
-ufw allow 4200/tcp comment 'Calendar bridge'
-ufw allow 4322/tcp comment 'Website'
-ufw allow 8000/tcp comment 'BaaS gateway'
-ufw allow 8001/tcp comment 'BaaS admin'
-ufw allow 8025/tcp comment 'Local mail inbox'
-ufw allow 8787/tcp comment 'Auth gateway'
-ufw allow 18200/tcp comment 'Vault'
-# [network] forwards in born2root.toml (first boot re-applies these too).
-for p in ${B2B_FORWARD_PORTS:-}; do
-    ufw allow "${p}/tcp" comment 'born2root.toml' || echo "[WARN] ufw could not open ${p}/tcp from born2root.toml"
-done
-echo y | ufw enable
-echo "[OK] UFW firewall active"
+### ─── 6. UFW ──────────────────────────────────────────────────────────────────
+# Installed above, configured by first-boot-setup.sh (section 3c): ufw needs a
+# running kernel with netfilter to load a ruleset, and this chroot has neither,
+# so the `ufw allow` lines that used to sit here never survived to the booted
+# system -- and first boot's `ufw --force reset` wiped them anyway.
 
 ### ─── 7. Sudo — strict rules per subject ───────────────────────────────────
 # [policy.sudo] in born2root.toml; the subject's values when build.conf is
