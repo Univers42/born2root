@@ -10,7 +10,7 @@ downloads a Debian netinst ISO, injects a preseed plus setup scripts, creates a
 VM (VirtualBox or QEMU/KVM), runs a ~20-minute unattended install with
 LUKS+LVM, boots it headless, unlocks the disk from the host and writes the
 host's `~/.ssh/config` so `ssh b2b` works. Everything that matters is
-Bash-dialect shell driven by GNU Make. `a.out`, `main.c`, `issue` and
+Bash-dialect shell driven by GNU Make. `main.c`, `issue`, `service` and
 `vm_boot.log` at the root are stray leftovers, not part of the build.
 
 ## Commands
@@ -87,12 +87,17 @@ then a separate job runs `make --dry-run all`, `CI=true make deps` and
 `make gen_iso`.
 
 ```bash
-find . -type f -name "*.sh" -print0 | xargs -0 shellcheck -e SC1091
-find . -type f -name "*.sh" -exec bashate -i E006 {} +
-find . -type f -name "*.sh" -exec shfmt -d -i 4 {} +     # shfmt -w -i 4 to fix
-markdownlint "**/*.md"                                    # MD013: 80 columns
+sh_files() { find . -path ./.claude -prune -o -type f -name '*.sh' -print0; }
+sh_files | xargs -0 shellcheck -e SC1091
+sh_files | xargs -0 bashate -i E006
+sh_files | xargs -0 shfmt -d -i 4             # shfmt -w -i 4 to fix
+markdownlint "**/*.md" --ignore .claude       # MD013: 80 columns
 make --dry-run all
 ```
+
+CI's `actions/checkout` fetches no submodules, so it never sees `.claude/`.
+Locally the kit is there, and its 51 scripts all fail `shfmt -i 4`: prune it,
+or the diff drowns the repo's own findings.
 
 Shell scripts are indented with 4 spaces (CI's `shfmt -i 4` wins over the tab
 setting in `.editorconfig`, and any flag on the command line makes shfmt
@@ -487,3 +492,9 @@ Tokens are the scarce resource here, so:
   lines of command output.
 - Run a test suite once, not once per shell, until it is green; then do the
   hellish pass.
+
+`.claude/` is a git submodule (Univers42/claude-deal-with-the-devil, SSH URL):
+after a clone it is empty until `git submodule update --init`. Its
+`rules/*.md` load every session and call `devil <tool>` (`digest`, `watch`,
+`quality`, …); the binary is `.claude/bin/devil`, not on `PATH`. Edit the
+kit upstream, not here: a local change is lost on the next submodule update.
