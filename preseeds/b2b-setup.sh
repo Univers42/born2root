@@ -567,7 +567,10 @@ while true; do
         fi
     done
 
-    MIN=$(date +%M); SEC=$(date +%S)
+    # Unpadded: $((08 % 5)) is an invalid octal number, and hellish ends the
+    # script on it (exit 127), so this watchdog died at :08 every hour and
+    # failed every restart until :10 (journal of 2026-10-07).
+    MIN=$(date +%-M); SEC=$(date +%-S)
     if [ "$((MIN % 5))" = "0" ] && [ "$SEC" -lt "16" ]; then
         echo "$(date): OK sshd=$SSHD_ACTIVE procs=$SSHD_COUNT listen=$LISTEN estab=$ESTAB mem=${MEM_FREE}kB" >> "$LOG"
     fi
