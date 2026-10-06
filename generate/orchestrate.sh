@@ -3,6 +3,13 @@
 # Called by: make all
 set -e
 
+# The VirtualBox build on the fast lane (utils/fast_lane.sh), before the first
+# mktemp: exec runs no EXIT trap. VBoxSVC starts the VM with its own group,
+# so one left outside the lane by make's checks is waited out first.
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/fast_lane.sh"
+fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"
+fast_lane_wait VBoxSVC 20
+
 VM_NAME="${1:-debian}"
 MAKE_CMD="${2:-make}"
 LOG_DIR=$(mktemp -d)

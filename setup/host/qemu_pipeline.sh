@@ -23,6 +23,10 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 QEMU_VM="$HERE/qemu_vm.sh"
+# The ISO download and the guest's whole first boot go through the qemu
+# process started below, so it starts on the fast lane (utils/fast_lane.sh).
+. "$REPO_ROOT/utils/fast_lane.sh"
+fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"
 
 VM_NAME="${VM_NAME:-debian}"
 MAKE_BIN="${MAKE_BIN:-make}"

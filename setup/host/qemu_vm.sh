@@ -87,6 +87,8 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$REPO_ROOT/utils/spinner.sh"
 # born2root.toml: the login to ssh in as, the passphrase to type at boot.
 . "$REPO_ROOT/utils/b2b_config.sh"
+# shellcheck source=utils/fast_lane.sh
+. "$REPO_ROOT/utils/fast_lane.sh"
 LUKS="${LUKS:-ON}"
 
 VM_NAME="${VM_NAME:-debian}"
@@ -885,6 +887,9 @@ await_shutdown() {
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
 if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
+    # The guest's traffic is this qemu process's sockets (slirp), so the
+    # actions that start it start it on the fast lane (utils/fast_lane.sh).
+    case "${1:-status}" in install | start | restart) fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@" ;; esac
     case "${1:-status}" in
     create)
         refuse_sudo_build "make qemu_create VM_PATH=$VM_PATH" || exit 1

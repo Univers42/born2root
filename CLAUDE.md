@@ -447,6 +447,20 @@ is wired to a `make <name>` / `make <name>_undo` pair (`groot`,
 anyway does not just fail silently: the NAT/natpf rule it creates squats the
 host port forever, so even a correct tunnel can no longer bind it.
 
+### A host whose Tor tool runs in global mode
+
+On a host running hide (`/usr/local/bin/hide`) with `GLOBAL=on`, every TCP
+connection goes through Tor, QEMU's slirp included: the netinst came at
+390 KB/s, against 6 MB/s on hide's fast lane. `utils/fast_lane.sh` re-executes
+the entry scripts on that lane (`create_custom_iso.sh`, `qemu_pipeline.sh`,
+`orchestrate.sh`, `unlock_vm.sh`, `qemu_vm.sh install|start|restart`, the
+downloading `llm_host.sh` actions), and never opens it: a closed lane
+(`FAST_APPS` not `on`) gets a note. `B2B_FAST_LANE=0` keeps a build on Tor,
+and a test that executes one of those scripts exports it (see
+`tests/test_llm_host.sh`). Daemons keep their own group: VBoxSVC is waited out
+(`fast_lane_wait`), the host's dockerd is not covered.
+`tests/test_fast_lane.sh` pins it.
+
 ### Guards on destructive paths
 
 - `install_vm_debian.sh` keeps an existing disk, so `make all` on a built

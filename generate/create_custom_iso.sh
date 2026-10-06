@@ -15,6 +15,11 @@ cd "$REPO_ROOT"
 # "initrd.gz not found", "cannot find /isolinux/isolinux.bin", or worse,
 # succeeds without the preseed. Measured on a real run. So a build holds a
 # lock for its whole life (fd 9), and a second build waits and says so.
+# The netinst download is the big one; see utils/fast_lane.sh. Before the
+# lock: sudo, which hide runs, closes fd 9, and the re-executed copy takes it.
+. "$REPO_ROOT/utils/fast_lane.sh"
+fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"
+
 ISO_LOCK="${ISO_LOCK:-$REPO_ROOT/.gen_iso.lock}"
 exec 9>"$ISO_LOCK"
 if ! flock -n 9; then
