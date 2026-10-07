@@ -36,6 +36,15 @@
 #                seat. A profile that is meant to be reproducible does not
 #                leave that to a prompt.
 #
+#   [vm] ram_mb 14336, not "auto". auto is 25% of the host clamped to
+#                8192 MB, sized for a desktop guest: on this 31.9 GB seat
+#                it gave 7982 MB, grobase's stack used 5500 of it
+#                (2026-10-07, `free -m` in the guest) and 2238 MB was
+#                left, while one graph_render worker slot is 4.32 GiB
+#                inside its 8g container cap (graph_render
+#                scripts/service.sh). 14 GiB holds both; a fully touched
+#                guest still leaves the host ~7.8 GB.
+#
 # Everything else is the shipped default. Credentials are the temporary
 # ones; change them here as in born2root.toml.
 
@@ -43,7 +52,7 @@
 name    = "baas"
 backend = "qemu"
 disk_gb = 50
-ram_mb  = "auto"
+ram_mb  = 14336
 cpus    = "auto"
 profile = "auto"
 ai_mode = "off"
