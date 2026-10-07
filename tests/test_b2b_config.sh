@@ -154,8 +154,18 @@ check "get ai.budget_gb" "$(get_of "$DEFAULTS" ai.budget_gb)" 15
 check "get ai.llama_cpp" "$(get_of "$DEFAULTS" ai.llama_cpp)" b10970
 check "get ai.gpu" "$(get_of "$DEFAULTS" ai.gpu)" auto
 check "get B2B_SWAP_MB" "$(get_of "$DEFAULTS" B2B_SWAP_MB)" auto
+# Both spellings of vm.ram_mb / vm.cpus have to keep working: "auto" resolves to
+# empty so the Makefile applies its own 25%-and-clamp rule, and a number comes
+# through as itself. The shipped file says a number (20480/12), so "auto" is
+# asked of a variant rather than of it.
 check 'get B2B_VM_RAM_MB: "auto" is empty, as the Makefile expects' \
-    "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" ""
+    "$(get_of "$(variant ramauto 's/^ram_mb  = .*/ram_mb  = "auto"/')" B2B_VM_RAM_MB)" ""
+check 'get B2B_VM_CPUS: "auto" is empty, same reason' \
+    "$(get_of "$(variant cpuauto 's/^cpus    = .*/cpus    = "auto"/')" B2B_VM_CPUS)" ""
+check "get B2B_VM_RAM_MB: a number comes through" \
+    "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" 20480
+check "get B2B_VM_CPUS: a number comes through" \
+    "$(get_of "$DEFAULTS" B2B_VM_CPUS)" 12
 check "get B2B_FEATURES: all auto means empty, so the picker still runs" \
     "$(get_of "$DEFAULTS" B2B_FEATURES)" ""
 check "get B2B_NVIM_USERS" "$(get_of "$DEFAULTS" B2B_NVIM_USERS)" dlesieur
@@ -207,7 +217,8 @@ refuse "vm.name with a space" vm.name 's/^name    = "debian"/name    = "my vm"/'
 refuse "vm.backend nonsense" vm.backend 's/^backend = "auto"/backend = "hyperv"/'
 refuse "vm.disk_gb below 8" vm.disk_gb 's/^disk_gb = 15/disk_gb = 4/'
 refuse "vm.disk_gb quoted" vm.disk_gb 's/^disk_gb = 15/disk_gb = "15"/'
-refuse "vm.ram_mb below 512" vm.ram_mb 's/^ram_mb  = "auto"/ram_mb  = 128/'
+refuse "vm.ram_mb below 512" vm.ram_mb 's/^ram_mb  = .*/ram_mb  = 128/'
+refuse "vm.cpus of zero" vm.cpus 's/^cpus    = .*/cpus    = 0/'
 refuse "vm.profile nonsense" vm.profile 's/^profile = "auto"/profile = "enormous"/'
 refuse "vm.ai_mode nonsense" vm.ai_mode 's/^ai_mode = "off"/ai_mode = "maybe"/'
 refuse "an unknown key in [vm]" "vm.nmae" 's/^name    = "debian"/nmae = "debian"/'
@@ -308,20 +319,26 @@ refuse "a relative sudo log dir" policy.sudo.log_dir \
     's|^log_dir         = "/var/log/sudo"|log_dir         = "sudo"|'
 refuse "a monitoring interval cron cannot repeat" policy.monitoring.interval_min \
     's/^interval_min = 10/interval_min = 7/'
-refuse "a forward on the SSH port" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "x", guest = 4242, host = 4243 } ]/'
-refuse "a forward on a port the build already uses" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "x", guest = 443, host = 9443 } ]/'
-refuse "a forward named like a built-in VirtualBox rule" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "vault", guest = 9100, host = 9100 } ]/'
-refuse "a forward on Inception's FTP passive range" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "x", guest = 21005, host = 21005 } ]/'
+# [network] forwards is the whole port list now, so a variant swaps the block:
+# SSH first, then whatever the case is about.
+forwards() { printf '/^forwards = \\[/,/^]$/c\\forwards = [ { name = "ssh", guest = 4242, host = 4242 }%s ]' "$1"; }
+refuse "a config without SSH" network.forwards \
+    "$(forwards '' | sed 's/{ name = "ssh", guest = 4242, host = 4242 }/{ name = "web", guest = 80, host = 8082 }/')"
+refuse "SSH on a guest port other than 4242" network.forwards \
+    "$(forwards '' | sed 's/guest = 4242/guest = 2222/')"
+refuse "4242 for something other than SSH" network.forwards \
+    "$(forwards '' | sed 's/{ name = "ssh", guest = 4242, host = 4242 }/{ name = "ssh", guest = 22, host = 4242 }, { name = "x", guest = 4242, host = 4243 }/')"
+refuse "a guest port forwarded twice" network.forwards \
+    "$(forwards ', { name = "a", guest = 9100, host = 9100 }, { name = "b", guest = 9100, host = 9101 }')"
+refuse "a host port used twice" network.forwards \
+    "$(forwards ', { name = "a", guest = 9100, host = 9100 }, { name = "b", guest = 9101, host = 9100 }')"
 refuse "a forward below 1024 on this machine" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 80 } ]/'
+    "$(forwards ', { name = "x", guest = 9100, host = 80 }')"
 refuse "two forwards with the same name" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 9100 }, { name = "x", guest = 9101, host = 9101 } ]/'
+    "$(forwards ', { name = "x", guest = 9100, host = 9100 }, { name = "x", guest = 9101, host = 9101 }')"
 refuse "an unknown key in a forward" network.forwards \
-    's/^forwards = \[\]/forwards = [ { name = "x", guest = 9100, host = 9100, proto = "udp" } ]/'
+    "$(forwards ', { name = "x", guest = 9100, host = 9100, proto = "udp" }')"
+check "the shipped forwards pass --check" "$(rc_of "$DEFAULTS" --check)" 0
 
 # ── Refusals: the volume table ──────────────────────────────────────────────
 refuse "no volume on /" disk.volumes 's|{ name = "root",    mount = "/",|{ name = "root",    mount = "/roo",|'
@@ -452,11 +469,13 @@ check "[features] becomes the +docker -pytools string FEATURES takes" \
     "$(get_of "$FEAT" B2B_FEATURES)" "+docker -pytools"
 check "packages become a space-separated list for the guest" \
     "$(get_of "$(variant pkgs 's/^apt = \[\]/apt = ["htop", "tree"]/')" B2B_APT_PACKAGES)" "htop tree"
-FWD=$(variant fwd 's/^forwards = \[\]/forwards = [ { name = "grafana", guest = 3100, host = 3100 }, { name = "api", guest = 9000, host = 19000 } ]/')
+FWD=$(variant fwd "$(forwards ', { name = "grafana", guest = 3100, host = 3100 }, { name = "api", guest = 9000, host = 19000 }')")
 check "forwards come out as name:host:guest, what PORTS_SPEC takes" \
-    "$(get_of "$FWD" B2B_FORWARDS)" "grafana:3100:3100 api:19000:9000"
-check "the guest ports alone, for the firewall" \
-    "$(get_of "$FWD" B2B_FORWARD_PORTS)" "3100 9000"
+    "$(get_of "$FWD" B2B_FORWARDS)" "ssh:4242:4242 grafana:3100:3100 api:19000:9000"
+check "the firewall gets name:guest, from the same list" \
+    "$(get_of "$FWD" B2B_FIREWALL)" "ssh:4242 grafana:3100 api:9000"
+contains "build.conf carries the firewall list" \
+    "$(env B2B_CONFIG="$FWD" "${CFG[@]}" --guest)" 'B2B_FIREWALL="ssh:4242 grafana:3100 api:9000"'
 
 # ── --render ────────────────────────────────────────────────────────────────
 render_of() { # <config> <template text> -> rendered text, or the error

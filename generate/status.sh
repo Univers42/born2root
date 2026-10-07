@@ -5,6 +5,8 @@ set -e
 
 VM_NAME="${1:-debian}"
 PRESEED_FILE="${2:-preseeds/preseed.cfg}"
+# iso_dir: where the ISOs live (beside the VM disks).
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/vm_path.sh"
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 # shellcheck disable=SC2034
@@ -143,17 +145,17 @@ fi
 mid
 
 # ── Debian base ISO ──
-BASE=$(find . -maxdepth 1 -name 'debian-*-amd64-netinst.iso' | head -n1 | sed 's|^\./||')
+BASE=$(find "$(iso_dir)" -maxdepth 1 -name 'debian-*-amd64-netinst.iso' 2>/dev/null | head -n1)
 if [ -n "$BASE" ]; then
-    status_row "${GRN}${BLD}✓${RST}" "Base ISO ........" "${GRN}${BASE}${RST}"
+    status_row "${GRN}${BLD}✓${RST}" "Base ISO ........" "${GRN}${BASE##*/}${RST}"
 else
     status_row "${YLW}${BLD}⚠${RST}" "Base ISO ........" "${YLW}not downloaded yet${RST}"
 fi
 
 # ── Preseeded ISO ──
-PISO=$(find . -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' | head -n1 | sed 's|^\./||')
+PISO=$(find "$(iso_dir)" -maxdepth 1 -name 'debian-*-amd64-*preseed.iso' 2>/dev/null | head -n1)
 if [ -n "$PISO" ]; then
-    status_row "${GRN}${BLD}✓${RST}" "Preseed ISO ....." "${GRN}${PISO}${RST}"
+    status_row "${GRN}${BLD}✓${RST}" "Preseed ISO ....." "${GRN}${PISO##*/}${RST}"
 else
     status_row "${YLW}${BLD}⚠${RST}" "Preseed ISO ....." "${YLW}not built yet${RST}"
 fi

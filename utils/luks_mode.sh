@@ -57,10 +57,10 @@ luks_iso_suffix() {
     fi
 }
 
-# The glob that finds this mode's ISO in the repo root. Exclusive in both
+# The glob that finds this mode's ISO in iso_dir. Exclusive in both
 # directions by construction: "*preseed.iso" cannot match a name ending in
 # "-preseed-nocrypt.iso", so neither mode can boot the other's image, and a
-# repo holding both stays unambiguous.
+# directory holding both stays unambiguous.
 luks_iso_glob() {
     printf 'debian-*-amd64-*preseed%s.iso' "$(luks_iso_suffix "${1:-ON}")"
 }

@@ -37,9 +37,21 @@ disk_gb = 15
 # Guest RAM in MB: "auto" is a quarter of this machine's, clamped to
 # 2048-8192 MB, on both backends. A number (10240 = 10 GB) is taken as is;
 # it applies at the next boot (make qemu_stop qemu_start, or make start_vm).
-ram_mb  = "auto"
-# Guest cores: "auto" is half of this machine's, clamped to 2-8.
-cpus    = "auto"
+#
+# 20480, not "auto": on a 30.5 GB seat "auto" tops out at 8192 MB, and that is
+# what this guest ran on -- which is fine for the school build and not fine for
+# agents working in it (several at once, each with a language server, plus a
+# build or a test run). 20 GB leaves the host ~10 GB, which is what the desktop
+# and the agent harnesses actually use. QEMU cannot change RAM on a live guest,
+# so this took effect at the next `make qemu_restart`; the value is kept here so
+# a rebuild boots the same size.
+ram_mb  = 20480
+# Guest cores: "auto" is half of this machine's, clamped to 2-8. 12 of this
+# seat's 16 vCPUs (8 physical cores + SMT): the 4 left are what the host needs
+# to stay responsive while the guest is saturated. More than the physical core
+# count buys SMT threads, which help agents waiting on I/O far more than they
+# help a compile -- hence 12 and not 16.
+cpus    = 12
 # auto | minimal | standard | full   (auto follows the disk size: minimal
 # under 15 GB, standard 15-29, full 30+)
 profile = "auto"
@@ -211,18 +223,64 @@ password_login = true
 interval_min = 10
 
 # ── Network ─────────────────────────────────────────────────────────────────
-# Ports of your own, forwarded from this machine into the VM and opened in
-# the VM's firewall. TCP only. `guest` is the port inside the VM, `host` the
-# one you connect to here; if that one is taken the build moves up to the
-# next free port and `make status` shows where it landed.
+# Every port between this machine and the VM, and nothing else: each entry is
+# one NAT forward (VirtualBox natpf / QEMU hostfwd) AND one rule in the VM's
+# firewall (UFW, default deny incoming). A port missing here is closed in the
+# guest; a port listed here is open in it. TCP only. `guest` is the port inside
+# the VM, `host` the one you connect to here (1024 and up); if that one is
+# taken the build moves up to the next free port and `make status` shows where
+# it landed. `ssh` is required and its guest side is always 4242.
 #
-# SSH (4242) and the ports Inception and the web stack need are forwarded
-# already — these are extras.
+# The names are what the scripts look ports up by (`ssh` for ~/.ssh/config,
+# `http`/`https`/`inception-*` for `make inception`): rename one and its tool
+# loses the port. Inception's FTP needs its passive range forwarded 1:1, or a
+# listing connects and then hangs.
+#
+# Applied when the VM is built: the NAT forwards again on every boot, the
+# firewall at first boot only, so a change here needs `make re` to reach UFW.
+#
+# Only for a service the guest binds to 0.0.0.0: a NAT/natpf rule forwards to
+# the guest's real NIC, never to its loopback, so a port the guest binds to
+# 127.0.0.1 (drawnosaurus's gateway on 5273 and API on 4300 among them) can
+# never be reached this way -- the rule looks fine and just squats the host
+# port forever. `make drawnosaurus` opens an SSH tunnel for those instead; see
+# setup/host/drawnosaurus_host_access.sh for the full story.
 [network]
 forwards = [
-  # { name = "grafana", guest = 3100, host = 3100 },
-  { name = "drawnosaurus-web", guest = 5273, host = 5273 },
-  { name = "drawnosaurus-api", guest = 4300, host = 4300 },
+  { name = "ssh",                      guest = 4242,  host = 4242  },
+  { name = "http",                     guest = 80,    host = 8082  },
+  { name = "https",                    guest = 443,   host = 8443  },
+  { name = "inception-static",         guest = 8090,  host = 8090  },
+  { name = "inception-adminer",        guest = 8080,  host = 8081  },
+  { name = "inception-ftp",            guest = 21,    host = 2121  },
+  { name = "inception-ftp-pasv-21000", guest = 21000, host = 21000 },
+  { name = "inception-ftp-pasv-21001", guest = 21001, host = 21001 },
+  { name = "inception-ftp-pasv-21002", guest = 21002, host = 21002 },
+  { name = "inception-ftp-pasv-21003", guest = 21003, host = 21003 },
+  { name = "inception-ftp-pasv-21004", guest = 21004, host = 21004 },
+  { name = "inception-ftp-pasv-21005", guest = 21005, host = 21005 },
+  { name = "inception-ftp-pasv-21006", guest = 21006, host = 21006 },
+  { name = "inception-ftp-pasv-21007", guest = 21007, host = 21007 },
+  { name = "inception-ftp-pasv-21008", guest = 21008, host = 21008 },
+  { name = "inception-ftp-pasv-21009", guest = 21009, host = 21009 },
+  { name = "inception-ftp-pasv-21010", guest = 21010, host = 21010 },
+  { name = "docker",                   guest = 5000,  host = 5000  },
+  { name = "mariadb",                  guest = 3306,  host = 3306  },
+  { name = "redis",                    guest = 6379,  host = 6379  },
+  { name = "frontend",                 guest = 5173,  host = 5173  },
+  { name = "backend",                  guest = 3000,  host = 3000  },
+  { name = "website",                  guest = 4322,  host = 4322  },
+  { name = "osionos-app",              guest = 3001,  host = 3001  },
+  { name = "osionos-mail",             guest = 3002,  host = 3002  },
+  { name = "osionos-calendar",         guest = 3003,  host = 3003  },
+  { name = "osionos-bridge",           guest = 4000,  host = 4000  },
+  { name = "mail-bridge",              guest = 4100,  host = 4100  },
+  { name = "calendar-bridge",          guest = 4200,  host = 4200  },
+  { name = "baas-gateway",             guest = 8000,  host = 8000  },
+  { name = "baas-admin",               guest = 8001,  host = 8001  },
+  { name = "mailpit",                  guest = 8025,  host = 8025  },
+  { name = "auth-gateway",             guest = 8787,  host = 8787  },
+  { name = "vault",                    guest = 18200, host = 18200 },
 ]
 
 # ── The disk ────────────────────────────────────────────────────────────────

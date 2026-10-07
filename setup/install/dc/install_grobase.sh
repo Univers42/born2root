@@ -58,14 +58,20 @@ set -u
 FEAT=/etc/b2b/features.conf
 BUILD=/etc/b2b/build.conf
 GROBASE_REPO="${GROBASE_REPO:-https://github.com/Univers42/grobase.git}"
-# 67279b7d = head of branch fix/laboratory-findings (what the Laboratory bench
-# found, repaired in grobase itself: WAF methods + GraphQL exclusion, pg_graphql
-# in the server image, migration 087, PostgREST graphql_public, SDK topic, the
-# ghcr realtime image, and REALTIME_ALLOWED_ORIGINS at the WebSocket upgrade).
-# It was 98eb2b74, four commits earlier, which predates the origin check
-# grobase_cors_guest.sh writes -- the socket then took REALTIME_ALLOWED_ORIGINS
-# and ignored it. Move to the merge commit once it lands on main.
-GROBASE_REF="${GROBASE_REF:-67279b7d}"
+# The pin is a commit on grobase's main that its CI built images for, because
+# the images are not built from this tree: they are pulled as :latest, which
+# CI builds from main's head, and only main commits get a per-commit
+# sha-<full sha> tag. A tree older than its images is a skew nobody sees until
+# a container dies: on 2026-10-06, at 5af95cdf (where fix/laboratory-findings
+# landed, 435 commits behind main), the :latest trino image stopped on the
+# old tree's config ("Environment variable is not set: CATALOG_MANAGEMENT";
+# main's tree no longer names it) and restarted forever, and mongo-init lost
+# the dial race that main's mongo-init retries. Before that the pin
+# was 67279b7d, on the fix branch itself, which a force-push erased ("ref not
+# found", every dc-* feature failed). So: main's head, by its full SHA (the
+# `git fetch origin <sha>` below takes no abbreviation). Moving it means
+# checking ghcr has sha-<new pin> images, the way realtime is tagged below.
+GROBASE_REF="${GROBASE_REF:-d180542b0a3f9c4029484e4e15e43f057ecdbc0d}"
 GROBASE_DIR="${GROBASE_DIR:-/opt/grobase}"
 CONF=/etc/b2b/grobase.conf
 
@@ -136,16 +142,25 @@ fi
 # ("ref 98eb2b74 not found") although the commit was on the remote the whole
 # time. Widen the refspec first, then deepen; the ref-name fetch is the last
 # resort for a commit no branch reaches any more.
-if ! git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null; then
+# The checkout is forced: the patches below edit tracked compose files, so a
+# rerun at a new pin was refused ("local changes would be overwritten") and
+# reported as "ref not found". They are reapplied after every checkout, and
+# untracked files (.env, the secrets) are left alone.
+if ! git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" 2>/dev/null; then
     git -C "$GROBASE_DIR" remote set-branches origin '*' 2>/dev/null || true
     git -C "$GROBASE_DIR" fetch -q --unshallow origin 2>/dev/null ||
         git -C "$GROBASE_DIR" fetch -q origin 2>/dev/null || true
-    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" 2>/dev/null ||
+    git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" 2>/dev/null ||
         git -C "$GROBASE_DIR" fetch -q origin "$GROBASE_REF" 2>/dev/null || true
-    git -C "$GROBASE_DIR" checkout -q "$GROBASE_REF" ||
+    git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" ||
         die "ref $GROBASE_REF not found in $GROBASE_REPO"
 fi
 cd "$GROBASE_DIR" || die "cannot enter $GROBASE_DIR"
+# The forced checkout also put back the ask rules make claude_debug removed
+# from .claude/settings.json for the guest's unattended Claude.
+if [ -x /usr/local/sbin/b2b-claude-bypass ]; then
+    /usr/local/sbin/b2b-claude-bypass "$GROBASE_DIR" || log "b2b-claude-bypass failed; Claude here will prompt again (make claude_debug)"
+fi
 
 # ── one local patch: every service but the door binds loopback ──────────────
 # At d74aa97 prometheus (9090), grafana (3030) and loki (3100) publish on
@@ -445,12 +460,13 @@ done
 [ "$pull_ok" = 1 ] || die "images could not be pulled from ghcr.io (network?) -- make grobase, from the host, retries"
 
 # ── the realtime image that matches the clone ─────────────────────────────
-# `make pull` gives the realtime service its versioned image
-# (dlesieur/realtime-agnostic:0.2.1 in data-plane.yml), which predates
-# presence and broadcast; ghcr also publishes one image per commit
-# (grobase-realtime:sha-<commit>). The one tagged with GROBASE_REF is what
-# the clone's source describes, so it replaces the versioned tag locally.
-# Found by the Laboratory bench on 2026-09-20 (TRACK answered nothing).
+# `make pull` gives the realtime service whatever data-plane.yml names
+# (grobase-realtime:latest since grobase 923372f, 2026-09-20; before that
+# dlesieur/realtime-agnostic:0.2.1, which predates presence and broadcast).
+# ghcr also publishes one image per commit (grobase-realtime:sha-<commit>);
+# the one tagged with GROBASE_REF is what the clone's source describes, so
+# it replaces the pulled tag locally. Found by the Laboratory bench on
+# 2026-09-20 (TRACK answered nothing).
 rt_name=$(grep -m1 -E '^\s+image:\s+\S*realtime\S*' orchestrators/compose/base/data-plane.yml | awk '{print $2}')
 rt_sha="ghcr.io/univers42/grobase-realtime:sha-$(git rev-parse HEAD)"
 if [ -n "$rt_name" ] && docker pull -q "$rt_sha" >/dev/null 2>&1; then

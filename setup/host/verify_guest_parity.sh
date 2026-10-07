@@ -131,8 +131,17 @@ printf "\n${C_BOLD}Born2beRoot policy${C_RESET}\n"
 # shellcheck disable=SC2016
 row "sshd port" "$(g 'ss -tlnH | awk "{print \$4}" | grep -o ":4242$" | head -1')" ":4242"
 row "root ssh" "$(g 'grep -iE "^permitrootlogin" /etc/ssh/sshd_config* 2>/dev/null | head -1' | awk '{print $NF}')" "no"
-row "ufw" "$(groot '/usr/sbin/ufw status' | grep -m1 'Status:')" "active"
-row "ufw 4242" "$(groot '/usr/sbin/ufw status' | grep -c '4242' | awk '{print ($1>0)?"allowed":"MISSING"}')" "allowed"
+UFW_STATUS=$(groot '/usr/sbin/ufw status')
+row "ufw" "$(printf '%s\n' "$UFW_STATUS" | grep -m1 'Status:')" "active"
+# Every [network] forwards entry is a port UFW must allow, 4242 among them.
+UFW_MISSING=""
+for UFW_RULE in $(b2b_get B2B_FIREWALL); do
+    printf '%s\n' "$UFW_STATUS" | grep -qE "^${UFW_RULE##*:}/tcp +ALLOW" ||
+        UFW_MISSING="$UFW_MISSING ${UFW_RULE##*:}"
+done
+UFW_VERDICT=allowed
+[ -z "$UFW_MISSING" ] || UFW_VERDICT="MISSING$UFW_MISSING"
+row "ufw [network] forwards" "$UFW_VERDICT" "allowed"
 row "apparmor" "$(g 'systemctl is-active apparmor')" "active"
 # The policy rows expect what born2root.toml asked for, not the subject's
 # literals: a stricter minlen = 12 is a pass, and must not read as a failure.
@@ -253,6 +262,8 @@ row "first-boot cron" "$(groot 'grep -h first-boot-setup /etc/crontab 2>/dev/nul
 printf "\n${C_BOLD}Services${C_RESET}\n"
 row "docker" "$(g 'systemctl is-active docker')" "active"
 row "ssh" "$(g 'systemctl is-active ssh')" "active"
+row "var-gc 90% watch" "$(g 'systemctl is-active b2b-var-gc-watch.timer')" "active"
+row "unhealthy-container watchdog" "$(g 'systemctl is-active b2b-autoheal.timer')" "active"
 
 printf "\n"
 if [ "$fail" -eq 0 ]; then

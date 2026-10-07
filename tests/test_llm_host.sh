@@ -25,6 +25,9 @@
 set -u
 
 cd "$(dirname "$0")/.." || exit 1
+# On a host whose hide runs in global mode, pull and install would re-execute
+# through `hide fast run` (utils/fast_lane.sh): sudo, and a line on stderr.
+export B2B_FAST_LANE=0
 
 fail=0
 check() {

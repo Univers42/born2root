@@ -15,6 +15,11 @@ cd "$REPO_ROOT"
 # "initrd.gz not found", "cannot find /isolinux/isolinux.bin", or worse,
 # succeeds without the preseed. Measured on a real run. So a build holds a
 # lock for its whole life (fd 9), and a second build waits and says so.
+# The netinst download is the big one; see utils/fast_lane.sh. Before the
+# lock: sudo, which hide runs, closes fd 9, and the re-executed copy takes it.
+. "$REPO_ROOT/utils/fast_lane.sh"
+fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"
+
 ISO_LOCK="${ISO_LOCK:-$REPO_ROOT/.gen_iso.lock}"
 exec 9>"$ISO_LOCK"
 if ! flock -n 9; then
@@ -107,25 +112,50 @@ download() {
 }
 
 # ── Dynamically discover the latest Debian netinst ISO ───────────────────────
-BASE_URL="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/"
+# cdimage.debian.org/debian-cd/current/ sometimes returns HTTP 500 (the path
+# moved to /cdimage/release/current/ on that host); try it first then fall
+# back to two known-good mirrors so a transient upstream failure doesn't stop
+# a build.
+_ISO_MIRRORS=(
+    "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/"
+    "https://cdimage.debian.org/cdimage/release/current/amd64/iso-cd/"
+    "https://mirrors.kernel.org/debian-cd/current/amd64/iso-cd/"
+)
 
 echo "===== Creating Custom Debian ISO with Preseed ====="
-echo "Querying $BASE_URL for the latest ISO filename..."
 
-ISO_FILENAME=$(curl -fsSL "$BASE_URL" 2>/dev/null |
-    grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' |
-    head -n1)
+ISO_FILENAME=""
+BASE_URL=""
+for _mirror in "${_ISO_MIRRORS[@]}"; do
+    echo "Querying $_mirror for the latest ISO filename..."
+    ISO_FILENAME=$(curl -fsSL --max-time 15 "$_mirror" 2>/dev/null |
+        grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' |
+        head -n1)
+    if [ -n "$ISO_FILENAME" ]; then
+        BASE_URL="$_mirror"
+        break
+    fi
+    echo "  (no response or no matching filename, trying next mirror)"
+done
 
 if [ -z "$ISO_FILENAME" ]; then
-    echo "Error: Could not determine the latest Debian ISO filename from $BASE_URL"
-    echo "The Debian mirrors may be temporarily unavailable."
+    echo "Error: Could not determine the latest Debian ISO filename from any mirror."
+    echo "Tried: ${_ISO_MIRRORS[*]}"
     exit 1
 fi
 
 URL_IMAGE_ISO="${BASE_URL}${ISO_FILENAME}"
+# Beside the VM disks, never in the source tree (iso_dir, utils/vm_path.sh).
+. "$REPO_ROOT/utils/vm_path.sh"
+ISO_HOME=$(iso_dir)
+mkdir -p "$ISO_HOME" || {
+    echo "Error: cannot create $ISO_HOME -- point VM_PATH (or B2B_ISO_DIR) at a writable directory."
+    exit 1
+}
+ISO_LOCAL="$ISO_HOME/$ISO_FILENAME"
 # Both overridable so a test build can run beside a real one without sharing
 # the extraction tree or overwriting the ISO a running VM booted from.
-ISO_DIR="${ISO_DIR:-debian_iso_extract}"
+ISO_DIR="${ISO_DIR:-$ISO_HOME/debian_iso_extract}"
 # A template: @B2B_*@ placeholders filled from born2root.toml below.
 PRESEED_FILE="preseeds/preseed.cfg.in"
 # Encrypted unless explicitly told otherwise; see utils/luks_mode.sh for why
@@ -138,7 +168,7 @@ LUKS_SUFFIX=$(luks_iso_suffix "$LUKS")
 # without it, `make gen_iso LUKS=OFF` would find the encrypted ISO sitting in
 # the repo root, decide there was nothing to do, and hand back an image that is
 # the opposite of what was asked for.
-OUTPUT_ISO="${OUTPUT_ISO:-${ISO_FILENAME%.iso}-preseed${LUKS_SUFFIX}.iso}"
+OUTPUT_ISO="${OUTPUT_ISO:-$ISO_HOME/${ISO_FILENAME%.iso}-preseed${LUKS_SUFFIX}.iso}"
 # xorriso runs from inside $ISO_DIR, so it needs the output as an absolute path.
 case "$OUTPUT_ISO" in
 /*) OUTPUT_ABS="$OUTPUT_ISO" ;;
@@ -218,11 +248,11 @@ if [ -f "$OUTPUT_ISO" ]; then
 fi
 
 # ── Download the base ISO if needed ──────────────────────────────────────────
-if [ -f "$ISO_FILENAME" ]; then
-    echo "✓ ISO file found locally: $ISO_FILENAME"
+if [ -f "$ISO_LOCAL" ]; then
+    echo "✓ ISO file found locally: $ISO_LOCAL"
 else
     echo "Downloading ISO from $URL_IMAGE_ISO ..."
-    download "$URL_IMAGE_ISO" "$ISO_FILENAME" || {
+    download "$URL_IMAGE_ISO" "$ISO_LOCAL" || {
         echo "Error: Failed to download ISO"
         exit 1
     }
@@ -260,11 +290,11 @@ mkdir -p "$ISO_DIR"
 
 # Use xorriso (most portable for ISO manipulation), fallback to bsdtar, then 7z
 if command -v xorriso >/dev/null 2>&1; then
-    xorriso -osirrox on -indev "$ISO_FILENAME" -extract / "$ISO_DIR" 2>/dev/null
+    xorriso -osirrox on -indev "$ISO_LOCAL" -extract / "$ISO_DIR" 2>/dev/null
 elif command -v bsdtar >/dev/null 2>&1; then
-    bsdtar -C "$ISO_DIR" -xf "$ISO_FILENAME"
+    bsdtar -C "$ISO_DIR" -xf "$ISO_LOCAL"
 elif command -v 7z >/dev/null 2>&1; then
-    7z x -o"$ISO_DIR" "$ISO_FILENAME" >/dev/null
+    7z x -o"$ISO_DIR" "$ISO_LOCAL" >/dev/null
 else
     echo "Error: No ISO extraction tool found. Install xorriso, bsdtar, or p7zip."
     exit 1
@@ -400,6 +430,20 @@ feature_env --conf >"$ISO_DIR/features.conf" ||
 feature_env --resolve | sed 's/^/    /'
 echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") feature(s) on"
 
+# Inception's host access (run at the very end of `make all`) reads its four
+# ports from [network] forwards, the list the guest's firewall opens; without
+# them the browser side would point at ports UFW keeps closed. Refuse here,
+# before the install, rather than 20 minutes in.
+if feature_env --has inception-data; then
+    for INCEPTION_FWD in https http inception-static inception-adminer; do
+        if ! b2b_forward "$INCEPTION_FWD" >/dev/null; then
+            echo "Error: Inception is in this build but [network] forwards has no '$INCEPTION_FWD'" >&2
+            echo "       (born2root.toml, or the B2B_CONFIG profile). Nothing was built." >&2
+            exit 1
+        fi
+    done
+fi
+
 # Nerd Font icons in the guest's Neovim, resolved at the top of this script
 # (see resolve_nerd_font). Appended after the feature count above, which counts
 # =on lines. install_nvim.sh reads it back as B2B_NERD_FONT.
@@ -484,7 +528,8 @@ for PROVISIONER in \
     setup/install/dc/install_edge.sh \
     setup/install/dc/install_grobase.sh \
     setup/install/dc/install_var_gc.sh \
-    setup/install/dc/install_backup.sh; do
+    setup/install/dc/install_backup.sh \
+    setup/install/dc/install_graph_render.sh; do
     if [ -f "$PROVISIONER" ]; then
         cp "$PROVISIONER" "$ISO_DIR/$(basename "$PROVISIONER")"
         chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true

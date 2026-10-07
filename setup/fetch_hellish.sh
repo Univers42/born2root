@@ -87,12 +87,24 @@ fi
 # ── Resolve the version to install ──────────────────────────────────────────
 # A pinned HELLISH_VERSION skips the API entirely, which also means `make all`
 # keeps working when the API rate limit (60/hr unauthenticated) is exhausted.
+# The release page is the fallback: GitHub's hosted runners share IPs, so the
+# unauthenticated API budget runs out under them (CI on ebbf0d5, 2026-10-07:
+# "Cannot resolve a hellish release" with v3.1.3 published), while the
+# /releases/latest page answers with a redirect to the tag and no budget.
+# Caveat: the fallback reads that redirect's Location header; if GitHub ever
+# stops redirecting there, it finds nothing and the old error stands.
 resolve_latest() {
-    curl -fsSL --max-time 20 \
+    local tag
+    tag=$(curl -fsSL --max-time 20 \
         -H 'Accept: application/vnd.github+json' \
         "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
         grep -m1 '"tag_name"' |
-        sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
+        sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    if [ -z "$tag" ]; then
+        tag=$(curl -fsSI --max-time 20 "https://github.com/${REPO}/releases/latest" 2>/dev/null |
+            tr -d '\r' | sed -n 's|^[Ll]ocation: .*/releases/tag/||p' | head -n1)
+    fi
+    printf '%s' "$tag"
 }
 
 VERSION="${HELLISH_VERSION:-}"

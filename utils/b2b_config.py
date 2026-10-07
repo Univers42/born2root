@@ -458,74 +458,6 @@ def bundles():
     return {line.split()[0] for line in block.group(1).splitlines() if len(line.split()) >= 2}
 
 
-# Ports already forwarded or opened, read from the scripts that own them, so
-# this is not a fourth copy of a list that drifts.
-def builtin_ports():
-    guest = {4242}
-    qemu = os.path.join(ROOT, "setup", "host", "qemu_vm.sh")
-    first_boot = os.path.join(ROOT, "preseeds", "first-boot-setup.sh")
-    try:
-        with open(qemu, "r", encoding="utf-8", errors="replace") as fh:
-            spec = re.search(r'PORTS_SPEC="\$\{PORTS_SPEC:-([^"]*)\}"', fh.read())
-        if spec:
-            for token in spec.group(1).split():
-                parts = token.split(":")
-                if len(parts) == 3 and parts[2].isdigit():
-                    guest.add(int(parts[2]))
-    except OSError:
-        pass
-    try:
-        with open(first_boot, "r", encoding="utf-8", errors="replace") as fh:
-            opened = re.search(r"for p in ((?:\d+ ?)+)", fh.read())
-        if opened:
-            guest.update(int(p) for p in opened.group(1).split())
-    except OSError:
-        pass
-    # VirtualBox's rule set is its own list, in the orchestrator's argument
-    # order (name guest host); a guest port only it forwards is still taken.
-    orchestrate = os.path.join(ROOT, "generate", "orchestrate.sh")
-    try:
-        with open(orchestrate, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-        for m in re.finditer(r"^\s*ensure_vm_nat_forward [a-z0-9-]+ (\d+) ", text, re.M):
-            guest.add(int(m.group(1)))
-        # Inception's FTP passive range is a loop, not a line per port.
-        passive = re.search(r"for _p in ((?:\d+ ?)+); do\s+ensure_vm_nat_forward", text)
-        if passive:
-            guest.update(int(p) for p in passive.group(1).split())
-    except OSError:
-        pass
-    return guest
-
-
-def builtin_forward_names():
-    """Every rule name the three forward lists already use.
-
-    VirtualBox refuses a second NAT rule with an existing name, and QEMU's
-    ports.env is keyed by it, so a config forward called "vault" would either
-    fail the VM's creation or overwrite a built-in port's record.
-    """
-    names = set()
-    sources = (
-        ("setup/host/qemu_vm.sh", r'PORTS_SPEC="\$\{PORTS_SPEC:-([^"]*)\}"', True),
-        ("setup/install/vms/install_vm_debian.sh", r"^add_natpf ([a-z0-9-]+) ", False),
-        ("generate/orchestrate.sh", r"^\s*ensure_vm_nat_forward ([a-z0-9-]+) ", False),
-    )
-    for rel, pattern, is_spec in sources:
-        try:
-            with open(os.path.join(ROOT, rel), "r", encoding="utf-8", errors="replace") as fh:
-                text = fh.read()
-        except OSError:
-            continue
-        if is_spec:
-            spec = re.search(pattern, text)
-            if spec:
-                names.update(t.split(":")[0] for t in spec.group(1).split())
-        else:
-            names.update(m.group(1) for m in re.finditer(pattern, text, re.M))
-    return names
-
-
 # ── Validation ──────────────────────────────────────────────────────────────
 LOGIN_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 GROUP_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
@@ -1041,10 +973,12 @@ class Validator:
         elif not value.startswith("/"):
             self.err(where, "%r is not absolute (it must start with /)" % (value,))
 
+    # [network] forwards is the whole port list: every NAT rule both backends
+    # create and every port the guest's firewall opens, so it must carry SSH.
+    # The guest side of it is the subject's 4242 and nothing else; the host
+    # side is free, like any other forward.
     def network(self):
         forwards = self._list("network.forwards", self.c.network["forwards"])
-        builtin = builtin_ports()
-        builtin_names = builtin_forward_names()
         names, guests, hosts = set(), set(), set()
         for i, forward in enumerate(forwards or []):
             where = "network.forwards[%d]" % i
@@ -1064,29 +998,29 @@ class Validator:
                 self.err(where + ".name", "lowercase letters, digits and - only")
             elif name in names:
                 self.err(where + ".name", "'%s' is used twice" % name)
-            elif name in builtin_names:
-                self.err(
-                    where + ".name",
-                    "'%s' is a forward the VM already has; pick another name" % name,
-                )
             else:
                 names.add(name)
             guest = self._int(where + ".guest", forward.get("guest"), low=1, high=65535)
             if guest is not None:
-                if guest in builtin:
+                if guest in guests:
+                    self.err(where + ".guest", "%d is forwarded twice" % guest)
+                elif (name == "ssh") != (guest == 4242):
                     self.err(
                         where + ".guest",
-                        "%d is forwarded by the build already (SSH, the web "
-                        "stack or Inception)" % guest,
+                        "SSH is 4242 in the guest and 4242 is SSH: the subject's "
+                        "port, not configurable",
                     )
-                elif guest in guests:
-                    self.err(where + ".guest", "%d is forwarded twice" % guest)
                 guests.add(guest)
             host = self._int(where + ".host", forward.get("host"), low=1024, high=65535)
             if host is not None and host in hosts:
                 self.err(where + ".host", "%d is used twice on this machine" % host)
             if host is not None:
                 hosts.add(host)
+        if forwards is not None and "ssh" not in names:
+            self.err(
+                "network.forwards",
+                'no SSH: add { name = "ssh", guest = 4242, host = 4242 }',
+            )
 
     def disk(self):
         swap = self.c.disk["swap_mb"]
@@ -1258,7 +1192,10 @@ LEGACY = {
     "B2B_FORWARDS": lambda c: " ".join(
         "%s:%s:%s" % (f.get("name"), f.get("host"), f.get("guest")) for f in c.forwards()
     ),
-    "B2B_FORWARD_PORTS": lambda c: " ".join(str(f.get("guest")) for f in c.forwards()),
+    # name:guest, what the guest's UFW opens (the name becomes the rule comment).
+    "B2B_FIREWALL": lambda c: " ".join(
+        "%s:%s" % (f.get("name"), f.get("guest")) for f in c.forwards()
+    ),
     "B2B_DC_CORS_ORIGINS": lambda c: " ".join(
         o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)
     ),
@@ -1393,8 +1330,8 @@ def guest_view(config):
         "B2B_SUDO_LOG_DIR",
         "B2B_SSH_PASSWORD_LOGIN",
         "B2B_MONITOR_INTERVAL",
-        # [network] forwards: the guest ports UFW opens.
-        "B2B_FORWARD_PORTS",
+        # [network] forwards: name:guest, what UFW opens.
+        "B2B_FIREWALL",
         # [dc] cors_origins: what install_grobase.sh adds to kong.yml.
         "B2B_DC_CORS_ORIGINS",
         # [dc] package: the grobase tier install_grobase.sh starts.
@@ -1413,7 +1350,7 @@ def guest_view(config):
             "B2B_NVIM_USERS",
             "B2B_VOLUMES",
             "B2B_SUDO_BADPASS",
-            "B2B_FORWARD_PORTS",
+            "B2B_FIREWALL",
             "B2B_DC_CORS_ORIGINS",
         ):
             lines.append('%s="%s"' % (key, value))
@@ -1586,7 +1523,7 @@ def show(config):
             "%s %s->%s" % (f.get("name"), f.get("host"), f.get("guest"))
             for f in config.forwards()
         )
-        or "(none beyond the built-in ones)",
+        or "(none: the VM has no SSH)",
     )
     out.append("")
     for name in DEFAULTS["policy"]:

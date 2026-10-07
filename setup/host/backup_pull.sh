@@ -15,7 +15,7 @@
 #   password manager too. That is the price of an encrypted backup.
 #
 # WHERE THE COPY GOES
-#   /sgoinfre/dlesieur/b2b-backups/<vm>/repo by default (BACKUP_DEST=…):
+#   /sgoinfre/students/<login>/b2b-backups/<vm>/repo by default (BACKUP_DEST=…):
 #   sgoinfre is off-limits for the VM DISK, by standing rule; a restic
 #   repository of a few hundred MB is what it is for. rsync when there is
 #   one, scp -r otherwise. The repository is plain files, encrypted at rest,
@@ -25,26 +25,45 @@
 #   make backup            password → backup in the guest → pull the repo
 #   make backup_verify     … and `restic check` the pulled copy (needs restic here)
 #   make restore           push the copy back into a (rebuilt) guest and load the newest snapshot
+#   backup_pull.sh --where print where the copy is (what `make datacenter` checks)
 set -u
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
 
-# BACKUP_DEST= beats [dc] backup_dest beats the campus default. The default is
-# only right on a 42 seat: on a personal machine /sgoinfre does not exist and /
-# is not writable, so `make datacenter` used to complete every step and then
-# die on `mkdir: cannot create directory '/sgoinfre'` (2026-09-24).
+# BACKUP_DEST= beats [dc] backup_dest beats the campus default. The default
+# lives here and only here: /sgoinfre/students/<login>, like every other
+# sgoinfre path in the repo, and it is only right on a 42 seat: on a personal
+# machine /sgoinfre does not exist and / is not writable, so `make datacenter`
+# used to complete every step and then die on `mkdir: cannot create directory
+# '/sgoinfre'` (2026-09-24). It used to be /sgoinfre/<login> while `make
+# datacenter` looked under students/, so the rebuild path never found the copy
+# `make backup` had made; a copy at the old path is still the one used when
+# there is none at the new one.
 DEST="${BACKUP_DEST:-$(b2b_get B2B_DC_BACKUP_DEST)}"
-[ -n "$DEST" ] || DEST="/sgoinfre/$(id -un)/b2b-backups/$VM_NAME"
 # $USER and ${USER} are the host login, the same rule ai.models_dir follows, so
 # a tracked profile can point at a home directory without naming anybody.
 _login=$(id -un)
 DEST=${DEST//\$\{USER\}/$_login}
 DEST=${DEST//\$USER/$_login}
+if [ -z "$DEST" ]; then
+    DEST="/sgoinfre/students/$_login/b2b-backups/$VM_NAME"
+    legacy_dest="/sgoinfre/$_login/b2b-backups/$VM_NAME"
+    if [ ! -d "$DEST/repo" ] && [ -d "$legacy_dest/repo" ]; then
+        DEST=$legacy_dest
+    fi
+fi
 unset _login
 VERIFY="${BACKUP_VERIFY:-0}"
 RESTORE=0
-case "${1:-}" in --verify) VERIFY=1 ;; --restore) RESTORE=1 ;; esac
+case "${1:-}" in
+--verify) VERIFY=1 ;;
+--restore) RESTORE=1 ;;
+--where)
+    printf '%s\n' "$DEST"
+    exit 0
+    ;;
+esac
 
 dc_connect
 

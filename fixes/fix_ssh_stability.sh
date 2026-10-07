@@ -22,8 +22,9 @@ while true; do
     fi
 
     # Periodic health log every 5 minutes
-    MIN=$(date +%M)
-    SEC=$(date +%S)
+    # Unpadded: $((08 % 5)) is an invalid octal number (exit at :08 and :09).
+    MIN=$(date +%-M)
+    SEC=$(date +%-S)
     if [ "$((MIN % 5))" = "0" ] && [ "$SEC" -lt "16" ]; then
         echo "$(date): OK sshd=$SSHD_ACTIVE procs=$SSHD_COUNT listen=$LISTEN estab=$ESTAB mem=${MEM_FREE}kB" >> "$LOG"
     fi

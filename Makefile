@@ -308,7 +308,9 @@ C_CYAN   := \033[36m
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
         groot groot_map groot_undo \
-        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
+        drawnosaurus drawnosaurus_status drawnosaurus_undo \
+        graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
+        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code claude_debug ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
         tailscale backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
@@ -383,6 +385,15 @@ _build:
 		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
+		qrc=$$?; \
+		if [ "$$qrc" = 75 ]; then \
+			printf "\n$(C_BLUE)>$(C_RESET) not an error -- first boot is still provisioning. Run 'make all' again later, or:\n"; \
+			printf "    $(C_BOLD)make qemu_watch$(C_RESET)     follow it live\n"; \
+			printf "    $(C_BOLD)make qemu_console$(C_RESET)   see the guest's serial console\n\n"; \
+			exit 0; \
+		elif [ "$$qrc" != 0 ]; then \
+			exit 1; \
+		fi; \
 	else \
 		$(MAKE_BIN) --no-print-directory check_driver && \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
@@ -390,7 +401,17 @@ _build:
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) generate/orchestrate.sh "$(VM_NAME)" "$(MAKE_BIN)"; \
 	fi
-	@VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh
+# Inception's host side edits the user's browsers, desktop proxy and
+# ~/.local/bin, so it is opt-in: only a profile that includes the Inception
+# feature gets it. A build of anything else (a project VM, a server) leaves the
+# host alone; `make host_access` is the explicit way in.
+	@if SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
+		$(SCRIPT_SH) generate/feature_profile.sh --has inception-data; then \
+		VM_NAME="$(VM_NAME)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh; \
+	else \
+		printf "$(C_BLUE)>$(C_RESET) host access for $(DOMAIN) skipped: no Inception in this profile ($(C_BOLD)make host_access$(C_RESET) to opt in)\n"; \
+	fi
 	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" $(SCRIPT_SH) setup/host/llm_host.sh build
 
 # Which backend would `make all` pick right now, and why?
@@ -753,7 +774,7 @@ gen_iso: shell
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
 		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
-		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" $(SCRIPT_SH) $(ISO_BUILDER)
+		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) $(ISO_BUILDER)
 
 # =========@@ Create the VM @@==================================================
 setup_vm:
@@ -785,7 +806,7 @@ gui_vm: check_system
 
 # =========@@ Status @@========================================================
 status:
-	@$(SCRIPT_SH) generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) generate/status.sh "$(VM_NAME)" "$(PRESEED_FILE)"
 
 # =========@@ Serial console @@================================================
 # The whole pipeline is headless, so nothing ever renders the VM's screen. The
@@ -872,9 +893,11 @@ prune_vms:
 	done; \
 	printf "$(C_GREEN)✓$(C_RESET) All VMs removed\n"
 
+# The ISOs live in $(VM_PATH)/iso (utils/vm_path.sh, iso_dir); the repo-root
+# names are where builds before that left theirs.
 clean:
-	@chmod -R u+w debian_iso_extract 2>/dev/null || true
-	$(RM) debian-*-amd64-netinst.iso debian-*-amd64-*preseed*.iso debian_iso_extract
+	@chmod -R u+w "$(VM_PATH)/iso" debian_iso_extract 2>/dev/null || true
+	$(RM) "$(VM_PATH)/iso" debian-*-amd64-netinst.iso debian-*-amd64-*preseed*.iso debian_iso_extract
 
 # =========@@ Space @@=========================================================
 # What this project costs, and whether that is still allowed. Fails (exit 1)
@@ -990,6 +1013,31 @@ groot_map:
 groot_undo:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/groot_host_access.sh --undo
 
+# =========@@ drawnosaurus: host access over the SAME port numbers @@==========
+# Same obstacle as groot: drawnosaurus's gateway (full access) and API bind
+# the guest's loopback at 5273/4300, which QEMU/VirtualBox NAT can never
+# reach. Unlike groot this tunnel keeps the exact host port numbers, so
+# http://localhost:5273/ works for every colleague without a bespoke URL.
+# See the script header for why [network] forwards must never list these two.
+drawnosaurus:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh
+drawnosaurus_status:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh --status
+drawnosaurus_undo:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh --undo
+
+# =========@@ graph_render: host access to its loopback-bound motor @@=========
+# The guest publishes graph_render on 127.0.0.1 only (no TLS in the server),
+# so the host reaches it through an SSH tunnel on the guest's port number
+# (8095 unless GRAPH_RENDER_PORT moved it at install). /healthz is open;
+# /v1 wants GRAPH_RENDER_KEY from the secrets file (make graph_render_key).
+graph_render:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_host_access.sh
+graph_render_status:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_host_access.sh --status
+graph_render_undo:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_host_access.sh --undo
+
 # Clone (or upload) Inception into the VM, build it, wire up the host, verify.
 #   make inception                    clone github.com/Univers42/inception
 #   make inception SRC=/path/to/repo  push a local working tree up instead
@@ -1057,6 +1105,11 @@ global_scope:
 # Herdr (persistent terminal panes over SSH) + opencode (the AI coding agent).
 devtools:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" devtools
+# Herdr, opencode and Playwright. Playwright (the browser the AI agents drive)
+# is 700 MB and its own feature row, so the provisioner installs it only when
+# the guest's features.conf lists it -- a 30 GB+ build, or FEATURES=+playwright.
+#   make devtools INSTALL_PLAYWRIGHT=1    install it whatever the build asked for
+#   make devtools INSTALL_PLAYWRIGHT=0    leave it out even if features.conf says on
 
 # =========@@ datacenter: rerun a dc-* provisioner in a built guest @@=========
 # The same scripts first boot ran from the ISO (setup/install/dc/), pushed
@@ -1072,6 +1125,8 @@ grobase:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" grobase
 backup_install:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" backup
+graph_render_install:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" graph-render
 
 # =========@@ datacenter: operate the server image from the host @@===========
 # Every one of these reads the guest's SSH port back the way provision_vm.sh
@@ -1139,21 +1194,22 @@ restore:
 # Everything a rebuilt guest needs after `make all`/`make re`, in the order
 # that keeps the backup copy safe: restore BEFORE the first backup (a fresh
 # repo must never overwrite the older copy), tenant_key after (it answers
-# "exists" when the restore brought the tenant back). Tailscale needs a
-# REUSABLE key in .b2b-secrets; without one that step warns and goes on.
+# "exists" when the restore brought the tenant back), graph_render_key
+# after that (it gives the new guest the stored key back, and is a no-op
+# on a guest without dc-graph-render). Tailscale needs a REUSABLE key in
+# .b2b-secrets; without one that step warns and goes on.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
 	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
-	@d="$(BACKUP_DEST)"; [ -n "$$d" ] || d="$(call b2b_conf,B2B_DC_BACKUP_DEST)"; \
-	[ -n "$$d" ] || d="/sgoinfre/students/$$(id -un)/b2b-backups/$(VM_NAME)"; \
-	d=$$(printf '%s' "$$d" | sed -e "s|[$$]{USER}|$$(id -un)|g" -e "s|[$$]USER|$$(id -un)|g"); \
+	@d=$$($(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --where); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
 	@$(MAKE_BIN) --no-print-directory tenant_key B2B_CONFIG="$(B2B_CONFIG)" TENANT="$(or $(TENANT),transcendence)"
+	@$(MAKE_BIN) --no-print-directory graph_render_key B2B_CONFIG="$(B2B_CONFIG)"
 	@$(MAKE_BIN) --no-print-directory backup B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$(BACKUP_DEST)"
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)"
 # The public plane. Down by default; read setup/host/funnel.sh before the first up.
@@ -1166,6 +1222,10 @@ funnel_down:
 # A tenant and its mbk_ key, provisioned through the signed operator call.
 tenant_key:
 	@$(DC_ENV) TENANT="$(TENANT)" NAME="$(NAME)" $(SCRIPT_SH) setup/host/tenant_key.sh
+# Keeps a key that still authenticates, gives a rebuilt guest the stored
+# one back, mints one only when none exists (setup/host/graph_render_key.sh).
+graph_render_key:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_key.sh
 seed:
 	@$(DC_ENV) N="$(N)" $(SCRIPT_SH) setup/host/loadtest.sh --seed
 loadtest:
@@ -1181,6 +1241,14 @@ grobase_status:
 #   make claude_code CLAUDE_CODE_VERSION=2.1.236   pin instead of the channel
 claude_code:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" claude-code
+
+# The guest's Claude, unattended in /opt/grobase: bypass mode, the
+# checkout's ask rules removed (and kept out of commits), RE and tracing
+# tools on / and in a privileged toolbox image (b2b-debug), the playwright
+# and radare2 MCP servers, a debugging skill. Header of the script: why each.
+#   make claude_debug CLAUDE_DEBUG_TOOLBOX=0   skip the ~1 GB toolbox image
+claude_debug:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" claude-debug
 
 # Optional AI. Does nothing unless AI_MODE is client or local:
 #   make ai AI_MODE=local        a model sized to this VM's RAM

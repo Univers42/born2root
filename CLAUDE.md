@@ -10,7 +10,7 @@ downloads a Debian netinst ISO, injects a preseed plus setup scripts, creates a
 VM (VirtualBox or QEMU/KVM), runs a ~20-minute unattended install with
 LUKS+LVM, boots it headless, unlocks the disk from the host and writes the
 host's `~/.ssh/config` so `ssh b2b` works. Everything that matters is
-Bash-dialect shell driven by GNU Make. `a.out`, `main.c`, `issue` and
+Bash-dialect shell driven by GNU Make. `main.c`, `issue`, `service` and
 `vm_boot.log` at the root are stray leftovers, not part of the build.
 
 ## Commands
@@ -33,11 +33,19 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Serve local models to opencode from the host (`[ai]`) | `make llm_select`, `make llm_host`, `make llm_status`, `make llm_stop` |
 | Status dashboard / follow the headless serial console | `make status`, `make console` |
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
-| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make hellish_plugins`, `make provision`, `make shell_vm` |
+| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make claude_debug`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
-| Build another machine from a profile instead of the personal file | `make all B2B_CONFIG=profiles/server.toml` |
-| Bring up / check the grobase datacenter in a built guest | `make grobase`, `make datacenter`, `make verify_platform`, `make grobase_status` |
-| Datacenter day-to-day (secrets in `.b2b-secrets`) | `make tailscale`, `make backup`, `make restore`, `make tenant_key TENANT=…`, `make seed`, `make loadtest`, `make funnel_up` |
+| Build with a preset config (school eval or server profile) | `make all B2B_CONFIG=profiles/school.toml` |
+| Full datacenter setup after a rebuild (restore → tailscale → backup) | `make datacenter` |
+| Expose grobase API/WAF on the host over SSH tunnels | `make baas_access`, `make baas_access_undo` |
+| Reach a guest-loopback-bound app (groot, drawnosaurus) over SSH tunnels | `make groot`, `make drawnosaurus`, `make drawnosaurus_undo` |
+| graph_render's motor: tunnel, key (kept across rebuilds), reinstall | `make graph_render`, `make graph_render_key`, `make graph_render_install` |
+| Grobase status (config + docker ps, read from the guest) | `make grobase_status` |
+| Prove the platform / mint a tenant key / seed / open the public plane | `make verify_platform`, `make tenant_key TENANT=…`, `make seed`, `make funnel_up` |
+| Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
+| Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
+| Mint a realtime publish JWT / apply CORS origins | `make realtime_token`, `make grobase_cors` |
+| Provision/re-run a datacenter component in the guest | `make grobase`, `make edge`, `make backup_install` |
 
 `make all` runs `prepare` first: `make deps`, then
 `git pull --autostash --ff-only origin main`, then downloads the hellish
@@ -81,12 +89,17 @@ then a separate job runs `make --dry-run all`, `CI=true make deps` and
 `make gen_iso`.
 
 ```bash
-find . -type f -name "*.sh" -print0 | xargs -0 shellcheck -e SC1091
-find . -type f -name "*.sh" -exec bashate -i E006 {} +
-find . -type f -name "*.sh" -exec shfmt -d -i 4 {} +     # shfmt -w -i 4 to fix
-markdownlint "**/*.md"                                    # MD013: 80 columns
+sh_files() { find . -path ./.claude -prune -o -type f -name '*.sh' -print0; }
+sh_files | xargs -0 shellcheck -e SC1091
+sh_files | xargs -0 bashate -i E006
+sh_files | xargs -0 shfmt -d -i 4             # shfmt -w -i 4 to fix
+markdownlint "**/*.md" --ignore .claude       # MD013: 80 columns
 make --dry-run all
 ```
+
+CI's `actions/checkout` fetches no submodules, so it never sees `.claude/`.
+Locally the kit is there, and its 51 scripts all fail `shfmt -i 4`: prune it,
+or the diff drowns the repo's own findings.
 
 Shell scripts are indented with 4 spaces (CI's `shfmt -i 4` wins over the tab
 setting in `.editorconfig`, and any flag on the command line makes shfmt
@@ -96,6 +109,47 @@ with hellish, so also check an edited script with `hellish -n` as well as
 `bash -n` (`doc/HANDOFF_SPACE_AND_PROFILES.md` lists the known differences,
 e.g. a one-line `case … esac; }` that shfmt collapses into something hellish
 cannot parse).
+
+## Secrets file
+
+`~/.config/born2root/b2b-secrets` (mode 600, `KEY=VALUE` lines) holds
+credentials that must not enter the repo or the ISO:
+
+- `TS_AUTHKEY` — Tailscale auth key; must be **reusable + ephemeral + pre-approved**
+  (a one-off key is spent by the first VM; ephemeral removes the old tailnet
+  node automatically on rebuild).
+- `RESTIC_PASSWORD` — restic backup repository password; `make backup` mints
+  one when absent, but copy it to a password manager immediately — every
+  snapshot on sgoinfre is unreadable without it.
+- `BAAS_API_KEY` — grobase tenant key; written by `make tenant_key`.
+- `CF_TUNNEL_TOKEN` — cloudflared tunnel token, only once a domain exists.
+
+Bootstrap:
+
+```bash
+cp .b2b-secrets.example ~/.config/born2root/b2b-secrets
+chmod 600 ~/.config/born2root/b2b-secrets
+```
+
+A `.b2b-secrets` at the repo root is also honoured (ignored by git). The
+campus `/goinfre` is wiped periodically — keep the file under `$HOME` (which
+survives wipes) and in a password manager.
+
+## Profile presets
+
+`profiles/school.toml` — Born2beRoot subject only (no Docker, WordPress,
+language toolchains; nvim stays). Use for evaluations:
+
+```bash
+make all B2B_CONFIG=profiles/school.toml
+```
+
+`profiles/server.toml` — server deployment preset. Both files follow the same
+schema as `born2root.toml`; read their headers before editing.
+
+A project's own VM (a large `/var`, a fixed feature set) is one more file of
+the same kind, passed with `B2B_CONFIG`; `born2root.toml` stays the general
+defaults. How: `doc/PROJECT_VM.md`.
 
 ## born2root.toml: the one file people personalise
 
@@ -148,9 +202,15 @@ read the one you are building before changing it. A profile names its own
   watchdog re-reads it with sed). Free text and secrets travel one record per
   line: `users` (`name:fullname:groups`), `ssh_keys`, `extra_users.shadow`
   (SHA-512, `!` for an empty password), `apt-packages`.
-- Built-in forwards, feature names and ports are scraped from the scripts
-  (`PORTS_SPEC`, `add_natpf`, `ensure_vm_nat_forward`, the `MANIFEST`), never
-  copied: rename one and the validator follows.
+- `[network] forwards` is the only port list: every VirtualBox natpf rule,
+  every QEMU hostfwd and every guest UFW rule (`B2B_FIREWALL` in `build.conf`,
+  `name:guest`) comes from it, so a profile file carries its own full list
+  (`school.toml`: `ssh` only). `ssh` with guest 4242 is required; host ports
+  walk past busy ones. Scripts look ports up by name (`b2b_forward NAME` in
+  `utils/b2b_config.sh`), so renaming an entry loses its tool the port.
+  `tests/test_firewall_forwards.sh` refuses a literal list coming back.
+- Feature names are scraped from the scripts (the `MANIFEST`), never copied:
+  rename one and the validator follows.
 - A literal `dlesieur`, `temp*123`, `vm_pass.txt` or `born2root.conf` in
   non-comment code fails `tests/test_b2b_config.sh`. Tests pin
   `tests/fixtures/default.toml` (the shipped values without comments), never
@@ -179,9 +239,25 @@ hardcoded `bash`.
 - Host side (runs on your machine): `Makefile`, `generate/`, `setup/host/`,
   `setup/install/vms/`, `utils/`, `unlock_vm.sh`.
 - Guest side (baked into the ISO, runs inside the VM): `preseeds/`, and the
-  provisioners `setup/install/{nvim,hellish,tools,ai}/*.sh`, which
+  provisioners `setup/install/{nvim,hellish,tools,ai,dc}/*.sh`, which
   `first-boot-setup.sh` runs from `/root` and `setup/host/provision_vm.sh`
-  re-pushes over SSH later.
+  re-pushes over SSH later. The `dc/` provisioners install grobase, edge
+  (Tailscale/cloudflared), backup (restic) and graph_render's motor
+  (`dc-graph-render`: loopback-only, idle until `make graph_render_key`
+  sends a key, refused below one 4.32 GiB render slot of free RAM).
+  `dc/install_var_gc.sh` is the exception, base tier in every build: a
+  daily pass plus a 10-minute watch
+  that cleans harder once `/var` or `/var/log` reaches 90%, never volumes,
+  and `b2b-autoheal`, which restarts any container left unhealthy (dockerd
+  ignores `depends_on` at boot, so a service can lose the race to postgres).
+  Its read-only twin `b2b-stack-health` is the verdict: exit 1 naming each
+  container unhealthy, crash-looping or exited non-zero. `b2b-restore` and
+  `verify_platform` end on it, so a restore that leaves an engine locked
+  out fails instead of printing "verified".
+- `setup/host/dc_lib.sh` is a shared library sourced by all datacenter host
+  scripts. It resolves the secrets file, provides SSH helpers and the
+  loopback-tunnel primitives (`tunnel_open`, `tunnel_close`,
+  `free_forward`), and defines color output functions. Never run directly.
 - Ad hoc and mostly historical: `diagnostic/`, `fixes/`, `management_tools/`,
   `monitore/`, `wordpress/`, `bak_conf/`, the other root-level scripts.
 
@@ -229,18 +305,24 @@ NAT accepts connections whether or not the guest is listening.
 
 The rendered preseed's `late_command` copies the scripts into `/target` and runs
 `b2b-setup.sh` via `in-target`. That is a chroot with no systemd and limited
-network, so it does every mandatory Born2beRoot setting (SSH on 4242, UFW,
-sudo, pwquality, AppArmor, cron monitoring, TRIM via crypttab, `lvm.conf` and
-`fstrim.timer`) from Debian repo packages only, before any network download.
-`first-boot-setup.sh` runs once via an `@reboot` crontab and self-deletes:
+network, so it does every mandatory Born2beRoot setting (SSH on 4242, ufw's
+package, sudo, pwquality, AppArmor, cron monitoring, TRIM via crypttab,
+`lvm.conf` and `fstrim.timer`) from Debian repo packages only, before any
+network download. `first-boot-setup.sh` runs once via an `@reboot` crontab and
+self-deletes: UFW (`apply_firewall`; ufw cannot load rules in the chroot),
 Docker, WordPress, third-party tools, nvim, hellish plugins. It sources
 `/etc/b2b/features.conf`, installs required features first, writes the measured
 cost of each to `/etc/b2b/features.status` (one line per mount a feature
-touches), and on a required feature failing prints `B2B-FEATURE-FAILED` to the
-serial console, which fails `make all`, and records why in
-`/etc/b2b/PROVISION_FAILED`. Provisioners are run through `run_logged`, never
-`provisioner | tee log`: without `pipefail` a pipeline's status is `tee`'s, so
-every provisioner used to report success whatever it did.
+touches), and on a required feature failing, or a firewall that is inactive or
+misses a configured port, prints `B2B-FEATURE-FAILED` to the serial console and
+records why in `/etc/b2b/PROVISION_FAILED`. Both backends wait for first boot
+to finish (its `@reboot` line gone from `/etc/crontab`) and read that verdict
+through `utils/first_boot.sh`: an essential failure fails `make all`, an
+optional one (`/etc/b2b/FEATURE_WARNINGS`) is listed, and a timeout while
+`features.status` still moves exits 75.
+Provisioners are run through `run_logged`, never `provisioner | tee log`:
+without `pipefail` a pipeline's status is `tee`'s, so every provisioner used to
+report success whatever it did.
 
 A new provisioner has to be named in three places that nothing but
 `tests/test_late_command.sh` holds together: the `/root/install_*.sh` call in
@@ -258,6 +340,60 @@ parser, language server or prebuilt binary is missing. A headless
 `vim.pack.add` is also wrapped with `confirm = false`, because its default is
 to ask. `install_excalidraw.sh` bundles the Excalidraw editor into
 `/opt/excalidraw` and smoke-tests its server before returning.
+
+**The one exception is a repository that no longer exists.**
+`install_nvim_extras.sh`'s `kulala_upstream()` asks github with git's own
+endpoint (`/info/refs?service=git-upload-pack`) and only a positive
+401/404/410 counts as gone; that leaves kulala's spec, its setup block and its
+`<leader>k…` mappings out of the generated config entirely (a flag in the
+LUAHEAD header, so the heredoc never needs a second copy), which is what keeps
+`nvim-verify.lua`'s verdict clean. A 403, a 000 or a curl that cannot run keeps
+the spec declared on purpose — those are machine faults, and the build should
+still stop on them. The same reasoning is why the error text of a clone failure
+is flattened onto one line *keeping* the reason: `vim.pack`'s aggregate error
+opens with a bare `vim.pack:` and names the cause below it, and the old
+first-line-only flattening printed "vim.pack:" for every failure.
+`tests/test_nvim_kulala_upstream.sh` pins all of it (stubbed curl, the real
+`write_ide_lua`, the real preinstall scraper, and the generated config executed
+in a headless nvim).
+
+A third trap lives in `run_as_user`, in both installers: every headless run
+gets `GIT_TERMINAL_PROMPT=0`. A clone of a private or deleted repository
+answers 401, `git` opens `/dev/tty` for a username, and a process with no
+terminal in its process group is **stopped** there (SIGTTIN) until the `timeout`
+kills it — 900 s of nothing, per run, per attempt, and no line in any log.
+`tests/test_nvim_bootstrap_env.sh` checks the variable reaches the command. A
+conditional declaration also carries a `B2B_NO_PREINSTALL` marker on its own
+line: `nvim-preinstall.lua` reads declarations out of the config as text, so it
+would otherwise resurrect exactly the plugin the config just decided to leave
+out.
+
+**Playwright, for the agents.** `install_devtools.sh` installs `playwright` and
+`@playwright/mcp`, registers two MCP servers per agent (`playwright` for its own
+headless browser, `playwright-host` for the host's Chrome over the
+`RemoteForward 9222` in the generated ssh block) and verifies both with a
+bounded handshake (`playwright-mcp-check.js`). Four things there are not
+obvious and each one cost a run:
+
+- The feature is a **`playwright` row in the `full` tier**, not part of
+  `devtools-extra`: 700 MB beside the standard set pushes the smallest build from
+  `SIZE_B2B=15` to 17. The provisioner reads `/etc/b2b/features.conf`; a build
+  that said no must never grow by 700 MB because a default crept in.
+- **Browsers on `/`** (`/usr/lib/ms-playwright`), not `~/.cache` and not `/opt`:
+  one copy for every account, and `/opt` is a 569 MB volume at the school quota
+  where 700 MB of browser would push the minimum build to 33.
+- **The profile file carries values, not expressions.** Its heredoc is
+  unquoted, so a literal `${NODE_PATH:-}` in it is expanded by the root
+  installer writing it — and shipped an empty `NODE_PATH`, which is
+  `MODULE_NOT_FOUND` on the next run with a working install.
+- **Never register through an agent's CLI.** `claude mcp add` verifies by
+  launching the server; through `runuser` with a pty that wait does not end
+  (120 s a call, the launched server left holding the terminal, `make devtools`
+  returning nothing after the script had exited). The configs are merged
+  directly, and `run_as_agent` writes to a file with stdin on `/dev/null` so
+  nothing a command launches can hold the pty.
+
+`tests/test_devtools_playwright.sh` pins all of it, hermetically (npm stubbed).
 
 ### One number: `SIZE_B2B`
 
@@ -354,16 +490,43 @@ and login the way `provision_vm.sh` does and reads the secrets file.
 
 Everything a backend writes lives under `$VM_PATH/$VM_NAME/`: the `.vdi` or
 `.qcow2`, pidfile, monitor socket, `serial.log`, and the `.built-on`,
-`.installed` and `.phase` stamps. `VM_PATH` comes from four places, most
-specific first: an explicit `VM_PATH=`, then `disk_images/.vm_path.<vm>`,
-then `[vm] path`, then `disk_images/`. The registry beats the config file on
-purpose — it records where a guest actually is, so editing the file never
-orphans a built VM. Moving one therefore means moving the directory *and*
-rewriting that file. Host ports (SSH from 4242, HTTP from 8082, HTTPS from
-8443, and the app ports) are allocated by `utils/host_ports.sh`, walking past
-ports already in
+`.installed` and `.phase` stamps. The ISOs (netinst, extraction, preseeded
+image) sit beside them in `$VM_PATH/iso`: `iso_dir` in `utils/vm_path.sh` is
+the one answer, and `tests/test_iso_dir.sh` refuses a repo-root lookup coming
+back. `VM_PATH` comes from four places, most specific first: an explicit
+`VM_PATH=`, then `disk_images/.vm_path.<vm>`, then `[vm] path`, then
+`disk_images/`. The registry beats the config file on purpose — it records
+where a guest actually is, so editing the file never orphans a built VM.
+Moving one therefore means moving the directory *and* rewriting that file.
+Host ports (SSH from 4242, HTTP from 8082, HTTPS from 8443, and the app
+ports) are allocated by `utils/host_ports.sh`, walking past ports already in
 use, so never assume 4242: read the port back the way `orchestrate.sh` and
 `provision_vm.sh` do.
+
+`[network] forwards` in `born2root.toml` only ever works for a guest service
+bound to `0.0.0.0`: both backends' NAT reaches the guest's real NIC
+(`10.0.2.15`), never its loopback, so a `127.0.0.1`-bound service (a project's
+"local machine only" entrance, e.g. drawnosaurus's gateway on 5273 or
+grobase's Kong on 8000) needs an SSH tunnel instead — a
+`setup/host/*_host_access.sh` script that opens `ssh -L` into the guest and
+is wired to a `make <name>` / `make <name>_undo` pair (`groot`,
+`baas_access`, `drawnosaurus`). Adding such a port to `[network] forwards`
+anyway does not just fail silently: the NAT/natpf rule it creates squats the
+host port forever, so even a correct tunnel can no longer bind it.
+
+### A host whose Tor tool runs in global mode
+
+On a host running hide (`/usr/local/bin/hide`) with `GLOBAL=on`, every TCP
+connection goes through Tor, QEMU's slirp included: the netinst came at
+390 KB/s, against 6 MB/s on hide's fast lane. `utils/fast_lane.sh` re-executes
+the entry scripts on that lane (`create_custom_iso.sh`, `qemu_pipeline.sh`,
+`orchestrate.sh`, `unlock_vm.sh`, `qemu_vm.sh install|start|restart`, the
+downloading `llm_host.sh` actions), and never opens it: a closed lane
+(`FAST_APPS` not `on`) gets a note. `B2B_FAST_LANE=0` keeps a build on Tor,
+and a test that executes one of those scripts exports it (see
+`tests/test_llm_host.sh`). Daemons keep their own group: VBoxSVC is waited out
+(`fast_lane_wait`), the host's dockerd is not covered.
+`tests/test_fast_lane.sh` pins it.
 
 ### Guards on destructive paths
 
@@ -420,3 +583,9 @@ Tokens are the scarce resource here, so:
   lines of command output.
 - Run a test suite once, not once per shell, until it is green; then do the
   hellish pass.
+
+`.claude/` is a git submodule (Univers42/claude-deal-with-the-devil, SSH URL):
+after a clone it is empty until `git submodule update --init`. Its
+`rules/*.md` load every session and call `devil <tool>` (`digest`, `watch`,
+`quality`, …); the binary is `.claude/bin/devil`, not on `PATH`. Edit the
+kit upstream, not here: a local change is lost on the next submodule update.

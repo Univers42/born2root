@@ -39,6 +39,7 @@
 #   feature_profile.sh --check      exit 1 with a reason when it does not fit
 #   feature_profile.sh --conf       the /etc/b2b/features.conf body
 #   feature_profile.sh --table      for humans (make features)
+#   feature_profile.sh --has NAME   exit 0 when NAME is on, 1 when it is off
 #
 # Env
 #   SIZE_B2B (15)  DISK_SIZE_MB  VM_RAM_MB (2048)   -- same as partition_recipe.sh
@@ -84,6 +85,32 @@ RECIPE="$HERE/partition_recipe.sh"
 #                 /opt 110 -> 0    /usr/local/bin (install_devtools.sh). Claude
 #                                  Code's 414 MB were on / too, uncounted: the
 #                                  npm prefix never moved to /opt.
+#
+# 2026-09-27 -- Playwright, so the agents in the guest have a browser. An agent
+# that cannot see a page cannot check its own work, and the guest has no
+# display by design (a graphics server scores 0), so the browser is headless
+# and the screenshot is taken from inside.
+#
+# Its own feature row, and the `full` tier, because 700 MB does not fit
+# beside the standard set at the school quota: folded into devtools-extra, the
+# smallest build this project could offer went from SIZE_B2B=15 to 17 -- and
+# from 15 to 33 with the browsers on /opt. Same reason claude-code is `full`
+# and ai-local is `explicit`. On a 30 GB+ build it turns on by itself; at
+# 15 GB the picker offers it and the fit check says what it costs.
+#
+#   playwright       / 0 -> 700       658 MB measured for the browsers in
+#                                   /usr/lib/ms-playwright (chromium, its
+#                                   headless shell and ffmpeg -- what an agent
+#                                   actually launches) and ~40 MB of npm
+#                                   packages in /opt/npm-global (playwright +
+#                                   @playwright/mcp). On /, not /opt and not
+#                                   ~/.cache: /opt is a 569 MB volume at the
+#                                   school quota and 700 MB of browser there
+#                                   pushes the smallest build from SIZE_B2B=15
+#                                   to 33, while / is where nvim, Docker and
+#                                   Claude Code already are. firefox and webkit
+#                                   are named in install_devtools.sh but not
+#                                   downloaded -- another ~900 MB if asked.
 #   nvim-extras   /opt  0 -> 30    the bundled Excalidraw editor
 #   nvim, nvim-extras /home 300, 400: the plugin sets, 57 plugins + parsers +
 #                                  Mason, measured 321 MB in all on the
@@ -135,7 +162,13 @@ RECIPE="$HERE/partition_recipe.sh"
 #                                    install_nvim_extras.sh and pointed at by
 #                                    kulala_core.path, so it is one copy on the
 #                                    volume that exists for exactly this, and
-#                                    the /home column is honest again.
+#                                    the /home column is honest again. The 105
+#                                    is an upper bound kept on purpose: as of
+#                                    2026-09-27 the plugin's own repository is
+#                                    gone (see kulala_upstream in
+#                                    install_nvim_extras.sh), so nothing is
+#                                    spent, and the number has to still be
+#                                    right the day it comes back.
 #
 # 2026-09-12, fifth pass -- Claude Code returns, beside opencode rather than
 # instead of it (setup/install/ai/install_claude_code.sh explains why both).
@@ -236,11 +269,16 @@ RECIPE="$HERE/partition_recipe.sh"
 #   dc-gateway    /opt    0 -> 273    the clone.
 #   dc-netmesh    /      50 -> 110    tailscale 1.102 with its deps.
 #   dc-backup     /      30  (24)     within a third, left alone.
-#   dc-var-gc     /var    0  (-177)   it reclaims: apt clean on a fresh guest.
+#   var-gc        /var    0  (-177)   it reclaims: apt clean on a fresh guest.
+#
+# dc-graph-render is graph_render's motor, not a grobase plane, so it is in no
+# dc-* bundle: one 87.9 MB image (dlesieur/graph_render, docker image
+# inspect, 2026-10-07) on /var, estimated at 100 until a build measures it.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      8     0     0     1      -
 devtools-apt       base      279   0     0     0      -
+var-gc             base      0     0     0     0      -
 nvim               core      382   120   0     138    devtools-apt
 npm-cache          core      0     0     0     55     nvim
 vscode-remote      standard  0     0     0     500    -
@@ -249,6 +287,7 @@ nodejs             standard  17    60    0     0      -
 pytools            standard  0     80    0     0      -
 nvim-extras        standard  214   135   0     259    nvim
 devtools-extra     standard  200   0     0     0      nodejs
+playwright         full      700   0     0     0      devtools-extra
 claude-code        full      320   0     0     0      -
 docker             standard  400   0     3300  0      -
 inception-data     standard  0     0     0     200    docker
@@ -256,7 +295,6 @@ ai-client          explicit  50    0     0     0      -
 ai-local           explicit  0     1000  0     0      -
 dc-netmesh         explicit  110   0     0     0      -
 dc-backup          explicit  30    0     0     0      -
-dc-var-gc          explicit  0     0     0     0      docker
 dc-gateway         explicit  0     273   3041  0      docker
 dc-tunnel          explicit  60    0     0     0      dc-gateway
 dc-identity        explicit  0     0     80    0      dc-gateway
@@ -272,6 +310,7 @@ dc-objectstore     explicit  0     0     150   0      dc-gateway
 dc-storage         explicit  0     0     200   0      dc-objectstore
 dc-observability   explicit  0     0     900   0      dc-gateway
 dc-data            explicit  0     0     4096  0      dc-gateway
+dc-graph-render    explicit  0     0     100   0      docker
 '
 # A bundle is a name that stands for a list of features, expanded before the
 # +name/-name pass so `FEATURES="+dc-standard -dc-tunnel"` reads exactly like
@@ -280,14 +319,18 @@ dc-data            explicit  0     0     4096  0      dc-gateway
 # names(), field(), feature_select.sh and utils/b2b_config.py all rely on. A
 # bundle may name another bundle; expansion is recursive.
 #
-#   dc-minimal   one gateway, one identity, one engine, private access, a
-#                backup and the garbage collector: the smallest thing that is
-#                still a BaaS, and everything it needs to stay alive.
+#   dc-minimal   one gateway, one identity, one engine, private access and a
+#                backup: the smallest thing that is still a BaaS, and
+#                everything it needs to stay alive (the /var garbage
+#                collector is base, in every build).
+#   dc-var-gc    the old name of var-gc, from when it was a dc-* row: a saved
+#                .b2b-features or a FEATURES= that still says it keeps working.
 #   dc-standard  + object storage, observability and a public tunnel.
 #   dc-full      + every other engine and plane grobase ships.
 BUNDLES='
-dc-minimal   dc-gateway dc-identity dc-db-postgres dc-netmesh dc-backup dc-var-gc dc-data
+dc-minimal   dc-gateway dc-identity dc-db-postgres dc-netmesh dc-backup dc-data
 dc-standard  dc-minimal dc-objectstore dc-observability dc-tunnel
+dc-var-gc    var-gc
 dc-full      dc-standard dc-db-mysql dc-db-mongo dc-db-redis dc-db-cockroach dc-db-mssql dc-realtime dc-storage dc-secrets
 '
 # vscode-remote and inception-data are SPACE, not steps: nothing installs them
@@ -685,6 +728,12 @@ emit_table() {
 case "$MODE" in
 --resolve) emit_resolve ;;
 --conf) emit_conf ;;
+--has)
+    # Exit 0 when the feature is in this profile, 1 when it is not. What the
+    # host side asks before it touches the user's machine (make all, Inception).
+    known "${2:-}" || die "--has: unknown feature '${2:-}' (see --table)"
+    is_on "$2"
+    ;;
 --table)
     emit_table
     [ -z "$OVERFLOW" ]
@@ -697,7 +746,7 @@ case "$MODE" in
     printf 'profile=%s fits at SIZE_B2B=%s\n' "$PROFILE" "$SIZE_GB"
     ;;
 *)
-    echo "usage: $0 --resolve | --check | --conf | --table" >&2
+    echo "usage: $0 --resolve | --check | --conf | --table | --has <feature>" >&2
     exit 2
     ;;
 esac

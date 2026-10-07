@@ -18,6 +18,7 @@
 #   setup/host/provision_vm.sh <vm-name> excalidraw    # just the Excalidraw editor
 #   setup/host/provision_vm.sh <vm-name> devtools      # herdr + opencode
 #   setup/host/provision_vm.sh <vm-name> claude-code   # Claude Code, beside it
+#   setup/host/provision_vm.sh <vm-name> claude-debug  # its unattended debug setup
 #   setup/host/provision_vm.sh <vm-name> hellish
 #   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
 #   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
@@ -298,14 +299,25 @@ global)
     ok "global scope configured"
     ;;
 devtools)
+    # Playwright is 700 MB and its own manifest row, so `make devtools` on a
+    # build that did not ask for it must not quietly grow the disk by three
+    # quarters of a gigabyte. The guest is the record of what the fit check
+    # allowed, so ask it (as the claude-code step below does) and let
+    # INSTALL_PLAYWRIGHT=1 override for a machine that wants it anyway.
     run_provisioner setup/install/tools/install_devtools.sh \
-        install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_" "Herdr + opencode"
+        install_devtools.sh "HERDR_ INSTALL_ OPENCODE_ DEVTOOLS_ INSTALL_PLAYWRIGHT" \
+        "Herdr + opencode + Playwright"
     ok "devtools provisioning finished"
     ;;
 claude-code)
     run_provisioner setup/install/ai/install_claude_code.sh \
         install_claude_code.sh "CLAUDE_CODE_ INSTALL_CLAUDE" "Claude Code"
     ok "Claude Code provisioning finished"
+    ;;
+claude-debug)
+    run_provisioner setup/install/ai/install_claude_debug.sh \
+        install_claude_debug.sh "CLAUDE_DEBUG_" "Claude debug setup"
+    ok "Claude debug setup finished"
     ;;
 ai)
     [ -n "${AI_MODE:-}" ] || die "set AI_MODE=client or AI_MODE=local (see setup/install/ai/install_ai.sh)"
@@ -335,6 +347,10 @@ grobase)
 backup)
     run_provisioner setup/install/dc/install_backup.sh \
         install_backup.sh BACKUP_ "restic + the dump job"
+    ;;
+graph-render)
+    run_provisioner setup/install/dc/install_graph_render.sh \
+        install_graph_render.sh GRAPH_RENDER_ "graph_render"
     ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
@@ -399,6 +415,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | ai | health | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | root-sh | restore-drill | all)"
     ;;
 esac

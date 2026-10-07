@@ -1,0 +1,313 @@
+#!/usr/bin/env hellish
+# The REST client, asked about before it is declared. No VM, no network: curl
+# is a stub that answers whatever code the case needs, and the config the
+# installer really generates is then run in a real headless Neovim.
+#
+# The bug this pins: github.com answers HTTP 401 -- what git sees for a
+# repository that is private or gone -- for mistweaverco/kulala.nvim, and the
+# same for the kulala-core backend it downloads, while kulala-ls, kulala-fmt
+# and kulala-desktop in the same account still clone. The REST client's
+# repository was withdrawn, with no successor announced. Nothing in this
+# project can fix that, and nothing should have to: on the 2026-09-27 build
+# the spec was declared anyway, so nvim-preinstall.lua, two headless starts
+# per attempt and three attempts all tried to clone it, and then
+# /usr/local/lib/b2b/nvim-verify.lua filed three PROBLEM lines --
+#
+#     extras MISS: kulala.nvim
+#     extras setup: install kulala.nvim: .../vim/pack.lua:1062: vim.pack:
+#     extras setup: kulala: .../60-b2b-ide.lua:357: module 'kulala' not found
+#
+# -- of which the middle one names no cause at all, because vim.pack's
+# aggregate error is a bare "vim.pack:" on its first line -- install_nvim.sh's
+# flattening threw the reason away. verify exits 1, first boot files
+# nvim-extras as failed, and `make all` stops twenty-five minutes in, over a
+# plugin whose only loss is <leader>ks.
+#
+# So the repository is asked about once, and a POSITIVE "gone" leaves the
+# plugin out of the config entirely: no spec to install, no require, no
+# mapping, nothing for the build to fail on. The spec comes back by itself the
+# day the repository does. Everything else must still be decided, not assumed:
+# a 403 (rate limit), a 000 (no network) and a curl that cannot run are all
+# transient, and those keep the plugin declared so the build still stops.
+#
+# Needs nvim (the generated config is executed, not just grepped).
+# Skipped, not failed, where there is none.
+set -e
+
+cd "$(dirname "$0")/.."
+REPO=$(pwd)
+SCRIPT="setup/install/nvim/install_nvim_extras.sh"
+
+if ! command -v nvim >/dev/null 2>&1; then
+    echo "skip test_nvim_kulala_upstream.sh: nvim is not installed"
+    exit 0
+fi
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+fail=0
+check() {
+    if [ "$2" = "$3" ]; then
+        printf 'ok   %-56s = %s\n' "$1" "$3"
+    else
+        printf 'FAIL %-56s = %s (expected %s)\n' "$1" "$2" "$3"
+        fail=1
+    fi
+}
+
+# ── the stub curl ──────────────────────────────────────────────────────────
+# -w '%{http_code}' and no network: what the real probe reads is the last
+# thing printed on stdout, so that is all this writes. FAKE_RC covers the case
+# where curl itself cannot answer (a 000 with no output at all).
+mkdir -p "$TMP/bin"
+cat >"$TMP/bin/curl" <<'STUB'
+#!/bin/sh
+printf '%s' "$FAKE_CODE"
+exit "${FAKE_RC:-0}"
+STUB
+chmod +x "$TMP/bin/curl"
+export PATH="$TMP/bin:$PATH"
+
+# ── the code under test, lifted out of the installer ───────────────────────
+# kulala_upstream() and write_ide_lua() are eval'd, the second one with the
+# awk below because it writes the config with two heredocs and a naive
+# /^write_ide_lua\(\) \{/,/^}/ stops at the first `}` INSIDE one of them. The
+# awk follows the heredoc markers and ends on the brace that closes the
+# function, so the real function -- decision, header and both heredocs -- is
+# what runs below.
+log() { :; }
+warn() { :; }
+die() { :; }
+
+KULALA_SRC="$(awk '/^KULALA_SRC=/{print; exit}' "$REPO/$SCRIPT")"
+[ -n "$KULALA_SRC" ] || {
+    echo "FAIL kulala_upstream's KULALA_SRC not found in $SCRIPT"
+    exit 1
+}
+# the assignment, for eval; the value, to compare against
+KULALA_URL="$(printf '%s' "$KULALA_SRC" | sed 's/^KULALA_SRC=//' | tr -d '"')"
+check "KULALA_SRC is the plugin the config declares" \
+    "$KULALA_URL" "https://github.com/mistweaverco/kulala.nvim"
+
+eval "$(awk '/^kulala_upstream\(\) \{/,/^}/' "$REPO/$SCRIPT")"
+
+# The extractor for write_ide_lua, which is eval'd below: that function writes
+# the config with two heredocs, and a naive /^write_ide_lua\(\) \{/,/^}/ stops
+# at the first `}` INSIDE one of them. This awk follows the heredoc markers and
+# ends on the brace that closes the function, so the real function -- the
+# decision, the header and both heredocs -- is what runs below.
+cat >"$TMP/extract.awk" <<'AWKEOF'
+# write_ide_lua(), whole: every line from its opening to the brace that closes
+# it, stepping over the heredoc bodies it writes.
+/^write_ide_lua\(\) \{/ { on = 1 }
+on {
+    print
+    if (inhd) {
+        if ($0 == hd) inhd = 0
+    } else if (match($0, /<<-?'?[A-Z][A-Z0-9_]*'?$/)) {
+        hd = substr($0, RSTART + 2)
+        gsub(/'/, "", hd)
+        inhd = 1
+    } else if (/^}/) {
+        exit
+    }
+}
+AWKEOF
+
+eval "$(awk -f "$TMP/extract.awk" "$REPO/$SCRIPT")"
+type write_ide_lua >/dev/null 2>&1 || {
+    echo "FAIL write_ide_lua could not be lifted out of $SCRIPT"
+    exit 1
+}
+
+# The file under test is generated by a real write_ide_lua call, so each case
+# gets its own process: the probe is memoised (that is the point of it) and a
+# second call in the same shell would reuse the first answer. FAKE_CODE is
+# exported rather than set as a `VAR=x func` prefix, because that prefix is not
+# put in the environment of a function's children by every shell this project's
+# scripts run under (hellish among them), and curl is exactly such a child.
+generate() {
+    local cfg="$1" code="$2" rc="${3:-0}"
+    mkdir -p "$cfg/plugin"
+    (
+        set +e
+        # shellcheck disable=SC2030 # the export is the point: it is the only way
+        # the stub curl in a child process learns the code to answer
+        export FAKE_CODE="$code" FAKE_RC="$rc"
+        eval "$(awk '/^KULALA_SRC=/{print; exit}' "$REPO/$SCRIPT")"
+        eval "$(awk '/^kulala_upstream\(\) \{/,/^}/' "$REPO/$SCRIPT")"
+        eval "$(awk -f "$TMP/extract.awk" "$REPO/$SCRIPT")"
+        write_ide_lua "$cfg" /opt/nvim-venv
+    )
+}
+
+state_of() {
+    # what the probe answers, in its own shell so the memo starts empty
+    (
+        set +e
+        # shellcheck disable=SC2030,SC2031 # same reason as in generate()
+        export FAKE_CODE="$1" FAKE_RC="${2:-0}"
+        eval "$(awk '/^KULALA_SRC=/{print; exit}' "$REPO/$SCRIPT")"
+        eval "$(awk '/^kulala_upstream\(\) \{/,/^}/' "$REPO/$SCRIPT")"
+        kulala_upstream
+    )
+}
+
+# ── 1. the probe ───────────────────────────────────────────────────────────
+check "404 (the repository is gone) is 'gone'" "$(state_of 404)" "gone"
+check "401 (private, which is the same answer to git) is 'gone'" "$(state_of 401)" "gone"
+check "410 is 'gone'" "$(state_of 410)" "gone"
+check "200 (a live repository) is 'ok'" "$(state_of 200)" "ok"
+check "403 (rate limited) is not a deletion" "$(state_of 403)" "unknown"
+check "000 (no network) is not a deletion" "$(state_of 000)" "unknown"
+check "curl that cannot answer is not a deletion" "$(state_of '' 7)" "unknown"
+# 403 and 000 must both keep the plugin declared: that is the transient kind
+# of failure the build is right to stop on, and silently dropping the REST
+# client because of a rate limit would be the same bug with a different cause.
+
+# ── 2. the config it writes ────────────────────────────────────────────────
+for code in 404 401; do
+    cfg="$TMP/gone$code"
+    generate "$cfg" "$code"
+    check "HTTP $code writes B2B_KULALA = false" \
+        "$(grep -c '^local B2B_KULALA = false$' "$cfg/plugin/60-b2b-ide.lua")" "1"
+    check "HTTP $code leaves the REST client out of the list" \
+        "$(grep -c "^  { src = gh 'mistweaverco/kulala.nvim' }," "$cfg/plugin/60-b2b-ide.lua")" "0"
+    check "HTTP $code still declares the other 13 plugins" \
+        "$(grep -c "^  { src = gh '" "$cfg/plugin/60-b2b-ide.lua")" "13"
+done
+
+for code in 200 403 000; do
+    cfg="$TMP/keep$code"
+    generate "$cfg" "$code"
+    check "HTTP $code writes B2B_KULALA = true" \
+        "$(grep -c '^local B2B_KULALA = true$' "$cfg/plugin/60-b2b-ide.lua")" "1"
+    check "HTTP $code declares the REST client again" \
+        "$(grep -c "specs\[#specs + 1\] = { src = gh 'mistweaverco/kulala.nvim' }" \
+            "$cfg/plugin/60-b2b-ide.lua")" "1"
+done
+
+# The spec is behind the flag rather than deleted, so the day the repository
+# is back the feature returns with no further edit -- and the flag is the only
+# difference between a config with the REST client and one without.
+check "the REST client is conditional, not removed" \
+    "$(grep -c 'if B2B_KULALA then' "$TMP/gone404/plugin/60-b2b-ide.lua")" "2"
+check "gone and live differ by the flag alone" \
+    "$(diff <(grep -v '^local B2B_KULALA' "$TMP/gone404/plugin/60-b2b-ide.lua") \
+        <(grep -v '^local B2B_KULALA' "$TMP/keep200/plugin/60-b2b-ide.lua") | wc -l)" "0"
+
+# ── 3. the preinstall pass, which reads the config as TEXT ─────────────────
+# nvim-preinstall.lua (install_nvim.sh) never runs the config: it globs every
+# *.lua under it and collects the repositories it finds on each line. So a
+# conditional declaration is a declaration to it, and the 2026-09-27 guest
+# asked for kulala that way even after the config had decided not to -- one
+# clone attempt, one MISSING line and one error per build, for a plugin the
+# config had just said not to have. Its scraper is lifted out of the installer
+# and run here against the two generated configs.
+awk "/^local hosts = /,/^if #specs == 0 then/" \
+    "$REPO/setup/install/nvim/install_nvim.sh" |
+    sed '$d' >"$TMP/scraper.lua"
+grep -q "globpath" "$TMP/scraper.lua" || {
+    echo "FAIL nvim-preinstall.lua's scraper could not be lifted out of install_nvim.sh"
+    exit 1
+}
+
+cat >"$TMP/scrape.lua" <<'LUAEOF'
+-- The scraper is a chunk of locals, so it is read and given a `return specs`
+-- rather than dofile'd: the extraction stays exactly as the installer has it.
+local src = table.concat(vim.fn.readfile(vim.env.B2B_SCRAPER), '\n') .. '\nreturn specs\n'
+local specs = assert(load(src, 'scraper'))()
+local kulala = 0
+for _, spec in ipairs(specs) do
+    if spec.src:lower():find('kulala') then kulala = kulala + 1 end
+end
+print(('SCRAPED=%d KULALA=%d'):format(#specs, kulala))
+LUAEOF
+
+scrape() {
+    # XDG_CONFIG_HOME moves stdpath('config'), which is what the scraper globs;
+    # nothing here touches the network, it only reads the file.
+    XDG_CONFIG_HOME="$1" B2B_SCRAPER="$TMP/scraper.lua" \
+        nvim --headless --clean -c "lua dofile('$TMP/scrape.lua')" -c qa 2>&1 |
+        tr -d '\r' | grep -E '^SCRAPED=' | tail -1
+}
+
+mkdir -p "$TMP/xdg-gone/nvim" "$TMP/xdg-keep/nvim"
+cp -a "$TMP/gone404/plugin" "$TMP/xdg-gone/nvim/plugin"
+cp -a "$TMP/keep200/plugin" "$TMP/xdg-keep/nvim/plugin"
+check "the preinstall pass leaves a conditional declaration alone" \
+    "$(scrape "$TMP/xdg-gone")" "SCRAPED=13 KULALA=0"
+# With the flag on it is still left alone, and that is right: this pass cannot
+# evaluate the condition, and installing the plugin is B2B.add's job when the
+# config is loaded -- which is the path every other extras plugin takes too.
+check "...and with the flag on, which is B2B.add's job, not this pass's" \
+    "$(scrape "$TMP/xdg-keep")" "SCRAPED=13 KULALA=0"
+
+# ── 4. the generated config, run ───────────────────────────────────────────
+# A stand-in for 05-b2b-pack.lua: it records what the IDE layer declares and
+# what its try() blocks could not set up, which is exactly the state
+# nvim-verify.lua turns into PASS or PROBLEM lines.
+cat >"$TMP/stub-b2b.lua" <<'LUAEOF'
+local specs, problems = {}, {}
+_G.B2B = { specs = specs, problems = problems, parsers = {} }
+function _G.B2B.gh(repo) return 'https://github.com/' .. repo end
+function _G.B2B.spec_name(spec) return spec.name or spec.src:match '[^/]+$' end
+function _G.B2B.status() return 'ok' end
+function _G.B2B.have() return true end
+function _G.B2B.add(list) for _, spec in ipairs(list) do specs[#specs + 1] = spec end end
+function _G.B2B.try(label, fn)
+    local ok, err = pcall(fn)
+    if not ok then problems[#problems + 1] = ('%s: %s'):format(label, tostring(err)) end
+    return ok
+end
+LUAEOF
+
+cat >"$TMP/report.lua" <<'LUAEOF'
+dofile(vim.env.B2B_STUB)
+dofile(vim.env.B2B_CONFIG)
+-- a spec is a table, so it is its src that is searched, not the table
+local function kulala_specs()
+    local n = 0
+    for _, spec in ipairs(_G.B2B.specs) do
+        if type(spec) == 'table' and tostring(spec.src or ''):lower():find('kulala') then
+            n = n + 1
+        end
+    end
+    return n
+end
+local function kulala_problems()
+    local n = 0
+    for _, p in ipairs(_G.B2B.problems) do
+        if tostring(p):lower():find('kulala') then n = n + 1 end
+    end
+    return n
+end
+print(('SPECS=%d KULALA_SPECS=%d KULALA_PROBLEMS=%d'):format(
+    #_G.B2B.specs, kulala_specs(), kulala_problems()))
+LUAEOF
+
+run_config() {
+    B2B_STUB="$TMP/stub-b2b.lua" B2B_CONFIG="$1/plugin/60-b2b-ide.lua" \
+        nvim --headless --clean -c "lua dofile('$TMP/report.lua')" -c qa 2>&1 |
+        tr -d '\r' | grep -E '^SPECS=' | tail -1
+}
+
+# Gone upstream: the layer loads, declares everything else, and says nothing
+# about kulala -- no spec for the build to fail on, and no "module 'kulala'
+# not found" from the require that used to be the third PROBLEM line.
+check "the generated config, upstream gone" "$(run_config "$TMP/gone404")" \
+    "SPECS=13 KULALA_SPECS=0 KULALA_PROBLEMS=0"
+
+# Upstream back: the spec is there again, and a missing plugin is still a
+# problem to report -- the tolerance is for a repository nobody can fetch, not
+# for a build that quietly installs less than it says.
+check "the generated config, upstream back" "$(run_config "$TMP/keep200")" \
+    "SPECS=14 KULALA_SPECS=1 KULALA_PROBLEMS=1"
+
+if [ "$fail" = "0" ]; then
+    echo "all ok"
+else
+    echo "FAILED"
+    exit 1
+fi

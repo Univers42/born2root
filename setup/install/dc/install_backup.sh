@@ -60,13 +60,26 @@ rm -f "$DUMPS"/*
 have() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
 stamp=$(date +%Y%m%dT%H%M%S)
 n=0
+# A running engine whose dump fails fails the run: the snapshot still takes
+# what was dumped, then the exit is 1 and the unit is "failed". It used to
+# say "5 dump(s) snapshotted" with Mongo locked out (2026-10-07). The
+# verdict also lands world-readable in $STATUS ("ok <epoch>" or "failed
+# <epoch> <what>"): verify_platform reads it as the login user, who cannot
+# list the 0700 repository -- its snapshot-age check never passed on its own.
+STATUS=/var/lib/b2b/backup.last
+verdict() {
+    install -d -m 0755 "${STATUS%/*}"
+    printf '%s %s%s\n' "$1" "$(date +%s)" "${2:-}" >"$STATUS"
+    chmod 644 "$STATUS"
+}
+failed=""
 if have mini-baas-postgres; then
     docker exec mini-baas-postgres pg_dumpall -U postgres --clean >"$DUMPS/postgres-$stamp.sql" && n=$((n + 1)) ||
-        echo "b2b-backup: postgres dump failed"
+        { echo "b2b-backup: postgres dump failed"; failed="$failed postgres"; }
 fi
 if have mini-baas-mysql; then
     docker exec mini-baas-mysql sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --all-databases --single-transaction' >"$DUMPS/mysql-$stamp.sql" && n=$((n + 1)) ||
-        echo "b2b-backup: mysql dump failed"
+        { echo "b2b-backup: mysql dump failed"; failed="$failed mysql"; }
 fi
 if have mini-baas-mongo; then
     # grobase's mongo image (d74aa97) ships mongosh but not the database
@@ -75,7 +88,7 @@ if have mini-baas-mongo; then
     # vault-restore, which round-trips mongo already.
     if docker exec mini-baas-mongo sh -c 'command -v mongodump' >/dev/null 2>&1; then
         docker exec mini-baas-mongo sh -c 'mongodump --archive -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' >"$DUMPS/mongo-$stamp.archive" && n=$((n + 1)) ||
-            echo "b2b-backup: mongo dump failed"
+            { echo "b2b-backup: mongo dump failed"; failed="$failed mongo"; }
     else
         echo "b2b-backup: mongo not dumped: no mongodump in the mini-baas-mongo image"
     fi
@@ -83,7 +96,7 @@ fi
 if have mini-baas-redis; then
     docker exec mini-baas-redis redis-cli SAVE >/dev/null 2>&1
     docker cp mini-baas-redis:/data/dump.rdb "$DUMPS/redis-$stamp.rdb" 2>/dev/null && n=$((n + 1)) ||
-        echo "b2b-backup: redis dump failed"
+        { echo "b2b-backup: redis dump failed"; failed="$failed redis"; }
 fi
 minio_vol=$(docker volume ls -q 2>/dev/null | grep -m1 'minio-data' || true)
 extra=""
@@ -101,11 +114,25 @@ done
 for skipped in mini-baas-cockroach mini-baas-mssql; do
     have "$skipped" && echo "b2b-backup: $skipped is running and not dumped here (see the header of install_backup.sh)"
 done
-restic snapshots >/dev/null 2>&1 || restic init >/dev/null || { echo "b2b-backup: restic init failed"; exit 1; }
+restic snapshots >/dev/null 2>&1 || restic init >/dev/null || {
+    echo "b2b-backup: restic init failed"
+    verdict failed " restic-init"
+    exit 1
+}
 # shellcheck disable=SC2086 # $extra is one path or empty, on purpose
-restic backup --quiet --tag b2b "$DUMPS" $extra || { echo "b2b-backup: restic backup failed"; exit 1; }
+restic backup --quiet --tag b2b "$DUMPS" $extra || {
+    echo "b2b-backup: restic backup failed"
+    verdict failed " restic-backup"
+    exit 1
+}
 restic forget --quiet --keep-hourly 24 --keep-daily 14 --keep-weekly 8 --prune >/dev/null 2>&1 || true
 echo "b2b-backup: $n dump(s) snapshotted into $REPO ($(restic snapshots --json 2>/dev/null | grep -o '"short_id"' | wc -l) snapshots kept)"
+if [ -n "$failed" ]; then
+    echo "b2b-backup: FAILED:$failed -- running but not dumped, so not in this snapshot"
+    verdict failed "$failed"
+    exit 1
+fi
+verdict ok
 BKEOF
 chmod 755 /usr/local/sbin/b2b-backup
 
@@ -156,11 +183,38 @@ chmod 755 /usr/local/sbin/b2b-restore-drill
 # platform secrets are put back first so the cluster initialises with the
 # dump's own password. Redis is a cache and is not restored; Mongo,
 # CockroachDB and MSSQL were never dumped (see above).
+#
+# Except the secrets of an engine whose data the restore does NOT reload:
+# its volume was initialised at first boot with THIS guest's value and still
+# holds it, so the snapshot's value locks every client out. Mongo did that on
+# 2026-10-07 (mongo-init exit 1; mongo-api, analytics-service, ai-service
+# crash-looping; the next backup's mongo dump "AuthenticationFailed"), and
+# the restore said nothing. Those keys keep the guest's value; MySQL's root
+# password is in config.env and MinIO reads its own from the environment at
+# every start, so neither is listed. The restore then ends on
+# b2b-stack-health (install_var_gc.sh): any container left unhealthy,
+# crash-looping or exited non-zero fails it, whatever the cause.
 cat >/usr/local/sbin/b2b-restore <<'RESTOREEOF'
 #!/bin/sh
 # b2b-restore — load the newest snapshot into the running engines. Installed
 # by setup/install/dc/install_backup.sh (born2root). Read its header first.
 set -u
+ENGINE_KEYS_KEPT="MONGO_INITDB_ROOT_PASSWORD"
+# keep_guest_engine_keys <guest secrets> <snapshot secrets> <out>: the
+# snapshot's file, each key of ENGINE_KEYS_KEPT carrying the guest's value.
+keep_guest_engine_keys() {
+    if [ ! -s "$1" ]; then
+        cp "$2" "$3"
+        return
+    fi
+    awk -v keep=" $ENGINE_KEYS_KEPT " '
+        { k = $0; sub(/=.*/, "", k) }
+        NR == FNR { if (index(keep, " " k " ")) guest[k] = $0; next }
+        k in guest { print guest[k]; seen[k] = 1; next }
+        { print }
+        END { for (k in guest) if (!(k in seen)) print guest[k] }
+    ' "$1" "$2" >"$3"
+}
 PASS=/etc/b2b/restic.pass
 REPO=/var/backups/b2b/repo
 [ -s "$PASS" ] || { echo "restore: no $PASS (make backup first)"; exit 1; }
@@ -184,7 +238,9 @@ echo "restore: snapshot $snap ($(basename "$pg")$( [ -n "$my" ] && printf ', %s'
 sec=$(find "$work" -name 'grobase.env.secrets' | head -n1)
 if [ -n "$sec" ] && [ -d /opt/grobase ]; then
     owner=$(stat -c %U /opt/grobase/.env.secrets 2>/dev/null || stat -c %U /opt/grobase)
-    install -m 0600 -o "$owner" -g "$owner" "$sec" /opt/grobase/.env.secrets
+    keep_guest_engine_keys /opt/grobase/.env.secrets "$sec" "$work/env.secrets.merged"
+    install -m 0600 -o "$owner" -g "$owner" "$work/env.secrets.merged" /opt/grobase/.env.secrets
+    echo "restore: kept this guest's value for $ENGINE_KEYS_KEPT (that engine's volume is not reloaded)"
     loc=$(find "$work" -name 'grobase.env.local' | head -n1)
     [ -n "$loc" ] && install -m 0600 -o "$owner" -g "$owner" "$loc" /opt/grobase/.env.local
     (cd /opt/grobase && make --no-print-directory env >/dev/null 2>&1) && echo "restore: grobase .env.secrets restored and .env re-assembled" || echo "restore: WARN make env failed after restoring .env.secrets"
@@ -245,7 +301,15 @@ if [ -d /opt/grobase ]; then
     sleep 20
     echo "restore: tenant_api_keys rows after grobase's bootstrap: $(docker exec mini-baas-postgres psql -U postgres -tA -c "select count(*) from public.tenant_api_keys" 2>/dev/null)"
 fi
-[ "${tables:-0}" -gt 0 ]
+[ "${tables:-0}" -gt 0 ] || exit 1
+if ! command -v b2b-stack-health >/dev/null 2>&1; then
+    echo "restore: ✗ cannot judge the stack: no b2b-stack-health in this guest (make var_gc installs it)"
+    exit 1
+fi
+b2b-stack-health 300 || {
+    echo "restore: ✗ data loaded, but the stack is not healthy (lines above): a secret, a volume or a service no longer agree"
+    exit 1
+}
 RESTOREEOF
 chmod 755 /usr/local/sbin/b2b-restore
 

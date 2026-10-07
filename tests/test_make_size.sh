@@ -57,13 +57,24 @@ check "VM_SIZE=47Go" "$(built_size 15 VM_SIZE=47Go)" "SIZE_B2B=47"
 check "VM_SIZE=47GB" "$(built_size '' VM_SIZE=47GB)" "SIZE_B2B=47"
 
 # The prefix form, `VM_SIZE=50 make all`, arrives as the environment.
-env_size() { VM_SIZE="$1" built_size "$2"; }
+# Exported, not `VM_SIZE=x built_size`: hellish does not export a prefix
+# assignment to what a function runs (CLAUDE.md). Every caller is inside
+# $( ), so the export ends with it.
+env_size() {
+    export VM_SIZE="$1"
+    built_size "$2"
+}
 check "VM_SIZE=50 in the environment, saved at 15" "$(env_size 50 15)" "SIZE_B2B=50"
 
 refusal() { make --no-print-directory -n -C "$REPO_ROOT" all "$@" 2>&1 | grep -c '\*\*\* VM_SIZE'; }
 check "VM_SIZE=big is refused" "$(refusal VM_SIZE=big)" 1
 check "VM_SIZE=50 SIZE_B2B=30 is refused" "$(refusal VM_SIZE=50 SIZE_B2B=30)" 1
-check "VM_SIZE=50 in env, SIZE_B2B=30 refused" "$(VM_SIZE=50 refusal SIZE_B2B=30)" 1
+env_refusal() {
+    export VM_SIZE="$1"
+    shift
+    refusal "$@"
+}
+check "VM_SIZE=50 in env, SIZE_B2B=30 refused" "$(env_refusal 50 SIZE_B2B=30)" 1
 
 # The sub-make must not re-apply VM_SIZE over the size the picker settled on.
 check "sub-make gets VM_SIZE= (picker grew 47 to 52)" \

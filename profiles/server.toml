@@ -13,13 +13,16 @@
 #                that pulls. Frontends (groot, osionos, transcendence) live
 #                on the host and talk to the gateway.
 #
-#   [disk]       / and /home give up share, /var takes it. The workstation
-#                image spent 11 GB on / and 6.4 GB on /home at 44 GB for
-#                nvim, npm caches and VS Code servers; without them those
-#                volumes need a fraction of that, and /var is the `rest`
-#                volume, so every point of share they release lands where
-#                the engines and their data live. Measured layout:
-#                `make partitions B2B_CONFIG=profiles/server.toml`.
+#   [disk]       50 GB, and / and /home give up share, /var takes it. The
+#                workstation image spent 11 GB on / and 6.4 GB on /home at
+#                44 GB for nvim, npm caches and VS Code servers; without
+#                them / needs 2 GB (3.6 GiB here) and /home only holds its
+#                floor, 1 GB for the VS Code and Inception reservations.
+#                /var is the `rest` volume, so every point of share they
+#                release lands where Docker, the engines and their data
+#                live: 34 GiB of 50, for 16.3 GB the dc-full set needs.
+#                Measured layout:
+#                `make partitions B2B_CONFIG=profiles/server.toml SIZE_B2B=50`.
 #
 #   [vm] name    "baas", not "debian": a different machine under
 #                disk_images/, so the destructive targets never confuse the
@@ -33,6 +36,15 @@
 #                seat. A profile that is meant to be reproducible does not
 #                leave that to a prompt.
 #
+#   [vm] ram_mb 14336, not "auto". auto is 25% of the host clamped to
+#                8192 MB, sized for a desktop guest: on this 31.9 GB seat
+#                it gave 7982 MB, grobase's stack used 5500 of it
+#                (2026-10-07, `free -m` in the guest) and 2238 MB was
+#                left, while one graph_render worker slot is 4.32 GiB
+#                inside its 8g container cap (graph_render
+#                scripts/service.sh). 14 GiB holds both; a fully touched
+#                guest still leaves the host ~7.8 GB.
+#
 # Everything else is the shipped default. Credentials are the temporary
 # ones; change them here as in born2root.toml.
 
@@ -45,10 +57,10 @@ backend = "qemu"
 # inside the repo. An existing VM is NOT moved by editing this -- the registry
 # at disk_images/.vm_path.baas wins so a built guest is never orphaned -- so
 # relocate one with `make all VM_PATH=…` or by moving the directory and that
-# file together.
-path    = "/mnt/storage/born2root"
-disk_gb = 44
-ram_mb  = "auto"
+# file together. This is where that registry says baas lives.
+path    = "/mnt/storage/virtual_machines"
+disk_gb = 50
+ram_mb  = 14336
 cpus    = "auto"
 profile = "auto"
 ai_mode = "off"
@@ -93,10 +105,18 @@ nodejs         = false
 pytools        = false
 devtools-extra = false
 claude-code    = false
+# The browser the agents drive. Off here for the same reason as the rows above:
+# a server image has no editor and no agent, and the feature is `full` tier, so
+# leaving it to size would switch on 700 MB of chromium for a machine that will
+# never call it -- and it requires devtools-extra, which is off here. A host that
+# does want agents on its server image asks by name: FEATURES="+playwright".
+playwright     = false
 # the machine
 docker         = true
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
+# graph_render's motor: its own row, in no dc-* bundle (generate/feature_profile.sh)
+dc-graph-render = true
 
 [policy.password]
 max_days    = 30
@@ -122,6 +142,40 @@ interval_min = 10
 
 [network]
 forwards = [
+  { name = "ssh",                      guest = 4242,  host = 4242  },
+  { name = "http",                     guest = 80,    host = 8082  },
+  { name = "https",                    guest = 443,   host = 8443  },
+  { name = "inception-static",         guest = 8090,  host = 8090  },
+  { name = "inception-adminer",        guest = 8080,  host = 8081  },
+  { name = "inception-ftp",            guest = 21,    host = 2121  },
+  { name = "inception-ftp-pasv-21000", guest = 21000, host = 21000 },
+  { name = "inception-ftp-pasv-21001", guest = 21001, host = 21001 },
+  { name = "inception-ftp-pasv-21002", guest = 21002, host = 21002 },
+  { name = "inception-ftp-pasv-21003", guest = 21003, host = 21003 },
+  { name = "inception-ftp-pasv-21004", guest = 21004, host = 21004 },
+  { name = "inception-ftp-pasv-21005", guest = 21005, host = 21005 },
+  { name = "inception-ftp-pasv-21006", guest = 21006, host = 21006 },
+  { name = "inception-ftp-pasv-21007", guest = 21007, host = 21007 },
+  { name = "inception-ftp-pasv-21008", guest = 21008, host = 21008 },
+  { name = "inception-ftp-pasv-21009", guest = 21009, host = 21009 },
+  { name = "inception-ftp-pasv-21010", guest = 21010, host = 21010 },
+  { name = "docker",                   guest = 5000,  host = 5000  },
+  { name = "mariadb",                  guest = 3306,  host = 3306  },
+  { name = "redis",                    guest = 6379,  host = 6379  },
+  { name = "frontend",                 guest = 5173,  host = 5173  },
+  { name = "backend",                  guest = 3000,  host = 3000  },
+  { name = "website",                  guest = 4322,  host = 4322  },
+  { name = "osionos-app",              guest = 3001,  host = 3001  },
+  { name = "osionos-mail",             guest = 3002,  host = 3002  },
+  { name = "osionos-calendar",         guest = 3003,  host = 3003  },
+  { name = "osionos-bridge",           guest = 4000,  host = 4000  },
+  { name = "mail-bridge",              guest = 4100,  host = 4100  },
+  { name = "calendar-bridge",          guest = 4200,  host = 4200  },
+  { name = "baas-gateway",             guest = 8000,  host = 8000  },
+  { name = "baas-admin",               guest = 8001,  host = 8001  },
+  { name = "mailpit",                  guest = 8025,  host = 8025  },
+  { name = "auth-gateway",             guest = 8787,  host = 8787  },
+  { name = "vault",                    guest = 18200, host = 18200 },
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──
@@ -130,12 +184,14 @@ forwards = [
 # expected" probe stays meaningful.
 [dc]
 cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
-# backup_dest: deliberately NOT on the disk that holds the VM. /mnt/storage is
-# nvme1n1, $HOME is on the ubuntu-vg volume group on the other NVMe, so a copy
-# here survives the disk the guest lives on. The shipped default is a 42
-# campus /sgoinfre path that does not exist on a personal machine. Absolute
-# paths only; $HOME is not expanded, so this names the user.
-backup_dest = "/home/$USER/b2b-backups/baas"
+# backup_dest: where the copy has lived since 2026-10-07, on /mnt/storage
+# (nvme1n1, 451 GB free) because nothing of the datacenter goes in /home (the
+# ubuntu-vg volume on the other NVMe, 60 GB free). That is the disk the guest
+# lives on too, so the copy survives a broken guest, not a dead nvme1n1: the
+# next tier is a USB disk or a remote (backup_pull.sh). The shipped default is
+# a 42 campus /sgoinfre path that does not exist on a personal machine.
+# Absolute paths only.
+backup_dest = "/mnt/storage/b2b-backups/baas"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
@@ -143,11 +199,11 @@ package = "max"
 [disk]
 swap_mb = "auto"
 volumes = [
-  { name = "root",    mount = "/",        floor_mb = 2816, share = 6,      cap_mb = 30720  },
-  { name = "home",    mount = "/home",    floor_mb = 512,  share = 2,      cap_mb = 102400 },
-  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 3,      cap_mb = 20480  },
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 1024, share = 0,      cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },
   { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
-  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 1,      cap_mb = 10240  },
-  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 2,      cap_mb = 20480  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 512,  share = 1,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 1024, share = 2,      cap_mb = 20480  },
   { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
 ]

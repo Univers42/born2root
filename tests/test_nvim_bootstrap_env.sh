@@ -3,13 +3,18 @@
 # verdict a successful re-run leaves behind. Both are host-testable: the
 # functions are lifted out of the scripts, with runuser and getent stubbed.
 #
-# 1. run_as_user runs from the user's HOME. The bug this pins: at first boot
+# 1. run_as_user runs from the user's HOME, and hands git a no-prompt
+#    environment. The HOME bug this pins: at first boot
 #    install_nvim.sh runs from cron's /root (mode 700), runuser kept that
 #    directory, and vim.pack -- which spawns git with nvim's working directory
 #    as `cwd` -- hit EACCES inside its async task and dropped the error. On the
 #    2026-09-12 QEMU build that was 0 of 58 plugins on disk with every run
 #    saying "100% Installing plugins" and exiting 0. The cwd here is a mode-000
 #    directory, so the old function prints it and the fixed one prints $HOME.
+#    The GIT_TERMINAL_PROMPT half: a clone of a private or deleted repository
+#    (kulala's, on 2026-09-27) answers 401, git opens /dev/tty for a username,
+#    and with no terminal in its process group it is stopped there (SIGTTIN)
+#    until the `timeout` kills it -- 900 s of silence per run.
 #
 # 2. mark_feature_ok flips only its own feature's failed lines. The bug: a
 #    `make nvim` that fixed the guest cleared PROVISION_FAILED, but the "nvim
@@ -55,6 +60,11 @@ PATH="$TMP/bin:$PATH"
 export PATH
 # shellcheck disable=SC2034 # read by the run_as_user bodies eval'd below
 NVIM_BOOTSTRAP_TIMEOUT=20
+# Fast polling (see run_with_inactivity_guard): production's 10 s cadence
+# would make every run_as_user call below pay up to one full poll tick just
+# to notice a command that already exited, which is fine at first boot and
+# very slow in a test that calls it a dozen times.
+export NVIM_GUARD_POLL=1
 unset NVIM_TERM NVIM_CFLAGS
 
 # shellcheck disable=SC2317,SC2329 # called by the function bodies eval'd below
@@ -66,6 +76,13 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     name=$(basename "$script")
     eval "$(awk '/^nvim_jobs_left\(\) \{/,/^}/' "$REPO/$script")"
     eval "$(awk '/^wait_nvim_jobs\(\) \{/,/^}/' "$REPO/$script")"
+    # run_as_user now runs through the inactivity guard (see
+    # test_nvim_inactivity_guard.sh for that guard's own tests); it has to be
+    # defined here too or run_as_user's body just fails to find it.
+    eval "$(awk '/^_nvim_guard_pid_tree\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^_nvim_guard_activity\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^_nvim_guard_kill_tree\(\) \{/,/^}/' "$REPO/$script")"
+    eval "$(awk '/^run_with_inactivity_guard\(\) \{/,/^}/' "$REPO/$script")"
     body=$(awk '/^run_as_user\(\) \{/,/^}/' "$REPO/$script")
     if [ -z "$body" ]; then
         check "$name: run_as_user found" "missing" "present"
@@ -85,6 +102,9 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     # shellcheck disable=SC2016 # $CFLAGS is meant for the inner shell
     check "$name: parser compiles skip -Wuninitialized" \
         "$(run_as_user alice "${SCRIPT_SH:-bash}" -c 'printf %s "$CFLAGS"')" "-Wno-uninitialized"
+    # shellcheck disable=SC2016 # $GIT_TERMINAL_PROMPT is meant for the inner shell
+    check "$name: git may not ask for a username" \
+        "$(run_as_user alice "${SCRIPT_SH:-bash}" -c 'printf %s "$GIT_TERMINAL_PROMPT"')" "0"
     chmod 755 "$TMP/locked"
     cd "$REPO"
 done

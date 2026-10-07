@@ -71,7 +71,15 @@ jobs:
           echo "Running make deps with CI=true..."
           CI=true make deps
 
+      # The partition recipe sizes swap from VM_RAM_MB, and the Makefile's
+      # default is 25% of the HOST's RAM. A 80 GB runner asked for a 20 GB
+      # swap, which left /opt, /var and /home too small for the 'standard'
+      # profile on the 15 GB default disk ("fits from SIZE_B2B=17"). The ISO
+      # does not depend on the runner, so pin the RAM the shipped VM uses:
+      # 2048 MB fits at 15 GB, 4096 does not.
       - name: Build Custom ISO
+        env:
+          VM_RAM_MB: "2048"
         run: |
           echo "Running make gen_iso..."
           make gen_iso

@@ -3,6 +3,13 @@
 # Called by: make all
 set -e
 
+# The VirtualBox build on the fast lane (utils/fast_lane.sh), before the first
+# mktemp: exec runs no EXIT trap. VBoxSVC starts the VM with its own group,
+# so one left outside the lane by make's checks is waited out first.
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/fast_lane.sh"
+fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"
+fast_lane_wait VBoxSVC 20
+
 VM_NAME="${1:-debian}"
 MAKE_CMD="${2:-make}"
 LOG_DIR=$(mktemp -d)
@@ -185,12 +192,13 @@ crow() {
 # dashboard read "VM Start done" for the next 20 minutes while Debian was still
 # partitioning. A step is only allowed to say "done" once the thing it names has
 # actually finished.
-STEPS=("VirtualBox" "Preseeded ISO" "VM Setup" "OS Install" "First Boot")
-STEP_STATUS=("pending" "pending" "pending" "pending" "pending")
-STEP_DETAIL=("" "" "" "" "")
+STEPS=("VirtualBox" "Preseeded ISO" "VM Setup" "OS Install" "First Boot" "Provisioning")
+STEP_STATUS=("pending" "pending" "pending" "pending" "pending" "pending")
+STEP_DETAIL=("" "" "" "" "" "")
 DASHBOARD_LINES=0
 S_INSTALL=3
 S_BOOT=4
+S_PROV=5
 
 # Braille spinner (static frame per step — no background process)
 SPIN_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
@@ -443,6 +451,9 @@ get_vm_port() {
     echo "$line" | cut -d',' -f4
 }
 
+# Binds 127.0.0.1 like install_vm_debian.sh's add_natpf. It used to leave the
+# host IP empty, which VirtualBox reads as 0.0.0.0: every rule this function
+# moved to dodge a clash came back reachable from the whole LAN.
 set_vm_nat_forward() {
     local name="$1"
     local host_port="$2"
@@ -453,10 +464,10 @@ set_vm_nat_forward() {
 
     if [ "$state" = "running" ]; then
         VBoxManage controlvm "${VM_NAME}" natpf1 delete "$name" >/dev/null 2>&1 || true
-        VBoxManage controlvm "${VM_NAME}" natpf1 "$name,tcp,,${host_port},,${guest_port}" >/dev/null
+        VBoxManage controlvm "${VM_NAME}" natpf1 "$name,tcp,${NATPF_BIND:-127.0.0.1},${host_port},,${guest_port}" >/dev/null
     else
         VBoxManage modifyvm "${VM_NAME}" --natpf1 delete "$name" >/dev/null 2>&1 || true
-        VBoxManage modifyvm "${VM_NAME}" --natpf1 "$name,tcp,,${host_port},,${guest_port}" >/dev/null
+        VBoxManage modifyvm "${VM_NAME}" --natpf1 "$name,tcp,${NATPF_BIND:-127.0.0.1},${host_port},,${guest_port}" >/dev/null
     fi
 }
 
@@ -505,10 +516,11 @@ ensure_vm_nat_forwarding() {
     state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2>/dev/null |
         grep "^VMState=" | cut -d'"' -f2)
     if [ "$state" = "running" ]; then
-        local ssh_port new_ssh_port
+        local ssh_port new_ssh_port ssh_pref
+        ssh_pref=$(b2b_forward ssh) || ssh_pref=4242
         ssh_port=$(get_vm_port ssh)
         if [ -z "$ssh_port" ] || { ! host_port_answers_ssh "$ssh_port" && host_port_answers_http "$ssh_port"; }; then
-            resolve_host_port new_ssh_port 4242
+            resolve_host_port new_ssh_port "${ssh_pref%% *}"
             set_vm_nat_forward ssh "$new_ssh_port" 4242
             STEP_DETAIL[2]="${VM_NAME} ssh:${new_ssh_port}"
             draw_dashboard
@@ -518,42 +530,10 @@ ensure_vm_nat_forwarding() {
     # When the VM is stopped, VirtualBox NAT is not listening yet, so any occupied
     # configured host port belongs to another process and must be moved.
 
-    ensure_vm_nat_forward ssh 4242 4242
-    ensure_vm_nat_forward http 80 8082
-    ensure_vm_nat_forward https 443 8443
-    # Inception's bonus static site. 'https' above already covers the
-    # WordPress/NGINX container (guest 443), which is why there is no
-    # separate inception-https rule.
-    ensure_vm_nat_forward inception-static 8090 8090
-    # Bonus services. Adminer lands on host 8081 rather than 8080, which this
-    # script already reserves for the preseed server (resolve_host_port P_PRESEED).
-    ensure_vm_nat_forward inception-adminer 8080 8081
-    # FTP: the control port plus the whole passive range, or a directory listing
-    # connects and then hangs — the data channel has nowhere to land. Host port 21
-    # is privileged and unbindable as this user, hence 2121.
-    ensure_vm_nat_forward inception-ftp 21 2121
-    for _p in 21000 21001 21002 21003 21004 21005 21006 21007 21008 21009 21010; do
-        ensure_vm_nat_forward "inception-ftp-pasv-${_p}" "$_p" "$_p"
-    done
-    ensure_vm_nat_forward docker 5000 5000
-    ensure_vm_nat_forward mariadb 3306 3306
-    ensure_vm_nat_forward redis 6379 6379
-    ensure_vm_nat_forward frontend 5173 5173
-    ensure_vm_nat_forward backend 3000 3000
-    ensure_vm_nat_forward website 4322 4322
-    ensure_vm_nat_forward osionos-app 3001 3001
-    ensure_vm_nat_forward osionos-mail 3002 3002
-    ensure_vm_nat_forward osionos-calendar 3003 3003
-    ensure_vm_nat_forward osionos-bridge 4000 4000
-    ensure_vm_nat_forward mail-bridge 4100 4100
-    ensure_vm_nat_forward calendar-bridge 4200 4200
-    ensure_vm_nat_forward baas-gateway 8000 8000
-    ensure_vm_nat_forward baas-admin 8001 8001
-    ensure_vm_nat_forward mailpit 8025 8025
-    ensure_vm_nat_forward auth-gateway 8787 8787
-    ensure_vm_nat_forward vault 18200 18200
-    # [network] forwards in born2root.toml. They are "name:host:guest" there,
-    # while this function takes name GUEST host -- the one place the order flips.
+    # Every rule is a [network] forwards entry in born2root.toml
+    # ("name:host:guest"), the list QEMU's hostfwd and the guest's UFW are
+    # built from too. This function takes name GUEST host -- the one place the
+    # order flips.
     local fwd fname fhost
     for fwd in $(b2b_get B2B_FORWARDS); do
         fname=${fwd%%:*}
@@ -1250,6 +1230,42 @@ setup_ssh_key_auth() {
     echo "  ℹ SSH key will be auto-copied to VM after first boot (via orchestrator wait loop)"
 }
 
+# Step 6 — first-boot-setup.sh has to finish, and finish clean: UFW, Docker
+# and the profile's features are installed there, after the unlock. The run
+# used to end at the unlock, so a failure there only reached the guest's MOTD
+# (utils/first_boot.sh has the whole story, shared with the QEMU pipeline).
+# The verdict's details wait in a file until the dashboard is done drawing.
+# shellcheck source=utils/first_boot.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../utils/first_boot.sh"
+# shellcheck disable=SC2034 # read by utils/first_boot.sh
+FB_SSH=(ssh -p "$P_SSH" "${GUEST_LOGIN}@127.0.0.1")
+FB_LAST=""
+# shellcheck disable=SC2317 # both hooks are called by first_boot_wait
+fb_wait_tick() {
+    set_step "$S_PROV" working "$(($1 / 60))m$(($1 % 60))s  ${FB_LAST:-first-boot-setup.sh is running}"
+    sleep 15
+}
+# shellcheck disable=SC2317
+fb_progress() { FB_LAST=$1; }
+if [ "${STEP_STATUS[$S_BOOT]}" != "done" ]; then
+    set_step $S_PROV warn "skipped: the VM did not come up unlocked"
+else
+    set_step $S_PROV working "waiting for first-boot-setup.sh..."
+    fb_rc=0
+    first_boot_wait "${FIRST_BOOT_TIMEOUT:-1800}" || fb_rc=$?
+    case "$fb_rc" in
+    0)
+        if first_boot_verdict 2>"$LOG_DIR/first-boot-verdict"; then
+            set_step $S_PROV "done" "$FB_SUMMARY"
+        else
+            set_step $S_PROV fail "$FB_SUMMARY"
+        fi
+        ;;
+    75) set_step $S_PROV warn "still provisioning after $((FB_WAITED / 60))m (features.status moving): ssh b2b, then /var/log/b2b-provision.log" ;;
+    *) set_step $S_PROV fail "first boot never finished: features.status sat still 5 min (make console)" ;;
+    esac
+fi
+
 setup_host_ssh_config 2>/dev/null || true
 setup_vscode_remote_ssh 2>/dev/null || true
 setup_ssh_key_auth 2>/dev/null || true
@@ -1276,8 +1292,8 @@ _auto_width \
     "    WordPress  http://127.0.0.1:${P_HTTP}/wordpress" \
     "    VS Code    Host: 127.0.0.1  Port: ${P_SSH}  User: ${GUEST_LOGIN}" \
     "    lighttpd :80  ·  MariaDB :3306  ·  PHP-FPM" \
-    "    AppArmor: enforced  ·  UFW: active" \
-    "    Docker :2375  ·  SSH :4242  ·  Monitoring: cron/${MONITOR_EVERY:-10}m" \
+    "    AppArmor: enforced  ·  UFW: [network] forwards only" \
+    "    Docker  ·  SSH :4242  ·  Monitoring: cron/${MONITOR_EVERY:-10}m" \
     "    If SSH drops, just reconnect — your session is still there" \
     "    Detach:  Ctrl+B d     Reattach:  ssh b2b  (automatic)" \
     "    Dashboard   http://127.0.0.1:${P_HTTP}/wordpress/wp-admin/" \
@@ -1389,8 +1405,8 @@ blank
 mid
 row "  ${BLD}${WHT}▸ Services Inside VM${RST}"
 row "    lighttpd ${DIM}:80${RST}  ·  MariaDB ${DIM}:3306${RST}  ·  PHP-FPM"
-row "    AppArmor: ${GRN}enforced${RST}  ·  UFW: ${GRN}active${RST}"
-row "    Docker ${DIM}:2375${RST}  ·  SSH ${DIM}:4242${RST}  ·  Monitoring: ${DIM}cron/${MONITOR_EVERY:-10}m${RST}"
+row "    AppArmor: ${GRN}enforced${RST}  ·  UFW: ${GRN}[network] forwards only${RST}"
+row "    Docker  ·  SSH ${DIM}:4242${RST}  ·  Monitoring: ${DIM}cron/${MONITOR_EVERY:-10}m${RST}"
 blank
 mid
 row "  ${BLD}${WHT}▸ tmux — Session Persistence${RST}"
@@ -1442,6 +1458,11 @@ row "    ${BLU}make re${RST}          destroy and rebuild"
 blank
 bot
 printf "\n"
+
+if [ -s "$LOG_DIR/first-boot-verdict" ]; then
+    cat "$LOG_DIR/first-boot-verdict" >&2
+    printf '\n' >&2
+fi
 
 # Exit non-zero when a step failed, so `make all` reports failure to the shell
 # instead of returning 0 after printing a red banner.

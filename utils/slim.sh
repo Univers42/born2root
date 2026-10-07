@@ -26,6 +26,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
+. "$HERE/vm_path.sh"
 QEMU_VM="$REPO_ROOT/setup/host/qemu_vm.sh"
 
 VM_NAME="${VM_NAME:-debian}"
@@ -61,7 +62,8 @@ if [ ! -f "$VM_DIR/.installed" ]; then
     skip "VM not installed yet — keeping the ISOs (they are the installer)"
 else
     freed=0
-    for iso in "$REPO_ROOT"/debian-*.iso; do
+    # iso_dir, and the repo root where builds before it left theirs.
+    for iso in "$(iso_dir)"/debian-*.iso "$REPO_ROOT"/debian-*.iso; do
         [ -e "$iso" ] || continue
         # Never delete an ISO a running guest still has attached: QEMU holds the
         # open file, so the space would not come back until it exits, and the

@@ -20,13 +20,24 @@
 # sudo is never used by default: on many machines the user does not have it.
 #
 # Sourced by setup/host/qemu_vm.sh and setup/install/vms/install_vm_debian.sh
-# (the two places a VM directory is created), and run as a command by the
+# (the two places a VM directory is created) -- and, for iso_dir alone, by
+# everything that reads or writes the ISOs -- and run as a command by the
 # Makefile before either pipeline starts, so the answer arrives before the ISO
 # build rather than after it:
 #
 #   . utils/vm_path.sh; ensure_vm_dir "$VM_PATH" "$VM_NAME"
 #   utils/vm_path.sh "$VM_PATH" "$VM_NAME"
 #   utils/vm_path.sh --no-root "make all VM_PATH=..."   (refuse_sudo_build)
+
+_VP_REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+
+# Where the installer ISOs live -- the netinst download, its extraction and the
+# preseeded image: beside the VM disks, in $VM_PATH/iso. They used to land in
+# the repo root whatever VM_PATH said, so a VM placed on an external disk
+# (VM_PATH=/mnt/storage/...) still left 1.8 GB of ISOs in the source tree on
+# the quota'd /home. B2B_ISO_DIR overrides; with no VM_PATH (a script run
+# outside make) it is the Makefile's default, disk_images/iso.
+iso_dir() { printf '%s' "${B2B_ISO_DIR:-${VM_PATH:-$_VP_REPO/disk_images}/iso}"; }
 
 # Overridable so tests/test_vm_path.sh can stand in a fake sudo; production
 # callers never set it.

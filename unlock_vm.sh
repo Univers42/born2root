@@ -18,6 +18,7 @@ VM_NAME="${VM_NAME:-debian}"
 # the preseed was rendered with, so the two cannot disagree. Located from this
 # file, not the working directory: orchestrate.sh sources this from elsewhere.
 . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/utils/b2b_config.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/utils/fast_lane.sh"
 # Measured on this VM (VBoxManage screenshotpng, boot from disk):
 #   t=3-13s   GRUB menu, 5s countdown
 #   t=16-26s  kernel + initramfs, blank screen
@@ -161,5 +162,9 @@ main() {
 # Only run when executed, so tests can source this for the pure helpers.
 if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     set -e
+    # make start_vm boots the VM here: on the fast lane (utils/fast_lane.sh),
+    # after the VBoxSVC its own showvminfo check left outside it has gone.
+    fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"
+    fast_lane_wait VBoxSVC 20
     main "$@"
 fi

@@ -567,7 +567,10 @@ while true; do
         fi
     done
 
-    MIN=$(date +%M); SEC=$(date +%S)
+    # Unpadded: $((08 % 5)) is an invalid octal number, and hellish ends the
+    # script on it (exit 127), so this watchdog died at :08 every hour and
+    # failed every restart until :10 (journal of 2026-10-07).
+    MIN=$(date +%-M); SEC=$(date +%-S)
     if [ "$((MIN % 5))" = "0" ] && [ "$SEC" -lt "16" ]; then
         echo "$(date): OK sshd=$SSHD_ACTIVE procs=$SSHD_COUNT listen=$LISTEN estab=$ESTAB mem=${MEM_FREE}kB" >> "$LOG"
     fi
@@ -645,32 +648,11 @@ chmod 600 "$HOST_PUBKEY_DIR/id_ed25519" 2>/dev/null || true
 sed -i 's/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 grep -q '^PubkeyAuthentication' /etc/ssh/sshd_config || echo 'PubkeyAuthentication yes' >>/etc/ssh/sshd_config
 
-### ─── 6. UFW — only port 4242 + web ports + dev ports ───────────────────────
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 4242/tcp comment 'SSH'
-ufw allow 80/tcp comment 'HTTP'
-ufw allow 443/tcp comment 'HTTPS'
-ufw allow 5173/tcp comment 'Vite Frontend'
-ufw allow 3000/tcp comment 'Backend API'
-ufw allow 3001/tcp comment 'osionos app'
-ufw allow 3002/tcp comment 'osionos Mail'
-ufw allow 3003/tcp comment 'osionos Calendar'
-ufw allow 4000/tcp comment 'osionos bridge API'
-ufw allow 4100/tcp comment 'Mail bridge'
-ufw allow 4200/tcp comment 'Calendar bridge'
-ufw allow 4322/tcp comment 'Website'
-ufw allow 8000/tcp comment 'BaaS gateway'
-ufw allow 8001/tcp comment 'BaaS admin'
-ufw allow 8025/tcp comment 'Local mail inbox'
-ufw allow 8787/tcp comment 'Auth gateway'
-ufw allow 18200/tcp comment 'Vault'
-# [network] forwards in born2root.toml (first boot re-applies these too).
-for p in ${B2B_FORWARD_PORTS:-}; do
-    ufw allow "${p}/tcp" comment 'born2root.toml' || echo "[WARN] ufw could not open ${p}/tcp from born2root.toml"
-done
-echo y | ufw enable
-echo "[OK] UFW firewall active"
+### ─── 6. UFW ──────────────────────────────────────────────────────────────────
+# Installed above, configured by first-boot-setup.sh (section 3c): ufw needs a
+# running kernel with netfilter to load a ruleset, and this chroot has neither,
+# so the `ufw allow` lines that used to sit here never survived to the booted
+# system -- and first boot's `ufw --force reset` wiped them anyway.
 
 ### ─── 7. Sudo — strict rules per subject ───────────────────────────────────
 # [policy.sudo] in born2root.toml; the subject's values when build.conf is
@@ -857,6 +839,26 @@ git config --system http.lowSpeedLimit 1000
 git config --system http.lowSpeedTime 60
 git config --system core.compression 0
 echo "[OK] Git configured"
+
+### ─── 10b. Prefer IPv4 when a host offers both ─────────────────────────────
+# Belt-and-braces beside qemu_vm.sh's ipv6=off: that fix removes the address
+# QEMU's slirp hands out, but this guest image also boots under VirtualBox
+# and, later, real bridged networking, where a genuinely dual-stack address
+# CAN show up. glibc's getaddrinfo() sorts a AAAA ahead of an A record by
+# default (RFC 3484/6724), so a guest that picks up any IPv6 address at all
+# -- routable or not -- tries it first for every dual-stack host (GitHub,
+# Fastly, Cloudflare all answer AAAA), and the 2026-09-30 incident is what
+# happens next if that address doesn't actually route: first-boot downloads
+# stall on ACK/FIN retransmits UFW logs as blocked inbound, not as a failed
+# connection. This does not touch net.ipv6.conf.*.disable_ipv6: an address
+# that DOES work is left alone, only de-prioritized behind IPv4.
+cat >/etc/gai.conf <<'GAICONF'
+# born2root: prefer IPv4 over IPv6 when a host has both (see b2b-setup.sh
+# section 10b). precedence ::ffff:0:0/96 100 ranks an IPv4-mapped address
+# above a native IPv6 one without disabling IPv6 itself.
+precedence ::ffff:0:0/96  100
+GAICONF
+echo "[OK] getaddrinfo set to prefer IPv4 over IPv6 (/etc/gai.conf)"
 
 ### ─── 11. Monitoring script ────────────────────────────────────────────────
 # Already copied to /usr/local/bin/monitoring.sh by late_command

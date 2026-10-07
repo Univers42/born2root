@@ -84,6 +84,18 @@ NVIM_PURGE="${NVIM_PURGE:-0}"
 # On a NAT'd VM with a cold cache that is minutes, not seconds — but it must
 # not hang the whole build either, hence a hard cap per phase.
 NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-900}"
+# A hard cap bounds a WORKING run; it does nothing for a STUCK one, because
+# `timeout` only fires once the cap is fully spent. The 2026-09-30 incident
+# was exactly that: `nvim --headless` sat at ~0% CPU with no children and no
+# sockets, and each attempt still burned the whole NVIM_BOOTSTRAP_TIMEOUT
+# before the next one started. NVIM_IDLE_TIMEOUT is the real guard: run_as_user
+# kills the run once neither it nor any process it spawned has burned a CPU
+# tick for this long, whatever is left of NVIM_BOOTSTRAP_TIMEOUT. And because
+# the bootstrap retries up to three times (see bootstrap_user below),
+# NVIM_TOTAL_BUDGET caps the WHOLE retry loop, not just one attempt of it, so
+# a build that is genuinely this slow still fails in minutes, not an hour.
+NVIM_IDLE_TIMEOUT="${NVIM_IDLE_TIMEOUT:-180}"
+NVIM_TOTAL_BUDGET="${NVIM_TOTAL_BUDGET:-1800}"
 # Where the two Lua helpers the bootstrap runs inside Neovim are installed.
 # install_nvim_extras.sh runs the same two after its own plugin layer.
 B2B_LIB_DIR="${B2B_LIB_DIR:-/usr/local/lib/b2b}"
@@ -553,17 +565,132 @@ wait_nvim_jobs() {
 # or -Wmaybe-uninitialized alone exhausts a 1.2 GB limit in 2 s. When CFLAGS is
 # set, tree-sitter uses it IN PLACE of -Wall, and with -Wno-uninitialized the
 # same build peaked at 460 MB. It only mutes warnings nobody reads here.
+#
+# ── Inactivity guard ─────────────────────────────────────────────────────────
+# Every pid in $1's process tree, one per line, breadth-first over ps's own
+# --ppid. State lives in files, not shell variables, on purpose: the inner
+# loop below reads through a pipe into `while read`, which hellish (like
+# bash) runs as a subshell, so a variable it set would vanish with it. A file
+# append is a side effect on the filesystem and survives the subshell exiting.
+_nvim_guard_pid_tree() {
+    local root="$1" qfile sfile pid kid
+    qfile=$(mktemp /var/tmp/b2b-guard-q.XXXXXX) || return 1
+    sfile=$(mktemp /var/tmp/b2b-guard-s.XXXXXX) || {
+        rm -f "$qfile"
+        return 1
+    }
+    printf '%s\n' "$root" >"$qfile"
+    printf '%s\n' "$root" >"$sfile"
+    while [ -s "$qfile" ]; do
+        pid=$(head -n1 "$qfile")
+        sed -i '1d' "$qfile"
+        ps -o pid= --ppid "$pid" 2>/dev/null | while read -r kid; do
+            [ -n "$kid" ] || continue
+            grep -qx "$kid" "$sfile" 2>/dev/null && continue
+            printf '%s\n' "$kid" >>"$sfile"
+            printf '%s\n' "$kid" >>"$qfile"
+        done
+    done
+    cat "$sfile"
+    rm -f "$qfile" "$sfile"
+}
+# "Activity" is CPU time (utime+stime, /proc/pid/stat) OR I/O moved
+# (rchar+wchar, /proc/pid/io -- this includes socket reads) across $1's
+# whole process tree, either one. CPU alone calls a slow-but-alive download
+# "stalled": a process blocked in read() on a throttled pipe or a slow HTTPS
+# transfer can sit at ~0% CPU for minutes while still making real progress
+# (nvim-extras' own curl steps -- markdown-preview's server, kulala's
+# grammar -- are exactly that shape), and a tight compile loop can burn CPU
+# with no I/O at all. Printing both sums on one line means either one
+# changing is enough to reset the idle clock, with no extra bookkeeping to
+# keep two separate counters in sync. /proc/pid/stat's comm field can itself
+# contain spaces or parentheses, so its split is on the LAST ")" rather than
+# the first space, and both splits are done in awk rather than relying on
+# shell word-splitting of an unquoted variable, which hellish does not do
+# the way bash does (see b2b_config.sh's guest-side notes). /proc/pid/io is
+# root-or-same-uid-readable, which first-boot-setup.sh always is here: it
+# runs as root, and every command this guard wraps is either root's own or
+# spawned under runuser.
+_nvim_guard_activity() {
+    local pid
+    _nvim_guard_pid_tree "$1" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        awk '{n = split($0, a, ")"); rest = a[n]; split(rest, f); print f[12] + f[13] + 0}' \
+            "/proc/${pid}/stat" 2>/dev/null
+        awk '/^rchar:/ { r = $2 } /^wchar:/ { w = $2 } END { print "io", r + w + 0 }' \
+            "/proc/${pid}/io" 2>/dev/null
+    done | awk '$1 == "io" {i += $2; next} {c += $1} END {print c + 0, i + 0}'
+}
+# Backgrounding with `&` puts the job in THIS script's own process group
+# (job control is off, so there is no new one to target), so a plain
+# `kill $pid` only reaches the direct child and leaves anything IT
+# background-spawned (vim.pack's git, a curl, tree-sitter's cc1) running
+# orphaned. Sends $2 to every pid in $1's tree, root last so a parent does
+# not lose the ability to reap a child still being signaled.
+_nvim_guard_kill_tree() {
+    local root="$1" sig="$2" pid
+    _nvim_guard_pid_tree "$root" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        kill "-$sig" "$pid" 2>/dev/null
+    done
+    kill "-$sig" "$root" 2>/dev/null
+}
+# run_with_inactivity_guard <idle_secs> <hard_secs> <cmd...>
+# A flat `timeout` bounds a WORKING command; it does nothing for a STUCK one,
+# since it only fires once its whole budget is spent. This polls CPU time and
+# I/O bytes across the command's entire process tree and kills it the moment
+# NEITHER has moved for <idle_secs>, or at <hard_secs> if it somehow never
+# goes idle first. See the NVIM_IDLE_TIMEOUT comment above for the incident
+# this replaces.
+run_with_inactivity_guard() {
+    local idle_secs="${1:-180}" hard_secs="${2:-1200}" pid elapsed=0 idle_elapsed=0 poll="${NVIM_GUARD_POLL:-10}" last="" now
+    shift 2
+    "$@" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep "$poll"
+        elapsed=$((elapsed + poll))
+        now=$(_nvim_guard_activity "$pid")
+        if [ "$now" = "$last" ]; then
+            idle_elapsed=$((idle_elapsed + poll))
+        else
+            idle_elapsed=0
+        fi
+        last="$now"
+        if [ "$idle_elapsed" -ge "$idle_secs" ] || [ "$elapsed" -ge "$hard_secs" ]; then
+            warn "pid ${pid}: $([ "$idle_elapsed" -ge "$idle_secs" ] && echo "no CPU or I/O progress in its process tree for ${idle_elapsed}s" || echo "hard limit ${hard_secs}s reached") — killing instead of waiting out the rest of ${hard_secs}s"
+            _nvim_guard_kill_tree "$pid" TERM
+            sleep 2
+            _nvim_guard_kill_tree "$pid" KILL
+            wait "$pid" 2>/dev/null
+            return 124
+        fi
+    done
+    wait "$pid"
+    return $?
+}
 run_as_user() {
     local user="$1" home rc
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
+    # GIT_TERMINAL_PROMPT=0 because a git that wants a username must not ask
+    # for one here. A private or deleted repository answers 401, git opens
+    # /dev/tty to ask for credentials, and these runs have no terminal in
+    # their group: the clone is STOPPED (SIGTTIN) and stays that way until the
+    # `timeout` above kills it, so one unreachable plugin costs the whole
+    # 900 s of this run and the log says nothing at all. Measured 2026-09-27
+    # on mistweaverco/kulala.nvim, whose repository is no longer public: git
+    # sat in state T for the full timeout. With this set it fails in a second,
+    # with "could not read Username ... terminal prompts disabled", which is
+    # the reason worth having.
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
-        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
+        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "GIT_TERMINAL_PROMPT=0" "$@"
     if [ "$user" = "root" ]; then
-        timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
     else
         # runuser keeps a clean environment and does not need PAM's auth stack.
-        timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" \
+            runuser -u "$user" -- "$@"
     fi
     rc=$?
     wait_nvim_jobs "$user" "${home:-/nonexistent}" || true
@@ -723,6 +850,28 @@ LUAEOF
 local mode = vim.g.b2b_verify_mode or 'all'
 local problems = {}
 local function problem(fmt, ...) problems[#problems + 1] = fmt:format(...) end
+-- Said, never counted: something absent ON PURPOSE, with the reason that
+-- install_nvim_extras.sh wrote down when it decided to leave it out.
+local notes = {}
+local function note(fmt, ...) notes[#notes + 1] = fmt:format(...) end
+
+-- A PROBLEM line is one line, but it has to be the one that says something.
+-- vim.pack's aggregate error is a bare "vim.pack:" on the first line and puts
+-- the reason -- which plugin, and what git said -- on the lines after it, so
+-- the first-line-only flattening this replaces reported "vim.pack:" and
+-- nothing else for every clone failure in the build. Measured 2026-09-27, on
+-- the kulala one: three PROBLEM lines, none of which named a cause, and a
+-- failed `make all` that took a reader to github.com to explain.
+local function oneline(err)
+  local kept = {}
+  for line in tostring(err):gmatch '[^\n]+' do
+    line = vim.trim(line)
+    if line ~= '' and not line:match '^vim%.pack:$' then kept[#kept + 1] = line end
+  end
+  if #kept == 0 then return (tostring(err):gsub('\n.*', '')) end
+  local out = table.concat(kept, ' | ')
+  return #out > 220 and (out:sub(1, 217) .. '...') or out
+end
 
 -- 1. Plugins: everything vim.pack knows about is on disk with code in it. A
 -- directory is not enough -- a repository whose default branch was emptied
@@ -748,7 +897,7 @@ if _G.B2B then
     if st ~= 'ok' then problem('extras %s: %s', st, name) end
   end
   for _, err in ipairs(_G.B2B.problems or {}) do
-    problem('extras setup: %s', (err:gsub('\n.*', '')))
+    problem('extras setup: %s', oneline(err))
   end
 end
 
@@ -813,7 +962,17 @@ if mode == 'all' then
   if vim.fn.isdirectory(opt_all .. 'kulala.nvim') == 1
     and vim.fn.executable '/opt/kulala/bin/kulala-core' ~= 1
     and vim.fn.executable(vim.fn.stdpath 'data' .. '/kulala.nvim/bin/kulala-core') ~= 1 then
-    problem 'kulala-core missing (/opt/kulala/bin/kulala-core) — .http requests cannot run'
+    -- install_kulala_core() leaves /opt/kulala/kulala-core.skipped when the
+    -- asset is gone upstream (HTTP 404, now license-gated). That is a decision
+    -- with a reason, not a failed install: a NOTE keeps the message and does
+    -- not turn a feature that installed everything it could into a failure.
+    local mark = vim.env.B2B_KULALA_SKIP_MARK or '/opt/kulala/kulala-core.skipped'
+    if vim.fn.filereadable(mark) == 1 then
+      note('kulala-core skipped on purpose (%s) — .http requests cannot run',
+        vim.trim(table.concat(vim.fn.readfile(mark), ' ')))
+    else
+      problem 'kulala-core missing (/opt/kulala/bin/kulala-core) — .http requests cannot run'
+    end
   end
 
   -- Its treesitter grammar is the other half, and the other message you would
@@ -838,6 +997,7 @@ if mode == 'all' then
 end
 
 print(('verify (%s): %d plugins, %d parsers, %d problem(s)'):format(mode, #plugins, parsers_installed, #problems))
+for _, n in ipairs(notes) do print('  NOTE ' .. n) end
 for _, p in ipairs(problems) do print('  PROBLEM ' .. p) end
 if #problems > 0 then vim.cmd 'cquit 1' else vim.cmd 'qa' end
 LUAEOF
@@ -872,6 +1032,13 @@ end
 
 -- Only declarations are read, never comments: the configs are full of
 -- documentation links, and https://docs.docker.com/... is not a plugin.
+--
+-- One exception to "every line that names a repository is a declaration": a
+-- line marked B2B_NO_PREINSTALL. A declaration the config makes CONDITIONAL
+-- (kulala's, which 60-b2b-ide.lua only asks for while its repository is
+-- published) is not one this pass may resurrect -- it has no way to know the
+-- condition held, and a plugin the config just decided to leave out must not
+-- come back as a clone attempt, a MISSING line and an error in this log.
 local hosts = { ['github.com'] = true, ['codeberg.org'] = true, ['gitlab.com'] = true }
 local cfg = vim.fn.stdpath 'config'
 local seen, specs = {}, {}
@@ -899,7 +1066,7 @@ end
 local function name_of(url) return (url:gsub('%.git$', ''):match '[^/]+$') end
 for _, file in ipairs(vim.fn.globpath(cfg, '**/*.lua', false, true)) do
   for _, line in ipairs(vim.fn.readfile(file)) do
-    if not line:match '^%s*%-%-' then
+    if not line:match '^%s*%-%-' and not line:find('B2B_NO_PREINSTALL', 1, true) then
       local urls = {}
       -- `gh 'owner/repo'`: the helper both kickstart and the b2b layer use,
       -- and it is only ever used for a plugin.
@@ -939,7 +1106,13 @@ for _, spec in ipairs(specs) do
 end
 print(('preinstall: %d declared, %d on disk, %d missing%s'):format(
   #specs, #specs - #missing, #missing, ok and '' or ' (vim.pack.add errored)'))
-if not ok then print('  ' .. tostring(err):gsub('\n.*', '')) end
+if not ok then
+  -- Not the first line, and not the first line only: vim.pack's aggregate
+  -- error opens with a bare "vim.pack:" and names the cause on the lines
+  -- after it, so printing only the first line printed "vim.pack:" and told
+  -- the reader nothing about which plugin or why.
+  print('  ' .. (tostring(err):gsub('\n%s*\n?', ' | '):sub(1, 300)))
+end
 -- Move the pinned plugins onto their declared version. A fresh clone is
 -- already there and this is one fetch each; a checkout an earlier pass made
 -- without the pin (the blink.cmp v2 above, on every guest built before this
@@ -1103,6 +1276,13 @@ bootstrap_user() {
         return 1
     fi
 
+    # NVIM_TOTAL_BUDGET bounds the WHOLE loop below, not one run_as_user call
+    # in it: three attempts each idle-guarded to NVIM_IDLE_TIMEOUT can still
+    # add up past what a 20-minute install can afford. _bootstrap_start is
+    # wall-clock (date +%s), not the shell's $SECONDS, which hellish does not
+    # guarantee the way bash does.
+    local _bootstrap_start _bootstrap_now
+    _bootstrap_start=$(date +%s)
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 200m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"
@@ -1114,6 +1294,12 @@ bootstrap_user() {
         if [ "$NVIM_ENOSPC" = "1" ]; then
             warn "${user}: stopping after attempt ${attempt} — the volume is full, retrying cannot help"
             check_home_space "$user" || true
+            BOOTSTRAP_FAILED=1
+            return 1
+        fi
+        _bootstrap_now=$(date +%s)
+        if [ "$((_bootstrap_now - _bootstrap_start))" -ge "$NVIM_TOTAL_BUDGET" ]; then
+            warn "${user}: stopping after attempt ${attempt} — ${NVIM_TOTAL_BUDGET}s total budget spent, retrying would only cost more of it"
             BOOTSTRAP_FAILED=1
             return 1
         fi

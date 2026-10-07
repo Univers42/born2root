@@ -372,7 +372,7 @@ the vendored parser on Python 3.10).
 | `[policy.sudo]`       | tries, wrong-password message, log directory                   |
 | `[policy.ssh]`        | `password_login = false` for keys only                         |
 | `[policy.monitoring]` | how often `monitoring.sh` broadcasts                           |
-| `[network]`           | `forwards = [ { name, guest, host } ]`, extra ports            |
+| `[network]`           | `forwards`: every NAT forward and every port UFW opens         |
 | `[disk]`              | swap and the logical volume table                              |
 
 Accounts are a table each, created in file order. **The first one is you**:
@@ -453,11 +453,8 @@ make all
   │
   ├─ 4. Create VirtualBox VM
   │     ├─ 2048 MB RAM, 3 CPUs, 64 GB dynamic disk
-  │     ├─ VirtualBox NAT networking with port forwarding:
-  │     │   SSH:4242  HTTP:80  HTTPS:443  Frontend:5173
-  │     │   Backend:3000  Docker:5000  MariaDB:3306  Redis:6379
-  │     │   Website:4322  osionos:3001-3003  Bridges:4000/4100/4200
-  │     │   BaaS:8000-8001  Mailpit:8025  Auth:8787  Vault:18200
+  │     ├─ VirtualBox NAT networking, one forward per [network] forwards
+  │     │   entry in born2root.toml (SSH:4242 always), bound to 127.0.0.1
   │     └─ Attach the custom ISO
   │
   ├─ 5. Boot and install (unattended)
@@ -493,7 +490,7 @@ make all
 | `make qemu_stop`        | Stop the QEMU guest (frees VT-x/AMD-V for VirtualBox)                       |
 | `make deps`             | Install VirtualBox + tools                                                  |
 | `make extpack`          | Install the VirtualBox Extension Pack (optional)                            |
-| `make fix_app_ports`    | Repair VirtualBox NAT forwarding for the osionos/ft_transcendence app ports |
+| `make fix_app_ports`    | Re-apply born2root.toml's `[network] forwards` to a VirtualBox VM           |
 | `make gen_iso`          | Download Debian ISO + inject preseed                                        |
 | `make setup_vm`         | Create the VirtualBox VM                                                    |
 | `make clean`            | Remove downloaded ISOs                                                      |
@@ -757,7 +754,8 @@ there before building, and `make all` prints the ones it used.
 - ✅ LUKS encrypted disk + LVM partitions (root, swap, home, var, srv, tmp,
   var-log)
 - ✅ SSH on port 4242 (no root login)
-- ✅ UFW firewall (only 4242, 80, 443 open)
+- ✅ UFW firewall (default deny; only `[network] forwards` open — 4242 with
+  `profiles/school.toml`)
 - ✅ sudo with strict rules (3 tries, TTY required, full logging)
 - ✅ Password policy (min 10 chars, uppercase, lowercase, digit, max 3 repeats)
 - ✅ AppArmor enabled at boot
@@ -959,7 +957,7 @@ what this setup is modelled on:
 | Breadcrumbs | [nvim-navic](https://github.com/SmiteshP/nvim-navic), in the winbar | automatic |
 | Project management | `vim.fs.root()` + the session manager | automatic, `:B2BRoot` |
 | AI assistant | [codecompanion.nvim](https://github.com/olimorris/codecompanion.nvim) | `<leader>a…` |
-| REST client | [kulala.nvim](https://github.com/mistweaverco/kulala.nvim) | `<leader>k…` |
+| REST client | [kulala.nvim](https://github.com/mistweaverco/kulala.nvim) — **not installed while its repository is gone**, see below | `<leader>k…` |
 | SQL client | [vim-dadbod](https://github.com/tpope/vim-dadbod) + dadbod-ui | `<leader>D` |
 
 **Three more things deliberately not installed:**
@@ -973,6 +971,20 @@ what this setup is modelled on:
 - **a Mason package for the debugger** — gdb has spoken DAP natively since
   gdb 14 (`gdb -i dap`) and trixie ships 16.3, so C/C++ debugging uses the gdb
   that is already installed. No codelldb download, no Rust toolchain.
+
+**And one that is up to its author:** the REST client, `kulala.nvim`, is
+declared here like everything else — but as of **2026-09-27** its repository is
+not on GitHub any more (`mistweaverco/kulala.nvim` and its `kulala-core`
+backend both answer 401, which is what git sees for a private or deleted
+repository; their siblings `kulala-ls`, `kulala-fmt` and `kulala-desktop` still
+clone). So the installer asks once, and a positive "gone" leaves the plugin out
+of the config entirely — no spec to clone, no `<leader>k…`, and no build that
+can never finish over a convenience plugin somebody deleted upstream. The
+warning is in the build log and in `/var/log/b2b-nvim-install.log`; the
+declaration is still there, so the feature comes back by itself on the next
+`make nvim` when the repository does. A `403` (rate limit) or a `000` (no
+network) is _not_ treated as gone: that is a transient failure, and the build
+still stops on it.
 
 ### Everything is installed at build time, and checked
 
@@ -1002,6 +1014,13 @@ because on a NAT'd VM in its first minute of network a failed clone is ordinary
 > `NVIM_BOOTSTRAP=0`, sent its output to `/dev/null`, and produced a VM whose
 > `nvim` was missing all 38 extra plugins — reported as `nvim ok`.
 
+The one thing this check does **not** fail on is a plugin whose repository no
+longer exists, and that is a deliberate exception rather than a hole: the
+installer asks github first, and a positive "gone" means the plugin is never
+declared (see the REST client above). A repository that is merely unreachable —
+rate limit, no network, a DNS blip — is still a build that fails, because that
+is a fault of the machine, not of the project it depends on.
+
 Run **`:B2BExtras`** inside Neovim to see what loaded, and
 `~/.local/state/nvim/bootstrap.log` for what the build's Neovim runs printed.
 
@@ -1022,6 +1041,7 @@ Both bind **`127.0.0.1` only**, and the build writes the two forwards into the
 ```sshconfig
 LocalForward 8420 127.0.0.1:8420
 LocalForward 8421 127.0.0.1:8421
+RemoteForward 9222 localhost:9222
 ```
 
 So while you are connected with **`ssh b2b`**, the URL Neovim prints is a URL
@@ -1030,6 +1050,50 @@ concurrent `ssh b2b` cannot bind the same two host ports and says so on stderr;
 the session itself is unaffected. From an ssh session that did not come from
 this config, tunnel it yourself: `ssh -p 4242 -L 8420:127.0.0.1:8420
 dlesieur@127.0.0.1`.)
+
+The third line goes the **other** way, and it is the one that lets an agent
+_inside_ the VM drive a browser. Start Chrome on your host first:
+
+```bash
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-cdp-profile
+```
+
+then connect as usual (`ssh b2b`) and the guest's `localhost:9222` is the host's
+Chrome, DevTools protocol and all — `curl -s http://127.0.0.1:9222/json/list`
+from inside the VM lists the host's tabs, and a browser MCP server in the guest
+can attach to it. Note the `--user-data-dir`: that is a **separate, empty
+profile**, not your daily one (Chrome refuses the debugging port on the default
+profile), so sign in once in that window if a page needs an account. The forward
+lives and dies with the ssh session; for one that outlives it, keep a second
+connection open: `ssh -f -N -R 9222:localhost:9222 b2b`.
+
+### Playwright, so the agents can see
+
+An agent that cannot open a page cannot check its own work, so the `full` tier
+(the automatic choice at 30 GB and up; `FEATURES=+playwright` at any size)
+installs **Playwright and the `@playwright/mcp` server** through
+`make devtools`. The guest gets a headless chromium in `/usr/lib/ms-playwright`
+(658 MB) and two MCP servers registered with **both** agents, opencode and Claude
+Code:
+
+| MCP server | What it drives | Needs |
+| --- | --- | --- |
+| `playwright` | its own headless browser in the VM | nothing — this is the default |
+| `playwright-host` | your **host's** Chrome, over `localhost:9222` | the reverse tunnel above |
+
+Inside the agent, `browser_navigate`, `browser_click`, `browser_snapshot` and
+`browser_take_screenshot` are then real tools, not a plan. Check what is
+registered, without an API key:
+
+```bash
+ssh b2b 'claude mcp list'                       # playwright, playwright-host
+ssh b2b '~/.opencode/bin/opencode mcp list'    # the same two
+```
+
+`NODE_PATH` and `PLAYWRIGHT_BROWSERS_PATH` come from
+`/etc/profile.d/b2b-playwright.sh`, written by the same provisioner: a global
+npm install is not on the module path, and a browser looked for in `~/.cache`
+reports "browser not installed" beside 658 MB of browser in `/usr/lib`.
 
 **Mermaid** needs nothing extra — a ```` ```mermaid ```` fenced block is a
 diagram in the preview:

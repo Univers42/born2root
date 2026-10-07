@@ -1,26 +1,38 @@
 #!/usr/bin/env hellish
 #
-# install_var_gc.sh — circular cleaning of /var (dc-var-gc), and the one
-# command it will never run.
+# install_var_gc.sh — keeps /var and /var/log below 90% on every build
+# (var-gc), and the one command it will never run; and, the other half of
+# keeping a container host alive, restarts any container left unhealthy.
 #
 # WHY
 #   Docker lives on /var, the `rest` volume, and /var is what fills: the 44 GB
 #   guest of 2026-09-19 stood at 91% with 6.3 GB of images nothing ran any
-#   more and 1.7 GB of build cache. Logs are on their own capped volume
-#   (/var/log) by the partition table, so they cannot take /var down; images,
-#   stopped containers and build cache can, and did.
+#   more and 1.7 GB of build cache. A daily pass alone does not hold the line:
+#   one `make grobase` pulls 3 GB in minutes, and a full /var stops postgres
+#   writing its WAL long before a nightly timer fires. So this is base tier,
+#   installed by first boot BEFORE docker (every container the guest ever
+#   creates then gets the log caps below), with two timers:
+#     b2b-var-gc.timer        daily, the regular pass
+#     b2b-var-gc-watch.timer  every 10 min, `b2b-var-gc --if-full`: nothing
+#                             below 90%; at 90% on /var or /var/log, the
+#                             regular pass, then a deeper one if still needed
+#   Caveat: it polls. A pull that takes /var from 89% to 100% inside one
+#   10-minute interval is cleaned after it has already failed; rerun the pull.
 #
 # WHAT IS RECLAIMED, AND WHY IT IS SAFE
 #   Only what is regenerable from somewhere else:
-#     docker builder prune        build cache            (rebuilt on demand)
+#     docker builder prune        build cache > 7 days   (all of it at 90%)
 #     docker image prune          DANGLING layers only   (untagged; `-a` never)
-#     docker container prune      exited > 24 h          (state is in volumes)
-#     journalctl --vacuum         the journal            (capped anyway)
+#     docker container prune      exited > 24 h          (> 1 h at 90%)
+#     journalctl --vacuum         7 days, 200 MB         (100 MB at 90%)
 #     apt-get clean               package cache          (re-downloaded)
+#     rotated logs                *.gz *.1 *.old, at 90% only, never /var/log/sudo
 #     fstrim                      freed blocks           (returns them to the host)
 #   plus a daemon.json that caps EVERY container's json-file log at
 #   3 x 10 MB, the one setting that stops a chatty service from eating /var
-#   between two runs of the timer.
+#   between two runs of the timer. Still at 90% after all of it, the cleaner
+#   exits 1 (`systemctl --failed`) and writes what holds the space to the
+#   journal: what is left is data, and deleting data is a person's decision.
 #
 # WHAT IS NEVER RECLAIMED
 #   `docker system prune -a --volumes` and `docker volume prune`. Named
@@ -28,11 +40,15 @@
 #   volume looks "unused" the moment its stack is stopped, which is exactly
 #   when a nightly cron would find it. That is how people delete their
 #   databases with a timer. The cleaner refuses both flags outright, with a
-#   message, and tests/test_var_gc_guard.sh pins the refusal.
+#   message, and tests/test_var_gc_guard.sh pins the refusal. Tagged images
+#   stay too: re-pulling grobase's 35 of them is the slowest step of a build.
 #
 # USAGE
-#   sudo ./install_var_gc.sh          install the cleaner, its timer, the log caps, run once
+#   sudo ./install_var_gc.sh          install the cleaner, its timers, the log caps, run once
 #   sudo b2b-var-gc                   run it now
+#   sudo b2b-var-gc --if-full         what the watch timer runs
+#   sudo b2b-autoheal                 restart every unhealthy container now
+#   b2b-stack-health [seconds]        the verdict: exit 1 naming each failing container
 set -u
 
 log() { printf '[var-gc] %s\n' "$*"; }
@@ -67,10 +83,12 @@ fi
 # ── the cleaner ─────────────────────────────────────────────────────────────
 cat >/usr/local/sbin/b2b-var-gc <<'GCEOF'
 #!/bin/sh
-# b2b-var-gc — reclaim what is regenerable on /var. Installed by
+# b2b-var-gc [--if-full] — reclaim what is regenerable on /var. Installed by
 # setup/install/dc/install_var_gc.sh (born2root); read its header for what
 # is and is not touched here, and why.
 set -u
+THRESHOLD=90
+if_full=0
 for a in "$@"; do
     case "$a" in
     --volumes | --all | -a | volume*)
@@ -79,20 +97,55 @@ for a in "$@"; do
         printf 'b2b-var-gc:   docker volume rm <name>\n' >&2
         exit 2
         ;;
+    --if-full) if_full=1 ;;
+    *)
+        printf 'b2b-var-gc: unknown option %s (usage: b2b-var-gc [--if-full])\n' "$a" >&2
+        exit 2
+        ;;
     esac
 done
-before=$(df -km /var | awk 'NR == 2 { print $3 }')
+# The fuller of /var and /var/log, in percent: a full /var/log stops sudo's
+# logging as surely as a full /var stops postgres.
+fullest() { df -P /var /var/log 2>/dev/null | awk 'NR > 1 { p = $5 + 0; if (p > m) m = p } END { print m + 0 }'; }
+used_mb() { df -Pm /var 2>/dev/null | awk 'NR == 2 { print $3 + 0 }'; }
+if [ "$if_full" = 1 ] && [ "$(fullest)" -lt "$THRESHOLD" ]; then
+    exit 0
+fi
+before=$(used_mb)
+docker_up=0
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker_up=1
     docker builder prune -f --filter until=168h >/dev/null 2>&1 || true
     docker image prune -f >/dev/null 2>&1 || true
     docker container prune -f --filter until=24h >/dev/null 2>&1 || true
 fi
 journalctl --vacuum-time=7d --vacuum-size=200M >/dev/null 2>&1 || true
 apt-get clean >/dev/null 2>&1 || true
+deep=""
+if [ "$(fullest)" -ge "$THRESHOLD" ]; then
+    deep=", deep pass at ${THRESHOLD}%"
+    if [ "$docker_up" = 1 ]; then
+        docker builder prune -af >/dev/null 2>&1 || true
+        docker container prune -f --filter until=1h >/dev/null 2>&1 || true
+    fi
+    journalctl --vacuum-size=100M >/dev/null 2>&1 || true
+    # -exec, not -delete: -delete implies -depth, and -depth voids -prune.
+    find /var/log -xdev -path /var/log/sudo -prune -o -type f \
+        \( -name '*.gz' -o -name '*.[0-9]' -o -name '*.old' \) -exec rm -f {} + 2>/dev/null || true
+fi
 fstrim -a >/dev/null 2>&1 || true
-after=$(df -km /var | awk 'NR == 2 { print $3 }')
-printf 'b2b-var-gc: /var %s MB used -> %s MB (reclaimed %s MB); volumes untouched\n' \
-    "$before" "$after" "$((before - after))"
+after=$(used_mb)
+printf 'b2b-var-gc: /var %s MB used -> %s MB (reclaimed %s MB%s); volumes untouched\n' \
+    "$before" "$after" "$((before - after))" "$deep"
+use=$(fullest)
+if [ "$use" -ge "$THRESHOLD" ]; then
+    printf 'b2b-var-gc: still %s%% full with every regenerable byte gone; what holds it is data:\n' "$use" >&2
+    if [ "$docker_up" = 1 ]; then
+        docker system df >&2 2>/dev/null
+    fi
+    du -xh -d 2 /var /var/log 2>/dev/null | sort -h | tail -n 10 >&2
+    exit 1
+fi
 GCEOF
 chmod 755 /usr/local/sbin/b2b-var-gc
 
@@ -117,8 +170,130 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 UNITEOF
-systemctl daemon-reload
-systemctl enable --now b2b-var-gc.timer >/dev/null 2>&1 || die "could not enable b2b-var-gc.timer"
+cat >/etc/systemd/system/b2b-var-gc-watch.service <<'UNITEOF'
+[Unit]
+Description=born2root: clean /var now if it or /var/log reached 90%
+After=docker.service
 
-/usr/local/sbin/b2b-var-gc
-log "timer active: systemctl list-timers b2b-var-gc.timer"
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/b2b-var-gc --if-full
+UNITEOF
+cat >/etc/systemd/system/b2b-var-gc-watch.timer <<'UNITEOF'
+[Unit]
+Description=born2root: check /var and /var/log every 10 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
+UNITEOF
+
+# ── containers that lose a boot race ────────────────────────────────────────
+# At boot dockerd starts every `restart: unless-stopped` container at once,
+# with no regard for compose's depends_on, and it never acts on a healthcheck
+# by itself. A service that connects a second too early and does not retry
+# stays unhealthy for good: grobase's realtime (47e34af) logs "Failed to
+# start producer: PostgreSQL connect failed" (cold boot of 2026-10-07: 33/34
+# healthy, realtime unhealthy at +144 s, restarts=0). So once a minute every
+# container docker reports unhealthy is restarted. The real fix is a retry
+# in the service; this keeps the next such race from needing a person.
+# Caveat: a container unhealthy for a reason a restart cannot cure is
+# restarted each time it fails its healthcheck again; the journal
+# (journalctl -u b2b-autoheal) shows that loop rather than hiding it.
+cat >/usr/local/sbin/b2b-autoheal <<'HEALEOF'
+#!/bin/sh
+# b2b-autoheal — restart every container docker reports unhealthy. Installed
+# by setup/install/dc/install_var_gc.sh (born2root); its header says why.
+set -u
+command -v docker >/dev/null 2>&1 || exit 0
+docker info >/dev/null 2>&1 || exit 0
+rc=0
+for id in $(docker ps -q --filter health=unhealthy); do
+    name=$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null)
+    if docker restart "$id" >/dev/null 2>&1; then
+        printf 'b2b-autoheal: restarted %s (unhealthy)\n' "${name#/}"
+    else
+        printf 'b2b-autoheal: could not restart %s\n' "${name#/}" >&2
+        rc=1
+    fi
+done
+exit "$rc"
+HEALEOF
+chmod 755 /usr/local/sbin/b2b-autoheal
+
+# The verdict autoheal does not give: read-only, exit 1 naming every
+# container that is unhealthy, crash-looping or exited non-zero. A restart
+# cannot cure a service its database locks out, and a crash loop is never
+# "unhealthy" to docker -- after the 2026-10-07 restore, mongo-api,
+# analytics-service and ai-service restarted for good on a Mongo password
+# mismatch, mongo-init had exited 1, and verify_platform still printed
+# "platform verified". b2b-restore ends on this, verify_platform runs it.
+# Caveat: it waits at most the seconds it is given for health checks still
+# "starting", then reports those as not settled -- a service whose start
+# period is longer fails a short wait it would pass later.
+cat >/usr/local/sbin/b2b-stack-health <<'HEALTHEOF'
+#!/bin/sh
+# b2b-stack-health [seconds] — exit 1 naming each container that is
+# unhealthy, restarting or exited non-zero. Installed by
+# setup/install/dc/install_var_gc.sh (born2root); its comment says why.
+set -u
+wait_s=${1:-0}
+case "$wait_s" in
+'' | *[!0-9]*)
+    echo "usage: b2b-stack-health [seconds to wait for health checks]" >&2
+    exit 2
+    ;;
+esac
+command -v docker >/dev/null 2>&1 || {
+    echo "stack-health: no docker"
+    exit 0
+}
+while [ "$wait_s" -gt 0 ] && [ -n "$(docker ps -q --filter health=starting)" ]; do
+    sleep 5
+    wait_s=$((wait_s - 5))
+done
+bad=$({
+    docker ps --filter health=unhealthy --format '{{.Names}} unhealthy'
+    docker ps --filter health=starting --format '{{.Names}} still starting (not settled)'
+    docker ps -a --filter status=restarting --format '{{.Names}} restarting (crash loop)'
+    docker ps -a --filter status=exited --format '{{.Names}} {{.Status}}' |
+        grep -v ' Exited (0)' | sed 's/^\([^ ]*\) \(Exited ([0-9]*)\).*/\1 \2/'
+} 2>/dev/null)
+if [ -n "$bad" ]; then
+    printf '%s\n' "$bad" | sed 's/^/stack-health: /'
+    exit 1
+fi
+echo "stack-health: $(docker ps -q | wc -l) running, none unhealthy, restarting or exited non-zero"
+HEALTHEOF
+chmod 755 /usr/local/sbin/b2b-stack-health
+cat >/etc/systemd/system/b2b-autoheal.service <<'UNITEOF'
+[Unit]
+Description=born2root: restart containers docker reports unhealthy
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/b2b-autoheal
+UNITEOF
+cat >/etc/systemd/system/b2b-autoheal.timer <<'UNITEOF'
+[Unit]
+Description=born2root: look for unhealthy containers every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+UNITEOF
+
+systemctl daemon-reload
+for t in b2b-var-gc.timer b2b-var-gc-watch.timer b2b-autoheal.timer; do
+    systemctl enable --now "$t" >/dev/null 2>&1 || die "could not enable $t"
+done
+
+/usr/local/sbin/b2b-var-gc || log "WARN: /var or /var/log is still at 90% or more; see the lines above"
+log "timers active: systemctl list-timers 'b2b-var-gc*' b2b-autoheal.timer"

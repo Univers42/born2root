@@ -87,6 +87,8 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$REPO_ROOT/utils/spinner.sh"
 # born2root.toml: the login to ssh in as, the passphrase to type at boot.
 . "$REPO_ROOT/utils/b2b_config.sh"
+# shellcheck source=utils/fast_lane.sh
+. "$REPO_ROOT/utils/fast_lane.sh"
 LUKS="${LUKS:-ON}"
 
 VM_NAME="${VM_NAME:-debian}"
@@ -158,25 +160,15 @@ vm_sizing() {
 }
 vm_sizing
 
-# Host:guest port pairs, matching the VirtualBox NAT rule set -- the same
-# names and guest ports generate/orchestrate.sh gives ensure_vm_nat_forward.
-# It said "matching" while carrying only the first eight: on QEMU every app
-# port of the dev stack (website 4322, the osionos trio 3001-3003, the three
-# bridges, auth-gateway 8787, mailpit, vault ...) had no forward at all, so a
-# guest container publishing on 0.0.0.0 and answering 200 to curl inside the
-# VM was still ERR_CONNECTION_REFUSED in the host browser. Adding a port here
-# is what makes it survive a rebuild; born2root.toml's [network] forwards is
-# for ports this list does not own. These are PREFERRED host ports, not
-# guaranteed ones -- see resolve_ports() below.
-PORTS_SPEC="${PORTS_SPEC:-ssh:4242:4242 http:8082:80 https:8443:443 inception-static:8090:8090 inception-adminer:8081:8080 inception-ftp:2121:21 docker:5000:5000 mariadb:3306:3306 redis:6379:6379 frontend:5173:5173 backend:3000:3000 website:4322:4322 osionos-app:3001:3001 osionos-mail:3002:3002 osionos-calendar:3003:3003 osionos-bridge:4000:4000 mail-bridge:4100:4100 calendar-bridge:4200:4200 baas-gateway:8000:8000 baas-admin:8001:8001 mailpit:8025:8025 auth-gateway:8787:8787 vault:18200:18200}"
-# [network] forwards in born2root.toml, already name:host:guest. Appended even
-# when PORTS_SPEC is overridden: they are the user's, not a default to replace,
-# and --check has refused a name or a guest port the built-in set already uses.
-B2B_EXTRA_FORWARDS="$(b2b_get B2B_FORWARDS)"
-case " $PORTS_SPEC " in
-*" ${B2B_EXTRA_FORWARDS%% *} "*) ;;
-*) PORTS_SPEC="$PORTS_SPEC${B2B_EXTRA_FORWARDS:+ $B2B_EXTRA_FORWARDS}" ;;
-esac
+# Host:guest port pairs: born2root.toml's [network] forwards, the one list
+# both backends and the guest's firewall are built from ("name:host:guest").
+# It used to be a literal here, a second one in install_vm_debian.sh and a
+# third in orchestrate.sh, and they drifted: QEMU carried no FTP passive range
+# and VirtualBox's installer no inception-* rules, while the guest's UFW opened
+# a fourth list of its own. These are PREFERRED host ports, not guaranteed
+# ones -- see resolve_ports() below. Setting PORTS_SPEC replaces the list
+# (the tests do); qemu_pipeline.sh exports it to the qemu_vm.sh it runs.
+PORTS_SPEC="${PORTS_SPEC:-$(b2b_get B2B_FORWARDS)}"
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -232,7 +224,7 @@ find_iso() {
     }
     # The glob is mode-specific (utils/luks_mode.sh): booting the other mode's
     # ISO would install the opposite of what was asked for, and say nothing.
-    find "$REPO_ROOT" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
+    find "$(iso_dir)" -maxdepth 1 -name "$(luks_iso_glob "$LUKS")" -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
 # The passphrase the preseed was rendered with: VM_PASS, else born2root.toml.
@@ -386,6 +378,12 @@ need_control() {
 RESOLVED_SPEC=""
 resolve_ports() {
     local spec name hp gp actual out=""
+    # An unreadable born2root.toml answers an empty list, and a VM without
+    # its ssh forward boots into a wait that can only time out.
+    case " $PORTS_SPEC " in
+    *" ssh:"*) ;;
+    *) die "no ssh forward in [network] forwards -- run: utils/b2b_config.sh --check" ;;
+    esac
     for spec in $PORTS_SPEC; do
         name="${spec%%:*}"
         hp="${spec#*:}"
@@ -605,6 +603,15 @@ launch() {
     # B2B_QEMU_LEGACY_HW=1 restores the old AHCI + e1000 line exactly, slots
     # included. No snapshot is needed to roll back: swapping the controller
     # does not alter a byte of the disk image.
+    #
+    # -netdev user's slirp hands the guest an fec0::/64 SLAAC address whether
+    # or not the host has real IPv6 connectivity. On a host that only has
+    # IPv4 (measured 2026-09-30: curl -6 to github.com timed out, curl -4
+    # answered 200), the guest still preferred that address for every dual-
+    # stack download (GitHub, Fastly, Cloudflare), so first-boot provisioning
+    # stalled on retransmits that UFW logged as blocked inbound ACK/FIN, not
+    # as a failure to connect. ipv6=off removes the address at the source, so
+    # the guest never has a broken route to prefer.
     local disk_args=() net_args=()
     if [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
         disk_args=(
@@ -637,7 +644,7 @@ launch() {
         -m "$VM_RAM_MB" \
         "${disk_args[@]}" \
         "${cd_args[@]}" \
-        -netdev "user,id=net0$(build_hostfwd)" \
+        -netdev "user,id=net0,ipv6=off$(build_hostfwd)" \
         "${net_args[@]}" \
         -device virtio-rng-pci \
         -device virtio-balloon-pci,free-page-reporting=on \
@@ -880,6 +887,9 @@ await_shutdown() {
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
 if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
+    # The guest's traffic is this qemu process's sockets (slirp), so the
+    # actions that start it start it on the fast lane (utils/fast_lane.sh).
+    case "${1:-status}" in install | start | restart) fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@" ;; esac
     case "${1:-status}" in
     create)
         refuse_sudo_build "make qemu_create VM_PATH=$VM_PATH" || exit 1
@@ -1226,7 +1236,16 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          # listen on the guest's loopback only; carrying them over the ssh
          # session makes the URLs Neovim prints work in the host's browser.
          "    LocalForward 8420 127.0.0.1:8420",
-         "    LocalForward 8421 127.0.0.1:8421", ""]
+         "    LocalForward 8421 127.0.0.1:8421",
+         # The other way round: Chrome's DevTools protocol on the HOST, at
+         # 127.0.0.1:9222 (started with --remote-debugging-port=9222
+         # --user-data-dir=/tmp/chrome-cdp-profile). A browser MCP server or
+         # an agent inside the guest can only drive a browser it can reach, and
+         # the host's Chrome is the one with a logged-in profile, so the guest's
+         # localhost:9222 is forwarded BACK to the host's. Costs nothing when
+         # nothing is listening there: a forward that is never used binds
+         # nothing in the guest but the one loopback port.
+         "    RemoteForward 9222 localhost:9222", ""]
 text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(block)
 open(path, "w").write(text)
 print("wrote the b2b block for port " + port)

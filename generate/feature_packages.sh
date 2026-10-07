@@ -26,6 +26,7 @@ PACKAGES='
 debian-base       apt: (what debian-installer lays down) img: -
 b2b-mandatory     apt: sudo ufw openssh-server libpam-pwquality apparmor cron haveged img: -
 devtools-apt      apt: git curl wget tmux htop tree jq ripgrep fd-find unzip build-essential img: -
+var-gc            apt: - img: -
 nvim              apt: neovim nodejs npm img: -
 npm-cache         apt: (a reservation: ~/.npm for the editor tooling) img: -
 vscode-remote     apt: (a reservation: ~/.vscode-server, written on first remote connect) img: -
@@ -34,6 +35,7 @@ webstack          apt: lighttpd mariadb-server php-fpm php-mysql img: -
 nodejs            apt: nodejs npm img: -
 pytools           apt: pipx img: -
 devtools-extra    apt: - img: -
+playwright        apt: (the libraries chromium needs, fetched by playwright install --with-deps) img: -
 claude-code       apt: - img: -
 docker            apt: docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin img: -
 inception-data    apt: (a reservation: the Inception volumes under ~/data) img: -
@@ -42,7 +44,6 @@ ai-local          apt: - img: (a GGUF model under /opt, sized from RAM by instal
 dc-netmesh        apt: tailscale img: -
 dc-tunnel         apt: cloudflared img: -
 dc-backup         apt: restic img: -
-dc-var-gc         apt: - img: -
 dc-gateway        apt: git make img: ghcr.io/univers42/grobase-kong ghcr.io/univers42/grobase-waf ghcr.io/univers42/grobase-tenant-control ghcr.io/univers42/grobase-data-plane-router
 dc-identity       apt: - img: ghcr.io/univers42/grobase-gotrue ghcr.io/univers42/grobase-session-service ghcr.io/univers42/grobase-permission-engine
 dc-realtime       apt: - img: ghcr.io/univers42/grobase-realtime
@@ -57,6 +58,7 @@ dc-objectstore    apt: - img: ghcr.io/univers42/grobase-minio
 dc-storage        apt: - img: ghcr.io/univers42/grobase-storage-router
 dc-observability  apt: - img: prom/prometheus ghcr.io/univers42/grobase-grafana grafana/loki
 dc-data           apt: - img: (a reservation: the space the engines above will fill)
+dc-graph-render   apt: - img: (the graph_render motor, pinned once: GRAPH_RENDER_IMAGE in install_graph_render.sh)
 '
 
 die() {

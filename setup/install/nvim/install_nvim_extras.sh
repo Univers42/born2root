@@ -46,7 +46,10 @@
 #   symbol outline        aerial.nvim
 #   breadcrumbs           nvim-navic, in the winbar
 #   project management    project.nvim + its telescope picker
-#   REST client           kulala.nvim (run .http files from the buffer)
+#   REST client           kulala.nvim (run .http files from the buffer), and
+#                         only while its repository is on github — it is not
+#                         as of 2026-09-27, so it is left out rather than
+#                         declared: see kulala_upstream
 #   SQL client            vim-dadbod + dadbod-ui + dadbod-completion — the VM
 #                         already runs MariaDB for WordPress, so this is wired
 #                         to it out of the box
@@ -122,6 +125,12 @@ if [ -z "${NVIM_USERS}" ]; then
 fi
 NVIM_BOOTSTRAP="${NVIM_BOOTSTRAP:-1}"
 NVIM_BOOTSTRAP_TIMEOUT="${NVIM_BOOTSTRAP_TIMEOUT:-1200}"
+# See install_nvim.sh's NVIM_IDLE_TIMEOUT/NVIM_TOTAL_BUDGET comment: a flat
+# timeout waits out a STUCK run just as patiently as a working one, which is
+# what let the 2026-09-30 incident's idle `nvim --headless` burn a full
+# NVIM_BOOTSTRAP_TIMEOUT three times over.
+NVIM_IDLE_TIMEOUT="${NVIM_IDLE_TIMEOUT:-180}"
+NVIM_TOTAL_BUDGET="${NVIM_TOTAL_BUDGET:-1800}"
 NVIM_SESSION_DIR_NAME="${NVIM_SESSION_DIR_NAME:-.nvim-sessions}"
 # Must match install_nvim.sh — that script builds the venv (for pynvim), this
 # one adds debugpy to it and points nvim-dap at the same interpreter.
@@ -1726,6 +1735,45 @@ LUAEOF
     chmod 644 "${cfg}/plugin/50-b2b-markdown.lua"
 }
 
+# ── Is kulala's repository still there? ─────────────────────────────────────
+# 2026-09-27: github.com answers 401 (which is what git sees for a repository
+# that is private or gone) for mistweaverco/kulala.nvim, and the same for the
+# kulala-core backend it downloads and for kulala.vscode, while their siblings
+# in the same account (kulala-ls, kulala-fmt, kulala-desktop) still clone: the
+# REST client and its backend were withdrawn, with no successor announced on
+# kulala.app, which still links the same dead URLs. That is not something this
+# project can fix, and a spec for a repository that no longer exists can never
+# install, so it must not be one the build tries six times and then fails on:
+# on the 2026-09-27 build the preinstall pass, two headless starts per attempt
+# and three attempts later, the whole nvim-extras feature was filed as failed
+# and `make all` stopped -- for a plugin whose only loss is <leader>ks.
+#
+# So the question is asked once, here, and the answer decides whether the REST
+# client is written into the config at all. Asked with git's own endpoint, so
+# it is the answer git itself would get, and only a POSITIVE 401/404/410 counts
+# as gone: a 000 (no network at all), a 403 (rate limit) or a curl that cannot
+# run leaves the plugin declared on purpose, because that is the transient kind
+# of failure the build is right to stop on.
+KULALA_SRC="https://github.com/mistweaverco/kulala.nvim"
+KULALA_UPSTREAM=""
+kulala_upstream() {
+    if [ -z "${KULALA_UPSTREAM:-}" ]; then
+        local code
+        code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            "${KULALA_SRC}/info/refs?service=git-upload-pack" 2>/dev/null) || code="000"
+        case "$code" in
+        401 | 404 | 410) KULALA_UPSTREAM="gone" ;;
+        200) KULALA_UPSTREAM="ok" ;;
+        *)
+            KULALA_UPSTREAM="unknown"
+            warn "could not tell whether ${KULALA_SRC} is reachable (HTTP ${code}) —"
+            warn "  assuming it is, so a real network problem still fails the build"
+            ;;
+        esac
+    fi
+    printf '%s\n' "$KULALA_UPSTREAM"
+}
+
 # ── The rest of the VS Code feature list ────────────────────────────────────
 # linting, debugger, tests, terminal, git UI, outline, breadcrumbs, REST, SQL, AI.
 #
@@ -1747,10 +1795,15 @@ LUAEOF
 # box wants. They are all lazy — nothing below starts a process until you press
 # its key — but if you routinely run several, give the VM more RAM.
 write_ide_lua() {
-    local cfg="$1" venv="$2"
+    local cfg="$1" venv="$2" kulala="true"
+    # The one thing in this file that can be false: kulala's repository is
+    # asked about once per run (see kulala_upstream), and a spec that cannot
+    # possibly install is left out instead of failing the build forever.
+    [ "$(kulala_upstream)" = "gone" ] && kulala="false"
     cat >"${cfg}/plugin/60-b2b-ide.lua" <<LUAHEAD
 -- 60-b2b-ide.lua — written by setup/install/nvim/install_nvim_extras.sh
 local VENV = '${venv}'
+local B2B_KULALA = ${kulala}
 LUAHEAD
     cat >>"${cfg}/plugin/60-b2b-ide.lua" <<'LUAEOF'
 
@@ -1762,7 +1815,7 @@ LUAHEAD
 --   <leader>o    symbol outline (aerial)
 --   <leader>gg   lazygit
 --   <C-\>        terminal
---   <leader>k…   REST client (kulala) — run .http files
+--   <leader>k…   REST client (kulala) — run .http files, only when B2B_KULALA
 --   <leader>D    SQL client (dadbod-ui)
 --   <leader>a…   AI assistant (codecompanion), when a backend is configured
 --
@@ -1781,7 +1834,7 @@ local function map(lhs, rhs, desc, mode)
 end
 local function exe(bin) return vim.fn.executable(bin) == 1 end
 
-B2B.add {
+local specs = {
   -- linting
   { src = gh 'mfussenegger/nvim-lint' },
   -- debugger. nvim-nio is a shared dependency of dap-ui AND neotest.
@@ -1796,8 +1849,6 @@ B2B.add {
   -- symbol outline + breadcrumbs
   { src = gh 'stevearc/aerial.nvim' },
   { src = gh 'SmiteshP/nvim-navic' },
-  -- REST client
-  { src = gh 'mistweaverco/kulala.nvim' },
   -- SQL client
   { src = gh 'tpope/vim-dadbod' },
   { src = gh 'kristijanhusak/vim-dadbod-ui' },
@@ -1805,6 +1856,22 @@ B2B.add {
   -- AI assistant
   { src = gh 'olimorris/codecompanion.nvim' },
 }
+
+-- REST client, last, and only when B2B_KULALA says its upstream is still
+-- there. github.com answers HTTP 404 for mistweaverco/kulala.nvim (and for
+-- the kulala-core backend it downloads), so a spec for it can only ever fail
+-- to clone -- and a spec that cannot install is what turned a convenience
+-- plugin somebody deleted upstream into a failed VM. It is a warning with a
+-- name, not a build this project can never finish; the spec comes back by
+-- itself on the next `make nvim` when the repository does.
+--
+-- The B2B_NO_PREINSTALL marker on that line is load-bearing in the other
+-- direction too: nvim-preinstall.lua (install_nvim.sh) reads declarations out
+-- of the config text, without running it, and would otherwise find this one
+-- and ask for the plugin the line above just said not to.
+if B2B_KULALA then specs[#specs + 1] = { src = gh 'mistweaverco/kulala.nvim' } end -- B2B_NO_PREINSTALL
+
+B2B.add(specs)
 
 -- ── Linting ────────────────────────────────────────────────────────────────
 -- kickstart already ships a working nvim-lint module (lua/kickstart/plugins/
@@ -2070,6 +2137,13 @@ end
 -- Write a .http file, put the cursor in a request, press <leader>ks. kulala
 -- drives `curl` and renders the response in a split.
 --
+-- The whole block is behind B2B_KULALA, which the installer writes after
+-- asking github.com whether the repository is still there. When it is not,
+-- none of this runs: no require to fail, no <leader>k mapping left defined to
+-- press, and — the part that matters to the build — no spec for the
+-- preinstall pass and the three attempts to try to clone. The reasoning is
+-- the long one above the spec, in the B2B.add list.
+--
 -- kulala parses .http files with its OWN treesitter grammar (kulala_http, from
 -- mistweaverco/tree-sitter-kulala-http), not the generic `http` one, and it
 -- manages that grammar itself: on setup it git-fetches the repo and shells out
@@ -2106,19 +2180,21 @@ end
 -- and default_view = 'body' are already the defaults, and they live under `ui`,
 -- not at the top level, so setting them there does nothing at all.
 local KULALA_CORE = '/opt/kulala/bin/kulala-core'
-try('kulala', function()
-  require('kulala').setup {
-    treesitter = { enable = exe 'tree-sitter' },
-    -- nil, not '', when it is absent: an empty string is falsy-but-set to
-    -- kulala's own check and would disable the download without providing a
-    -- binary, which is the one combination that cannot work.
-    kulala_core = { path = vim.fn.executable(KULALA_CORE) == 1 and KULALA_CORE or nil },
-  }
-  map('<leader>ks', function() require('kulala').run() end, '[K]ulala: [s]end request')
-  map('<leader>ka', function() require('kulala').run_all() end, '[K]ulala: send [a]ll')
-  map('<leader>kt', function() require('kulala').toggle_view() end, '[K]ulala: [t]oggle body/headers')
-  map('<leader>kc', function() require('kulala').copy() end, '[K]ulala: [c]opy as curl')
-end)
+if B2B_KULALA then
+  try('kulala', function()
+    require('kulala').setup {
+      treesitter = { enable = exe 'tree-sitter' },
+      -- nil, not '', when it is absent: an empty string is falsy-but-set to
+      -- kulala's own check and would disable the download without providing a
+      -- binary, which is the one combination that cannot work.
+      kulala_core = { path = vim.fn.executable(KULALA_CORE) == 1 and KULALA_CORE or nil },
+    }
+    map('<leader>ks', function() require('kulala').run() end, '[K]ulala: [s]end request')
+    map('<leader>ka', function() require('kulala').run_all() end, '[K]ulala: send [a]ll')
+    map('<leader>kt', function() require('kulala').toggle_view() end, '[K]ulala: [t]oggle body/headers')
+    map('<leader>kc', function() require('kulala').copy() end, '[K]ulala: [c]opy as curl')
+  end)
+end
 
 -- ── SQL client ─────────────────────────────────────────────────────────────
 -- This VM runs MariaDB for WordPress, so a SQL client earns its place. No
@@ -2363,15 +2439,101 @@ wait_nvim_jobs() {
 # CFLAGS=-Wno-uninitialized: this layer's B2B.parsers is what adds gitcommit,
 # whose parser tree-sitter's default -Wall compile cannot fit in a 2 GB guest
 # (the measurement is in install_nvim.sh).
+#
+# Same inactivity guard as install_nvim.sh's run_as_user, and for the same
+# incident: a flat `timeout` waits out a STUCK run exactly as patiently as a
+# working one.
+_nvim_guard_pid_tree() {
+    local root="$1" qfile sfile pid kid
+    qfile=$(mktemp /var/tmp/b2b-guard-q.XXXXXX) || return 1
+    sfile=$(mktemp /var/tmp/b2b-guard-s.XXXXXX) || {
+        rm -f "$qfile"
+        return 1
+    }
+    printf '%s\n' "$root" >"$qfile"
+    printf '%s\n' "$root" >"$sfile"
+    while [ -s "$qfile" ]; do
+        pid=$(head -n1 "$qfile")
+        sed -i '1d' "$qfile"
+        ps -o pid= --ppid "$pid" 2>/dev/null | while read -r kid; do
+            [ -n "$kid" ] || continue
+            grep -qx "$kid" "$sfile" 2>/dev/null && continue
+            printf '%s\n' "$kid" >>"$sfile"
+            printf '%s\n' "$kid" >>"$qfile"
+        done
+    done
+    cat "$sfile"
+    rm -f "$qfile" "$sfile"
+}
+# See install_nvim.sh's _nvim_guard_activity comment: activity is CPU time
+# (utime+stime) OR I/O moved (rchar+wchar, including socket reads) across
+# the whole process tree, either one, computed in one tree walk.
+_nvim_guard_activity() {
+    local pid
+    _nvim_guard_pid_tree "$1" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        awk '{n = split($0, a, ")"); rest = a[n]; split(rest, f); print f[12] + f[13] + 0}' \
+            "/proc/${pid}/stat" 2>/dev/null
+        awk '/^rchar:/ { r = $2 } /^wchar:/ { w = $2 } END { print "io", r + w + 0 }' \
+            "/proc/${pid}/io" 2>/dev/null
+    done | awk '$1 == "io" {i += $2; next} {c += $1} END {print c + 0, i + 0}'
+}
+# See install_nvim.sh's _nvim_guard_kill_tree comment: backgrounding with `&`
+# shares this script's own process group, so a plain `kill $pid` only reaches
+# the direct child and leaves anything IT background-spawned running
+# orphaned.
+_nvim_guard_kill_tree() {
+    local root="$1" sig="$2" pid
+    _nvim_guard_pid_tree "$root" | while read -r pid; do
+        [ -n "$pid" ] || continue
+        kill "-$sig" "$pid" 2>/dev/null
+    done
+    kill "-$sig" "$root" 2>/dev/null
+}
+run_with_inactivity_guard() {
+    local idle_secs="${1:-180}" hard_secs="${2:-1200}" pid elapsed=0 idle_elapsed=0 poll="${NVIM_GUARD_POLL:-10}" last="" now
+    shift 2
+    "$@" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep "$poll"
+        elapsed=$((elapsed + poll))
+        now=$(_nvim_guard_activity "$pid")
+        if [ "$now" = "$last" ]; then
+            idle_elapsed=$((idle_elapsed + poll))
+        else
+            idle_elapsed=0
+        fi
+        last="$now"
+        if [ "$idle_elapsed" -ge "$idle_secs" ] || [ "$elapsed" -ge "$hard_secs" ]; then
+            warn "pid ${pid}: $([ "$idle_elapsed" -ge "$idle_secs" ] && echo "no CPU or I/O progress in its process tree for ${idle_elapsed}s" || echo "hard limit ${hard_secs}s reached") — killing instead of waiting out the rest of ${hard_secs}s"
+            _nvim_guard_kill_tree "$pid" TERM
+            sleep 2
+            _nvim_guard_kill_tree "$pid" KILL
+            wait "$pid" 2>/dev/null
+            return 124
+        fi
+    done
+    wait "$pid"
+    return $?
+}
 run_as_user() {
     local user="$1" home rc
     shift
     home=$(getent passwd "$user" | cut -d: -f6)
+    # GIT_TERMINAL_PROMPT=0 for the reason install_nvim.sh gives at its own
+    # run_as_user: a clone of a private or deleted repository answers 401, git
+    # opens /dev/tty to ask for a username, and a process with no terminal in
+    # its group is stopped there (SIGTTIN) until the timeout kills it. Silent,
+    # and it costs the whole run.
     set -- env -C "${home:-/}" "TERM=${NVIM_TERM:-xterm-256color}" \
-        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "$@"
+        "CFLAGS=${NVIM_CFLAGS:--Wno-uninitialized}" "GIT_TERMINAL_PROMPT=0" "$@"
     if [ "$user" = "root" ]; then
-        timeout "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
-    else timeout "$NVIM_BOOTSTRAP_TIMEOUT" runuser -u "$user" -- "$@"; fi
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" "$@"
+    else
+        run_with_inactivity_guard "$NVIM_IDLE_TIMEOUT" "$NVIM_BOOTSTRAP_TIMEOUT" \
+            runuser -u "$user" -- "$@"
+    fi
     rc=$?
     wait_nvim_jobs "$user" "${home:-/nonexistent}" || true
     return "$rc"
@@ -2565,6 +2727,15 @@ install_mkdp_binary() {
 # The version is read from the plugin checkout rather than pinned here, so it
 # follows kulala instead of drifting from it.
 KULALA_CORE_DIR="${KULALA_CORE_DIR:-/opt/kulala/bin}"
+# A skip that is a DECISION, not a failure, leaves this file behind and
+# nvim-verify.lua reads it: the asset answering 404 is upstream's change (the
+# download moved behind a license token), nothing a retry or a rebuild fixes,
+# and the 2026-10-04 build filed nvim-extras as failed over it -- verify
+# counted the missing binary as a PROBLEM, exit 1, a warning for a feature
+# that had installed everything it could. A download that failed any other way
+# (no network, a 5xx, a rate limit) writes nothing, so it still fails the
+# feature and `make nvim` retries it.
+KULALA_SKIP_MARK="${KULALA_SKIP_MARK:-$(dirname "$KULALA_CORE_DIR")/kulala-core.skipped}"
 install_kulala_core() {
     local plugin="$1" ver arch url dest tmp
     dest="${KULALA_CORE_DIR}/kulala-core"
@@ -2592,16 +2763,40 @@ install_kulala_core() {
     url="https://github.com/mistweaverco/kulala-core/releases/download/v${ver}/kulala-core-linux-${arch}"
     log "fetching kulala-core ${ver} (~103 MB) into ${KULALA_CORE_DIR}"
     mkdir -p "$KULALA_CORE_DIR"
+    # Whatever an earlier run decided, this attempt decides again.
+    rm -f "$KULALA_SKIP_MARK"
     tmp=$(mktemp "${KULALA_CORE_DIR}/.kulala-core.XXXXXX") || {
         warn "mktemp in ${KULALA_CORE_DIR} failed"
         return 0
     }
-    if ! curl -fL --retry 3 --retry-delay 2 --max-time 600 -o "$tmp" "$url" 2>/dev/null; then
-        warn "could not download kulala-core — .http requests will not run"
-        warn "retry with: ${SCRIPT_SH:-bash} install_nvim_extras.sh, or set kulala_core.path yourself"
-        rm -f "$tmp"
+    # curl's own words are the only record of WHY: the 2026-10-04 build lost
+    # this download with no reason in any log, because stderr went to
+    # /dev/null. -f turns an HTTP error into exit 22 and hides the status, so
+    # -w brings it back. A 404 is final (the retry is for network blips), and
+    # it is what this URL answers today: kulala-core left the mistweaverco
+    # org for a license-gated download at core.kulala.app (kulala.nvim's
+    # lua/kulala/backend.lua reads KULALA_CORE_LICENSE_TOKEN), so there is
+    # nothing to retry or to time out -- the editor keeps working without it.
+    local errf http rc
+    errf=$(mktemp "${KULALA_CORE_DIR}/.curl-err.XXXXXX") || errf=/dev/null
+    http=$(curl -fL --retry 3 --retry-delay 2 --max-time 600 -sS \
+        -w '%{http_code}' -o "$tmp" "$url" 2>"$errf")
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        warn "could not download kulala-core ${ver}: curl exit ${rc}, HTTP ${http:-none}"
+        [ -s "$errf" ] && warn "curl said: $(tr '\n' ' ' <"$errf")"
+        warn "url: ${url}"
+        if [ "$http" = 404 ]; then
+            warn "the asset no longer exists: upstream now serves kulala-core from core.kulala.app with a license token"
+            printf 'v%s: HTTP 404, upstream now serves it from core.kulala.app with a license token\n' \
+                "$ver" >"$KULALA_SKIP_MARK" 2>/dev/null || true
+        fi
+        warn "skipping kulala-core — .http requests will not run (everything else is installed)"
+        warn "to add it later: set KULALA_CORE_LICENSE_TOKEN and open an .http file in nvim, or set kulala_core.path"
+        rm -f "$tmp" "$errf"
         return 0
     fi
+    rm -f "$errf"
     # Upstream publishes no checksum beside the asset. What a rate-limited or
     # redirected download actually gives you is an HTML page saved under the
     # right name, so prove it is a Linux executable before installing it.
@@ -2617,6 +2812,7 @@ install_kulala_core() {
         return 0
     }
     printf '%s\n' "$ver" >"${KULALA_CORE_DIR}/version.txt"
+    rm -f "$KULALA_SKIP_MARK"
     log "kulala-core ${ver} installed at ${dest}"
 }
 
@@ -2628,6 +2824,13 @@ install_kulala_core() {
 # trap, and the same shape of answer, as the markdown-preview binary.
 install_kulala_runtime() {
     local user="$1" home plugin
+    if [ "$(kulala_upstream)" = "gone" ]; then
+        # Nothing to set up, and nothing is wrong: the config does not declare
+        # the plugin (see kulala_upstream), so there is no checkout to build a
+        # grammar for and no backend to fetch.
+        log "${user}: kulala's repository is gone upstream — no REST client to set up"
+        return 0
+    fi
     home=$(getent passwd "$user" | cut -d: -f6)
     plugin="${home}/.local/share/nvim/site/pack/core/opt/kulala.nvim"
     [ -d "$plugin" ] || {
@@ -2719,6 +2922,10 @@ bootstrap_user() {
             sed 's/^/[nvim-extras]     /' || true
     fi
 
+    # See install_nvim.sh's bootstrap_user for why this is wall-clock
+    # (date +%s) and bounds the whole loop, not one attempt of it.
+    local _bootstrap_start _bootstrap_now
+    _bootstrap_start=$(date +%s)
     for attempt in 1 2 3; do
         nvim_headless "$user" +'lua vim.cmd("sleep 300m")' +qa ||
             warn "${user}: headless start returned non-zero (attempt ${attempt})"
@@ -2730,6 +2937,12 @@ bootstrap_user() {
         if [ "$NVIM_ENOSPC" = "1" ]; then
             warn "${user}: stopping after attempt ${attempt} — the volume is full, retrying cannot help"
             check_home_space "$user" || true
+            BOOTSTRAP_FAILED=1
+            return 1
+        fi
+        _bootstrap_now=$(date +%s)
+        if [ "$((_bootstrap_now - _bootstrap_start))" -ge "$NVIM_TOTAL_BUDGET" ]; then
+            warn "${user}: stopping after attempt ${attempt} — ${NVIM_TOTAL_BUDGET}s total budget spent, retrying would only cost more of it"
             BOOTSTRAP_FAILED=1
             return 1
         fi
@@ -2870,6 +3083,21 @@ mark_feature_ok() {
 
 # ── main ────────────────────────────────────────────────────────────────────
 log "=== Neovim extras (buffers, files, git, sessions, movement) ==="
+
+# Asked before anything is written, so the loss is on the record in the log
+# that `make all` (and the guest's /var/log/b2b-nvim-install.log) keeps --
+# not something you find out by pressing <leader>ks on a guest that built fine.
+case "$(kulala_upstream)" in
+gone)
+    warn "kulala's repository is gone: ${KULALA_SRC} is not on github any more"
+    warn "  (HTTP 404, and the same for the kulala-core backend it downloads)."
+    warn "  The REST client is therefore NOT part of this guest: no <leader>k"
+    warn "  mappings, no .http requests, and 105 MB of /opt left unspent."
+    warn "  Nothing else is affected. The spec comes back by itself on the next"
+    warn "  'make nvim' once the repository is published again."
+    ;;
+esac
+
 install_deps
 install_mermaid_ascii || true
 write_profile

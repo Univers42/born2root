@@ -83,7 +83,7 @@ else
     echo "[WARN] /etc/b2b/features.conf missing — assuming the base profile"
 fi
 feature_on() {
-    case "$1" in debian-base | b2b-mandatory | devtools-apt | nvim) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
+    case "$1" in debian-base | b2b-mandatory | devtools-apt | var-gc | nvim) [ ! -f /etc/b2b/features.conf ] && return 0 ;; esac
     grep -qx "B2B_FEATURE_$(printf '%s' "$1" | tr '-' '_')=on" /etc/b2b/features.conf 2>/dev/null
 }
 # Every feature records what it actually cost, so the estimates in
@@ -98,11 +98,13 @@ feature_on() {
 # guest's shell (hellish) does not do the way bash does.
 _FEAT_BEFORE=""
 _FEAT_STATUS=ok
+_FEAT_ANNOUNCED=""
 _used_mb() { df -km "$1" 2>/dev/null | awk 'NR==2 {print $3}'; }
 feature_begin() {
     local name="$1" m
     shift
     _FEAT_STATUS=ok
+    _FEAT_ANNOUNCED=""
     _FEAT_BEFORE=""
     for m in "$@"; do
         _FEAT_BEFORE="${_FEAT_BEFORE}${m} $(_used_mb "$m")
@@ -126,17 +128,76 @@ feature_end() {
 $_FEAT_BEFORE
 FEATEOF
     echo "--- [$name] $status ($summary) ---"
+    # A feature that did not install is announced exactly once, as fatal or as
+    # a warning, whichever section noticed first: the sections used to flag
+    # only some of their failure paths, so the log the host reads back could
+    # say nothing about a feature the status file called failed.
+    case "$status" in
+    failed | no-space)
+        if [ -z "$_FEAT_ANNOUNCED" ]; then
+            if feature_essential "$name"; then
+                feature_fail "$name" "$status — see /var/log/first-boot.log, section [$name]"
+            else
+                feature_warn "$name" "$status — see /var/log/first-boot.log, section [$name]"
+            fi
+        fi
+        ;;
+    esac
 }
 feature_off() {
     printf '%s off - 0\n' "$1" >>/etc/b2b/features.status
     echo "[OFF] $1 — not in the '$B2B_PROFILE' profile"
 }
+# Which failures stop `make all`. Chosen from generate/feature_profile.sh's
+# manifest: the base and core tiers (debian-base, b2b-mandatory, devtools-apt,
+# var-gc, nvim: the Born2beRoot subject, the cleaner that keeps /var alive and
+# the editor first boot promises), plus what
+# the user asked for by name (hellish, apt-packages, nvim-shared) and the two
+# features everything else is ordered behind (docker, claude-code). Every other
+# row -- nvim-extras, devtools-extra, webstack, nodejs, pytools, ai-*, dc-* --
+# is a layer on a machine that is already good, and `make <name>` reruns it.
+ESSENTIAL_FEATURES=" debian-base b2b-mandatory devtools-apt var-gc nvim nvim-shared hellish apt-packages docker claude-code "
+feature_essential() {
+    case "$ESSENTIAL_FEATURES" in
+    *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+# The command that reruns an optional feature from the host.
+feature_retry() {
+    case "$1" in
+    nvim-extras) echo "make nvim" ;;
+    devtools-extra) echo "make devtools" ;;
+    dc-*) echo "make grobase (or make edge / make backup_install)" ;;
+    *) echo "make provision" ;;
+    esac
+}
+# An OPTIONAL feature that failed: filed as failed in features.status, listed in
+# /etc/b2b/FEATURE_WARNINGS, and printed as B2B-FEATURE-WARN to the console and
+# to /var/log/b2b-provision.log. The host reports it and exits 0; only
+# feature_fail (and PROVISION_FAILED) fails the build.
+feature_warn() {
+    _FEAT_STATUS=failed
+    _FEAT_ANNOUNCED=1
+    echo "[WARN] $1: $2"
+    printf '%s %s (retry: %s)\n' "$1" "$2" "$(feature_retry "$1")" >>/etc/b2b/FEATURE_WARNINGS
+    echo "B2B-FEATURE-WARN $1: $2 (retry: $(feature_retry "$1"))" >/dev/console 2>/dev/null || true
+    echo "B2B-FEATURE-WARN $1: $2 (retry: $(feature_retry "$1"))" >>/var/log/b2b-provision.log 2>/dev/null || true
+}
 # A BASE feature that failed: the build is wrong, say so where it is seen.
+# The console line is what the orchestrator's serial-log parser fails the
+# build on, but the console is not persisted anywhere -- a build examined
+# after the fact (e.g. after a manual kill, see qemu_vm.sh's ipv6=off note
+# for why one might be) has no way to answer "what actually failed" beyond
+# re-reading every provisioner's own log. This line puts the same verdict in
+# the one file that survives: /var/log/b2b-provision.log.
 feature_fail() {
     _FEAT_STATUS=failed
+    _FEAT_ANNOUNCED=1
     echo "[FAIL] $1: $2"
     printf '%s %s\n' "$1" "$2" >>/etc/b2b/PROVISION_FAILED
     echo "B2B-FEATURE-FAILED $1: $2" >/dev/console 2>/dev/null || true
+    echo "B2B-FEATURE-FAILED $1: $2" >>/var/log/b2b-provision.log 2>/dev/null || true
 }
 # Free space on a mount, in MB, or "?" when df cannot say. Used in messages.
 avail_mb() { df -k "$1" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1024; f=1} END {if (!f) print "?"}'; }
@@ -192,50 +253,63 @@ systemctl restart ssh 2>/dev/null || true
 sysctl --system >/dev/null 2>&1 || true
 echo "[OK] NAT keepalive + sshd-watchdog + SSH stability ensured"
 
-### ─── 3c. UFW — configure and enable it for real ────────────────────────────
-# b2b-setup.sh already runs the `ufw allow` rules, but it runs them in the d-i
-# CHROOT, and they do not survive: measured on a fresh build, /etc/ufw/user.rules
-# contained no rule for 4242 and /etc/ufw/ufw.conf still said ENABLED=no, while
-# `systemctl is-active ufw` cheerfully reported "active". The service was up and
-# the firewall was doing nothing -- the worst of both worlds, because every
-# obvious check says it is fine.
+### ─── 3c. UFW — the firewall, from [network] forwards ──────────────────────
+# Configured here, on the first real boot, because ufw needs a running kernel
+# with netfilter to load a ruleset and the installer chroot has neither:
+# measured on a fresh build, rules applied from b2b-setup.sh left
+# /etc/ufw/user.rules with no rule for 4242 and ufw.conf at ENABLED=no, while
+# `systemctl is-active ufw` cheerfully reported "active".
 #
-# The cause is the usual one for this project: ufw needs a running kernel with
-# netfilter to load a ruleset, and the installer chroot has neither. So the
-# rules are applied HERE, on the first real boot, where they take effect and
-# persist. Born2beRoot requires the firewall to be on with only 4242 open, so
-# this is mandatory-part correctness, not a nicety.
-echo "--- Configuring UFW ---"
-if command -v ufw >/dev/null 2>&1; then
-    ufw --force reset >/dev/null 2>&1 || true
-    ufw default deny incoming >/dev/null 2>&1 || true
-    ufw default allow outgoing >/dev/null 2>&1 || true
-
-    # 4242 is the subject's requirement; the rest are the bonus web stack and
-    # the app ports the NAT forwards already expose.
-    ufw allow 4242/tcp comment 'SSH' >/dev/null 2>&1 || true
-    for p in 80 443 3000 3001 3002 3003 4000 4100 4200 4322 5173 8000 8001 8025 8787 18200; do
-        ufw allow "${p}/tcp" >/dev/null 2>&1 || true
-    done
-    # [network] forwards in born2root.toml: the guest side of each one.
-    for p in ${B2B_FORWARD_PORTS:-}; do
-        ufw allow "${p}/tcp" comment 'born2root.toml' >/dev/null 2>&1 ||
-            echo "[WARN] ufw could not open ${p}/tcp from born2root.toml"
-    done
-
-    ufw --force enable >/dev/null 2>&1 || true
-    systemctl enable ufw >/dev/null 2>&1 || true
-
-    # Report the REAL state: `ufw status` reads ufw's own ENABLED flag, which is
-    # what actually decides whether packets are filtered, unlike systemd's view.
-    if ufw status 2>/dev/null | grep -q "Status: active"; then
-        echo "[OK] UFW active — $(ufw status 2>/dev/null | grep -c '^[0-9]*/tcp\|ALLOW') rule(s), 4242 open"
-    else
-        echo "[WARN] UFW did not come up active — check: sudo ufw status verbose"
+# The rules are B2B_FIREWALL from build.conf ("name:guest", one per
+# [network] forwards entry in born2root.toml) -- the list the host's NAT
+# forwards are built from too, so a port is open in the guest exactly when the
+# host forwards to it, and `ufw status` names each rule after its forward.
+#
+# Every ufw call here used to end in `>/dev/null 2>&1 || true`: an enable that
+# failed left one [WARN] in this log, a VM with no firewall, and a `make all`
+# that reported success. Now the output stays in this log and the result is
+# read back from `ufw status`; a firewall that is not active, or that misses a
+# configured port, fails the build like a required feature. Born2beRoot
+# requires it on, so this is mandatory-part correctness, not a nicety.
+apply_firewall() {
+    local rule port status count=0 missing=""
+    if ! command -v ufw >/dev/null 2>&1; then
+        feature_fail firewall "ufw is not installed (b2b-setup.sh installs it)"
+        return 1
     fi
-else
-    echo "[SKIP] ufw not installed"
-fi
+    # 4242 whatever the list says: a guest whose firewall shut SSH out is left
+    # with the serial console. (--check already refuses a config without it.)
+    case " ${B2B_FIREWALL:-} " in
+    *":4242 "*) ;;
+    *) B2B_FIREWALL="ssh:4242 ${B2B_FIREWALL:-}" ;;
+    esac
+    ufw --force reset
+    ufw default deny incoming
+    ufw default allow outgoing
+    for rule in $B2B_FIREWALL; do
+        ufw allow "${rule##*:}/tcp" comment "${rule%%:*}"
+    done
+    ufw --force enable
+    systemctl enable ufw
+    status=$(ufw status 2>&1)
+    printf '%s\n' "$status"
+    if ! printf '%s\n' "$status" | grep -q '^Status: active'; then
+        feature_fail firewall "ufw is not active after enabling it: $(printf '%s\n' "$status" | head -n 1)"
+        return 1
+    fi
+    for rule in $B2B_FIREWALL; do
+        port=${rule##*:}
+        count=$((count + 1))
+        printf '%s\n' "$status" | grep -qE "^${port}/tcp +ALLOW" || missing="$missing $port"
+    done
+    if [ -n "$missing" ]; then
+        feature_fail firewall "ufw does not allow${missing} (tcp) from [network] forwards"
+        return 1
+    fi
+    echo "[OK] UFW active: ${count} port(s) from [network] forwards, everything else denied"
+}
+echo "--- Configuring UFW ---"
+apply_firewall || true
 
 # First TRIM of the new system. b2b-setup.sh wires discard through crypttab,
 # lvm.conf, fstab and fstrim.timer, but that all runs under in-target, before
@@ -250,6 +324,23 @@ if command -v fstrim >/dev/null 2>&1; then
     # build where the discard chain did not come up simply trims nothing here
     # rather than failing first boot over it.
     fstrim -av 2>&1 | sed 's/^/[TRIM] /' || echo "[WARN] fstrim found nothing to trim — check: lsblk -D"
+fi
+
+### ─── 3d. /var below 90%: the garbage collector, before Docker ───────────
+# Every build, base tier (setup/install/dc/install_var_gc.sh says what it
+# reclaims and what it never touches). Here, ahead of 4a, on purpose: the
+# daemon.json log caps it writes apply only to containers created after
+# dockerd read them, and no dockerd exists yet, so they cover every container
+# this guest will ever run.
+feature_begin var-gc /var
+if [ ! -f /root/install_var_gc.sh ]; then
+    echo "[FAIL] var-gc — /root/install_var_gc.sh is not in the ISO"
+    feature_end var-gc failed
+elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_var_gc.sh; then
+    feature_end var-gc ok
+else
+    echo "[FAIL] var-gc install reported errors — see /var/log/b2b-provision.log"
+    feature_end var-gc failed
 fi
 
 ### ─── 4b. Neovim + kickstart.nvim, and the hellishrc plugin framework ───────
@@ -323,6 +414,109 @@ else
     feature_end nvim ok
 fi
 
+### ─── 4a. Claude Code, optional local AI, and Docker ───────────────────────
+# Moved ahead of nvim-extras, devtools-extra and webstack on purpose: those
+# are cosmetic (an IDE layer, optional dev tools, a demo WordPress site) and
+# nvim-extras' plugin bootstrap is the one that hung for up to an hour on the
+# 2026-09-30 build (see run_with_inactivity_guard in install_nvim_extras.sh,
+# which now bounds that). Essential features -- and whatever a teammate
+# actually asked born2root.toml for -- must not sit behind a cosmetic one
+# that is slow, retrying, or stuck. Docker and Claude Code have no
+# dependency on anything nvim, hellish or apt-packages installs, so nothing
+# below needs them to have run first either.
+echo "--- Installing Claude Code ---"
+if ! feature_on claude-code; then
+    feature_off claude-code
+elif [ ! -f /root/install_claude_code.sh ]; then
+    echo "[FAIL] claude-code — /root/install_claude_code.sh is not in the ISO"
+    printf 'claude-code failed - 0\n' >>/etc/b2b/features.status
+else
+    feature_begin claude-code /
+    chmod +x /root/install_claude_code.sh 2>/dev/null || true
+    # 450, not 320: the download is staged on /var but lands on /, and the
+    # binary is copied there before the staging copy goes away.
+    if ! check_disk_space / 450; then
+        echo "[SKIP] Claude Code — insufficient disk space"
+        feature_end claude-code no-space
+    elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_claude_code.sh; then
+        feature_end claude-code ok
+    else
+        echo "[FAIL] Claude Code install reported errors — see /var/log/b2b-provision.log"
+        feature_end claude-code failed
+    fi
+fi
+
+B2B_AI_MODE="${B2B_AI_MODE:-off}"
+if [ "$B2B_AI_MODE" = "off" ]; then
+    echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
+elif [ -f /root/install_ai.sh ]; then
+    echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
+    chmod +x /root/install_ai.sh 2>/dev/null || true
+    # A model is gigabytes; refuse rather than filling the volume it lands on.
+    if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
+        run_logged /var/log/b2b-provision.log env AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh ||
+            echo "[WARN] AI install reported errors"
+    else
+        echo "[SKIP] AI — not enough free space on /opt for a model"
+    fi
+else
+    echo "[SKIP] AI — /root/install_ai.sh not present"
+fi
+
+if ! feature_on docker; then
+    feature_off docker
+else
+    feature_begin docker /var
+    ### ─── 1. Docker installation (official method) ─────────────────────────────
+    echo "--- Installing Docker ---"
+
+    # Add Docker official GPG key
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+
+    # Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
+    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
+        # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
+        apt-get update -qq 2>/dev/null
+        if ! apt-cache show docker-ce >/dev/null 2>&1; then
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
+            apt-get update -qq
+        fi
+    else
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
+        apt-get update -qq
+    fi
+
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
+
+    # Who may use Docker is born2root.toml's call: b2b-setup.sh already put
+    # every account whose groups list docker into the group (it exists before
+    # Docker does). This used to add the login unconditionally, so
+    # `groups = []` still meant a docker user.
+    #
+    # Kill those accounts' running VS Code servers so they restart with the
+    # docker group loaded. Without this, a server inherits the old group list
+    # (no docker GID) and every Docker command from the VS Code terminal fails
+    # with "permission denied". The next reconnect spawns a fresh server.
+    awk -F: '("," $3 ",") ~ /,docker,/ { print $1 }' /etc/b2b/users 2>/dev/null |
+        while read -r docker_user; do
+            pkill -u "$docker_user" -f "vscode-server" 2>/dev/null || true
+        done
+
+    # Enable and start Docker
+    systemctl enable docker
+    systemctl start docker
+    echo "[OK] Docker installed and running"
+
+    feature_end docker ok
+fi
+
 # The IDE layer on top is the STANDARD feature nvim-extras, with its own
 # manifest row, so it is measured apart from nvim: on / (apt: fzf, lazygit,
 # gdb, ...), on /home (its plugins) and on /opt (the Excalidraw editor).
@@ -341,7 +535,7 @@ else
     # Same guard as the nvim section above, for the same reason: this layer's
     # plugins go to /home, and a full /home fails it invisibly.
     if ! check_disk_space /home 200; then
-        feature_fail nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
+        feature_warn nvim-extras "only $(avail_mb /home) MB free on /home (needs 200)"
         NVIM_EXTRAS_STATUS=failed
     fi
     chmod +x /root/install_nvim_extras.sh 2>/dev/null || true
@@ -350,6 +544,7 @@ else
         echo "[OK] Neovim extras installed (log: /var/log/b2b-nvim-install.log)"
     else
         echo "[FAIL] Neovim extras reported errors — see /var/log/b2b-nvim-install.log"
+        feature_warn nvim-extras "install_nvim_extras.sh failed — see /var/log/b2b-nvim-install.log"
         NVIM_EXTRAS_STATUS=failed
     fi
     # The Excalidraw editor Neovim opens in the host's browser (:Excalidraw),
@@ -362,10 +557,12 @@ else
             echo "[OK] Excalidraw editor built (log: /var/log/b2b-nvim-install.log)"
         else
             echo "[FAIL] Excalidraw build reported errors — see /var/log/b2b-nvim-install.log"
+            feature_warn nvim-extras "install_excalidraw.sh failed — see /var/log/b2b-nvim-install.log"
             NVIM_EXTRAS_STATUS=failed
         fi
     else
         echo "[FAIL] Excalidraw — /root/install_excalidraw.sh is not in the ISO"
+        feature_warn nvim-extras "/root/install_excalidraw.sh is not in the ISO"
         NVIM_EXTRAS_STATUS=failed
     fi
     feature_end nvim-extras "$NVIM_EXTRAS_STATUS"
@@ -954,12 +1151,12 @@ echo "[OK] Third-party tools check complete"
 
 feature_end nodejs ok
 if feature_on pytools; then printf "pytools ok /opt -\n" >>/etc/b2b/features.status; else feature_off pytools; fi
-### ─── 4c. Herdr, opencode, Claude Code, and the optional local AI ──────────
-# Herdr and opencode are the STANDARD feature devtools-extra, measured on /
-# where both binaries live (see install_devtools.sh for why not /opt). The
-# installer exits non-zero when a tool it was asked for is not on PATH
-# afterwards, and that records the feature as failed. AI_MODE travels in
-# features.conf; it defaults to "off", so a stock build downloads nothing here.
+### ─── 4c. Herdr and opencode ────────────────────────────────────────────────
+# The STANDARD feature devtools-extra, measured on / where both binaries live
+# (see install_devtools.sh for why not /opt). The installer exits non-zero
+# when a tool it was asked for is not on PATH afterwards, and that records
+# the feature as failed. Claude Code and the optional local AI moved to
+# section 4a, ahead of nvim-extras; see the comment there for why.
 echo "--- Installing Herdr + opencode ---"
 if ! feature_on devtools-extra; then
     feature_off devtools-extra
@@ -980,112 +1177,16 @@ else
     fi
 fi
 
-# Claude Code is its own feature, claude-code, and it sits BESIDE opencode --
-# setup/install/ai/install_claude_code.sh has the argument for keeping both.
-# It is off in the default 15 GB build: its single binary is 320 MB on /, and
-# beside the standard set that leaves 144 MB of the 20% headroom -- it fits,
-# but by less than a default should spend. `full` (30 GB+) gets it
-# automatically and FEATURES="+claude-code" (or the picker) asks for it on a
-# 15-29 GB disk. Either way the host already checked it fits before this ISO
-# existed, so reaching here means the space was budgeted.
-echo "--- Installing Claude Code ---"
-if ! feature_on claude-code; then
-    feature_off claude-code
-elif [ ! -f /root/install_claude_code.sh ]; then
-    echo "[FAIL] claude-code — /root/install_claude_code.sh is not in the ISO"
-    printf 'claude-code failed - 0\n' >>/etc/b2b/features.status
-else
-    feature_begin claude-code /
-    chmod +x /root/install_claude_code.sh 2>/dev/null || true
-    # 450, not 320: the download is staged on /var but lands on /, and the
-    # binary is copied there before the staging copy goes away.
-    if ! check_disk_space / 450; then
-        echo "[SKIP] Claude Code — insufficient disk space"
-        feature_end claude-code no-space
-    elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_claude_code.sh; then
-        feature_end claude-code ok
-    else
-        echo "[FAIL] Claude Code install reported errors — see /var/log/b2b-provision.log"
-        feature_end claude-code failed
-    fi
-fi
-
-B2B_AI_MODE="${B2B_AI_MODE:-off}"
-if [ "$B2B_AI_MODE" = "off" ]; then
-    echo "[SKIP] AI — AI_MODE=off (nothing downloaded)"
-elif [ -f /root/install_ai.sh ]; then
-    echo "--- Installing AI (AI_MODE=${B2B_AI_MODE}) ---"
-    chmod +x /root/install_ai.sh 2>/dev/null || true
-    # A model is gigabytes; refuse rather than filling the volume it lands on.
-    if [ "$B2B_AI_MODE" = "client" ] || check_disk_space /opt 8000; then
-        run_logged /var/log/b2b-provision.log env AI_MODE="$B2B_AI_MODE" "$B2B_SH" /root/install_ai.sh ||
-            echo "[WARN] AI install reported errors"
-    else
-        echo "[SKIP] AI — not enough free space on /opt for a model"
-    fi
-else
-    echo "[SKIP] AI — /root/install_ai.sh not present"
-fi
-
-if ! feature_on docker; then
-    feature_off docker
-else
-    feature_begin docker /var
-    ### ─── 1. Docker installation (official method) ─────────────────────────────
-    echo "--- Installing Docker ---"
-
-    # Add Docker official GPG key
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-
-    # Add Docker repo (Debian trixie → use bookworm as fallback if trixie not available)
-    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
-    if [ -z "$CODENAME" ] || [ "$CODENAME" = "trixie" ]; then
-        # Docker may not have trixie packages yet — try trixie first, fall back to bookworm
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian trixie stable" >/etc/apt/sources.list.d/docker.list
-        apt-get update -qq 2>/dev/null
-        if ! apt-cache show docker-ce >/dev/null 2>&1; then
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian bookworm stable" >/etc/apt/sources.list.d/docker.list
-            apt-get update -qq
-        fi
-    else
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/debian $CODENAME stable" >/etc/apt/sources.list.d/docker.list
-        apt-get update -qq
-    fi
-
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || true
-
-    # Who may use Docker is born2root.toml's call: b2b-setup.sh already put
-    # every account whose groups list docker into the group (it exists before
-    # Docker does). This used to add the login unconditionally, so
-    # `groups = []` still meant a docker user.
-    #
-    # Kill those accounts' running VS Code servers so they restart with the
-    # docker group loaded. Without this, a server inherits the old group list
-    # (no docker GID) and every Docker command from the VS Code terminal fails
-    # with "permission denied". The next reconnect spawns a fresh server.
-    awk -F: '("," $3 ",") ~ /,docker,/ { print $1 }' /etc/b2b/users 2>/dev/null |
-        while read -r docker_user; do
-            pkill -u "$docker_user" -f "vscode-server" 2>/dev/null || true
-        done
-
-    # Enable and start Docker
-    systemctl enable docker
-    systemctl start docker
-    echo "[OK] Docker installed and running"
-
-    ### ─── 3. UFW — open Docker port ─────────────────────────────────────────────
-    ufw allow 2375/tcp comment 'Docker' 2>/dev/null || true
-
-    feature_end docker ok
-fi
+# Claude Code, AI and Docker used to run HERE, after devtools-extra and
+# before the datacenter section. They moved up, right after nvim core (see
+# that comment above): essential features running behind a cosmetic one is
+# exactly what let the 2026-09-30 incident matter as much as it did -- an
+# idle `nvim --headless` inside nvim-extras' retry loop sat between Docker
+# and every account that needed it, for up to an hour, on a VM whose network
+# was fine again within a minute of the guest-side IPv6 fix above.
 
 ### ─── 4b. The datacenter: dc-* features ────────────────────────────────────
-# Four provisioners, in dependency order, each gated by the dc-* rows that
+# Three provisioners, in dependency order, each gated by the dc-* rows that
 # are on in features.conf (generate/feature_profile.sh names them; the
 # server profile turns them all on with dc-full). They are opt-in, not base:
 # a failure is filed in features.status and shown, but does not raise
@@ -1093,11 +1194,10 @@ fi
 # tonight is still a good machine, and `make grobase` / `make edge` from the
 # host rerun the same scripts over SSH.
 #
-#   var-gc   FIRST: it writes docker's daemon.json log caps, and the daemon
-#            must restart with them before grobase starts a container.
 #   edge     Tailscale and cloudflared, software only (no key in the ISO).
 #   grobase  the BaaS itself, at the tier the dc-* rows imply.
 #   backup   restic and its timer, idle until the host sends the password.
+#   graph-render  graph_render's motor, idle until the host sends a key.
 #
 # One features.status line per dc-* row that is on, so the manifest's
 # estimates can be corrected the same way as every other row -- but read
@@ -1125,10 +1225,22 @@ dc_run() { # <feature> <script> <mounts...>
         return 1
     fi
 }
-if feature_on dc-var-gc; then dc_run dc-var-gc install_var_gc.sh /var; fi
+# A row whose cost is measured under another (one install serves both) takes
+# that row's status, and a failure is filed as a warning like the row's own:
+# the 2026-10-06 build warned dc-gateway's failure but filed its eleven
+# siblings as bare failures, which the host reads as essential, so an optional
+# grobase stopped the build (utils/first_boot.sh).
+dc_fold() { # <feature> <its row> <mount>
+    local status=failed
+    if grep -q "^$2 ok" /etc/b2b/features.status; then status=ok; fi
+    printf '%s %s %s 0\n' "$1" "$status" "$3" >>/etc/b2b/features.status
+    if [ "$status" = failed ]; then
+        printf '%s %s (retry: %s)\n' "$1" "failed with $2" "$(feature_retry "$1")" >>/etc/b2b/FEATURE_WARNINGS
+    fi
+}
 if feature_on dc-netmesh || feature_on dc-tunnel; then
     dc_run dc-netmesh install_edge.sh / || true
-    feature_on dc-tunnel && printf 'dc-tunnel %s / 0\n' "$(grep -q '^dc-netmesh ok' /etc/b2b/features.status && echo ok || echo failed)" >>/etc/b2b/features.status
+    if feature_on dc-tunnel; then dc_fold dc-tunnel dc-netmesh /; fi
 fi
 if feature_on dc-gateway; then
     dc_run dc-gateway install_grobase.sh /var /opt || true
@@ -1137,13 +1249,14 @@ if feature_on dc-gateway; then
     for f in dc-identity dc-realtime dc-secrets dc-db-postgres dc-db-mysql dc-db-mongo \
         dc-db-redis dc-db-cockroach dc-db-mssql dc-objectstore dc-storage dc-observability; do
         if feature_on "$f"; then
-            printf '%s %s /var 0\n' "$f" "$(grep -q '^dc-gateway ok' /etc/b2b/features.status && echo ok || echo failed)" >>/etc/b2b/features.status
+            dc_fold "$f" dc-gateway /var
         else
             feature_off "$f"
         fi
     done
 fi
 if feature_on dc-backup; then dc_run dc-backup install_backup.sh / || true; fi
+if feature_on dc-graph-render; then dc_run dc-graph-render install_graph_render.sh /var || true; fi
 
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────
 sed -i '/first-boot-setup/d' /etc/crontab

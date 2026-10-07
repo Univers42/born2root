@@ -82,6 +82,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
 . "$REPO_ROOT/utils/b2b_config.sh"
+. "$REPO_ROOT/utils/fast_lane.sh"
 
 # One [ai] value, as `get` answers it ("" when the file does not parse).
 ai_conf() { b2b_get "ai.$1"; }
@@ -819,6 +820,12 @@ do_stop() {
 }
 
 if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
+    # The release and the models are GBs: fetched on the fast lane
+    # (utils/fast_lane.sh), and only by the actions that download.
+    case "${1:-up}" in
+    up | install | pull) fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@" ;;
+    build) if enabled; then fast_lane_reexec "${BASH_SOURCE[0]:-$0}" "$@"; fi ;;
+    esac
     case "${1:-up}" in
     up) do_up ;;
     preflight) do_preflight ;;

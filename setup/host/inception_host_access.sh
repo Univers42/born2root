@@ -56,19 +56,18 @@ VM_NAME="${VM_NAME:-debian}"
 # The subject's <login>.42.fr, with the login born2root.toml gave the guest.
 DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
 
-# Preferred host ports. Only used when the VM has no rule yet; an existing rule
-# always wins, so a port moved to dodge a clash is respected.
-PREF_HTTPS_PORT="${INCEPTION_HTTPS_PORT:-8443}"
-PREF_STATIC_PORT="${INCEPTION_STATIC_PORT:-8090}"
-PREF_HTTP_PORT="${INCEPTION_HTTP_PORT:-8082}"
+# Host and guest port of each forward this script uses, from born2root.toml's
+# [network] forwards: the guest's firewall opens exactly that list, so a rule
+# made up here would forward into a closed port. The host port is only a
+# preference, used when the VM has no rule yet; an existing rule always wins,
+# so a port moved to dodge a clash is respected. create_custom_iso.sh refuses
+# an Inception build whose config lacks one of the four.
+read -r PREF_HTTPS_PORT GUEST_HTTPS <<<"$(b2b_forward https)"
+read -r PREF_STATIC_PORT GUEST_STATIC <<<"$(b2b_forward inception-static)"
+read -r PREF_HTTP_PORT GUEST_HTTP <<<"$(b2b_forward http)"
 # Bonus: Adminer, so it is reachable at http://<domain>:8081 like everything
 # else rather than only as an IP:port.
-PREF_ADMINER_PORT="${INCEPTION_ADMINER_PORT:-8081}"
-
-# Guest-side ports the Inception stack listens on.
-GUEST_HTTPS=443
-GUEST_STATIC=8090
-GUEST_HTTP=80
+read -r PREF_ADMINER_PORT GUEST_ADMINER <<<"$(b2b_forward inception-adminer)"
 
 BEGIN_MARK="// >>> born2root: Inception host access — auto-generated, do not edit >>>"
 END_MARK="// <<< born2root: Inception host access <<<"
@@ -130,9 +129,9 @@ ensure_forward() {
         return 0
     fi
     if [ "$(vm_state)" = "running" ]; then
-        VBoxManage controlvm "$VM_NAME" natpf1 "$name,tcp,,${pref},,${guest}" >/dev/null 2>&1
+        VBoxManage controlvm "$VM_NAME" natpf1 "$name,tcp,${NATPF_BIND:-127.0.0.1},${pref},,${guest}" >/dev/null 2>&1
     else
-        VBoxManage modifyvm "$VM_NAME" --natpf1 "$name,tcp,,${pref},,${guest}" >/dev/null 2>&1
+        VBoxManage modifyvm "$VM_NAME" --natpf1 "$name,tcp,${NATPF_BIND:-127.0.0.1},${pref},,${guest}" >/dev/null 2>&1
     fi
     existing=$(get_forward_port "$name")
     printf '%s' "${existing:-$pref}"
@@ -738,11 +737,16 @@ if [ "$ACTION" = "undo" ]; then
     exit 0
 fi
 
+if [ -z "$GUEST_HTTPS" ] || [ -z "$GUEST_STATIC" ] || [ -z "$GUEST_HTTP" ] || [ -z "$GUEST_ADMINER" ]; then
+    printf "  Inception needs https, http, inception-static and inception-adminer in\n" >&2
+    printf "  [network] forwards (born2root.toml); the guest's firewall opens only those.\n" >&2
+    exit 1
+fi
 if have_vm; then
     P_HTTPS=$(ensure_forward https "$PREF_HTTPS_PORT" "$GUEST_HTTPS")
     P_STATIC=$(ensure_forward inception-static "$PREF_STATIC_PORT" "$GUEST_STATIC")
     P_HTTP=$(ensure_forward http "$PREF_HTTP_PORT" "$GUEST_HTTP")
-    P_ADMINER=$(ensure_forward inception-adminer "$PREF_ADMINER_PORT" 8080)
+    P_ADMINER=$(ensure_forward inception-adminer "$PREF_ADMINER_PORT" "$GUEST_ADMINER")
     ok "NAT forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}  adminer→${P_ADMINER}"
 elif [ "$(vm_backend)" = "qemu" ]; then
     # A QEMU VM forwards with -netdev hostfwd=, decided when it was launched.
