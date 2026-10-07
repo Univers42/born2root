@@ -372,7 +372,7 @@ the vendored parser on Python 3.10).
 | `[policy.sudo]`       | tries, wrong-password message, log directory                   |
 | `[policy.ssh]`        | `password_login = false` for keys only                         |
 | `[policy.monitoring]` | how often `monitoring.sh` broadcasts                           |
-| `[network]`           | `forwards = [ { name, guest, host } ]`: every NAT forward and every port UFW opens |
+| `[network]`           | `forwards`: every NAT forward and every port UFW opens         |
 | `[disk]`              | swap and the logical volume table                              |
 
 Accounts are a table each, created in file order. **The first one is you**:
@@ -490,7 +490,7 @@ make all
 | `make qemu_stop`        | Stop the QEMU guest (frees VT-x/AMD-V for VirtualBox)                       |
 | `make deps`             | Install VirtualBox + tools                                                  |
 | `make extpack`          | Install the VirtualBox Extension Pack (optional)                            |
-| `make fix_app_ports`    | Re-apply born2root.toml's `[network] forwards` to a VirtualBox VM |
+| `make fix_app_ports`    | Re-apply born2root.toml's `[network] forwards` to a VirtualBox VM           |
 | `make gen_iso`          | Download Debian ISO + inject preseed                                        |
 | `make setup_vm`         | Create the VirtualBox VM                                                    |
 | `make clean`            | Remove downloaded ISOs                                                      |
