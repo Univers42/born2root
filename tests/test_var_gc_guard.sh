@@ -165,4 +165,68 @@ check "... by id" "$(count '^restart b2$')" 1
 check "... and names it" "$(printf '%s\n' "$out" | grep -c 'restarted svc-a1 (unhealthy)' || true)" 1
 check "autoheal never stops, kills or removes" "$(count '^stop\|^kill\|^rm\|prune')" 0
 
+# --- b2b-stack-health: the verdict ------------------------------------------------
+# docker answers each `ps` filter from $STUB_DIR/<state> (name<TAB>status
+# lines), rendered through the --format it was given; sleep is a no-op.
+awk "/^cat >\/usr\/local\/sbin\/b2b-stack-health <<'HEALTHEOF'\$/ { on = 1; next } /^HEALTHEOF\$/ { on = 0 } on" \
+    setup/install/dc/install_var_gc.sh >"$TMP/b2b-stack-health"
+chmod +x "$TMP/b2b-stack-health"
+cat >"$TMP/bin/docker" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STUB_DIR/docker.log"
+case "$*" in
+*health=unhealthy*) f=unhealthy ;;
+*health=starting*) f=starting ;;
+*status=restarting*) f=restarting ;;
+*status=exited*) f=exited ;;
+*) f=running ;;
+esac
+fmt='{{.Names}}'
+prev=""
+for a in "$@"; do
+    [ "$prev" = --format ] && fmt=$a
+    prev=$a
+done
+[ -f "$STUB_DIR/$f" ] || exit 0
+awk -F'\t' -v fmt="$fmt" '{ o = fmt; gsub(/\{\{\.Names\}\}/, $1, o); gsub(/\{\{\.Status\}\}/, $2, o); print o }' "$STUB_DIR/$f"
+EOF
+printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/sleep"
+chmod +x "$TMP/bin/docker" "$TMP/bin/sleep"
+verdict() {
+    : >"$TMP/docker.log"
+    rc=0
+    out=$("$TMP/b2b-stack-health" "$@" 2>&1) || rc=$?
+    log=$(cat "$TMP/docker.log")
+}
+for s in unhealthy starting restarting exited; do : >"$TMP/$s"; done
+printf 'c1\nc2\n' >"$TMP/running"
+verdict
+check "stack-health, all settled: exit 0" "$rc" 0
+check "... and says how many run" "$(printf '%s\n' "$out" | grep -c '2 running, none' || true)" 1
+check "stack-health never restarts, stops or removes" "$(count '^restart\|^stop\|^kill\|^rm\|prune')" 0
+printf 'mini-baas-mongo-init\tExited (0) 2 minutes ago\n' >"$TMP/exited"
+verdict
+check "a one-shot init that exited 0 is not a failure" "$rc" 0
+printf 'mini-baas-mongo-init\tExited (1) 2 minutes ago\n' >"$TMP/exited"
+verdict
+check "an init that exited 1 fails the verdict" "$rc" 1
+check "... named with its code" "$(printf '%s\n' "$out" | grep -cx 'stack-health: mini-baas-mongo-init Exited (1)' || true)" 1
+: >"$TMP/exited"
+echo mini-baas-mongo-api >"$TMP/restarting"
+verdict
+check "a crash loop (never 'unhealthy' to docker) fails the verdict" "$rc" 1
+check "... named" "$(printf '%s\n' "$out" | grep -c 'mini-baas-mongo-api restarting' || true)" 1
+: >"$TMP/restarting"
+echo mini-baas-realtime >"$TMP/unhealthy"
+verdict
+check "an unhealthy container fails the verdict" "$rc" 1
+: >"$TMP/unhealthy"
+echo mini-baas-slow >"$TMP/starting"
+verdict 20
+check "still starting after the wait: exit 1, not settled" "$rc" 1
+check "... after polling until the bound (20 s, every 5 s)" "$(count '^ps -q --filter health=starting$')" 4
+check "... and says so" "$(printf '%s\n' "$out" | grep -c 'mini-baas-slow still starting (not settled)' || true)" 1
+verdict abc
+check "a non-numeric wait is a usage error" "$rc" 2
+
 exit "$fail"

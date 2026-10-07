@@ -48,6 +48,7 @@
 #   sudo b2b-var-gc                   run it now
 #   sudo b2b-var-gc --if-full         what the watch timer runs
 #   sudo b2b-autoheal                 restart every unhealthy container now
+#   b2b-stack-health [seconds]        the verdict: exit 1 naming each failing container
 set -u
 
 log() { printf '[var-gc] %s\n' "$*"; }
@@ -222,6 +223,52 @@ done
 exit "$rc"
 HEALEOF
 chmod 755 /usr/local/sbin/b2b-autoheal
+
+# The verdict autoheal does not give: read-only, exit 1 naming every
+# container that is unhealthy, crash-looping or exited non-zero. A restart
+# cannot cure a service its database locks out, and a crash loop is never
+# "unhealthy" to docker -- after the 2026-10-07 restore, mongo-api,
+# analytics-service and ai-service restarted for good on a Mongo password
+# mismatch, mongo-init had exited 1, and verify_platform still printed
+# "platform verified". b2b-restore ends on this, verify_platform runs it.
+# Caveat: it waits at most the seconds it is given for health checks still
+# "starting", then reports those as not settled -- a service whose start
+# period is longer fails a short wait it would pass later.
+cat >/usr/local/sbin/b2b-stack-health <<'HEALTHEOF'
+#!/bin/sh
+# b2b-stack-health [seconds] — exit 1 naming each container that is
+# unhealthy, restarting or exited non-zero. Installed by
+# setup/install/dc/install_var_gc.sh (born2root); its comment says why.
+set -u
+wait_s=${1:-0}
+case "$wait_s" in
+'' | *[!0-9]*)
+    echo "usage: b2b-stack-health [seconds to wait for health checks]" >&2
+    exit 2
+    ;;
+esac
+command -v docker >/dev/null 2>&1 || {
+    echo "stack-health: no docker"
+    exit 0
+}
+while [ "$wait_s" -gt 0 ] && [ -n "$(docker ps -q --filter health=starting)" ]; do
+    sleep 5
+    wait_s=$((wait_s - 5))
+done
+bad=$({
+    docker ps --filter health=unhealthy --format '{{.Names}} unhealthy'
+    docker ps --filter health=starting --format '{{.Names}} still starting (not settled)'
+    docker ps -a --filter status=restarting --format '{{.Names}} restarting (crash loop)'
+    docker ps -a --filter status=exited --format '{{.Names}} {{.Status}}' |
+        grep -v ' Exited (0)' | sed 's/^\([^ ]*\) \(Exited ([0-9]*)\).*/\1 \2/'
+} 2>/dev/null)
+if [ -n "$bad" ]; then
+    printf '%s\n' "$bad" | sed 's/^/stack-health: /'
+    exit 1
+fi
+echo "stack-health: $(docker ps -q | wc -l) running, none unhealthy, restarting or exited non-zero"
+HEALTHEOF
+chmod 755 /usr/local/sbin/b2b-stack-health
 cat >/etc/systemd/system/b2b-autoheal.service <<'UNITEOF'
 [Unit]
 Description=born2root: restart containers docker reports unhealthy

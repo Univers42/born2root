@@ -14,7 +14,9 @@
 #   gateway answers on 127.0.0.1:8000        cloudflared present (dc-tunnel)
 #   NO engine port published off loopback
 #   var-gc timers (daily, 90% watch, autoheal) active, refuses --volumes
-#   backup timer active
+#   no container unhealthy, crash-looping or exited non-zero
+#     (b2b-stack-health; it printed "verified" over a crash loop once)
+#   backup timer active, last backup run not failed
 #
 #   make verify_platform
 set -u
@@ -79,11 +81,19 @@ hard "var-gc daily timer active" "systemctl is-active b2b-var-gc.timer" active
 hard "var-gc 90% watch timer active" "systemctl is-active b2b-var-gc-watch.timer" active
 hard "unhealthy-container watchdog active" "systemctl is-active b2b-autoheal.timer" active
 hard "var-gc refuses --volumes (exit 2)" "/usr/local/sbin/b2b-var-gc --volumes >/dev/null 2>&1; echo rc=\$?" rc=2
+# Echoes its exit code so a failure keeps the lines naming the containers
+# (hard() drops the output of a command that fails).
+hard "no container unhealthy, crash-looping or exited non-zero" \
+    "out=\$(/usr/local/sbin/b2b-stack-health 180 2>&1); rc=\$?; printf '%s\\n' \"\$out\" | tail -n3; echo stack-rc=\$rc" stack-rc=0
 if on dc-backup; then
     hard "backup timer active" "systemctl is-active b2b-backup.timer" active
     soft "backup password installed" "test -s /etc/b2b/restic.pass && echo yes" yes "make backup"
+    # b2b-backup's own verdict file: the repository is 0700 root, so the old
+    # `ls` of its snapshots failed for the login user and this never passed.
+    hard "the last backup run did not fail" \
+        "f=/var/lib/b2b/backup.last; if [ -e \$f ] && [ ! -r \$f ]; then echo \"\$f unreadable\"; else case \"\$(cat \$f 2>/dev/null)\" in failed*) cat \$f ;; *) echo not-failed ;; esac; fi" not-failed
     soft "last snapshot younger than 2 h" \
-        "f=\$(ls -t /var/backups/b2b/repo/snapshots 2>/dev/null | head -n1); [ -n \"\$f\" ] && [ \$(( \$(date +%s) - \$(stat -c %Y /var/backups/b2b/repo/snapshots/\$f) )) -lt 7200 ] && echo fresh" fresh "no fresh snapshot (make backup)"
+        "set -- \$(cat /var/lib/b2b/backup.last 2>/dev/null); [ \"\${1:-}\" = ok ] && [ \$(( \$(date +%s) - \${2:-0} )) -lt 7200 ] && echo fresh" fresh "no fresh snapshot (make backup)"
 fi
 
 # ── the edge ────────────────────────────────────────────────────────────────

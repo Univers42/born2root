@@ -227,6 +227,10 @@ hardcoded `bash`.
   that cleans harder once `/var` or `/var/log` reaches 90%, never volumes,
   and `b2b-autoheal`, which restarts any container left unhealthy (dockerd
   ignores `depends_on` at boot, so a service can lose the race to postgres).
+  Its read-only twin `b2b-stack-health` is the verdict: exit 1 naming each
+  container unhealthy, crash-looping or exited non-zero. `b2b-restore` and
+  `verify_platform` end on it, so a restore that leaves an engine locked
+  out fails instead of printing "verified".
 - `setup/host/dc_lib.sh` is a shared library sourced by all datacenter host
   scripts. It resolves the secrets file, provides SSH helpers, and defines
   color output functions. Never run directly.
