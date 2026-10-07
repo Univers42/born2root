@@ -528,7 +528,8 @@ for PROVISIONER in \
     setup/install/dc/install_edge.sh \
     setup/install/dc/install_grobase.sh \
     setup/install/dc/install_var_gc.sh \
-    setup/install/dc/install_backup.sh; do
+    setup/install/dc/install_backup.sh \
+    setup/install/dc/install_graph_render.sh; do
     if [ -f "$PROVISIONER" ]; then
         cp "$PROVISIONER" "$ISO_DIR/$(basename "$PROVISIONER")"
         chmod 755 "$ISO_DIR/$(basename "$PROVISIONER")" || true

@@ -58,6 +58,7 @@ dc-objectstore    apt: - img: ghcr.io/univers42/grobase-minio
 dc-storage        apt: - img: ghcr.io/univers42/grobase-storage-router
 dc-observability  apt: - img: prom/prometheus ghcr.io/univers42/grobase-grafana grafana/loki
 dc-data           apt: - img: (a reservation: the space the engines above will fill)
+dc-graph-render   apt: - img: (the graph_render motor, pinned once: GRAPH_RENDER_IMAGE in install_graph_render.sh)
 '
 
 die() {

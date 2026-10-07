@@ -270,6 +270,10 @@ RECIPE="$HERE/partition_recipe.sh"
 #   dc-netmesh    /      50 -> 110    tailscale 1.102 with its deps.
 #   dc-backup     /      30  (24)     within a third, left alone.
 #   var-gc        /var    0  (-177)   it reclaims: apt clean on a fresh guest.
+#
+# dc-graph-render is graph_render's motor, not a grobase plane, so it is in no
+# dc-* bundle: one 87.9 MB image (dlesieur/graph_render, docker image
+# inspect, 2026-10-07) on /var, estimated at 100 until a build measures it.
 MANIFEST='
 debian-base        base      1100  0     0     0      -
 b2b-mandatory      base      8     0     0     1      -
@@ -306,6 +310,7 @@ dc-objectstore     explicit  0     0     150   0      dc-gateway
 dc-storage         explicit  0     0     200   0      dc-objectstore
 dc-observability   explicit  0     0     900   0      dc-gateway
 dc-data            explicit  0     0     4096  0      dc-gateway
+dc-graph-render    explicit  0     0     100   0      docker
 '
 # A bundle is a name that stands for a list of features, expanded before the
 # +name/-name pass so `FEATURES="+dc-standard -dc-tunnel"` reads exactly like

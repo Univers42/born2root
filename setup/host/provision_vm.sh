@@ -342,6 +342,10 @@ backup)
     run_provisioner setup/install/dc/install_backup.sh \
         install_backup.sh BACKUP_ "restic + the dump job"
     ;;
+graph-render)
+    run_provisioner setup/install/dc/install_graph_render.sh \
+        install_graph_render.sh GRAPH_RENDER_ "graph_render"
+    ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
 # An ad-hoc script as root in the guest, through the same upload + sudo
@@ -405,6 +409,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | ai | health | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | ai | health | var-gc | edge | grobase | backup | graph-render | root-sh | restore-drill | all)"
     ;;
 esac

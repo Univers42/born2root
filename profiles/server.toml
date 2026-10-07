@@ -107,6 +107,8 @@ playwright     = false
 docker         = true
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
+# graph_render's motor: its own row, in no dc-* bundle (generate/feature_profile.sh)
+dc-graph-render = true
 
 [policy.password]
 max_days    = 30

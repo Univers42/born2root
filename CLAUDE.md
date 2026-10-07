@@ -39,6 +39,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Full datacenter setup after a rebuild (restore → tailscale → backup) | `make datacenter` |
 | Expose grobase API/WAF on the host over SSH tunnels | `make baas_access`, `make baas_access_undo` |
 | Reach a guest-loopback-bound app (groot, drawnosaurus) over SSH tunnels | `make groot`, `make drawnosaurus`, `make drawnosaurus_undo` |
+| graph_render's motor: tunnel, key (kept across rebuilds), reinstall | `make graph_render`, `make graph_render_key`, `make graph_render_install` |
 | Grobase status (config + docker ps, read from the guest) | `make grobase_status` |
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
 | Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
@@ -222,8 +223,11 @@ hardcoded `bash`.
   provisioners `setup/install/{nvim,hellish,tools,ai,dc}/*.sh`, which
   `first-boot-setup.sh` runs from `/root` and `setup/host/provision_vm.sh`
   re-pushes over SSH later. The `dc/` provisioners install grobase, edge
-  (Tailscale/cloudflared), and backup (restic). `dc/install_var_gc.sh` is the
-  exception, base tier in every build: a daily pass plus a 10-minute watch
+  (Tailscale/cloudflared), backup (restic) and graph_render's motor
+  (`dc-graph-render`: loopback-only, idle until `make graph_render_key`
+  sends a key, refused below one 4.32 GiB render slot of free RAM).
+  `dc/install_var_gc.sh` is the exception, base tier in every build: a
+  daily pass plus a 10-minute watch
   that cleans harder once `/var` or `/var/log` reaches 90%, never volumes,
   and `b2b-autoheal`, which restarts any container left unhealthy (dockerd
   ignores `depends_on` at boot, so a service can lose the race to postgres).
@@ -232,8 +236,9 @@ hardcoded `bash`.
   `verify_platform` end on it, so a restore that leaves an engine locked
   out fails instead of printing "verified".
 - `setup/host/dc_lib.sh` is a shared library sourced by all datacenter host
-  scripts. It resolves the secrets file, provides SSH helpers, and defines
-  color output functions. Never run directly.
+  scripts. It resolves the secrets file, provides SSH helpers and the
+  loopback-tunnel primitives (`tunnel_open`, `tunnel_close`,
+  `free_forward`), and defines color output functions. Never run directly.
 - Ad hoc and mostly historical: `diagnostic/`, `fixes/`, `management_tools/`,
   `monitore/`, `wordpress/`, `bak_conf/`, the other root-level scripts.
 

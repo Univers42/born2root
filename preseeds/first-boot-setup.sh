@@ -1197,6 +1197,7 @@ fi
 #   edge     Tailscale and cloudflared, software only (no key in the ISO).
 #   grobase  the BaaS itself, at the tier the dc-* rows imply.
 #   backup   restic and its timer, idle until the host sends the password.
+#   graph-render  graph_render's motor, idle until the host sends a key.
 #
 # One features.status line per dc-* row that is on, so the manifest's
 # estimates can be corrected the same way as every other row -- but read
@@ -1255,6 +1256,7 @@ if feature_on dc-gateway; then
     done
 fi
 if feature_on dc-backup; then dc_run dc-backup install_backup.sh / || true; fi
+if feature_on dc-graph-render; then dc_run dc-graph-render install_graph_render.sh /var || true; fi
 
 ### ─── 5. Self-destruct ─────────────────────────────────────────────────────
 sed -i '/first-boot-setup/d' /etc/crontab

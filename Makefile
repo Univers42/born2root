@@ -300,6 +300,7 @@ C_CYAN   := \033[36m
         host_access host_access_undo inception verify_access verif_access fresh \
         groot groot_map groot_undo \
         drawnosaurus drawnosaurus_status drawnosaurus_undo \
+        graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
         tailscale backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
@@ -1016,6 +1017,18 @@ drawnosaurus_status:
 drawnosaurus_undo:
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/drawnosaurus_host_access.sh --undo
 
+# =========@@ graph_render: host access to its loopback-bound motor @@=========
+# The guest publishes graph_render on 127.0.0.1 only (no TLS in the server),
+# so the host reaches it through an SSH tunnel on the guest's port number
+# (8095 unless GRAPH_RENDER_PORT moved it at install). /healthz is open;
+# /v1 wants GRAPH_RENDER_KEY from the secrets file (make graph_render_key).
+graph_render:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_host_access.sh
+graph_render_status:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_host_access.sh --status
+graph_render_undo:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_host_access.sh --undo
+
 # Clone (or upload) Inception into the VM, build it, wire up the host, verify.
 #   make inception                    clone github.com/Univers42/inception
 #   make inception SRC=/path/to/repo  push a local working tree up instead
@@ -1103,6 +1116,8 @@ grobase:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" grobase
 backup_install:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" backup
+graph_render_install:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" graph-render
 
 # =========@@ datacenter: operate the server image from the host @@===========
 # Every one of these reads the guest's SSH port back the way provision_vm.sh
@@ -1170,8 +1185,10 @@ restore:
 # Everything a rebuilt guest needs after `make all`/`make re`, in the order
 # that keeps the backup copy safe: restore BEFORE the first backup (a fresh
 # repo must never overwrite the older copy), tenant_key after (it answers
-# "exists" when the restore brought the tenant back). Tailscale needs a
-# REUSABLE key in .b2b-secrets; without one that step warns and goes on.
+# "exists" when the restore brought the tenant back), graph_render_key
+# after that (it gives the new guest the stored key back, and is a no-op
+# on a guest without dc-graph-render). Tailscale needs a REUSABLE key in
+# .b2b-secrets; without one that step warns and goes on.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
 	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
@@ -1183,6 +1200,7 @@ datacenter:
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
 	@$(MAKE_BIN) --no-print-directory tenant_key B2B_CONFIG="$(B2B_CONFIG)" TENANT="$(or $(TENANT),transcendence)"
+	@$(MAKE_BIN) --no-print-directory graph_render_key B2B_CONFIG="$(B2B_CONFIG)"
 	@$(MAKE_BIN) --no-print-directory backup B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$(BACKUP_DEST)"
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)"
 # The public plane. Down by default; read setup/host/funnel.sh before the first up.
@@ -1195,6 +1213,10 @@ funnel_down:
 # A tenant and its mbk_ key, provisioned through the signed operator call.
 tenant_key:
 	@$(DC_ENV) TENANT="$(TENANT)" NAME="$(NAME)" $(SCRIPT_SH) setup/host/tenant_key.sh
+# Keeps a key that still authenticates, gives a rebuilt guest the stored
+# one back, mints one only when none exists (setup/host/graph_render_key.sh).
+graph_render_key:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/graph_render_key.sh
 seed:
 	@$(DC_ENV) N="$(N)" $(SCRIPT_SH) setup/host/loadtest.sh --seed
 loadtest:
