@@ -42,27 +42,15 @@ WAF_PORT="${BAAS_WAF_PORT:-18443}"
 VM_PATH="${VM_PATH:-$DC_ROOT/disk_images}"
 PIDFILE="$VM_PATH/$VM_NAME/baas-tunnel.pid"
 
-tunnel_pid() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && cat "$PIDFILE"; }
-
-probe() {
-    local code
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "http://127.0.0.1:${GATEWAY_PORT}/" 2>/dev/null || echo 000)
-    printf '%s' "$code"
-}
+probe() { http_code "http://127.0.0.1:${GATEWAY_PORT}/"; }
 
 case "${1:-}" in
 --undo)
-    if pid=$(tunnel_pid); then
-        kill "$pid" 2>/dev/null
-        rm -f "$PIDFILE"
-        ok "tunnel closed (was pid $pid)"
-    else
-        ok "no tunnel to close"
-    fi
+    tunnel_close "$PIDFILE"
     exit 0
     ;;
 --status)
-    if pid=$(tunnel_pid); then
+    if pid=$(tunnel_pid "$PIDFILE"); then
         ok "tunnel up (pid $pid): host :${GATEWAY_PORT} -> guest Kong, host :${WAF_PORT} -> guest WAF"
         code=$(probe)
         case "$code" in
@@ -94,30 +82,12 @@ guest_port() { # <container> <container port> <fallback>
 }
 KONG_IN_GUEST=$(guest_port mini-baas-kong 8000 8000)
 WAF_IN_GUEST=$(guest_port mini-baas-waf 443 8443)
-if pid=$(tunnel_pid); then
+if pid=$(tunnel_pid "$PIDFILE"); then
     ok "tunnel already up (pid $pid)"
 else
-    for p in "$GATEWAY_PORT" "$WAF_PORT"; do
-        if ss -ltn 2>/dev/null | awk '{ print $4 }' | grep -q ":${p}\$"; then
-            die "host port $p is already in use; BAAS_GATEWAY_PORT= / BAAS_WAF_PORT= pick others"
-        fi
-    done
-    # -N: no command. -f would fork before the forwards are proven; a plain
-    # background job with its pid recorded is simpler to stop. Its stdio is
-    # detached: a tunnel that keeps the caller's stdout open keeps
-    # `make baas_access` from returning (it hung a 90 s timeout the first
-    # time). nohup, not setsid: setsid forks when it is not already a group
-    # leader, so $! was the short-lived parent, the script declared the
-    # tunnel dead, and an orphan kept serving 18000 with no pidfile.
-    nohup ssh -N "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes \
-        -L "127.0.0.1:${GATEWAY_PORT}:127.0.0.1:${KONG_IN_GUEST}" \
-        -L "127.0.0.1:${WAF_PORT}:127.0.0.1:${WAF_IN_GUEST}" \
-        "${VM_USER}@127.0.0.1" </dev/null >/dev/null 2>&1 &
-    pid=$!
-    disown "$pid" 2>/dev/null || true
-    sleep 1
-    kill -0 "$pid" 2>/dev/null || die "the tunnel exited at once (a forward failed?)"
-    printf '%s\n' "$pid" >"$PIDFILE"
+    tunnel_open "$PIDFILE" "BAAS_GATEWAY_PORT= / BAAS_WAF_PORT= pick others" \
+        "$GATEWAY_PORT:$KONG_IN_GUEST" "$WAF_PORT:$WAF_IN_GUEST"
+    pid=$(tunnel_pid "$PIDFILE")
     ok "tunnel open (pid $pid): host :${GATEWAY_PORT} -> guest Kong :${KONG_IN_GUEST}, host :${WAF_PORT} -> guest WAF :${WAF_IN_GUEST}"
 fi
 code=$(probe)

@@ -105,3 +105,99 @@ secret_set() {
     mv "$tmp" "$SECRETS_FILE"
     chmod 600 "$SECRETS_FILE"
 }
+
+# LOOPBACK TUNNELS
+#   NAT reaches the guest's NIC (10.0.2.15), never its loopback, so a service
+#   the guest binds to 127.0.0.1 reaches the host through `ssh -L` instead;
+#   drawnosaurus_host_access.sh's header has the failure in full. Each
+#   tunnel is one `ssh -N` with its pid in a file under $VM_PATH/$VM_NAME.
+
+# http_code URL: the HTTP status, 000 when nothing answers. curl -w prints
+# 000 itself on a refused connection and exits non-zero, so the old
+# `$(curl -w ... || echo 000)` gave 000000: no `000)` case matched it, and
+# a tunnel to a stopped drawnosaurus printed "gateway answers HTTP 000000".
+http_code() {
+    local code
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "$1" 2>/dev/null)
+    printf '%s' "${code:-000}"
+}
+
+# tunnel_pid PIDFILE: the tunnel's pid while it runs; nothing, exit 1, if not.
+tunnel_pid() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null && cat "$1"; }
+
+# tunnel_close PIDFILE
+tunnel_close() {
+    local pid
+    if pid=$(tunnel_pid "$1"); then
+        kill "$pid" 2>/dev/null
+        rm -f "$1"
+        ok "tunnel closed (was pid $pid)"
+    else
+        ok "no tunnel to close"
+    fi
+}
+
+# tunnel_open PIDFILE HINT HOST_PORT:GUEST_PORT...: one `ssh -N` carrying
+# every pair, its pid recorded. A host port already taken dies naming HINT,
+# the knobs that move it. Call dc_connect first.
+#   -N: no command. -f would fork before the forwards are proven; a plain
+#   background job with its pid recorded is simpler to stop. Its stdio is
+#   detached: a tunnel that keeps the caller's stdout open keeps
+#   `make baas_access` from returning (it hung a 90 s timeout the first
+#   time). nohup, not setsid: setsid forks when it is not already a group
+#   leader, so $! was the short-lived parent, the script declared the
+#   tunnel dead, and an orphan kept serving 18000 with no pidfile.
+tunnel_open() {
+    local pidfile="$1" hint="$2" pair pid
+    local forwards=()
+    shift 2
+    for pair in "$@"; do
+        if ss -ltn 2>/dev/null | awk '{ print $4 }' | grep -q ":${pair%%:*}\$"; then
+            die "host port ${pair%%:*} is already in use; $hint"
+        fi
+        forwards+=(-L "127.0.0.1:${pair%%:*}:127.0.0.1:${pair#*:}")
+    done
+    nohup ssh -N "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes "${forwards[@]}" \
+        "${VM_USER}@127.0.0.1" </dev/null >/dev/null 2>&1 &
+    pid=$!
+    disown "$pid" 2>/dev/null || true
+    sleep 1
+    kill -0 "$pid" 2>/dev/null || die "the tunnel exited at once (a forward failed?)"
+    printf '%s\n' "$pid" >"$pidfile"
+}
+
+# free_forward PORT: remove whatever squats a host port before a tunnel
+# binds it: a leftover VirtualBox natpf rule (any name -- an old
+# born2root.toml may still list one), or a QEMU hostfwd (recorded only on
+# its monitor socket, see vm_ports.sh). Both are always dead for a
+# loopback-bound service, so dropping them loses nothing; qemu_vm.sh
+# recreates any legitimate one on the next VM start regardless.
+free_forward() {
+    local port="$1" rule
+    if command -v VBoxManage >/dev/null 2>&1 &&
+        VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1; then
+        while IFS= read -r rule; do
+            [ -n "$rule" ] || continue
+            VBoxManage controlvm "$VM_NAME" natpf1 delete "$rule" >/dev/null 2>&1 || true
+        done < <(VBoxManage showvminfo "$VM_NAME" --machinereadable 2>/dev/null |
+            awk -F'"' '/^Forwarding/ { print $2 }' |
+            awk -F',' -v p="$port" '$4 == p { print $1 }')
+        return 0
+    fi
+    ss -ltnp 2>/dev/null | grep -q "127.0.0.1:${port} .*qemu" || return 0
+    local sock="$VM_PATH/$VM_NAME/monitor.sock"
+    [ -S "$sock" ] || return 0
+    python3 - "$sock" "$port" <<'PYEOF' 2>/dev/null
+import socket, sys, time
+sock, port = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(5)
+s.connect(sock)
+time.sleep(0.2)
+try: s.recv(65536)
+except Exception: pass
+s.sendall(f"hostfwd_remove tcp:127.0.0.1:{port}\n".encode())
+time.sleep(0.2)
+s.close()
+PYEOF
+}
