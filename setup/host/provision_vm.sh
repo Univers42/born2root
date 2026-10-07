@@ -18,6 +18,7 @@
 #   setup/host/provision_vm.sh <vm-name> excalidraw    # just the Excalidraw editor
 #   setup/host/provision_vm.sh <vm-name> devtools      # herdr + opencode
 #   setup/host/provision_vm.sh <vm-name> claude-code   # Claude Code, beside it
+#   setup/host/provision_vm.sh <vm-name> claude-debug  # its unattended debug setup
 #   setup/host/provision_vm.sh <vm-name> hellish
 #   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
 #   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
@@ -313,6 +314,11 @@ claude-code)
         install_claude_code.sh "CLAUDE_CODE_ INSTALL_CLAUDE" "Claude Code"
     ok "Claude Code provisioning finished"
     ;;
+claude-debug)
+    run_provisioner setup/install/ai/install_claude_debug.sh \
+        install_claude_debug.sh "CLAUDE_DEBUG_" "Claude debug setup"
+    ok "Claude debug setup finished"
+    ;;
 ai)
     [ -n "${AI_MODE:-}" ] || die "set AI_MODE=client or AI_MODE=local (see setup/install/ai/install_ai.sh)"
     run_provisioner setup/install/ai/install_ai.sh \
@@ -409,6 +415,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | ai | health | var-gc | edge | grobase | backup | graph-render | root-sh | restore-drill | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | root-sh | restore-drill | all)"
     ;;
 esac

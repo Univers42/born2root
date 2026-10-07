@@ -156,6 +156,11 @@ if ! git -C "$GROBASE_DIR" checkout -q -f "$GROBASE_REF" 2>/dev/null; then
         die "ref $GROBASE_REF not found in $GROBASE_REPO"
 fi
 cd "$GROBASE_DIR" || die "cannot enter $GROBASE_DIR"
+# The forced checkout also put back the ask rules make claude_debug removed
+# from .claude/settings.json for the guest's unattended Claude.
+if [ -x /usr/local/sbin/b2b-claude-bypass ]; then
+    /usr/local/sbin/b2b-claude-bypass "$GROBASE_DIR" || log "b2b-claude-bypass failed; Claude here will prompt again (make claude_debug)"
+fi
 
 # ── one local patch: every service but the door binds loopback ──────────────
 # At d74aa97 prometheus (9090), grafana (3030) and loki (3100) publish on

@@ -301,7 +301,7 @@ C_CYAN   := \033[36m
         groot groot_map groot_undo \
         drawnosaurus drawnosaurus_status drawnosaurus_undo \
         graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
-        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code ai \
+        nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code claude_debug ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
         tailscale backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
@@ -1232,6 +1232,14 @@ grobase_status:
 #   make claude_code CLAUDE_CODE_VERSION=2.1.236   pin instead of the channel
 claude_code:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" claude-code
+
+# The guest's Claude, unattended in /opt/grobase: bypass mode, the
+# checkout's ask rules removed (and kept out of commits), RE and tracing
+# tools on / and in a privileged toolbox image (b2b-debug), the playwright
+# and radare2 MCP servers, a debugging skill. Header of the script: why each.
+#   make claude_debug CLAUDE_DEBUG_TOOLBOX=0   skip the ~1 GB toolbox image
+claude_debug:
+	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" claude-debug
 
 # Optional AI. Does nothing unless AI_MODE is client or local:
 #   make ai AI_MODE=local        a model sized to this VM's RAM

@@ -33,7 +33,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Serve local models to opencode from the host (`[ai]`) | `make llm_select`, `make llm_host`, `make llm_status`, `make llm_stop` |
 | Status dashboard / follow the headless serial console | `make status`, `make console` |
 | Boot an existing VM headless with LUKS unlock | `make start_vm` (VirtualBox), `make qemu_start` |
-| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make hellish_plugins`, `make provision`, `make shell_vm` |
+| Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make claude_debug`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
 | Build with a preset config (school eval or server profile) | `make all B2B_CONFIG=profiles/school.toml` |
 | Full datacenter setup after a rebuild (restore → tailscale → backup) | `make datacenter` |
