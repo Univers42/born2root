@@ -206,7 +206,9 @@ for script in setup/install/nvim/install_nvim.sh setup/install/nvim/install_nvim
     check "$name: waits out a job by its cwd" "$([ $(($(date +%s) - t0)) -ge 2 ] && echo waited)" "waited"
 
     # curl's shape: no cwd of its own, an --output path in ~/.cache/nvim.
-    sh -c 'sleep 3' --output "$TMP/home/alice/.cache/nvim/tree-sitter-c.tar.gz" &
+    # The '; :' keeps sh from exec'ing sleep in its place (bash as /bin/sh
+    # does), which drops --output from the process's arguments.
+    sh -c 'sleep 3; :' --output "$TMP/home/alice/.cache/nvim/tree-sitter-c.tar.gz" &
     sleep 0.3
     t0=$(date +%s)
     wait_nvim_jobs "$me" "$TMP/home/alice"
