@@ -43,6 +43,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Grobase status (config + docker ps, read from the guest) | `make grobase_status` |
 | Prove the platform / mint a tenant key / seed / open the public plane | `make verify_platform`, `make tenant_key TENANT=…`, `make seed`, `make funnel_up` |
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
+| The private plane: MagicDNS name + certificate + serve -> WAF + CORS origin | `make tailnet`, `make tailnet_status`, `make tailnet_down` (`setup/host/tailnet.sh`) |
 | Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
 | Mint a realtime publish JWT / apply CORS origins | `make realtime_token`, `make grobase_cors` |
 | Provision/re-run a datacenter component in the guest | `make grobase`, `make edge`, `make backup_install` |
@@ -118,6 +119,9 @@ credentials that must not enter the repo or the ISO:
 - `TS_AUTHKEY` — Tailscale auth key; must be **reusable + ephemeral + pre-approved**
   (a one-off key is spent by the first VM; ephemeral removes the old tailnet
   node automatically on rebuild).
+- `TS_API_TOKEN` (or `TS_OAUTH_CLIENT_ID` + `TS_OAUTH_CLIENT_SECRET`) — Tailscale
+  API credential, optional; `make tailnet` then flips MagicDNS and key expiry
+  and mints `TS_AUTHKEY` itself instead of prompting for console clicks.
 - `RESTIC_PASSWORD` — restic backup repository password; `make backup` mints
   one when absent, but copy it to a password manager immediately — every
   snapshot on sgoinfre is unreadable without it.
@@ -471,7 +475,8 @@ and login the way `provision_vm.sh` does and reads the secrets file.
   in it fails `tests/test_b2b_config.sh`). They live in `.b2b-secrets`:
   `~/.config/born2root/b2b-secrets` by default, a repo-root `.b2b-secrets`
   when present, or `B2B_SECRETS=`. `KEY=VALUE`, mode 600, read with sed and
-  never sourced. Keys: `TS_AUTHKEY`, `RESTIC_PASSWORD`, `CF_TUNNEL_TOKEN`.
+  never sourced. Keys: `TS_AUTHKEY`, `TS_API_TOKEN`, `RESTIC_PASSWORD`,
+  `CF_TUNNEL_TOKEN`.
   Under `$HOME` on purpose: the campus wipe of /goinfre on 2026-09-20 took the
   repo clone and the restic password with it. See `.b2b-secrets.example`.
 - `make datacenter` is the ordered rebuild path after `make all`/`make re`:
@@ -479,6 +484,13 @@ and login the way `provision_vm.sh` does and reads the secrets file.
   never overwrite the older copy on `BACKUP_DEST`), tenant_key, backup,
   verify again. Each step is also a target on its own, and missing secrets
   warn and continue rather than abort.
+- `make tailnet` (`setup/host/tailnet.sh` + `tailnet_guest.sh` as root via
+  `provision_vm.sh root-sh`) is the private plane end to end. Admin-console
+  switches (MagicDNS, HTTPS Certificates, key expiry, the auth key) are done
+  through the API when `TS_API_TOKEN` is in the secrets file, otherwise
+  prompted for with the exact page to open; without a terminal it prints the
+  instructions and exits 1. `TS_SERVE=tcp` serves the WAF without the
+  certificate switch (self-signed). `make funnel_up` is the public twin.
 - `make verify_platform` is the session self-test — run it before and after
   touching anything in this layer. `make grobase_status` reads
   `/etc/b2b/grobase.conf` and `docker ps` straight from the guest.

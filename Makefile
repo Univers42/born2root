@@ -312,7 +312,7 @@ C_CYAN   := \033[36m
         graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code claude_debug ai \
         var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
-        tailscale backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
+        tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
@@ -1136,6 +1136,7 @@ graph_render_install:
 #   make verify_platform     the session self-test: is the platform the platform
 #   make baas_access         host :8000 -> Kong, :8443 -> WAF, over SSH (loopback-bound in the guest)
 #   make tailscale           log the guest into the tailnet (TS_AUTHKEY from the secrets file, or asked once)
+#   make tailnet             the private plane end to end: login, MagicDNS, certificate, serve -> WAF, CORS origin
 #   make sql FILE=x.sql      pipe a SQL file into the guest's Postgres (an app's schema)
 #   make realtime_token      mint a publish-capable realtime token (NS="pg lab" DAYS=30) into the secrets file
 #   make grobase_cors        re-apply [dc] cors_origins to a live VM and restart Kong
@@ -1181,6 +1182,19 @@ baas_access_undo:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/baas_host_access.sh --undo
 tailscale:
 	@$(DC_ENV) TS_AUTHKEY="$(TS_AUTHKEY)" $(SCRIPT_SH) setup/host/tailscale_up.sh
+# The private plane (setup/host/tailnet.sh): everything the guest needs to be
+# https://<node>.<tailnet>.ts.net/ for tailnet peers -- login, MagicDNS, the
+# HTTPS certificate, `tailscale serve` -> WAF, the CORS origin. The console
+# switches are done through the API with TS_API_TOKEN in the secrets file,
+# or prompted for one by one; without a terminal it prints what to click.
+#   make tailnet TS_SERVE=tcp       no certificate switch yet: raw passthrough (self-signed)
+#   make tailnet TS_HOSTNAME=baas   rename the node; its ts.net name follows
+tailnet:
+	@$(DC_ENV) TS_AUTHKEY="$(TS_AUTHKEY)" TS_SERVE="$(TS_SERVE)" TS_HOSTNAME="$(TS_HOSTNAME)" TS_TAGS="$(TS_TAGS)" $(SCRIPT_SH) setup/host/tailnet.sh
+tailnet_status:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/tailnet.sh --status
+tailnet_down:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/tailnet.sh --down
 backup:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh
 backup_verify:
@@ -1197,13 +1211,16 @@ restore:
 # "exists" when the restore brought the tenant back), graph_render_key
 # after that (it gives the new guest the stored key back, and is a no-op
 # on a guest without dc-graph-render). Tailscale needs a REUSABLE key in
-# .b2b-secrets; without one that step warns and goes on.
+# .b2b-secrets; without one that step warns and goes on. tailnet then puts
+# the private URL back (serve, CORS); a pending console switch warns too.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
 	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
+	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
 	@d=$$($(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --where); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
