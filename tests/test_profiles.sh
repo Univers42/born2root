@@ -7,8 +7,9 @@
 # What each profile promises:
 #   school.toml   the Born2beRoot subject at 15 GB: nvim on, docker and the
 #                 bonus off, and it fits.
-#   server.toml   backend only at 44 GB: no nvim, docker on, dc-full on, and
-#                 it fits with /var holding the engines.
+#   server.toml   backend only at 44 GB: no nvim, docker on, dc-full on but
+#                 for the max tier's add-ons, and it fits with /var holding
+#                 the engines.
 set -e
 
 cd "$(dirname "$0")/.."
@@ -60,8 +61,16 @@ v=$(resolve server)
 check "server: nvim off" "$(printf '%s\n' "$v" | grep -c '^feature=nvim$')" 0
 check "server: nvim-extras off" "$(printf '%s\n' "$v" | grep -c '^feature=nvim-extras$')" 0
 check "server: docker on" "$(printf '%s\n' "$v" | grep -c '^feature=docker$')" 1
+# The max tier's add-ons stay off: on a 7.6 GB seat max crash-looped mssql
+# and grobase puts it at 3128 MiB idle, against 1619 MB used for pro in the
+# baas guest (2026-10-08). Every other dc-* row is on.
+max_addons="dc-db-cockroach dc-db-mssql dc-observability"
 dc_rows=$(awk "/^MANIFEST='/,/^'\$/" generate/feature_profile.sh | grep -c '^dc-')
-check "server: every dc-* row on" "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" "$dc_rows"
+check "server: every dc-* row on but the max add-ons" \
+    "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" "$((dc_rows - 3))"
+for f in $max_addons; do
+    check "server: $f off" "$(printf '%s\n' "$v" | grep -c "^feature=$f\$")" 0
+done
 check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^feature=var-gc$')" 1
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
 

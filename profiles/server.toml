@@ -59,8 +59,10 @@ backend = "qemu"
 # relocate one with `make all VM_PATH=…` or by moving the directory and that
 # file together. This is where that registry says baas lives.
 path    = "/mnt/storage/virtual_machines"
-disk_gb = 50
-ram_mb  = 14336
+disk_gb = 80
+# On a 7.6 GB campus seat: 4048 left the host 3.6 GB and swapping (2026-10-08).
+# 3 GB is grobase's own figure for the pro tier below (cost-analysis.md).
+ram_mb  = 3072
 cpus    = "auto"
 profile = "auto"
 ai_mode = "off"
@@ -115,6 +117,12 @@ playwright     = false
 docker         = true
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
+# Not on a 7.6 GB seat: these are the max tier's add-ons (engines: mssql with a
+# 2 GB cap, cockroach; observability: loki, prometheus, grafana). Together
+# grobase measures max at 3128 MiB idle and asks 6 GB / 8 vCPU.
+dc-db-cockroach  = false
+dc-db-mssql      = false
+dc-observability = false
 # graph_render's motor: its own row, in no dc-* bundle (generate/feature_profile.sh)
 dc-graph-render = true
 
@@ -141,6 +149,13 @@ password_login = true
 interval_min = 10
 
 [network]
+# No forward for groot's frontends (website 4322, osionos 3001/3002/3003, the
+# bridges 4000/4100/4200, auth-gateway 8787): they run on the HOST against this
+# guest's grobase (groot: make link, over the ssh entry), and a hostfwd here
+# would hold the host port each of them must bind. None for Kong 8000, its
+# admin 8001 or Mailpit 8025 either: they bind the guest's loopback, which a
+# hostfwd never reaches (it targets the NIC), so those entries only squatted
+# the ports a grobase running on the host publishes. Removed 2026-10-08.
 forwards = [
   { name = "ssh",                      guest = 4242,  host = 4242  },
   { name = "http",                     guest = 80,    host = 8082  },
@@ -164,17 +179,6 @@ forwards = [
   { name = "redis",                    guest = 6379,  host = 6379  },
   { name = "frontend",                 guest = 5173,  host = 5173  },
   { name = "backend",                  guest = 3000,  host = 3000  },
-  { name = "website",                  guest = 4322,  host = 4322  },
-  { name = "osionos-app",              guest = 3001,  host = 3001  },
-  { name = "osionos-mail",             guest = 3002,  host = 3002  },
-  { name = "osionos-calendar",         guest = 3003,  host = 3003  },
-  { name = "osionos-bridge",           guest = 4000,  host = 4000  },
-  { name = "mail-bridge",              guest = 4100,  host = 4100  },
-  { name = "calendar-bridge",          guest = 4200,  host = 4200  },
-  { name = "baas-gateway",             guest = 8000,  host = 8000  },
-  { name = "baas-admin",               guest = 8001,  host = 8001  },
-  { name = "mailpit",                  guest = 8025,  host = 8025  },
-  { name = "auth-gateway",             guest = 8787,  host = 8787  },
   { name = "vault",                    guest = 18200, host = 18200 },
 ]
 
@@ -194,7 +198,7 @@ cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
 backup_dest = "/mnt/storage/b2b-backups/baas"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
-package = "max"
+package = "pro"
 
 [disk]
 swap_mb = "auto"
