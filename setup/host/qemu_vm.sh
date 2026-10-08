@@ -636,7 +636,14 @@ launch() {
             disk_args+=(-device "ich9-ahci,id=ahci,addr=0x5")
     fi
 
-    "$QEMU" \
+    # nice 10: when the host is contended, the desktop's threads win over
+    # the vCPUs; when it is idle, the guest still gets every cycle. On a
+    # 6-core, 7.6 GB seat (2026-10-08) a max-tier guest kept QEMU at 112%
+    # CPU, load 8 inside, and the seat's own desktop stalled. Every thread
+    # inherits it, which a later `renice -p PID` does not do: that moves
+    # only the main thread, not the vCPUs. No ionice: the seats' mq-deadline
+    # ignores levels inside the best-effort class.
+    nice -n 10 "$QEMU" \
         -name "$VM_NAME" \
         -machine "pc,accel=${ACCEL}" \
         "${cpu_args[@]}" \
