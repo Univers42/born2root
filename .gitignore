@@ -27,3 +27,7 @@ __pycache__/
 # A separate clone of the agent-config repo, parked here for reference; it
 # carries its own .git and 228 MB of assets, and is not part of the build.
 claude-deal-with-the-devil/
+
+# The server profile's VM_PATH on this seat (disk_images/.vm_path.baas):
+# the qcow2, pidfile, monitor socket, serial.log and stamps live here.
+storage/
