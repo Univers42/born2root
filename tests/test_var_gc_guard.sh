@@ -52,8 +52,14 @@ cat >"$TMP/bin/docker" <<'EOF'
 printf '%s\n' "$*" >>"$STUB_DIR/docker.log"
 case "$2" in prune) if [ -f "$STUB_DIR/drop" ]; then echo 50 >"$STUB_DIR/use"; fi ;; esac
 case "$1" in
-ps) cat "$STUB_DIR/unhealthy" 2>/dev/null ;;
-inspect) echo "/svc-$4" ;;
+ps)
+    case "$*" in
+    *health=healthy*) cat "$STUB_DIR/healthy" 2>/dev/null ;;
+    *health=unhealthy*) cat "$STUB_DIR/unhealthy" 2>/dev/null ;;
+    *) cat "$STUB_DIR/healthy" "$STUB_DIR/unhealthy" 2>/dev/null ;;
+    esac
+    ;;
+inspect) echo "/svc-$4 $(cat "$STUB_DIR/started-$4" 2>/dev/null || echo 2026-01-01T00:00:00Z)" ;;
 esac
 exit 0
 EOF
@@ -147,6 +153,11 @@ never_unsafe deep
 awk "/^cat >\/usr\/local\/sbin\/b2b-autoheal <<'HEALEOF'\$/ { on = 1; next } /^HEALEOF\$/ { on = 0 } on" \
     setup/install/dc/install_var_gc.sh >"$TMP/b2b-autoheal"
 chmod +x "$TMP/b2b-autoheal"
+# Autoheal remembers, in $B2B_AUTOHEAL_STATE, every container it has seen
+# healthy; only those are restarted (see the header in install_var_gc.sh:
+# a restart during a first start corrupted mysql's datadir on 2026-10-08).
+export B2B_AUTOHEAL_STATE="$TMP/seen"
+seen_ids() { (cd "$TMP/seen" && printf '%s ' *); }
 heal() {
     : >"$TMP/docker.log"
     rc=0
@@ -154,16 +165,31 @@ heal() {
     log=$(cat "$TMP/docker.log")
 }
 : >"$TMP/unhealthy"
+printf 'a1\nb2\n' >"$TMP/healthy"
 heal
 check "autoheal, all healthy: exit 0" "$rc" 0
 check "autoheal, all healthy: restarts nothing" "$(count '^restart')" 0
-printf 'a1\nb2\n' >"$TMP/unhealthy"
+check "autoheal remembers each healthy container" "$(seen_ids)" "a1 b2 "
+: >"$TMP/healthy"
+printf 'a1\nb2\nc3\n' >"$TMP/unhealthy"
 heal
 check "autoheal asks docker for the unhealthy ones" "$(count '^ps -q --filter health=unhealthy$')" 1
-check "autoheal restarts each unhealthy container" "$(count '^restart ')" 2
+check "autoheal restarts each once-healthy unhealthy container" "$(count '^restart ')" 2
 check "... by id" "$(count '^restart b2$')" 1
 check "... and names it" "$(printf '%s\n' "$out" | grep -c 'restarted svc-a1 (unhealthy)' || true)" 1
+check "never one still in its first start (never seen healthy)" "$(count '^restart c3$')" 0
 check "autoheal never stops, kills or removes" "$(count '^stop\|^kill\|^rm\|prune')" 0
+date -u -d '-60 seconds' +%Y-%m-%dT%H:%M:%S.000000000Z >"$TMP/started-a1"
+heal
+check "not within the grace period after a start" "$(count '^restart a1$')" 0
+check "... while an older one still is" "$(count '^restart b2$')" 1
+export B2B_AUTOHEAL_GRACE=30
+heal
+unset B2B_AUTOHEAL_GRACE
+check "the grace period is B2B_AUTOHEAL_GRACE" "$(count '^restart a1$')" 1
+printf 'b2\n' >"$TMP/unhealthy"
+heal
+check "forgets a container that no longer exists" "$(seen_ids)" "b2 "
 
 # --- b2b-stack-health: the verdict ------------------------------------------------
 # docker answers each `ps` filter from $STUB_DIR/<state> (name<TAB>status

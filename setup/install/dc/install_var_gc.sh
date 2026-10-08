@@ -200,19 +200,52 @@ UNITEOF
 # healthy, realtime unhealthy at +144 s, restarts=0). So once a minute every
 # container docker reports unhealthy is restarted. The real fix is a retry
 # in the service; this keeps the next such race from needing a person.
-# Caveat: a container unhealthy for a reason a restart cannot cure is
-# restarted each time it fails its healthcheck again; the journal
-# (journalctl -u b2b-autoheal) shows that loop rather than hiding it.
+#
+# Only a container this timer has once seen healthy, though. A container
+# that never was is still in its first start, and that start may be an
+# entrypoint initialising a datadir: on the 2026-10-08 max-tier first boot
+# (4 GB guest, disk at 40-60% iowait) mysql's mariadb-install-db took
+# minutes, the healthcheck called it unhealthy after ~70 s, autoheal
+# restarted it at 13:32:09, and the restart found a half-written datadir
+# (`ibdata1` page 0 all zeros) that it never re-initialises. `make up`
+# failed on "mysql is unhealthy" and took all thirteen dc-* rows with it;
+# mariadb's volume went the same way. Containers keep their id across a
+# reboot, so the boot race this is for still qualifies. And a container is
+# left alone for B2B_AUTOHEAL_GRACE seconds (300) after any start: the same
+# guest had mssql, cockroach and grafana restarted every minute, each a cold
+# start the healthcheck could not wait out under that load.
+# Caveat: a container recreated by compose (a new id) that loses the boot
+# race on its very first start is never restarted, and one unhealthy for a
+# reason a restart cannot cure is restarted once per grace period; both
+# show in b2b-stack-health, the loop also in journalctl -u b2b-autoheal.
 cat >/usr/local/sbin/b2b-autoheal <<'HEALEOF'
 #!/bin/sh
-# b2b-autoheal — restart every container docker reports unhealthy. Installed
-# by setup/install/dc/install_var_gc.sh (born2root); its header says why.
+# b2b-autoheal — restart each container docker reports unhealthy that was
+# healthy before and has run past its grace period. Installed by
+# setup/install/dc/install_var_gc.sh (born2root); its header says why.
 set -u
 command -v docker >/dev/null 2>&1 || exit 0
 docker info >/dev/null 2>&1 || exit 0
+seen=${B2B_AUTOHEAL_STATE:-/var/lib/b2b/autoheal}
+grace=${B2B_AUTOHEAL_GRACE:-300}
+mkdir -p "$seen" || exit 1
+for id in $(docker ps -q --filter health=healthy); do
+    : >"$seen/$id"
+done
+all=$(docker ps -aq)
+for f in "$seen"/*; do
+    [ -e "$f" ] || continue
+    printf '%s\n' "$all" | grep -qx "${f##*/}" || rm -f "$f"
+done
+now=$(date +%s)
 rc=0
 for id in $(docker ps -q --filter health=unhealthy); do
-    name=$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null)
+    [ -e "$seen/$id" ] || continue
+    read -r name started_at <<EOF
+$(docker inspect -f '{{.Name}} {{.State.StartedAt}}' "$id" 2>/dev/null)
+EOF
+    started=$(date -d "${started_at:-}" +%s 2>/dev/null) || started=0
+    [ $((now - started)) -ge "$grace" ] || continue
     if docker restart "$id" >/dev/null 2>&1; then
         printf 'b2b-autoheal: restarted %s (unhealthy)\n' "${name#/}"
     else
