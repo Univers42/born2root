@@ -49,10 +49,17 @@ printf '[grobase] realtime: sockets allowed from %s\n' "$origins"
 project=$(docker inspect mini-baas-realtime -f '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
 files=$(docker inspect mini-baas-realtime -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
 workdir=$(docker inspect mini-baas-realtime -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+# The error is kept: on the pro-tier guest (2026-10-08) compose refused with
+# "required variable MYSQL_ROOT_PASSWORD is missing a value" -- grobase's own
+# `make up` supplies variables that are in no .env file, so a recreate from
+# the labels alone cannot work there, and a plain `docker restart` would not
+# pick new environment up either. The origin is in .env for the next up.
 if [ -n "$project" ] && [ -n "$files" ]; then
-    COMPOSE_FILE="$files" COMPOSE_PATH_SEPARATOR=, \
-        docker compose -p "$project" --project-directory "${workdir:-/opt/grobase}" up -d --no-deps realtime >/dev/null 2>&1 ||
-        printf '[grobase] realtime: could not recreate the container; restart it by hand to pick the origins up\n'
+    if ! err=$(COMPOSE_FILE="$files" COMPOSE_PATH_SEPARATOR=, \
+        docker compose -p "$project" --project-directory "${workdir:-/opt/grobase}" up -d --no-deps realtime 2>&1 >/dev/null); then
+        printf '[grobase] realtime: could not recreate the container (%s); the origins take effect at grobase'"'"'s next make up\n' \
+            "$(printf '%s\n' "$err" | grep -m1 . || echo 'no error text')"
+    fi
     printf '[grobase] realtime: %s\n' "$(docker inspect mini-baas-realtime -f '{{.State.Status}}' 2>/dev/null || echo absent)"
 else
     printf '[grobase] realtime: not running; the origins take effect at the next up\n'
