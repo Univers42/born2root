@@ -8,6 +8,8 @@
 #      had been saved at 15. The recipe let the saved size win whenever it
 #      differed from the one asked for, but the picker only ever GROWS the
 #      disk, so a smaller saved size is a selection for another disk.
+#   3. `VM_RAM_DB=15000 make all` built with the toml's RAM and said nothing:
+#      a misspelt knob was a silent no-op. VM_RAM* is now checked by prefix.
 #
 # Runs the REAL `all` recipe, printed by `make -n`, with the sub-make replaced
 # by an echo, so it cannot drift from what `make all` executes.
@@ -75,6 +77,17 @@ env_refusal() {
     refusal "$@"
 }
 check "VM_SIZE=50 in env, SIZE_B2B=30 refused" "$(env_refusal 50 SIZE_B2B=30)" 1
+
+# Bug 3: both spellings of the typo, command line and environment.
+knob_refusal() { make --no-print-directory -n -C "$REPO_ROOT" all "$@" 2>&1 | grep -c '\*\*\* VM_RAM_DB.*VM_RAM_MB=<MB>'; }
+check "VM_RAM_DB=15000 is refused, VM_RAM_MB named (bug 3)" "$(knob_refusal VM_RAM_DB=15000)" 1
+env_knob_refusal() {
+    export VM_RAM_DB=15000
+    knob_refusal
+}
+check "VM_RAM_DB in the environment is refused too" "$(env_knob_refusal)" 1
+check "VM_RAM_MB=15000 itself is accepted" \
+    "$(make --no-print-directory -n -C "$REPO_ROOT" all VM_RAM_MB=15000 2>&1 | grep -c '\*\*\*')" 0
 
 # The sub-make must not re-apply VM_SIZE over the size the picker settled on.
 check "sub-make gets VM_SIZE= (picker grew 47 to 52)" \

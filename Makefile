@@ -119,11 +119,27 @@ endif
 ifeq ($(origin VM_RAM_MB),undefined)
 VM_RAM_MB := $(call b2b_conf,B2B_VM_RAM_MB)
 endif
+# make accepts any variable, so a misspelt knob is a silent no-op:
+# `VM_RAM_DB=15000 make all` built with the toml's 20480 MB and said nothing.
+# Whatever the command line or the environment defines is in .VARIABLES, so
+# the knob people retype most is checked by prefix (VM_RAM_MB is the only
+# VM_RAM* name in the repo; keep it that way or this misfires).
+ifneq ($(filter-out VM_RAM_MB,$(filter VM_RAM%,$(.VARIABLES))),)
+$(error $(filter-out VM_RAM_MB,$(filter VM_RAM%,$(.VARIABLES))) is not a knob: the guest's memory is VM_RAM_MB=<MB>)
+endif
 ifeq ($(origin B2B_VM_CPUS),undefined)
 B2B_VM_CPUS := $(call b2b_conf,B2B_VM_CPUS)
 endif
 ifeq ($(origin PROFILE),undefined)
 PROFILE := $(or $(call b2b_conf,B2B_PROFILE),auto)
+endif
+# PROFILE is an install tier, never a file. `PROFILE=profiles/server.toml
+# make all` downloaded and extracted the netinst (3 min) before
+# feature_profile.sh refused it; a preset goes in B2B_CONFIG, so the refusal
+# names that, with the file when `profiles/<PROFILE>.toml` exists.
+PROFILE_PRESET := $(firstword $(wildcard $(PROFILE) profiles/$(PROFILE).toml))
+ifneq ($(filter-out auto minimal standard full,$(PROFILE)),)
+$(error PROFILE=$(PROFILE) is not an install tier (auto, minimal, standard or full)$(if $(PROFILE_PRESET),; a preset is passed as B2B_CONFIG=$(PROFILE_PRESET)))
 endif
 ifeq ($(origin FEATURES),undefined)
 FEATURES := $(call b2b_conf,B2B_FEATURES)

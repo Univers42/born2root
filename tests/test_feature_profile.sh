@@ -197,4 +197,21 @@ check "nvim-shared is a base row FEATURES cannot drop" \
 check "the picker reads the shared cost from feature_profile.sh" \
     "$(grep -c '^EDITOR_SHARED_HOME_MB=' generate/feature_profile.sh)" 1
 
+# ── A volume that cannot grow ───────────────────────────────────────────────
+# share = 0 pins a volume at its floor (server.toml's /home, so /var gets the
+# rest). A set that overflows it fits at NO size, and the old linear search
+# for the smallest fit walked every GB up to 2048 -- 100 s and counting in
+# the ISO build. The refusal must come back in seconds and name the mount.
+STUCK=$(mktemp)
+sed 's/{ name = "home", *mount = "\/home", *floor_mb = [0-9]*, *share = [0-9]*,/{ name = "home",    mount = "\/home",    floor_mb = 256,  share = 0,/' \
+    "$DEFAULTS" >"$STUCK"
+check "fixture: /home pinned at a 256 MB floor" "$(grep -c '"home".*floor_mb = 256,  share = 0,' "$STUCK")" 1
+stuck_rc=0
+stuck_out=$(env B2B_CONFIG="$STUCK" SIZE_B2B=15 timeout 60 "${FP[@]}" --check 2>&1) || stuck_rc=$?
+rm -f "$STUCK"
+check "fits at no size: exit 1 within 60 s (124 = still walking)" "$stuck_rc" 1
+check "fits at no size: names the mount that cannot grow" \
+    "$(printf '%s\n' "$stuck_out" | grep -c 'No disk size up to 2048 GB holds this set: /home')" 1
+check "fits at no size: names no size" "$(printf '%s\n' "$stuck_out" | grep -c 'fits from SIZE_B2B')" 0
+
 exit "$fail"

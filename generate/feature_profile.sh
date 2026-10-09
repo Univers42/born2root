@@ -649,18 +649,36 @@ usable_cell() { # <sizes> <holder>
 
 OVERFLOW=$(fits "$SIZES")
 
-# The smallest SIZE_B2B at which this exact feature set fits. Linear search is
-# fine: each probe is one cheap script run, and it stops at the first fit.
+# The smallest SIZE_B2B at which this exact feature set fits. Usable space per
+# mount never shrinks as the disk grows (floor, weighted share, cap), so the
+# ceiling is probed first and the answer found by bisection: 12 recipe runs
+# at most. It was a linear walk, one recipe run per GB up to 2048: a volume
+# with share = 0 (server.toml's /home) is the same 1024 MB at 80 GB and at
+# 2048, and the walk sat 100 s and counting in the ISO build finding that
+# out, where failing before the install is the whole point.
+# Caveat: bisection trusts that monotony. A [disk] table whose volume shrinks
+# at a bigger disk (none shipped; floor/share/cap cannot) could make it name
+# a size the walk would not have.
+fits_at_gb() {
+    s=$(sizes_for $(($1 * 1024))) && [ -n "$s" ] && [ -z "$(fits "$s")" ]
+}
 smallest_fit_gb() {
-    g=$((SIZE_GB + 1))
-    while [ "$g" -le 2048 ]; do
-        s=$(sizes_for $((g * 1024))) && [ -n "$s" ] && [ -z "$(fits "$s")" ] && {
-            echo "$g"
-            return 0
-        }
-        g=$((g + 1))
+    lo=$((SIZE_GB + 1))
+    hi=2048
+    fits_at_gb "$hi" || return 1
+    while [ "$lo" -lt "$hi" ]; do
+        mid=$(((lo + hi) / 2))
+        if fits_at_gb "$mid"; then
+            hi=$mid
+        else
+            lo=$((mid + 1))
+        fi
     done
-    return 1
+    echo "$lo"
+}
+# The mounts still over at the ceiling: what no disk size can hold.
+stuck_mounts() {
+    fits "$(sizes_for $((2048 * 1024)))" | awk '{ printf "%s%s", sep, $1; sep = ", " }'
 }
 
 # ── Output ──────────────────────────────────────────────────────────────────
@@ -720,7 +738,12 @@ emit_table() {
         printf '%s\n' "$OVERFLOW" | while read -r m need have; do
             printf '      %-6s needs %s MB, has %s MB\n' "$m" "$need" "$have"
         done
-        g=$(smallest_fit_gb) && printf '\n    This set fits from SIZE_B2B=%s   (make all SIZE_B2B=%s)\n' "$g" "$g"
+        if g=$(smallest_fit_gb); then
+            printf '\n    This set fits from SIZE_B2B=%s   (make all SIZE_B2B=%s)\n' "$g" "$g"
+        else
+            printf '\n    No disk size up to 2048 GB holds this set: %s does not grow with the disk\n' "$(stuck_mounts)"
+            printf '    (share = 0 or cap_mb in [disk]); raise its floor_mb or cap_mb, or drop what lives there.\n'
+        fi
         printf '    Or drop a feature: FEATURES="-docker"   Or a smaller profile: PROFILE=minimal\n\n'
     fi
 }

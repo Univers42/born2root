@@ -93,20 +93,20 @@ fullname = ""
 sudo     = true
 groups   = ["docker"]
 ssh_keys = []
-nvim     = false
+nvim     = true
 
 [packages]
 apt = []
 
 [features]
 # workstation: off
-nvim           = false
-nvim-extras    = false
+nvim           = true
+nvim-extras    = true
 webstack       = false
-nodejs         = false
+nodejs         = true
 pytools        = false
-devtools-extra = false
-claude-code    = false
+devtools-extra = true
+claude-code    = true
 # The browser the agents drive. Off here for the same reason as the rows above:
 # a server image has no editor and no agent, and the feature is `full` tier, so
 # leaving it to size would switch on 700 MB of chromium for a machine that will
@@ -204,7 +204,9 @@ package = "pro"
 swap_mb = "auto"
 volumes = [
   { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
-  { name = "home",    mount = "/home",    floor_mb = 1024, share = 0,      cap_mb = 102400 },
+  # 2048, not 1024: with the editor rows on, nvim, node and claude-code put
+  # ~1.2 GB in /home, and share = 0 means the floor is all it ever gets.
+  { name = "home",    mount = "/home",    floor_mb = 2048, share = 0,      cap_mb = 102400 },
   { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },
   { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
   { name = "tmp",     mount = "/tmp",     floor_mb = 512,  share = 1,      cap_mb = 10240  },

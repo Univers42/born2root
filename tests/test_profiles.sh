@@ -80,4 +80,15 @@ var_of() { env B2B_CONFIG="$1" SIZE_B2B=44 bash generate/partition_recipe.sh --s
 check "server: /var grew against the shipped table at 44 GB" \
     "$([ "$(var_of profiles/server.toml)" -gt "$(var_of tests/fixtures/default.toml)" ] && echo grew || echo same)" grew
 
+# PROFILE is the install tier; a preset goes in B2B_CONFIG. The mix-up is
+# refused when make parses, not three minutes in after the netinst download.
+parse_refusal() { make --no-print-directory -n all "$@" 2>&1 | grep -m1 '\*\*\*'; }
+check "PROFILE=profiles/server.toml refused at parse time, B2B_CONFIG named" \
+    "$(parse_refusal PROFILE=profiles/server.toml | grep -c 'B2B_CONFIG=profiles/server.toml')" 1
+check "PROFILE=server names the preset file" \
+    "$(parse_refusal PROFILE=server | grep -c 'B2B_CONFIG=profiles/server.toml')" 1
+check "PROFILE=nonsense refused without a file to name" \
+    "$(parse_refusal PROFILE=nonsense | grep -c 'PROFILE=nonsense is not an install tier')" 1
+check "PROFILE=standard still parses" "$(parse_refusal PROFILE=standard | grep -c '\*\*\*')" 0
+
 exit "$fail"
