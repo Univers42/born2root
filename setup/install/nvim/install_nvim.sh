@@ -346,6 +346,7 @@ install_providers() {
 # init.lua — and that file is git-ignored via .git/info/exclude so the checkout
 # stays clean.
 LOCAL_PLUGIN_REL="plugin/00-b2b-local.lua"
+AUTOSAVE_PLUGIN_REL="plugin/02-b2b-autosave.lua"
 
 write_local_plugin() {
     local cfg="$1"
@@ -377,6 +378,91 @@ if vim.env.DISPLAY == nil and vim.env.WAYLAND_DISPLAY == nil then
 end
 LOCALEOF
     chmod 644 "${cfg}/${LOCAL_PLUGIN_REL}"
+}
+
+# The guest is edited from two sides at once: Neovim inside it and the host
+# over SSH (git, scp, an agent writing files). Without this drop-in a file
+# rewritten outside while its buffer was open prompted W11 mid-keystroke, and
+# what was typed in Neovim stayed in the buffer until a :w nobody remembered,
+# so the host read stale files. Every build gets it, beside 00-b2b-local.lua;
+# nvim-extras is not required. tests/test_nvim_autosave.sh cuts this function
+# out by name and runs the Lua in a headless Neovim, so the closing brace stays
+# at column 0 and no line of the Lua starts with one.
+write_autosave_plugin() {
+    local cfg="$1"
+    mkdir -p "${cfg}/plugin"
+    cat >"${cfg}/${AUTOSAVE_PLUGIN_REL}" <<'AUTOSAVEEOF'
+-- 02-b2b-autosave.lua — the buffer and the file on disk agree, both ways.
+--
+-- Written by setup/install/nvim/install_nvim.sh (write_autosave_plugin); the
+-- installer rewrites it when it runs again.
+--
+-- Reload: 'autoread' only acts when something runs :checktime, and over SSH
+-- FocusGained depends on the terminal (tmux needs `focus-events on`), so a
+-- 2 s timer runs it beside the usual events. A modified buffer is never
+-- reloaded under you -- that is the one case Neovim still asks about, and
+-- autosave keeps it rare.
+-- Save: a modified, named, ordinary buffer is written 1 s after the last
+-- change in normal mode and at once on InsertLeave, FocusLost and BufLeave;
+-- 'autowriteall' covers :q, :e and :make. Never from insert, visual or
+-- command-line mode, so a format-on-save hook cannot move the cursor mid-word.
+-- Off: `:B2BAutosave off` (or toggle) for the session; `vim.g.b2b_autosave =
+-- false` in init.lua for good; `vim.g.b2b_autosave_debounce_ms` tunes the wait.
+--
+-- Caveat: a save waits for an event or the debounce, and a reload for an event
+-- or the 2 s tick, so either can lag by that much. Focus events reach Neovim
+-- only when the terminal reports them; the timer and CursorHold cover the rest.
+local uv = vim.uv or vim.loop
+vim.o.autoread = true
+vim.o.autowriteall = true
+if vim.g.b2b_autosave == nil then vim.g.b2b_autosave = true end
+local debounce_ms = tonumber(vim.g.b2b_autosave_debounce_ms) or 1000
+local group = vim.api.nvim_create_augroup('b2b_autosave', { clear = true })
+local function on(events, fn) vim.api.nvim_create_autocmd(events, { group = group, callback = fn }) end
+
+-- :checktime is refused from the command line and the command-line window.
+local function checktime()
+  if vim.fn.getcmdwintype() ~= '' or vim.fn.mode():sub(1, 1) == 'c' then return end
+  pcall(vim.cmd, 'silent! checktime')
+end
+on({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI', 'TermLeave' }, checktime)
+local reload_timer = uv.new_timer()
+reload_timer:start(2000, 2000, vim.schedule_wrap(checktime))
+on('FileChangedShellPost', function(ev)
+  vim.notify('reloaded ' .. vim.fn.fnamemodify(ev.file, ':~:.'), vim.log.levels.INFO)
+end)
+
+local function savable(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return false end
+  local bo = vim.bo[buf]
+  return bo.modified and bo.modifiable and not bo.readonly and bo.buftype == ''
+    and vim.api.nvim_buf_get_name(buf) ~= ''
+end
+local function save(buf)
+  if not vim.g.b2b_autosave or vim.fn.mode():sub(1, 1) ~= 'n' or not savable(buf) then return end
+  vim.api.nvim_buf_call(buf, function() pcall(vim.cmd, 'silent! update') end)
+end
+-- One timer per buffer, restarted on every change, closed with the buffer.
+local timers = {}
+local function save_soon(buf)
+  if not timers[buf] then timers[buf] = uv.new_timer() end
+  timers[buf]:start(debounce_ms, 0, vim.schedule_wrap(function() save(buf) end))
+end
+on('TextChanged', function(ev) save_soon(ev.buf) end)
+on({ 'InsertLeave', 'FocusLost', 'BufLeave' }, function(ev) save(ev.buf) end)
+on('BufWipeout', function(ev)
+  local t = timers[ev.buf]
+  if t then t:stop(); t:close(); timers[ev.buf] = nil end
+end)
+
+vim.api.nvim_create_user_command('B2BAutosave', function(o)
+  local want = ({ on = true, off = false })[o.args]
+  if want == nil then want = not vim.g.b2b_autosave end
+  vim.g.b2b_autosave = want
+  vim.notify('autosave ' .. (want and 'on' or 'off'), vim.log.levels.INFO)
+end, { nargs = '?', complete = function() return { 'on', 'off' } end, desc = 'b2b autosave on|off|toggle' })
+AUTOSAVEEOF
+    chmod 644 "${cfg}/${AUTOSAVE_PLUGIN_REL}"
 }
 
 # kickstart's switch for icons, applied where kickstart reads it. Its init.lua
@@ -442,14 +528,18 @@ setup_user_config() {
     fi
 
     write_local_plugin "$cfg"
+    write_autosave_plugin "$cfg"
     set_nerd_font "$user" "$cfg"
 
     # Keep the drop-in out of `git status` without touching .gitignore, which
     # belongs to upstream.
     if [ -d "${cfg}/.git" ]; then
         mkdir -p "${cfg}/.git/info"
-        grep -qxF "$LOCAL_PLUGIN_REL" "${cfg}/.git/info/exclude" 2>/dev/null ||
-            printf '%s\n' "$LOCAL_PLUGIN_REL" >>"${cfg}/.git/info/exclude"
+        local rel
+        for rel in "$LOCAL_PLUGIN_REL" "$AUTOSAVE_PLUGIN_REL"; do
+            grep -qxF "$rel" "${cfg}/.git/info/exclude" 2>/dev/null ||
+                printf '%s\n' "$rel" >>"${cfg}/.git/info/exclude"
+        done
     fi
 
     # Everything under the user's home must belong to the user, not to root —
