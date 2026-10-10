@@ -521,8 +521,7 @@ fi
 # only if grobase publishes them on the guest loopback: REMOTE_ACCESS=1 adds its
 # remote-access compose overlay (orchestrators/makes/00-config.mk reads .env.local).
 # Loopback only; nothing new is reachable from the network.
-grep -qx REMOTE_ACCESS=1 .env.local 2>/dev/null || printf REMOTE_ACCESS=1
- >>.env.local
+grep -qx REMOTE_ACCESS=1 .env.local 2>/dev/null || printf 'REMOTE_ACCESS=1\n' >>.env.local
 
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
 
