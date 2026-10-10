@@ -517,6 +517,13 @@ if [ -n "$rt_img" ]; then
     fi
 fi
 
+# groot on the host reaches realtime (4000) and mailpit SMTP (1025) over the ssh entry
+# only if grobase publishes them on the guest loopback: REMOTE_ACCESS=1 adds its
+# remote-access compose overlay (orchestrators/makes/00-config.mk reads .env.local).
+# Loopback only; nothing new is reachable from the network.
+grep -qx REMOTE_ACCESS=1 .env.local 2>/dev/null || printf REMOTE_ACCESS=1
+ >>.env.local
+
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
 
 # Readiness is the gateway answering, not `up` returning: Kong starts before
