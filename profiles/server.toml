@@ -158,8 +158,12 @@ interval_min = 10
 # the ports a grobase running on the host publishes. Removed 2026-10-08.
 forwards = [
   { name = "ssh",                      guest = 4242,  host = 4242  },
-  { name = "http",                     guest = 80,    host = 8082  },
-  { name = "https",                    guest = 443,   host = 8443  },
+  # http/https target the grobase WAF, which binds the guest's 0.0.0.0:8880 and :8443.
+  # Nothing listens on the guest's 80/443 (measured 2026-10-10: ss -ltn shows only
+  # 8443/8880), so the old 80/443 rules connected, died, and squatted 8082/8443 on
+  # the host. Kong 8000, redis, realtime, mailpit bind the guest loopback: ssh only.
+  { name = "http",                     guest = 8880,  host = 8082  },
+  { name = "https",                    guest = 8443,  host = 8443  },
   { name = "inception-static",         guest = 8090,  host = 8090  },
   { name = "inception-adminer",        guest = 8080,  host = 8081  },
   { name = "inception-ftp",            guest = 21,    host = 2121  },
