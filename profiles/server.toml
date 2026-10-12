@@ -93,15 +93,15 @@ fullname = ""
 sudo     = true
 groups   = ["docker"]
 ssh_keys = []
-nvim     = true
+nvim     = false
 
 [packages]
 apt = []
 
 [features]
 # workstation: off
-nvim           = true
-nvim-extras    = true
+nvim           = false
+nvim-extras    = false
 webstack       = false
 nodejs         = true
 pytools        = false
