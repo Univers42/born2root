@@ -389,7 +389,9 @@ resolve_ports() {
         hp="${spec#*:}"
         gp="${hp#*:}"
         hp="${hp%%:*}"
-        resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
+        # Every hostfwd binds 127.0.0.1, so a listener on another address -- the LAN edge
+        # on 192.168.1.132:8443 -- is no conflict (tests/test_host_port_bind.sh).
+        HOST_PORT_BIND=127.0.0.1 resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
         [ "$actual" != "$hp" ] && warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
         out="${out} ${name}:${actual}:${gp}"
     done

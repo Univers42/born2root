@@ -25,13 +25,26 @@ reserve_host_port() {
 # plain connect. `netstat -an` is the one spelling Linux, macOS and Git Bash all
 # accept; its local-address column is host:port on Linux/Windows but host.port on
 # BSD, hence the [:.] separator class.
+#
+# HOST_PORT_BIND (optional): the address the caller will bind, e.g. 127.0.0.1 for QEMU's
+# hostfwd. Then only a listener on that address or a wildcard (0.0.0.0, *, [::]) conflicts,
+# so a socat on the LAN address :8443 no longer pushes the VM's 127.0.0.1:8443 to 8445.
+# Unset keeps "any address conflicts" -- right for VirtualBox NAT rules, which bind all.
+# Ponytail: only the ss probe honours it; lsof/netstat/nc still count any address, which
+# over-reports (the VM takes the next port, the old behaviour) and never double-binds.
 is_host_port_free() {
     local port="$1"
     [ -n "$port" ] || return 1
 
     if command -v ss >/dev/null 2>&1; then
         if ss -H -ltn 2>/dev/null |
-            awk -v p="$port" '$4 ~ ("[:.]" p "$") { found = 1 } END { exit found ? 0 : 1 }'; then
+            awk -v p="$port" -v bind="${HOST_PORT_BIND:-}" '
+                $4 ~ ("[:.]" p "$") {
+                    addr = substr($4, 1, length($4) - length(p) - 1)
+                    if (bind == "" || addr == bind || addr == "0.0.0.0" || addr == "*" || addr == "[::]")
+                        found = 1
+                }
+                END { exit found ? 0 : 1 }'; then
             return 1 # something already listens there
         fi
     elif command -v lsof >/dev/null 2>&1; then
