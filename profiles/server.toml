@@ -62,7 +62,7 @@ path    = "/mnt/storage/virtual_machines"
 disk_gb = 80
 # On a 7.6 GB campus seat: 4048 left the host 3.6 GB and swapping (2026-10-08).
 # 3 GB is grobase's own figure for the pro tier below (cost-analysis.md).
-ram_mb  = 3072
+ram_mb  = 10000
 cpus    = "auto"
 profile = "auto"
 ai_mode = "off"
@@ -120,9 +120,9 @@ dc-full        = true
 # Not on a 7.6 GB seat: these are the max tier's add-ons (engines: mssql with a
 # 2 GB cap, cockroach; observability: loki, prometheus, grafana). Together
 # grobase measures max at 3128 MiB idle and asks 6 GB / 8 vCPU.
-dc-db-cockroach  = false
-dc-db-mssql      = false
-dc-observability = false
+dc-db-cockroach  = true
+dc-db-mssql      = true
+dc-observability = true
 # graph_render's motor: its own row, in no dc-* bundle (generate/feature_profile.sh)
 dc-graph-render = true
 
@@ -202,7 +202,7 @@ cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
 backup_dest = "/mnt/storage/b2b-backups/baas"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
-package = "pro"
+package = "max"
 
 [disk]
 swap_mb = "auto"

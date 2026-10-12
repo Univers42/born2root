@@ -61,15 +61,15 @@ v=$(resolve server)
 check "server: nvim off" "$(printf '%s\n' "$v" | grep -c '^feature=nvim$')" 0
 check "server: nvim-extras off" "$(printf '%s\n' "$v" | grep -c '^feature=nvim-extras$')" 0
 check "server: docker on" "$(printf '%s\n' "$v" | grep -c '^feature=docker$')" 1
-# The max tier's add-ons stay off: on a 7.6 GB seat max crash-looped mssql
-# and grobase puts it at 3128 MiB idle, against 1619 MB used for pro in the
-# baas guest (2026-10-08). Every other dc-* row is on.
+# The max tier's add-ons are on: server.toml runs max (package = "max") on
+# the baas host with ram_mb = 10000. On a 7.6 GB seat they stay off, since max
+# crash-looped mssql there and grobase puts it at 3128 MiB idle (2026-10-08).
 max_addons="dc-db-cockroach dc-db-mssql dc-observability"
 dc_rows=$(awk "/^MANIFEST='/,/^'\$/" generate/feature_profile.sh | grep -c '^dc-')
-check "server: every dc-* row on but the max add-ons" \
-    "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" "$((dc_rows - 3))"
+check "server: every dc-* row on, max add-ons included" \
+    "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" "$dc_rows"
 for f in $max_addons; do
-    check "server: $f off" "$(printf '%s\n' "$v" | grep -c "^feature=$f\$")" 0
+    check "server: $f on" "$(printf '%s\n' "$v" | grep -c "^feature=$f\$")" 1
 done
 check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^feature=var-gc$')" 1
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
