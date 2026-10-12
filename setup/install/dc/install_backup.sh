@@ -114,11 +114,25 @@ done
 for skipped in mini-baas-cockroach mini-baas-mssql; do
     have "$skipped" && echo "b2b-backup: $skipped is running and not dumped here (see the header of install_backup.sh)"
 done
-restic snapshots >/dev/null 2>&1 || restic init >/dev/null || {
-    echo "b2b-backup: restic init failed"
-    verdict failed " restic-init"
-    exit 1
-}
+# Init only when the repository is absent. Any other snapshots failure (a wrong
+# password, a permission, a damaged repo) is reported as itself: masking it with
+# `restic init` made a wrong password read as "config file already exists".
+# Caveat: matches restic's "does not exist" wording; a restic that words the
+# missing-repo error differently fails here instead of initialising.
+if ! snap_err=$(restic snapshots 2>&1 >/dev/null); then
+    case "$snap_err" in
+        *"does not exist"*) restic init >/dev/null || {
+            echo "b2b-backup: restic init failed"
+            verdict failed " restic-init"
+            exit 1
+        } ;;
+        *)
+            echo "b2b-backup: restic snapshots failed: $snap_err"
+            verdict failed " restic-snapshots"
+            exit 1
+            ;;
+    esac
+fi
 # shellcheck disable=SC2086 # $extra is one path or empty, on purpose
 restic backup --quiet --tag b2b "$DUMPS" $extra || {
     echo "b2b-backup: restic backup failed"
