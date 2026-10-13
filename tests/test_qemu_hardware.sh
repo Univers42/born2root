@@ -123,8 +123,59 @@ check_has "that controller avoids the pinned slots" "$line" "ich9-ahci,id=ahci,a
 check_has "CD hangs off it" "$line" "ide-cd,drive=cd0,bus=ahci.1"
 check_has "NIC pin holds during install too" "$line" "virtio-net-pci,netdev=net0,addr=0x4"
 
+printf '\n-- the IDE sandbox disk (vm.ide_disk_gb) --\n'
+# hd1 is a second scsi-hd on the same controller, found in the guest by its
+# serial (install_ide_disk.sh), never booted from. It is attached only to the
+# installed system: the installer must see one disk, or partman's /dev/sda
+# could be the wrong one. Everything else on the line stays byte-identical.
+HD1_DRIVE="file=$VM_DIR/$VM_NAME-ide.qcow2,if=none,id=hd1,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring"
+HD1_DEVICE="scsi-hd,drive=hd1,bus=scsi0.0,scsi-id=1,serial=b2bide0001"
+export B2B_VM_IDE_DISK_GB=0
+# In a subshell like every other launch here: the port resolver keeps state in
+# the shell, and a second launch in the same one walks ssh to 4243.
+line=$(run_launch disk)
+check_lacks "baseline: key 0, no file: no hd1" "$line" "id=hd1"
+cp "$TMP/cmdline" "$TMP/cmdline.no-ide"
+: >"$VM_DIR/$VM_NAME-ide.qcow2"
+B2B_VM_IDE_DISK_GB=40
+line=$(run_launch disk)
+check_has "disk mode, key 40, file present: hd1 drive" "$line" "$HD1_DRIVE"
+check_has "disk mode, key 40, file present: hd1 device" "$line" "$HD1_DEVICE"
+check_lacks "hd1 is never a boot device" "$(grep -F drive=hd1 "$TMP/cmdline")" "bootindex"
+grep -vxF -e -drive -e -device -e "$HD1_DRIVE" -e "$HD1_DEVICE" "$TMP/cmdline" >"$TMP/with-ide.rest"
+grep -vxF -e -drive -e -device "$TMP/cmdline.no-ide" >"$TMP/no-ide.rest"
+if cmp -s "$TMP/with-ide.rest" "$TMP/no-ide.rest"; then
+    printf 'ok   every other argument, hd0 included, is unchanged\n'
+else
+    printf 'FAIL adding hd1 changed other arguments:\n'
+    diff "$TMP/no-ide.rest" "$TMP/with-ide.rest" | sed 's/^/     /'
+    fail=1
+fi
+check_has "hd0 still the boot disk" "$line" "scsi-hd,drive=hd0,bus=scsi0.0,bootindex=1"
+line=$(run_launch cdrom)
+check_lacks "installer: no hd1 even with the key and the file" "$line" "id=hd1"
+B2B_VM_IDE_DISK_GB=0
+line=$(run_launch disk)
+check_lacks "key 0: no hd1 even with the file" "$line" "id=hd1"
+rm -f "$VM_DIR/$VM_NAME-ide.qcow2"
+B2B_VM_IDE_DISK_GB=40
+line=$(run_launch disk)
+check_lacks "key 40, file missing: no hd1" "$line" "id=hd1"
+check_has "key 40, file missing: it still boots" "$line" "drive=hd0"
+# shellcheck disable=SC2329,SC2317
+warn() { printf '%s\n' "$*" >>"$TMP/warnings"; }
+(launch disk) >/dev/null 2>&1 || true
+check_has "key 40, file missing: says so" "$(cat "$TMP/warnings" 2>/dev/null)" "booting without it"
+: >"$VM_DIR/$VM_NAME-ide.qcow2"
+
 printf '\n-- B2B_QEMU_LEGACY_HW=1, the rollback path --\n'
 export B2B_QEMU_LEGACY_HW=1
+line=$(run_launch disk)
+check_lacks "legacy mode: no hd1 even with the key and the file" "$line" "id=hd1"
+rm -f "$TMP/warnings"
+(launch disk) >/dev/null 2>&1 || true
+check_has "legacy mode: says it skips hd1" "$(cat "$TMP/warnings" 2>/dev/null)" "without the IDE disk"
+B2B_VM_IDE_DISK_GB=0
 line=$(run_launch disk)
 check_has "AHCI controller is back" "$line" "ich9-ahci,id=ahci"
 check_has "disk is an IDE disk again" "$line" "ide-hd,drive=hd0,bus=ahci.0"

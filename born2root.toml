@@ -34,6 +34,10 @@ path    = ""
 # Disk size in GB. 15 is the school quota; the layout below and the install
 # set are both derived from it.
 disk_gb = 15
+# GiB of a second disk for the IDE sandbox's dockerd, QEMU only: created with
+# the root disk, encrypted with a keyfile and mounted XFS (prjquota) on
+# /var/lib/docker-ide at first boot. 0 = no such disk.
+ide_disk_gb = 0
 # Guest RAM in MB: "auto" is a quarter of this machine's, clamped to
 # 2048-8192 MB, on both backends. A number (10240 = 10 GB) is taken as is;
 # it applies at the next boot (make qemu_stop qemu_start, or make start_vm).

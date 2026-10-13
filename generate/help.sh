@@ -192,6 +192,7 @@ cmd "make qemu_monitor" "Any QEMU monitor command: CMD=\"info block\""
 cmd "make qemu_unlock" "Type the LUKS passphrase (qemu_start does it)"
 cmd "make qemu_create" "Just the disk; qemu_install = create + install"
 cmd "make qemu_grow_disk SIZE_GB=120" "Grow a stopped VM's qcow2; then make grow_root"
+cmd "make qemu_ide_disk_create" "Add the IDE disk to a stopped VM; then make ide_disk"
 cmd "make qemu_ssh_config" "Re-point ssh b2b at this VM's port"
 cmd "make verify_guest" "Prove the guest matches the spec (partitions, LUKS…)"
 

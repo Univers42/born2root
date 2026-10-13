@@ -130,6 +130,9 @@ endif
 ifeq ($(origin B2B_VM_CPUS),undefined)
 B2B_VM_CPUS := $(call b2b_conf,B2B_VM_CPUS)
 endif
+ifeq ($(origin B2B_VM_IDE_DISK_GB),undefined)
+B2B_VM_IDE_DISK_GB := $(or $(call b2b_conf,B2B_VM_IDE_DISK_GB),0)
+endif
 ifeq ($(origin PROFILE),undefined)
 PROFILE := $(or $(call b2b_conf,B2B_PROFILE),auto)
 endif
@@ -291,6 +294,9 @@ COMPACT ?= 0
 # AI_MODE=local will say so.
 #   make re VM_RAM_MB=6144 AI_MODE=local
 # B2B_VM_CPUS: the VM's cores. Empty = half the host's, clamped to [2,8].
+# B2B_VM_IDE_DISK_GB (vm.ide_disk_gb): GiB of a second QEMU disk for the IDE
+# sandbox's dockerd, created with the root disk and set up at first boot.
+# 0 = none. VirtualBox builds ignore it.
 
 # AI_MODE (B2B_AI_MODE): optional AI, baked into the ISO so first boot
 # honours it (default: off).
@@ -331,7 +337,7 @@ C_CYAN   := \033[36m
         tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
-        qemu_create qemu_grow_disk qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
+        qemu_create qemu_grow_disk qemu_ide_disk_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
         space slim partitions features features_select packages _build config
 
@@ -390,15 +396,17 @@ all: no_root prepare
 
 # The build proper. Never call this directly -- `make all` is the entry point;
 # this exists only so the size the picker chose can be a real make variable.
+# The preflight counts the IDE disk too: it is created next to the root disk.
+# Ponytail: also on VirtualBox, which never creates it -- over by ide_disk_gb there.
 _build:
 	@SPACE_BUDGET_GB="$(SPACE_BUDGET_GB)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
-		$(SCRIPT_SH) utils/space_budget.sh --preflight "$(DISK_SIZE_MB)" || exit 1
+		$(SCRIPT_SH) utils/space_budget.sh --preflight "$$(( $(DISK_SIZE_MB) + $(B2B_VM_IDE_DISK_GB) * 1024 ))" || exit 1
 	@backend=$$(BACKEND="$(BACKEND)" $(SCRIPT_SH) setup/host/select_backend.sh "$(BACKEND)") || exit 1; \
 	$(SCRIPT_SH) utils/vm_path.sh "$(VM_PATH)" "$(VM_NAME)" || exit 1; \
 	if [ "$$backend" = "qemu" ]; then \
 		CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" FORCE_ISO=1 AI_MODE="$(AI_MODE)" \
 		DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" VM_NAME="$(VM_NAME)" \
-		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" \
+		VM_PATH="$(VM_PATH)" MAKE_BIN="$(MAKE_BIN)" LUKS="$(LUKS)" B2B_VM_IDE_DISK_GB="$(B2B_VM_IDE_DISK_GB)" \
 		SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" \
 			$(SCRIPT_SH) setup/host/qemu_pipeline.sh; \
 		qrc=$$?; \
@@ -439,6 +447,7 @@ backend:
 # want to drive the phases by hand rather than through `make all`.
 QEMU_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" \
 	DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" LUKS="$(LUKS)" \
+	B2B_VM_IDE_DISK_GB="$(B2B_VM_IDE_DISK_GB)" \
 	SIZE_B2B="$(SIZE_B2B)" PROFILE="$(PROFILE)" FEATURES="$(FEATURES)"
 
 # Boots the ISO and runs the unattended install, which REFORMATS the disk.
@@ -488,6 +497,11 @@ qemu_create:
 # grow_root). A fresh build takes its size from vm.disk_gb and needs neither.
 qemu_grow_disk:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh grow-disk "$(SIZE_GB)"
+
+# Add the IDE sandbox disk (vm.ide_disk_gb) to an EXISTING, stopped VM; a fresh
+# build gets it from qemu_create. The guest half is ide_disk.
+qemu_ide_disk_create:
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ide-disk-create
 
 qemu_kill:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh kill

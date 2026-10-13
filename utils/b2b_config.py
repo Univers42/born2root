@@ -111,6 +111,10 @@ DEFAULTS = {
         # VM that already exists is never orphaned by editing this.
         "path": "",
         "disk_gb": 15,
+        # GiB of a second disk, <name>-ide.qcow2, for the osionos IDE
+        # sandbox's own dockerd: XFS with project quotas, which the root
+        # LVM's ext4 volumes cannot give it. 0 = no such disk. QEMU only.
+        "ide_disk_gb": 0,
         "ram_mb": "auto",
         "cpus": "auto",
         "profile": "auto",
@@ -541,6 +545,7 @@ class Validator:
         if vm["backend"] not in ("auto", "virtualbox", "qemu"):
             self.err("vm.backend", "auto, virtualbox or qemu")
         self._int("vm.disk_gb", vm["disk_gb"], low=8, what="a whole number of GB")
+        self._int("vm.ide_disk_gb", vm["ide_disk_gb"], low=0, what="a whole number of GiB (0 = none)")
         if vm["ram_mb"] != "auto":
             self._int("vm.ram_mb", vm["ram_mb"], low=512, what='"auto" or MB')
         if vm["cpus"] != "auto":
@@ -1169,6 +1174,7 @@ LEGACY = {
     "B2B_MIRROR": lambda c: c.system.get("mirror") or "",
     "B2B_SWAP_MB": lambda c: c.disk.get("swap_mb"),
     "B2B_SIZE_GB": lambda c: c.vm.get("disk_gb"),
+    "B2B_VM_IDE_DISK_GB": lambda c: c.vm.get("ide_disk_gb"),
     "B2B_VM_RAM_MB": lambda c: "" if c.vm.get("ram_mb") == "auto" else c.vm.get("ram_mb"),
     "B2B_VM_CPUS": lambda c: "" if c.vm.get("cpus") == "auto" else c.vm.get("cpus"),
     "B2B_VM_NAME": lambda c: c.vm.get("name") or "",
@@ -1472,6 +1478,7 @@ def show(config):
     row("vm.name", config.vm["name"])
     row("vm.backend", config.vm["backend"])
     row("vm.disk_gb", config.vm["disk_gb"])
+    row("vm.ide_disk_gb", config.vm["ide_disk_gb"])
     row("vm.ram_mb", config.vm["ram_mb"])
     row("vm.cpus", config.vm["cpus"])
     row("vm.profile", config.vm["profile"])
