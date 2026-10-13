@@ -152,4 +152,58 @@ check "await_shutdown: times out with 1" "$rc" 1
 unset -f sleep is_running
 rm -f "$SERIAL"
 
+# ── stop_guest: STOP_ON_TIMEOUT=abort never forces a guest that is still up ──
+# A maintenance window stops the guest to resize its disk; a plug pulled after
+# STOP_GRACE hands qemu-img a filesystem nobody unmounted. With abort the guest
+# stays up, exit 3, and neither `quit` nor a signal is sent. Without it the
+# path is the one the systemd unit's ExecStop has always relied on. The monitor
+# and kill are recorders; the guest never goes down unless a case says so.
+# shellcheck disable=SC2329,SC2317 # stubs, called from stop_guest
+mon() { printf '%s\n' "$1" >>"$TMP/mon.log"; }
+# shellcheck disable=SC2329,SC2317
+kill() { printf '%s\n' "$*" >>"$TMP/kill.log"; }
+# shellcheck disable=SC2329,SC2317
+sleep() { :; }
+# shellcheck disable=SC2329,SC2317
+is_running() { [ ! -f "$TMP/gone" ]; }
+# shellcheck disable=SC2329,SC2317
+await_shutdown() {
+    [ -f "$TMP/goes-down" ] && : >"$TMP/gone"
+    ! is_running
+}
+stop_case() { # <GRACEFUL> <STOP_ON_TIMEOUT> -> rc; mon.log, kill.log, out
+    rm -f "$TMP/mon.log" "$TMP/kill.log" "$TMP/gone"
+    : >"$TMP/mon.log"
+    : >"$TMP/kill.log"
+    (
+        GRACEFUL="$1"
+        STOP_ON_TIMEOUT="$2"
+        STOP_GRACE=5
+        stop_guest 4242
+    ) >"$TMP/out" 2>&1 && echo 0 || echo $?
+}
+
+check "abort, still up: exit 3" "$(stop_case 1 abort)" 3
+check "abort, still up: only system_powerdown sent" "$(tr '\n' ' ' <"$TMP/mon.log")" "system_powerdown "
+check "abort, still up: no signal sent" "$(wc -l <"$TMP/kill.log")" 0
+check "abort, still up: says it was left running" "$(grep -c 'left running (pid 4242)' "$TMP/out")" 1
+
+check "default, still up: plug pulled, then 'could not stop' (1)" "$(stop_case 1 '')" 1
+check "default, still up: system_powerdown, no quit" "$(tr '\n' ' ' <"$TMP/mon.log")" "system_powerdown "
+check "default, still up: SIGTERM then SIGKILL, as before" "$(tr '\n' ' ' <"$TMP/kill.log")" "4242 -9 4242 "
+check "default, still up: warns it pulls the plug" "$(grep -c 'pulling the plug' "$TMP/out")" 1
+
+: >"$TMP/goes-down"
+check "abort, goes down in time: stopped (0)" "$(stop_case 1 abort)" 0
+check "abort, goes down in time: no signal sent" "$(wc -l <"$TMP/kill.log")" 0
+rm -f "$TMP/goes-down"
+
+check "not graceful: quit at once (rc of the escalation)" "$(stop_case '' '')" 1
+check "not graceful: the monitor gets quit" "$(tr '\n' ' ' <"$TMP/mon.log")" "quit "
+check "abort without GRACEFUL=1: refused (1)" "$(stop_case '' abort)" 1
+check "abort without GRACEFUL=1: nothing sent" "$(cat "$TMP/mon.log" "$TMP/kill.log" | wc -l)" 0
+check "a misspelt mode: refused (1)" "$(stop_case 1 abrot)" 1
+check "a misspelt mode: nothing sent" "$(cat "$TMP/mon.log" "$TMP/kill.log" | wc -l)" 0
+unset -f mon kill sleep is_running await_shutdown
+
 exit "$fail"

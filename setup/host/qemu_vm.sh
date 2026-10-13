@@ -48,6 +48,7 @@
 #   qemu_vm.sh restart     stop, then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
+#                          GRACEFUL=1 STOP_ON_TIMEOUT=abort: never force it; exit 3 if still up
 #   qemu_vm.sh kill        last resort: SIGTERM the QEMU process
 #   qemu_vm.sh reset       hard reset;  pause / resume  freeze and continue
 #   qemu_vm.sh status      pid, ports, disk size, what the console last said
@@ -892,6 +893,59 @@ await_shutdown() {
     ! is_running
 }
 
+# Power off the guest at pid $1. Immediate by default -- like VirtualBox's
+# `controlvm poweroff`, and what people mean by "stop". The monitor `quit`
+# exits QEMU at once AND flushes the qcow2 (kill -9 would not), so the guest's
+# journal replays cleanly on the next boot. GRACEFUL=1 asks the guest to shut
+# its services down first, which is the slow path this used to always take.
+#
+# A graceful stop that outlives STOP_GRACE pulls the plug: the systemd unit's
+# ExecStop relies on that, so a host shutdown never waits on a hung guest.
+# STOP_ON_TIMEOUT=abort is the other contract, for a maintenance window whose
+# next step resizes the disk: the guest is left running and the exit is 3,
+# because a plug pulled there hands qemu-img a filesystem nobody unmounted.
+stop_guest() {
+    local pid="$1" grace="${STOP_GRACE:-90}"
+    case "${STOP_ON_TIMEOUT:-}" in
+    '') ;;
+    abort)
+        [ -n "${GRACEFUL:-}" ] ||
+            die "STOP_ON_TIMEOUT=abort needs GRACEFUL=1: without it stop quits at once, the plug abort promises not to pull"
+        ;;
+    *) die "STOP_ON_TIMEOUT='${STOP_ON_TIMEOUT}' is not a mode: abort, or unset to pull the plug at the timeout" ;;
+    esac
+    if [ -n "${GRACEFUL:-}" ]; then
+        info "orderly shutdown (pid $pid) — letting the guest stop its services"
+        mon "system_powerdown" >/dev/null
+        if ! await_shutdown "$grace"; then
+            if [ "${STOP_ON_TIMEOUT:-}" = abort ]; then
+                printf "  ${C_RED}✗${C_RESET} still up after %ss and STOP_ON_TIMEOUT=abort: left running (pid %s), nothing forced\n" \
+                    "$grace" "$pid" >&2
+                printf "    ${C_DIM}see what it waits on: %s console | %s screenshot; then retry with a longer STOP_GRACE${C_RESET}\n" \
+                    "$0" "$0" >&2
+                exit 3
+            fi
+            warn "still up after ${grace}s — pulling the plug"
+        fi
+    else
+        info "powering off (pid $pid)"
+        mon "quit" >/dev/null 2>&1
+    fi
+    # Confirm it is really gone, escalating only if it is not.
+    await_shutdown 3 || true
+    is_running && {
+        kill "$pid" 2>/dev/null
+        await_shutdown 3 || true
+    }
+    is_running && {
+        kill -9 "$pid" 2>/dev/null
+        sleep 1
+    }
+    is_running && die "could not stop pid $pid — force it: $0 kill"
+    rm -f "$PIDFILE" "$MONITOR"
+    ok "stopped"
+}
+
 # ── Actions ─────────────────────────────────────────────────────────────────
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
@@ -1077,33 +1131,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
     stop)
         need_running
         need_control qemu_stop
-        pid=$(qemu_pid)
-        # Immediate by default -- like VirtualBox's `controlvm poweroff`, and what
-        # people mean by "stop". The monitor `quit` exits QEMU at once AND flushes
-        # the qcow2 (kill -9 would not), so the guest's journal replays cleanly on
-        # the next boot. GRACEFUL=1 asks the guest to shut its services down first,
-        # which is the slow path this used to always take.
-        if [ -n "${GRACEFUL:-}" ]; then
-            info "orderly shutdown (pid $pid) — letting the guest stop its services"
-            mon "system_powerdown" >/dev/null
-            await_shutdown "${STOP_GRACE:-90}" || warn "still up after ${STOP_GRACE:-90}s — pulling the plug"
-        else
-            info "powering off (pid $pid)"
-            mon "quit" >/dev/null 2>&1
-        fi
-        # Confirm it is really gone, escalating only if it is not.
-        await_shutdown 3 || true
-        is_running && {
-            kill "$pid" 2>/dev/null
-            await_shutdown 3 || true
-        }
-        is_running && {
-            kill -9 "$pid" 2>/dev/null
-            sleep 1
-        }
-        is_running && die "could not stop pid $pid — force it: $0 kill"
-        rm -f "$PIDFILE" "$MONITOR"
-        ok "stopped"
+        stop_guest "$(qemu_pid)"
         ;;
 
     kill)
