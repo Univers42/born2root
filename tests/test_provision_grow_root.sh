@@ -6,7 +6,8 @@
 # in the guest's /dev/shm and nowhere else -- not an ssh command line, not the
 # output -- and the FIFO is gone afterwards, read or not; the dry run asks for
 # no passphrase; the partition table the guest prints lands beside the VM's
-# disk; the guest script's failure is this command's failure.
+# disk; the guest script's failure is this command's failure -- and the same
+# for `ide-disk` (install_ide_disk.sh), whose refusals are its answer.
 #
 # ssh and scp are fakes that run "the guest" here: /tmp/grow_root.sh and
 # /dev/shm/ are mapped under $GUEST, sudo is dropped, and scp uploads a stand-in
@@ -69,13 +70,15 @@ while [ $# -gt 0 ]; do
 done
 cmd="$*"
 cmd=${cmd//\/tmp\/grow_root.sh/$GUEST\/tmp\/grow_root.sh}
+cmd=${cmd//\/tmp\/install_ide_disk.sh/$GUEST\/tmp\/install_ide_disk.sh}
 cmd=${cmd//\/dev\/shm\//$GUEST\/shm\/}
 cmd=${cmd//sudo -n /}
 exec bash -c "$cmd"
 EOF
 cat >"$TMP/bin/scp" <<'EOF'
 #!/bin/bash
-cp "$GUEST_SCRIPT" "$GUEST/tmp/grow_root.sh"
+for dest; do :; done
+cp "$GUEST_SCRIPT" "$GUEST/tmp/${dest##*/}"
 EOF
 printf '#!/bin/sh\nexit 1\n' >"$TMP/bin/VBoxManage"
 # The stand-in: says which FIFO it was handed, reads the key from it when
@@ -127,6 +130,17 @@ check "apply, key never read: no writer left" "$(alive_fakes)" 0
 check "apply, the guest script fails: 1" "$(grow_root 1 1 0 4)" 1
 check "apply, the guest script fails: says so" "$(grep -c 'grow_root.sh exited 4' "$TMP/out")" 1
 check "apply, the guest script fails: the FIFO is gone" "$(leftovers)" 0
+
+ide_disk() { # <guest rc> -> rc
+    rm -f "$GUEST/ssh.argv"
+    env PATH="$TMP/bin:$PATH" FAKE_READS_KEY=0 FAKE_PRINTS_DUMP=0 FAKE_RC="$1" \
+        timeout 60 "${SCRIPT_SH:-bash}" setup/host/provision_vm.sh t-grow ide-disk >"$TMP/out" 2>&1 &&
+        echo 0 || echo $?
+}
+check "ide-disk: 0" "$(ide_disk 0)" 0
+check "ide-disk: ran install_ide_disk.sh" "$(grep -c 'bash /tmp/install_ide_disk.sh' "$GUEST/ssh.argv")" 1
+check "ide-disk, the guest script refuses: 1" "$(ide_disk 1)" 1
+check "ide-disk, the guest script refuses: says so" "$(grep -c 'install_ide_disk.sh exited 1' "$TMP/out")" 1
 
 printf '\n'
 [ "$fail" = 0 ] && printf 'all ok\n'

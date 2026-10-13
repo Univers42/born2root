@@ -24,6 +24,8 @@
 #   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
 #   setup/host/provision_vm.sh <vm-name> grow-root       # /var into a grown disk (dry run;
 #                                                          GROW_ROOT_APPLY=1 acts)
+#   setup/host/provision_vm.sh <vm-name> ide-disk        # the IDE disk: ide_crypt, XFS,
+#                                                          /var/lib/docker-ide
 #   setup/host/provision_vm.sh <vm-name> all
 #
 # Environment passed through to the guest script, e.g.
@@ -419,6 +421,12 @@ graph-render)
 grow-root)
     grow_root
     ;;
+# Not run_provisioner: a refusal here (a disk that is not blank, two disks
+# with the serial) is the answer the operator needs, so it is the exit status.
+ide-disk)
+    guest_script setup/install/dc/install_ide_disk.sh install_ide_disk.sh IDE_DISK_ "install_ide_disk.sh" ||
+        die "install_ide_disk.sh exited $? -- read its output above"
+    ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
 # An ad-hoc script as root in the guest, through the same upload + sudo
@@ -482,6 +490,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | grow-root | root-sh | restore-drill | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | grow-root | ide-disk | root-sh | restore-drill | all)"
     ;;
 esac
