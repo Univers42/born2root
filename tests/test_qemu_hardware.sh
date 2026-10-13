@@ -69,7 +69,7 @@ export VM_PATH_REGISTRY="$TMP/registry"
 . ./setup/host/qemu_vm.sh
 
 # TCG, so launch() skips the KVM availability check and emits no -cpu host.
-ACCEL=tcg
+export ACCEL=tcg
 
 mkdir -p "$VM_DIR"
 : >"$DISK"
@@ -124,7 +124,7 @@ check_has "CD hangs off it" "$line" "ide-cd,drive=cd0,bus=ahci.1"
 check_has "NIC pin holds during install too" "$line" "virtio-net-pci,netdev=net0,addr=0x4"
 
 printf '\n-- B2B_QEMU_LEGACY_HW=1, the rollback path --\n'
-B2B_QEMU_LEGACY_HW=1
+export B2B_QEMU_LEGACY_HW=1
 line=$(run_launch disk)
 check_has "AHCI controller is back" "$line" "ich9-ahci,id=ahci"
 check_has "disk is an IDE disk again" "$line" "ide-hd,drive=hd0,bus=ahci.0"

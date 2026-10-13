@@ -42,6 +42,7 @@ export VM_PATH_REGISTRY="$TMP/registry"
 # Three guests, as /proc would show them: ours, one of the same VM started
 # from another VM_PATH (the reproduced case), and an unrelated VM that must be
 # left alone. Trailing space is what `tr '\0' ' '` leaves on a real cmdline.
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 qemu_cmdlines() {
     printf '%s\n' \
         "1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
@@ -67,6 +68,7 @@ case "$out" in
 esac
 
 # Nothing running anywhere: stop/kill may say "not running" and mean it.
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 qemu_cmdlines() { :; }
 check "no guests: none listed" "$(other_guests | wc -l)" 0
 if report_other_guests >/dev/null 2>&1; then
@@ -79,10 +81,12 @@ fi
 # ── qemu_pid: a pidfile that exists but cannot be read -r is not "not running" ──
 # (root-owned, from `sudo make all`). Fixture pids are not processes, so
 # liveness is the seam.
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 pid_alive() {
     case "$1" in 1001 | 1002) return 0 ;; esac
     return 1
 }
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 qemu_cmdlines() {
     printf '%s\n' \
         "1001 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/here/debian/qemu.pid " \
@@ -112,6 +116,7 @@ case "$out" in
 esac
 check "ambiguous: VM_PATH unchanged" "$VM_PATH" "$TMP/nowhere"
 
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 qemu_cmdlines() {
     printf '%s\n' \
         "1002 /usr/bin/qemu-system-x86_64 -name debian -machine pc,accel=kvm -pidfile $TMP/elsewhere/debian/qemu.pid "
@@ -122,6 +127,7 @@ check "adopted: VM_PATH re-keyed" "$VM_PATH" "$TMP/elsewhere"
 check "adopted: PIDFILE follows" "$PIDFILE" "$TMP/elsewhere/debian/qemu.pid"
 check "adopted: now running" "$(if is_running; then echo yes; else echo no; fi)" yes
 
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 qemu_cmdlines() { :; }
 VM_PATH="$TMP/nowhere"
 vm_paths
@@ -132,11 +138,13 @@ check "no candidate: none (1)" "$rc" 1
 # is_running is the seam; sleep is stubbed so the test is instant. No progress
 # line (STOP_PROGRESS=0) so stdout stays clean.
 export STOP_PROGRESS=0
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 sleep() { :; }   # never actually wait in the test
 SERIAL=$(mktemp) # await_shutdown tails it on a TTY; empty is fine
 
 # Goes down on the 3rd poll: await_shutdown must return 0.
 _polls=0
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 is_running() {
     _polls=$((_polls + 1))
     [ "$_polls" -lt 3 ]
@@ -145,6 +153,7 @@ await_shutdown 100 && rc=0 || rc=$?
 check "await_shutdown: 0 once the guest is gone" "$rc" 0
 
 # Never goes down within the grace: must time out with 1, not spin forever.
+# shellcheck disable=SC2329,SC2317 # stub: qemu_vm.sh calls it through the source, which shellcheck cannot follow
 is_running() { return 0; }
 await_shutdown 2 && rc=0 || rc=$?
 check "await_shutdown: times out with 1" "$rc" 1
@@ -158,15 +167,15 @@ rm -f "$SERIAL"
 # stays up, exit 3, and neither `quit` nor a signal is sent. Without it the
 # path is the one the systemd unit's ExecStop has always relied on. The monitor
 # and kill are recorders; the guest never goes down unless a case says so.
-# shellcheck disable=SC2329,SC2317 # stubs, called from stop_guest
+# shellcheck disable=SC2329,SC2317 # stub: stop_guest calls it, which shellcheck cannot see
 mon() { printf '%s\n' "$1" >>"$TMP/mon.log"; }
-# shellcheck disable=SC2329,SC2317
+# shellcheck disable=SC2329,SC2317 # stub: stop_guest calls it, which shellcheck cannot see
 kill() { printf '%s\n' "$*" >>"$TMP/kill.log"; }
-# shellcheck disable=SC2329,SC2317
+# shellcheck disable=SC2329,SC2317 # stub: stop_guest calls it, which shellcheck cannot see
 sleep() { :; }
-# shellcheck disable=SC2329,SC2317
+# shellcheck disable=SC2329,SC2317 # stub: stop_guest calls it, which shellcheck cannot see
 is_running() { [ ! -f "$TMP/gone" ]; }
-# shellcheck disable=SC2329,SC2317
+# shellcheck disable=SC2329,SC2317 # stub: stop_guest calls it, which shellcheck cannot see
 await_shutdown() {
     [ -f "$TMP/goes-down" ] && : >"$TMP/gone"
     ! is_running
@@ -176,9 +185,7 @@ stop_case() { # <GRACEFUL> <STOP_ON_TIMEOUT> -> rc; mon.log, kill.log, out
     : >"$TMP/mon.log"
     : >"$TMP/kill.log"
     (
-        GRACEFUL="$1"
-        STOP_ON_TIMEOUT="$2"
-        STOP_GRACE=5
+        export GRACEFUL="$1" STOP_ON_TIMEOUT="$2" STOP_GRACE=5
         stop_guest 4242
     ) >"$TMP/out" 2>&1 && echo 0 || echo $?
 }
