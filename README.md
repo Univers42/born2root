@@ -314,6 +314,10 @@ main README.
   accessing your local Inception domain, your host does not trust the VM's
   generated Certificate Authority. Follow `doc/HTTPS_FROM_HOST_STEP_BY_STEP.md`
   to properly import the CA into your browser's trust store.
+- **Rebuilding the server VM on another seat:** `profiles/server.toml`, the
+  secrets file and the carried restic repository rebuild baas with
+  `make all` and `make datacenter`. `doc/rebuild-baas-at-school.md` lists the
+  commands, the manual steps and what is still unverified at school.
 
 ### Disk Space Management
 

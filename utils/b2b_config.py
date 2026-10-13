@@ -56,6 +56,9 @@ import re
 import subprocess
 import sys
 
+# utils/, sys.path[0] when this runs as a script, which is how every caller runs it.
+import host_path
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CONFIG = os.environ.get("B2B_CONFIG") or os.path.join(ROOT, "born2root.toml")
@@ -108,7 +111,8 @@ DEFAULTS = {
         # max tier fills ~16 GB immediately and grows with every engine's
         # volumes. An explicit VM_PATH= on the command line still wins, and
         # disk_images/.vm_path.<vm> still remembers the last one used, so a
-        # VM that already exists is never orphaned by editing this.
+        # VM that already exists is never orphaned by editing this. A list is
+        # tried in order (utils/host_path.py): one profile, several seats.
         "path": "",
         "disk_gb": 15,
         # GiB of a second disk, <name>-ide.qcow2, for the osionos IDE
@@ -160,7 +164,39 @@ DEFAULTS = {
     # datacenter` died at its last step on a personal machine (2026-09-24).
     # "" keeps that campus default; set it to a path on a disk that is not
     # the VM's own, which is the only thing that makes the copy worth taking.
-    "dc": {"cors_origins": [], "package": "auto", "backup_dest": ""},
+    # A list is tried in order, like vm.path.
+    # secrets_file: the host's KEY=VALUE secrets (setup/host/dc_lib.sh), for a
+    # profile whose keys live somewhere else than the defaults dc_lib.sh tries.
+    # "" keeps those defaults; B2B_SECRETS= beats it.
+    # grobase_ref: the grobase commit install_grobase.sh checks out, by its
+    # full SHA; "" keeps the pin that script carries.
+    # grobase_env: NON-secret KEY = "value" lines kept in /opt/grobase/.env.local,
+    # the layer grobase's `make env` appends last, so they survive every
+    # re-assembly. A profile's table REPLACES this default one. The default is
+    # what install_grobase.sh always wrote: REMOTE_ACCESS=1 publishes realtime
+    # and mailpit on the guest loopback for the ssh entry (grobase's
+    # 00-config.mk reads it at dab5f43; d180542 ignores it), and
+    # CATALOG_MANAGEMENT=static, which trino needed at 5af95cdf and neither
+    # pin names any more (git grep, 2026-10-13).
+    # tailnet_hostname: the node's name on the tailnet, so its ts.net name
+    # (kong.yml, the cert SANs, the realtime origins) is the same after a
+    # rebuild; "" keeps the guest's hostname. funnel: `make datacenter` opens
+    # the public plane (make funnel_up) when true.
+    "dc": {
+        "cors_origins": [],
+        "package": "auto",
+        "backup_dest": "",
+        "secrets_file": "",
+        "grobase_ref": "",
+        "grobase_env": {"CATALOG_MANAGEMENT": "static", "REMOTE_ACCESS": "1"},
+        "tailnet_hostname": "",
+        "funnel": False,
+    },
+    # [host]: what the build sets up on the host itself. autostart: `make all`
+    # ends with `make autostart` -- the VM as a user service of this login,
+    # started at boot and stopped gracefully at shutdown, and `make backup`
+    # hourly (setup/host/autostart.sh).
+    "host": {"autostart": False},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -285,6 +321,7 @@ class Config:
             DEFAULTS["network"], raw.get("network"), "network", self.errors
         )
         self.dc = _merge(DEFAULTS["dc"], raw.get("dc"), "dc", self.errors)
+        self.host = _merge(DEFAULTS["host"], raw.get("host"), "host", self.errors)
         self.disk = _merge(DEFAULTS["disk"], raw.get("disk"), "disk", self.errors)
         self.policy = {}
         given_policy = raw.get("policy") or {}
@@ -377,8 +414,15 @@ class Config:
     def is_first(self, user):
         return bool(self.users) and user is self.users[0]
 
+    def gets_editor(self, user):
+        """Every account that asked; the login unless it said nvim = false,
+        which --check allows only in a build with no editor at all."""
+        if user is self.users[0]:
+            return not ("nvim" in user["given"] and user.get("nvim") is False)
+        return bool(user.get("nvim"))
+
     def nvim_users(self):
-        return [u["name"] for u in self.users if u is self.users[0] or u.get("nvim")]
+        return [u["name"] for u in self.users if self.gets_editor(u)]
 
     def groups_of(self, user):
         """Every group but the primary one: user42 always, sudo when asked."""
@@ -961,9 +1005,65 @@ class Validator:
                 "%r is not a grobase tier (one of: %s)" % (package, ", ".join(self.DC_PACKAGES)),
             )
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
+        self._abs_path("dc.secrets_file", self.c.dc.get("secrets_file"))
+        ref = self.c.dc.get("grobase_ref")
+        if ref and not (isinstance(ref, str) and self.SHA_RE.match(ref)):
+            self.err(
+                "dc.grobase_ref",
+                "%r is not a full commit SHA (40 hex digits: git fetch "
+                "origin <sha> takes no abbreviation)" % (ref,),
+            )
+        self._grobase_env(self.c.dc.get("grobase_env"))
+        name = self.c.dc.get("tailnet_hostname")
+        if name and not (isinstance(name, str) and self.DNS_LABEL_RE.match(name)):
+            self.err(
+                "dc.tailnet_hostname",
+                "%r is not a node name (one DNS label: a-z, 0-9 and -, "
+                "no dot; the tailnet adds .<tailnet>.ts.net)" % (name,),
+            )
+        if not isinstance(self.c.dc.get("funnel"), bool):
+            self.err("dc.funnel", "%r is not true or false" % (self.c.dc.get("funnel"),))
+
+    SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+    DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+    ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+    # build.conf is sourced, each value inside double quotes: nothing that
+    # would end the quotes or expand there, and no control character.
+    ENV_VALUE_RE = re.compile(r'^[^"$`\\\x00-\x1f\x7f]*$')
+    # Ponytail: a secret is recognised by its NAME. A secret under an innocent
+    # name (DSN, URL with a password in it) passes; a harmless key that happens
+    # to be named *_TOKEN or *_KEY is refused -- put that one in .env.local by
+    # hand on the guest. BYPASS is not PASS: the word must stand alone.
+    SECRET_NAME_RE = re.compile(
+        r"PASSWORD|SECRET|TOKEN|PRIVATE|(^|_)(PAT|KEY|PASS|PWD|CREDENTIALS?)(_|$)"
+    )
+
+    def _grobase_env(self, table):
+        if not isinstance(table, dict):
+            self.err("dc.grobase_env", "is a table: [dc.grobase_env] then KEY = \"value\" lines")
+            return
+        for key, value in table.items():
+            where = "dc.grobase_env.%s" % key
+            if not self.ENV_KEY_RE.match(key):
+                self.err(where, "is not an env name (A-Z, 0-9 and _, a letter first)")
+            elif self.SECRET_NAME_RE.search(key):
+                self.err(
+                    where,
+                    "looks like a secret; the profile is tracked, so it goes "
+                    "in the secrets file, never here",
+                )
+            elif not isinstance(value, str):
+                self.err(where, "%r is not a string (quote it: %s = \"%s\")" % (value, key, value))
+            elif not self.ENV_VALUE_RE.match(value):
+                self.err(
+                    where,
+                    "%r holds a character build.conf cannot carry "
+                    "(\" $ ` \\ or a control character)" % (value,),
+                )
 
     def _abs_path(self, where, value):
-        """A host path that is empty (keep the default) or absolute.
+        """A host path, or a list of them, each absolute once $HOME is
+        expanded; empty keeps the default.
 
         Relative would resolve against whatever directory the caller happened
         to be in -- make runs these scripts from the repo root, the systemd
@@ -973,10 +1073,14 @@ class Validator:
         """
         if value in (None, ""):
             return
-        if not isinstance(value, str):
-            self.err(where, "%r is not a path" % (value,))
-        elif not value.startswith("/"):
-            self.err(where, "%r is not absolute (it must start with /)" % (value,))
+        entries = value if isinstance(value, list) else [value]
+        for index, entry in enumerate(entries):
+            name = "%s[%d]" % (where, index) if isinstance(value, list) else where
+            if not isinstance(entry, str) or not entry:
+                self.err(name, "%r is not a path" % (entry,))
+            elif not host_path.expand(entry).startswith("/"):
+                why = "is not absolute (it must start with / or $HOME)"
+                self.err(name, "%r %s" % (entry, why))
 
     # [network] forwards is the whole port list: every NAT rule both backends
     # create and every port the guest's firewall opens, so it must carry SSH.
@@ -1130,6 +1234,7 @@ class Validator:
         self.policy()
         self.network()
         self.dc()
+        self._bool("host.autostart", self.c.host.get("autostart"))
         self.disk()
         return self.errors, self.warnings
 
@@ -1159,6 +1264,12 @@ def sh_hash(password):
     return out.stdout.strip()
 
 
+def _host_path(value):
+    """A host-path knob -- one path or a list -- resolved on this host."""
+    entries = value if isinstance(value, list) else [value]
+    return host_path.resolve([e for e in entries if isinstance(e, str)])
+
+
 LEGACY = {
     "B2B_LOGIN": lambda c: c.login,
     "B2B_HOSTNAME": lambda c: c.hostname,
@@ -1180,7 +1291,7 @@ LEGACY = {
     "B2B_VM_NAME": lambda c: c.vm.get("name") or "",
     # Host-side only, both of these: the guest has no use for a host path, and
     # build.conf is sourced in the guest, so they stay out of the guest view.
-    "B2B_VM_PATH": lambda c: c.vm.get("path") or "",
+    "B2B_VM_PATH": lambda c: _host_path(c.vm.get("path")),
     "B2B_BACKEND": lambda c: c.vm.get("backend") or "",
     "B2B_PROFILE": lambda c: c.vm.get("profile") or "",
     "B2B_AI_MODE": lambda c: c.vm.get("ai_mode") or "",
@@ -1206,7 +1317,12 @@ LEGACY = {
         o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)
     ),
     "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
-    "B2B_DC_BACKUP_DEST": lambda c: c.dc.get("backup_dest") or "",
+    "B2B_DC_BACKUP_DEST": lambda c: _host_path(c.dc.get("backup_dest")),
+    "B2B_DC_SECRETS_FILE": lambda c: _host_path(c.dc.get("secrets_file")),
+    "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
+    "B2B_DC_TAILNET_HOSTNAME": lambda c: c.dc.get("tailnet_hostname") or "",
+    "B2B_DC_FUNNEL": lambda c: c.dc.get("funnel"),
+    "B2B_HOST_AUTOSTART": lambda c: c.host.get("autostart"),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
@@ -1269,6 +1385,7 @@ def _dotted(config, path):
         "policy": config.policy,
         "features": config.features,
         "ai": config.ai,
+        "host": config.host,
     }.get(head)
     for part in parts[1:]:
         if not isinstance(node, dict):
@@ -1342,6 +1459,8 @@ def guest_view(config):
         "B2B_DC_CORS_ORIGINS",
         # [dc] package: the grobase tier install_grobase.sh starts.
         "B2B_DC_PACKAGE",
+        # [dc] grobase_ref: the commit it checks out ("" = its own pin).
+        "B2B_DC_GROBASE_REF",
     )
     for key in keys:
         if key == "B2B_VOLUMES":
@@ -1362,7 +1481,20 @@ def guest_view(config):
             lines.append('%s="%s"' % (key, value))
         else:
             lines.append("%s=%s" % (key, value))
+    lines.extend(_grobase_env_lines(config.dc.get("grobase_env")))
     return "\n".join(lines)
+
+
+def _grobase_env_lines(table):
+    """[dc.grobase_env] for build.conf: the names on one line (b2b-grobase-env
+    reads it, and an old build.conf without it means "today's defaults"), then
+    one quoted line per value, which may hold a space."""
+    if not isinstance(table, dict):
+        return []
+    lines = ['B2B_DC_GROBASE_ENV="%s"' % " ".join(table)]
+    for key, value in table.items():
+        lines.append('B2B_DC_GROBASE_ENV_%s="%s"' % (key, value))
+    return lines
 
 
 def users_view(config):
@@ -1515,7 +1647,7 @@ def show(config):
                 user["name"] + ("*" if config.is_first(user) else ""),
                 state,
                 "yes" if user.get("sudo") or config.is_first(user) else "no",
-                "yes" if user.get("nvim") or config.is_first(user) else "no",
+                "yes" if config.gets_editor(user) else "no",
                 ",".join(config.groups_of(user)),
                 len(user.get("ssh_keys") or []),
             )

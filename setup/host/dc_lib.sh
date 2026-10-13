@@ -5,8 +5,10 @@
 #
 # THE SECRETS FILE
 #   ~/.config/born2root/b2b-secrets by default, KEY=VALUE lines, mode 600.
-#   A .b2b-secrets at the repo root is honoured when it exists (ignored by
-#   git, `*secret*`), and B2B_SECRETS= names any other path. It lives under
+#   B2B_SECRETS= names any path, then the profile's [dc] secrets_file, then a
+#   .b2b-secrets at the repo root when it exists (ignored by git,
+#   `*secret*`), then that default -- the Makefile resolves it the same way
+#   (B2B_SECRETS, which it exports). It lives under
 #   $HOME and not beside the repo because the campus wipes /goinfre: on
 #   2026-09-20 a wipe took the VM, the repo clone and the file with the
 #   restic password, leaving five snapshots on sgoinfre nobody can open.
@@ -25,13 +27,16 @@
 set -u
 
 DC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
-if [ -n "${B2B_SECRETS:-}" ]; then
-    SECRETS_FILE="$B2B_SECRETS"
-elif [ -f "$DC_ROOT/.b2b-secrets" ]; then
+# shellcheck source=utils/b2b_config.sh
+. "$DC_ROOT/utils/b2b_config.sh"
+# shellcheck source=setup/host/vm_ports.sh
+. "$DC_ROOT/setup/host/vm_ports.sh"
+
+SECRETS_FILE="${B2B_SECRETS:-$(b2b_get B2B_DC_SECRETS_FILE)}"
+if [ -z "$SECRETS_FILE" ] && [ -f "$DC_ROOT/.b2b-secrets" ]; then
     SECRETS_FILE="$DC_ROOT/.b2b-secrets"
-else
-    SECRETS_FILE="$HOME/.config/born2root/b2b-secrets"
 fi
+SECRETS_FILE="${SECRETS_FILE:-$HOME/.config/born2root/b2b-secrets}"
 
 C_R='\033[0m'
 # shellcheck disable=SC2034 # for the scripts that source this
@@ -49,11 +54,6 @@ die() {
     printf "${C_RED}✗${C_R} %s\n" "$*" >&2
     exit 1
 }
-
-# shellcheck source=utils/b2b_config.sh
-. "$DC_ROOT/utils/b2b_config.sh"
-# shellcheck source=setup/host/vm_ports.sh
-. "$DC_ROOT/setup/host/vm_ports.sh"
 
 VM_NAME="${VM_NAME:-$(b2b_get B2B_VM_NAME)}"
 [ -n "$VM_NAME" ] || VM_NAME=debian

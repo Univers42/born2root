@@ -18,10 +18,11 @@
 #   Until both are on, `make funnel_up` prints what to click and exits 1.
 #
 # DOWN BY DEFAULT
-#   Exposure is an explicit act tied to a session: nothing here persists a
-#   funnel across a rebuild, and `make funnel_down` closes it. Check the
-#   campus acceptable-use policy before the first `funnel_up`; phases 0-5 of
-#   the plan are private, this is the one that is not.
+#   Exposure is an explicit act: `make funnel_up`, or a profile that says
+#   [dc] funnel = true, which `make datacenter` then opens after a rebuild.
+#   `make funnel_down` closes it. Check the campus acceptable-use policy
+#   before the first `funnel_up`; phases 0-5 of the plan are private, this is
+#   the one that is not.
 #
 #   make funnel_up | funnel_status | funnel_down
 set -u

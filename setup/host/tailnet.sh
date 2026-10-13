@@ -40,6 +40,7 @@
 #   make tailnet                   up (idempotent)
 #   make tailnet TS_SERVE=tcp      no certificate yet: raw passthrough, self-signed
 #   make tailnet TS_HOSTNAME=baas  rename the node; its ts.net name follows
+#                                  (default: the profile's [dc] tailnet_hostname)
 #   make tailnet_status | tailnet_down
 #   B2B_CONFIG=profiles/server.toml make tailnet   the guest's sudo password
 #                                  comes from the profile, as make edge does;
@@ -65,6 +66,7 @@ TS_API="${TS_API_URL:-https://api.tailscale.com/api/v2}"
 CONSOLE=https://login.tailscale.com/admin
 VM_PATH="${VM_PATH:-$DC_ROOT/disk_images}"
 export VM_PATH
+TS_HOSTNAME="${TS_HOSTNAME:-$(b2b_get B2B_DC_TAILNET_HOSTNAME)}"
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tailnet.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
@@ -389,6 +391,15 @@ info "configuring the node (operator ${VM_USER}, accept-dns, serve ${SERVE} -> W
 run_guest "$SERVE"
 ts_refresh
 name=$(node_name)
+# A node that already holds the name -- the guest this one replaces, never
+# removed -- makes the control plane hand this one <name>-1 or -2, and every
+# origin, SAN and client config that names the old one points nowhere.
+if [ -n "${TS_HOSTNAME:-}" ]; then
+    case "$name" in
+    "${TS_HOSTNAME}."*) ;;
+    *) die "the tailnet named this node ${name%%.*}, not ${TS_HOSTNAME}: another node holds that name. At ${CONSOLE}/machines remove the old one and rename this one to ${TS_HOSTNAME}, then rerun make tailnet" ;;
+    esac
+fi
 ip4=$(vm_ssh 'tailscale ip -4 2>/dev/null | head -n1' 2>/dev/null || true)
 serve_out=$(vm_ssh "tailscale serve status 2>&1" 2>/dev/null || true)
 case "$serve_out" in
@@ -434,6 +445,17 @@ esac
 if [ -d "$VM_PATH/$VM_NAME" ]; then
     printf 'TS_DNSNAME=%s\nTS_IP4=%s\nTS_TAILNET=%s\nTS_SERVE=%s\nGROBASE_URL=https://%s\n' \
         "$name" "$ip4" "$tailnet" "$SERVE" "$name" >"$VM_PATH/$VM_NAME/tailnet.env"
+fi
+
+# 11. grobase's own address list -- GROBASE_PUBLIC_ADDRESSES, the certificate's
+#     SANs, the frontend configs -- names this node: grobase's `make expose`,
+#     with the TS_DNSNAME and TS_IP4 just recorded (grobase_expose_guest.sh).
+if expose_out=$(vm_ssh "bash -s -- '${name}' '${ip4}'" <"$DC_ROOT/setup/host/grobase_expose_guest.sh" 2>&1); then
+    printf '%s\n' "$expose_out" | sed 's/^/    /'
+    ok "grobase: GROBASE_PUBLIC_ADDRESSES names ${name}${ip4:+ and $ip4}"
+else
+    printf '%s\n' "$expose_out" | sed 's/^/    /'
+    warn "grobase's make expose did not finish in the guest (output above); rerun make tailnet"
 fi
 printf '\n'
 if [ "$SERVE" = https ]; then

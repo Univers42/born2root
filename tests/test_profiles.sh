@@ -9,7 +9,11 @@
 #                 bonus off, and it fits.
 #   server.toml   backend only at 120 GB: no nvim, docker on, every dc-* row
 #                 on (the max tier's add-ons included), 14 GiB of RAM, a
-#                 40 GB IDE disk, and it fits with /var holding the engines.
+#                 40 GB IDE disk, both of baas's SSH keys, baas's grobase
+#                 commit and hand-set grobase keys (none of them a secret,
+#                 neither REMOTE_ACCESS nor CATALOG_MANAGEMENT, as live), its
+#                 tailnet name and funnel, only the ports baas serves, and it
+#                 fits with /var holding the engines.
 set -e
 
 cd "$(dirname "$0")/.."
@@ -75,6 +79,23 @@ check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
 check "server: ram_mb 14336" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_RAM_MB)" 14336
 check "server: an IDE disk of 40 GB" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_IDE_DISK_GB)" 40
+check "server: both authorized keys, from the profile alone" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --ssh-keys | grep -c '^dlesieur ssh-ed25519 ')" 2
+check "server: no editor user (no editor in the build)" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_NVIM_USERS)" ""
+SERVER_GUEST=$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --guest)
+check "server: grobase at baas's commit" \
+    "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_REF=//p')" dab5f43060aab2914183173c91dc7a39a7aab9f6
+check "server: baas's hand-set grobase keys, DynamoDB data plane included" \
+    "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_ENV_DATA_PLANE_FEATURES=//p')" '"--features dynamodb"'
+check "server: the guest's firewall opens exactly what baas serves (ssh, the WAF)" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_FIREWALL)" "ssh:4242 http:8880 https:8443"
+check "server: the tailnet name baas has (kong.yml, cert SANs, origins name it)" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_TAILNET_HOSTNAME)" dlesieur42-1
+check "server: the funnel opened, as on baas" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_FUNNEL)" true
+check "server: neither REMOTE_ACCESS nor CATALOG_MANAGEMENT (baas has neither)" \
+    "$(printf '%s\n' "$SERVER_GUEST" | grep -c 'REMOTE_ACCESS\|CATALOG_MANAGEMENT' || true)" 0
 
 # The reweight is the point of the server profile: /var must be the largest
 # volume by a margin, larger than at the shipped shares.

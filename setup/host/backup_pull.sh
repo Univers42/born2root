@@ -4,14 +4,16 @@
 # thing it backs up is not one.
 #
 # THE PASSWORD
-#   RESTIC_PASSWORD in .b2b-secrets (mode 600, gitignored). Minted here on
-#   first use with openssl, and printed NOWHERE: the file is the record. It
+#   RESTIC_PASSWORD in the secrets file (dc_lib.sh: B2B_SECRETS=, [dc]
+#   secrets_file, ...; mode 600). Minted here on first use with openssl --
+#   never for a restore, never beside an existing repository -- and printed
+#   NOWHERE: the file is the record. It
 #   travels to the guest over the SSH channel's stdin into a 600 file under
 #   /tmp, and install_backup.sh (through provision_vm.sh, which owns the sudo
 #   plumbing) moves it to /etc/b2b/restic.pass. Never on a command line, so
 #   never in the guest's process list or a log.
 #
-#   Lose .b2b-secrets and every snapshot is noise. Keep that one line in a
+#   Lose that file and every snapshot is noise. Keep that one line in a
 #   password manager too. That is the price of an encrypted backup.
 #
 # WHERE THE COPY GOES
@@ -40,12 +42,14 @@ set -u
 # datacenter` looked under students/, so the rebuild path never found the copy
 # `make backup` had made; a copy at the old path is still the one used when
 # there is none at the new one.
-DEST="${BACKUP_DEST:-$(b2b_get B2B_DC_BACKUP_DEST)}"
-# $USER and ${USER} are the host login, the same rule ai.models_dir follows, so
-# a tracked profile can point at a home directory without naming anybody.
+# $USER/$HOME expand, and a list resolves, by the one rule the profile's paths
+# follow (utils/host_path.py), so BACKUP_DEST='/media/$USER/b' works too.
+if [ -n "${BACKUP_DEST:-}" ]; then
+    DEST=$(b2b_host_path "$BACKUP_DEST")
+else
+    DEST=$(b2b_get B2B_DC_BACKUP_DEST)
+fi
 _login=$(id -un)
-DEST=${DEST//\$\{USER\}/$_login}
-DEST=${DEST//\$USER/$_login}
 if [ -z "$DEST" ]; then
     DEST="/sgoinfre/students/$_login/b2b-backups/$VM_NAME"
     legacy_dest="/sgoinfre/$_login/b2b-backups/$VM_NAME"
@@ -65,15 +69,22 @@ case "${1:-}" in
     ;;
 esac
 
-dc_connect
-
+# A password is minted only when there is nothing it would have to open: a
+# restore, or a repository already at DEST, needs the one it was made with,
+# and a new one would lock the next backup out of the repository too.
+# Checked before the guest is touched.
 pass=$(secret_get RESTIC_PASSWORD)
 if [ -z "$pass" ]; then
+    if [ "$RESTORE" = 1 ] || [ -e "$DEST/repo/config" ]; then
+        die "no RESTIC_PASSWORD in $SECRETS_FILE, and $([ "$RESTORE" = 1 ] && echo 'a restore' || echo "the repository at $DEST/repo") needs the password it was made with: put that RESTIC_PASSWORD line back in $SECRETS_FILE (mode 600), or name the file that has it ([dc] secrets_file, or B2B_SECRETS=)"
+    fi
     pass=$(openssl rand -base64 33 | tr -d '\n=/+' | cut -c1-40)
     [ -n "$pass" ] || die "openssl could not mint a password"
     secret_set RESTIC_PASSWORD "$pass"
     ok "minted RESTIC_PASSWORD into $SECRETS_FILE -- copy that line to a password manager"
 fi
+
+dc_connect
 
 # The password reaches the guest by stdin, into a 600 file in /tmp, and
 # install_backup.sh moves it into place as root.

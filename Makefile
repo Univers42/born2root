@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all autostart firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -393,6 +393,7 @@ all: no_root prepare
 		sel="$(SIZE_B2B)"; \
 	fi; \
 	$(MAKE_BIN) --no-print-directory _build SIZE_B2B="$$sel" VM_SIZE= B2B_NO_SELECT=1
+	$(if $(filter true,$(call b2b_conf,B2B_HOST_AUTOSTART)),@$(MAKE_BIN) --no-print-directory autostart || printf '  ! autostart did not finish -- the VM is built; rerun make autostart\n')
 
 # The build proper. Never call this directly -- `make all` is the entry point;
 # this exists only so the size the picker chose can be a real make variable.
@@ -489,6 +490,12 @@ qemu_start:
 
 qemu_stop:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop
+
+# The VM as a user service of this login: up at boot, stopped gracefully at
+# shutdown, `make backup` hourly (setup/host/autostart.sh). `make all` ends
+# with it when the profile says [host] autostart = true.
+autostart:
+	@B2B_CONFIG="$(B2B_CONFIG)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/autostart.sh
 
 qemu_status:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh status
@@ -1200,8 +1207,12 @@ ide_disk:
 #   make restore_drill       restore the newest snapshot into a scratch database and count what came back
 #   make seed / loadtest     rows from grobase's own seeder; k6 against Kong, inside the guest
 # Secrets live under $HOME, not in the repo: the campus wipes /goinfre and
-# took the restic password with it once (see setup/host/dc_lib.sh).
-B2B_SECRETS ?= $(or $(wildcard $(CURDIR)/.b2b-secrets),$(HOME)/.config/born2root/b2b-secrets)
+# took the restic password with it once (see setup/host/dc_lib.sh, which
+# resolves it in the same order). B2B_SECRETS= wins, then [dc] secrets_file.
+# := so the profile is read once, not at every recipe line the export reaches.
+ifeq ($(origin B2B_SECRETS),undefined)
+B2B_SECRETS := $(or $(call b2b_conf,B2B_DC_SECRETS_FILE),$(wildcard $(CURDIR)/.b2b-secrets),$(HOME)/.config/born2root/b2b-secrets)
+endif
 export B2B_SECRETS
 DC_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" SCRIPT_SH="$(SCRIPT_SH)"
 
@@ -1256,6 +1267,12 @@ backup_verify:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --verify
 restore_drill:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" restore-drill
+# UFW on a running guest made to match [network] forwards as the profile says
+# them NOW: listed ports allowed, born2root's rules for ports no longer
+# listed deleted, 4242, tailscale0 and hand-made rules kept
+# (setup/host/firewall_guest.sh). First boot already applies the list.
+firewall:
+	@ROOTSH_FIREWALL="$(call b2b_conf,B2B_FIREWALL)" ROOT_SH=setup/host/firewall_guest.sh VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" root-sh
 # The rebuild path: push the copy on BACKUP_DEST back into a fresh guest and
 # load the newest snapshot into the engines -- tenants, keys and rows return.
 restore:
@@ -1267,19 +1284,26 @@ restore:
 # after that (it gives the new guest the stored key back, and is a no-op
 # on a guest without dc-graph-render). Tailscale needs a REUSABLE key in
 # .b2b-secrets; without one that step warns and goes on. tailnet then puts
-# the private URL back (serve, CORS); a pending console switch warns too.
+# the private URL back (serve, CORS, grobase's address list); it runs AFTER
+# the restore, whose .env.local still names the old node. realtime_token
+# re-mints the socket token under the restored JWT secret; funnel_up opens
+# the public plane when the profile says [dc] funnel = true. A pending
+# console switch in any of the three warns and the rest continues.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
 	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
-	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
-		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
 	@d=$$($(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --where); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
+	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
+	@$(MAKE_BIN) --no-print-directory realtime_token B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! realtime_token did not finish -- the rest continues; rerun make realtime_token\n'
+	$(if $(filter true,$(call b2b_conf,B2B_DC_FUNNEL)),@$(MAKE_BIN) --no-print-directory funnel_up B2B_CONFIG="$(B2B_CONFIG)" || printf '  ! funnel_up did not finish (a console switch is pending?) -- the rest continues; rerun make funnel_up\n')
 	@$(MAKE_BIN) --no-print-directory tenant_key B2B_CONFIG="$(B2B_CONFIG)" TENANT="$(or $(TENANT),transcendence)"
 	@$(MAKE_BIN) --no-print-directory graph_render_key B2B_CONFIG="$(B2B_CONFIG)"
 	@$(MAKE_BIN) --no-print-directory backup B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$(BACKUP_DEST)"

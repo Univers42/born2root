@@ -302,6 +302,16 @@ refuse "turning a base feature off" features.devtools-apt \
 # toml may set: both used to be refusals.
 check "turning nvim (core) off is accepted" \
     "$(rc_of "$(variant "core$$" 's/^docker         = "auto"/nvim = false/')" --check)" 0
+# A build without the editor: the login gets none either when it says so, and
+# keeps the implicit "yes" when it says nothing (verify_guest and the space
+# budget read B2B_NVIM_USERS, and would look for an editor nobody installed).
+NO_EDITOR=$(variant "noeditor$$" 's/^docker         = "auto"/nvim = false/' 's/^nvim     = true/nvim     = false/')
+check "features.nvim and the login's nvim false: valid" "$(rc_of "$NO_EDITOR" --check)" 0
+check "  B2B_NVIM_USERS leaves the login out" "$(get_of "$NO_EDITOR" B2B_NVIM_USERS)" ""
+check "  --show says no editor for the login" \
+    "$(env B2B_CONFIG="$NO_EDITOR" "${CFG[@]}" --show | grep -cE '^ +dlesieur\* +set +yes +no ')" 1
+check "the login with no nvim key: still the editor user" \
+    "$(get_of "$(variant "implicit$$" '/^nvim     = true/d')" B2B_NVIM_USERS)" dlesieur
 check "a bundle name is accepted in [features]" \
     "$(rc_of "$(variant "bundle$$" 's/^docker         = "auto"/dc-full = true/')" --check)" 0
 refuse "turning hellish off" features.hellish \
@@ -579,5 +589,73 @@ check "a duplicate origin is refused" \
 check "an unknown [dc] key is refused" \
     "$(rc_of "$(variant dckey 's|^cors_origins = \[\]|cors_origin = []|')" --check)" 1
 contains "  with a did-you-mean" "$(cat "$TMP/out")" "did you mean cors_origins"
+
+# ── [dc] grobase_ref and [dc.grobase_env] ───────────────────────────────────
+# build.conf is sourced in the guest, so a value reaches it only when it needs
+# no escaping; a secret never reaches the profile at all (it is tracked).
+GUEST_DEFAULT=$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --guest)
+contains "no grobase_ref: build.conf leaves install_grobase.sh's own pin" \
+    "$GUEST_DEFAULT" 'B2B_DC_GROBASE_REF='
+contains "no [dc.grobase_env]: today's two keys, CATALOG_MANAGEMENT ..." \
+    "$GUEST_DEFAULT" 'B2B_DC_GROBASE_ENV_CATALOG_MANAGEMENT="static"'
+contains "  ... and REMOTE_ACCESS" "$GUEST_DEFAULT" 'B2B_DC_GROBASE_ENV_REMOTE_ACCESS="1"'
+contains "  ... named on the list line" "$GUEST_DEFAULT" 'B2B_DC_GROBASE_ENV="CATALOG_MANAGEMENT REMOTE_ACCESS"'
+GENV=$(append genv '[dc.grobase_env]
+DATA_PLANE_FEATURES = "--features dynamodb"
+DATA_PLANE_ADMIN_BYPASS = "1"')
+check "a [dc.grobase_env] table passes --check" "$(rc_of "$GENV" --check)" 0
+GUEST_GENV=$(env B2B_CONFIG="$GENV" "${CFG[@]}" --guest)
+check "  it replaces the default table (CATALOG_MANAGEMENT and REMOTE_ACCESS gone)" \
+    "$(printf '%s\n' "$GUEST_GENV" | grep -c 'CATALOG_MANAGEMENT\|REMOTE_ACCESS' || true)" 0
+check "  and build.conf sources to the value, space and all" \
+    "$(printf '%s\n' "$GUEST_GENV" >"$TMP/genv.conf" && "${SCRIPT_SH:-bash}" -c ". '$TMP/genv.conf'; printf '%s|%s' \"\$B2B_DC_GROBASE_ENV\" \"\$B2B_DC_GROBASE_ENV_DATA_PLANE_FEATURES\"")" \
+    "DATA_PLANE_FEATURES DATA_PLANE_ADMIN_BYPASS|--features dynamodb"
+EMPTY_GENV=$(append genvempty '[dc.grobase_env]')
+contains "an empty table writes nothing (the list line says so)" \
+    "$(env B2B_CONFIG="$EMPTY_GENV" "${CFG[@]}" --guest)" 'B2B_DC_GROBASE_ENV=""'
+refuse_add "a lowercase key is refused" "dc.grobase_env.data_plane" '[dc.grobase_env]
+data_plane = "1"'
+refuse_add "a value build.conf would expand is refused" "dc.grobase_env.FOO" '[dc.grobase_env]
+FOO = "a$HOME"'
+refuse_add "a value with a double quote is refused" "dc.grobase_env.FOO" '[dc.grobase_env]
+FOO = "a\"b"'
+refuse_add "a number is refused (quote it)" "dc.grobase_env.FOO" '[dc.grobase_env]
+FOO = 1'
+refuse_add "a password is refused: secrets go in the secrets file" "secrets file" '[dc.grobase_env]
+MYSQL_PASSWORD = "x"'
+refuse_add "  so is a token" "dc.grobase_env.FLY_TOKEN" '[dc.grobase_env]
+FLY_TOKEN = "x"'
+refuse_add "  and a PAT" "dc.grobase_env.GH_PAT" '[dc.grobase_env]
+GH_PAT = "x"'
+REF=$(variant genvref 's|^package = "auto"|package = "auto"\ngrobase_ref = "dab5f43060aab2914183173c91dc7a39a7aab9f6"|')
+check "a full grobase_ref passes --check" "$(rc_of "$REF" --check)" 0
+contains "  and reaches build.conf" "$(env B2B_CONFIG="$REF" "${CFG[@]}" --guest)" \
+    'B2B_DC_GROBASE_REF=dab5f43060aab2914183173c91dc7a39a7aab9f6'
+refuse "an abbreviated grobase_ref is refused (git fetch takes no abbreviation)" "dc.grobase_ref" \
+    's|^package = "auto"|package = "auto"\ngrobase_ref = "dab5f43"|'
+
+# ── [dc] tailnet_hostname and funnel ────────────────────────────────────────
+check "no tailnet_hostname: empty (the guest's own hostname)" "$(get_of "$DEFAULTS" B2B_DC_TAILNET_HOSTNAME)" ""
+check "no funnel key: false (the public plane stays down)" "$(get_of "$DEFAULTS" B2B_DC_FUNNEL)" false
+TSN=$(variant tsname 's|^package = "auto"|package = "auto"\ntailnet_hostname = "node-1"\nfunnel = true|')
+check "a tailnet_hostname and funnel pass --check" "$(rc_of "$TSN" --check)" 0
+check "  the name reaches B2B_DC_TAILNET_HOSTNAME" "$(get_of "$TSN" B2B_DC_TAILNET_HOSTNAME)" node-1
+check "  funnel reaches B2B_DC_FUNNEL" "$(get_of "$TSN" B2B_DC_FUNNEL)" true
+refuse "a tailnet_hostname that is not a DNS label is refused" "dc.tailnet_hostname" \
+    's|^package = "auto"|package = "auto"\ntailnet_hostname = "node.example"|'
+refuse "funnel must be true or false" "dc.funnel" \
+    's|^package = "auto"|package = "auto"\nfunnel = "yes"|'
+
+# ── [host] autostart ────────────────────────────────────────────────────────
+check "no [host]: autostart false (make all leaves the host's units alone)" \
+    "$(get_of "$DEFAULTS" B2B_HOST_AUTOSTART)" false
+HOST=$(append host '[host]
+autostart = true')
+check "[host] autostart = true passes --check" "$(rc_of "$HOST" --check)" 0
+check "  and reaches B2B_HOST_AUTOSTART" "$(get_of "$HOST" B2B_HOST_AUTOSTART)" true
+refuse_add "autostart must be true or false" "host.autostart" '[host]
+autostart = "yes"'
+refuse_add "an unknown [host] key is refused" "host.autostrat" '[host]
+autostrat = true'
 
 exit "$fail"
