@@ -634,4 +634,16 @@ contains "  and reaches build.conf" "$(env B2B_CONFIG="$REF" "${CFG[@]}" --guest
 refuse "an abbreviated grobase_ref is refused (git fetch takes no abbreviation)" "dc.grobase_ref" \
     's|^package = "auto"|package = "auto"\ngrobase_ref = "dab5f43"|'
 
+# ── [dc] tailnet_hostname and funnel ────────────────────────────────────────
+check "no tailnet_hostname: empty (the guest's own hostname)" "$(get_of "$DEFAULTS" B2B_DC_TAILNET_HOSTNAME)" ""
+check "no funnel key: false (the public plane stays down)" "$(get_of "$DEFAULTS" B2B_DC_FUNNEL)" false
+TSN=$(variant tsname 's|^package = "auto"|package = "auto"\ntailnet_hostname = "node-1"\nfunnel = true|')
+check "a tailnet_hostname and funnel pass --check" "$(rc_of "$TSN" --check)" 0
+check "  the name reaches B2B_DC_TAILNET_HOSTNAME" "$(get_of "$TSN" B2B_DC_TAILNET_HOSTNAME)" node-1
+check "  funnel reaches B2B_DC_FUNNEL" "$(get_of "$TSN" B2B_DC_FUNNEL)" true
+refuse "a tailnet_hostname that is not a DNS label is refused" "dc.tailnet_hostname" \
+    's|^package = "auto"|package = "auto"\ntailnet_hostname = "node.example"|'
+refuse "funnel must be true or false" "dc.funnel" \
+    's|^package = "auto"|package = "auto"\nfunnel = "yes"|'
+
 exit "$fail"

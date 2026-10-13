@@ -1259,19 +1259,26 @@ restore:
 # after that (it gives the new guest the stored key back, and is a no-op
 # on a guest without dc-graph-render). Tailscale needs a REUSABLE key in
 # .b2b-secrets; without one that step warns and goes on. tailnet then puts
-# the private URL back (serve, CORS); a pending console switch warns too.
+# the private URL back (serve, CORS, grobase's address list); it runs AFTER
+# the restore, whose .env.local still names the old node. realtime_token
+# re-mints the socket token under the restored JWT secret; funnel_up opens
+# the public plane when the profile says [dc] funnel = true. A pending
+# console switch in any of the three warns and the rest continues.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
 	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
 	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
-	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
-		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
 	@d=$$($(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --where); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
+	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
+	@$(MAKE_BIN) --no-print-directory realtime_token B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! realtime_token did not finish -- the rest continues; rerun make realtime_token\n'
+	$(if $(filter true,$(call b2b_conf,B2B_DC_FUNNEL)),@$(MAKE_BIN) --no-print-directory funnel_up B2B_CONFIG="$(B2B_CONFIG)" || printf '  ! funnel_up did not finish (a console switch is pending?) -- the rest continues; rerun make funnel_up\n')
 	@$(MAKE_BIN) --no-print-directory tenant_key B2B_CONFIG="$(B2B_CONFIG)" TENANT="$(or $(TENANT),transcendence)"
 	@$(MAKE_BIN) --no-print-directory graph_render_key B2B_CONFIG="$(B2B_CONFIG)"
 	@$(MAKE_BIN) --no-print-directory backup B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$(BACKUP_DEST)"

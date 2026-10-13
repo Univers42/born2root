@@ -9,6 +9,12 @@
 # half is pinned statically: it must name the console pages it asks the
 # operator to open, refuse to run a console step without a terminal, and
 # never carry a credential on a command line.
+#
+# grobase_expose_guest.sh (grobase's `make expose` for exactly this node) runs
+# against a stub make in a temp grobase tree. `make -n datacenter` pins the
+# order a rebuild runs in: the restore, then the tailnet (whose address list
+# a restore's .env.local would otherwise overwrite), then the realtime token,
+# then the funnel when the profile asks for it.
 set -u
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." || exit 1
 
@@ -24,7 +30,7 @@ check() {
 SH="${SCRIPT_SH:-bash}"
 
 # ── parse and lint-shape ────────────────────────────────────────────────────
-for f in setup/host/tailnet.sh setup/host/tailnet_guest.sh; do
+for f in setup/host/tailnet.sh setup/host/tailnet_guest.sh setup/host/grobase_expose_guest.sh; do
     check "$f parses ($SH -n)" "$($SH -n "$f" 2>&1 && echo yes)" yes
 done
 check "tailnet.sh --help needs no VM" "$($SH setup/host/tailnet.sh --help >/dev/null 2>&1 && echo yes)" yes
@@ -37,7 +43,17 @@ check "make datacenter runs tailnet" "$(grep -c 'no-print-directory tailnet ' Ma
 h=setup/host/tailnet.sh
 check "names the DNS page (MagicDNS, HTTPS Certificates)" "$(grep -c 'CONSOLE}/dns' $h)" 2
 check "names the keys page (auth key, API token, 401 hint)" "$(grep -c 'CONSOLE}/settings/keys' $h)" 3
-check "names the machine page (key expiry)" "$(grep -c 'CONSOLE}/machines' $h)" 1
+check "names the machine page (key expiry, an old node holding the name)" "$(grep -c 'CONSOLE}/machines' $h)" 2
+# shellcheck disable=SC2016 # the pattern is the literal source line, not an expansion
+check "TS_HOSTNAME falls back to the profile's [dc] tailnet_hostname" \
+    "$(grep -c 'TS_HOSTNAME="${TS_HOSTNAME:-$(b2b_get B2B_DC_TAILNET_HOSTNAME)}"' $h)" 1
+# shellcheck disable=SC2016 # the pattern is the literal source line, not an expansion
+check "the first login takes that name too (make tailscale)" \
+    "$(grep -c 'EDGE_TS_HOSTNAME="$(b2b_get B2B_DC_TAILNET_HOSTNAME)"' setup/host/tailscale_up.sh)" 1
+written=$(grep -n 'tailnet.env"$' $h | head -n1 | cut -d: -f1)
+exposed=$(grep -n 'grobase_expose_guest.sh"' $h | head -n1 | cut -d: -f1)
+check "make expose runs after tailnet.env is written" \
+    "$([ -n "$written" ] && [ -n "$exposed" ] && [ "$exposed" -gt "$written" ] && echo after)" after
 check "without a terminal a console step dies" "$(grep -c 'is_tty || die' $h)" 1
 check "the API credential travels on curl stdin (-K -)" "$(grep -c -- '-K - ' $h)" 2
 check "no credential on an ssh command line" "$(grep -c 'vm_ssh.*TS_API_TOKEN\|vm_ssh.*AUTHKEY' $h)" 0
@@ -112,5 +128,51 @@ check "off: both handlers removed, nothing served" "$(calls '^serve --https=443 
 
 rc=$(run_guest env ROOTSH_SERVE=bogus)
 check "ROOTSH_SERVE=bogus: refused" "$rc" 1
+
+# ── grobase_expose_guest.sh against a stub make ────────────────────────────
+g="$stub/grobase"
+mkdir -p "$g/scripts/ops"
+: >"$g/scripts/ops/expose.sh"
+cat >"$stub/bin/make" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >>"$STUB_LOG"
+exit "$(cat "${STUB_LOG%/*}/make_rc" 2>/dev/null || echo 0)"
+EOF
+chmod +x "$stub/bin/make"
+expose() { # <args...> -> exit code; make's command lines in $stub/calls
+    : >"$stub/calls"
+    env PATH="$stub/bin:$PATH" STUB_LOG="$stub/calls" GROBASE_DIR="$g" \
+        bash setup/host/grobase_expose_guest.sh "$@" >"$stub/out" 2>&1
+    echo $?
+}
+printf 'GROBASE_PUBLIC_ADDRESSES=old-1.tailf00.ts.net,100.64.0.1\n' >"$g/.env.local"
+check "expose: a new node's name and address: exit 0" "$(expose vm.tailf00.ts.net 100.64.0.9)" 0
+check "expose: exactly this node, detection off, no trust store touched" \
+    "$(cat "$stub/calls")" "--no-print-directory expose ARGS=--no-detect --replace --no-trust --add vm.tailf00.ts.net --add 100.64.0.9"
+printf 'X=1\nGROBASE_PUBLIC_ADDRESSES=vm.tailf00.ts.net,100.64.0.9\n' >"$g/.env.local"
+check "expose: the list already right: exit 0" "$(expose vm.tailf00.ts.net 100.64.0.9)" 0
+check "expose: ... and make is not run (kong, gotrue, waf keep running)" "$(grep -c . "$stub/calls")" 0
+check "expose: no IPv4 yet: the name alone" "$(expose vm.tailf00.ts.net)$(grep -c -- '--add vm.tailf00.ts.net$' "$stub/calls")" 01
+echo 2 >"$stub/make_rc"
+check "expose: make expose failing is reported" "$(expose other.tailf00.ts.net 100.64.0.9)" 2
+rm -f "$stub/make_rc"
+rm -f "$g/scripts/ops/expose.sh"
+check "expose: a grobase without expose.sh (d180542): skipped, exit 0" \
+    "$(expose other.tailf00.ts.net 100.64.0.9)$(grep -c . "$stub/calls")" 00
+check "expose: ... and says so" "$(grep -c 'no scripts/ops/expose.sh' "$stub/out")" 1
+check "expose: no name: refused" "$(expose)" 2
+
+# ── make datacenter, in order ──────────────────────────────────────────────
+dc_plan() { # <profile> -> make -n datacenter's lines
+    env B2B_SECRETS="$stub/secrets" make -n --no-print-directory datacenter B2B_CONFIG="$1" 2>/dev/null
+}
+line_of() { printf '%s\n' "$1" | grep -n -m1 -- "$2" | cut -d: -f1; }
+plan=$(dc_plan profiles/server.toml)
+order=$(for step in 'no-print-directory restore ' 'no-print-directory tailnet ' 'no-print-directory realtime_token ' \
+    'no-print-directory funnel_up ' 'no-print-directory backup '; do line_of "$plan" "$step"; done)
+check "datacenter: restore, tailnet, realtime_token, funnel_up, backup" \
+    "$(printf '%s\n' "$order" | grep -c .) $(printf '%s\n' "$order" | sort -n -c && echo ascending)" "5 ascending"
+check "datacenter: no funnel unless the profile asks" \
+    "$(dc_plan tests/fixtures/default.toml | grep -c 'funnel_up' || true)" 0
 
 exit "$fail"

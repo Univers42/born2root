@@ -178,6 +178,10 @@ DEFAULTS = {
     # 00-config.mk reads it at dab5f43; d180542 ignores it), and
     # CATALOG_MANAGEMENT=static, which trino needed at 5af95cdf and neither
     # pin names any more (git grep, 2026-10-13).
+    # tailnet_hostname: the node's name on the tailnet, so its ts.net name
+    # (kong.yml, the cert SANs, the realtime origins) is the same after a
+    # rebuild; "" keeps the guest's hostname. funnel: `make datacenter` opens
+    # the public plane (make funnel_up) when true.
     "dc": {
         "cors_origins": [],
         "package": "auto",
@@ -185,6 +189,8 @@ DEFAULTS = {
         "secrets_file": "",
         "grobase_ref": "",
         "grobase_env": {"CATALOG_MANAGEMENT": "static", "REMOTE_ACCESS": "1"},
+        "tailnet_hostname": "",
+        "funnel": False,
     },
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
@@ -1002,8 +1008,18 @@ class Validator:
                 "origin <sha> takes no abbreviation)" % (ref,),
             )
         self._grobase_env(self.c.dc.get("grobase_env"))
+        name = self.c.dc.get("tailnet_hostname")
+        if name and not (isinstance(name, str) and self.DNS_LABEL_RE.match(name)):
+            self.err(
+                "dc.tailnet_hostname",
+                "%r is not a node name (one DNS label: a-z, 0-9 and -, "
+                "no dot; the tailnet adds .<tailnet>.ts.net)" % (name,),
+            )
+        if not isinstance(self.c.dc.get("funnel"), bool):
+            self.err("dc.funnel", "%r is not true or false" % (self.c.dc.get("funnel"),))
 
     SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+    DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
     ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
     # build.conf is sourced, each value inside double quotes: nothing that
     # would end the quotes or expand there, and no control character.
@@ -1297,6 +1313,8 @@ LEGACY = {
     "B2B_DC_BACKUP_DEST": lambda c: _host_path(c.dc.get("backup_dest")),
     "B2B_DC_SECRETS_FILE": lambda c: _host_path(c.dc.get("secrets_file")),
     "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
+    "B2B_DC_TAILNET_HOSTNAME": lambda c: c.dc.get("tailnet_hostname") or "",
+    "B2B_DC_FUNNEL": lambda c: c.dc.get("funnel"),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
