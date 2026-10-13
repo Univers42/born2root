@@ -24,6 +24,11 @@
 #   - a disk where `blkid -p` finds anything -- a partition table, a
 #     filesystem, LUKS -- unless /etc/crypttab already has ide_crypt for that
 #     very disk: then it only verifies (key, fstab, mapping, prjquota mount);
+#   - a disk blkid -p could not open: rc 2 says "no signature" and "cannot open
+#     the device" alike (util-linux 2.39.3), so only a block device that really
+#     is there counts as blank;
+#   - a disk whose /dev/disk/by-id name cannot be resolved: a refusal names
+#     that by-id path, never the /dev/sdX the kernel picked this boot;
 #   - an existing key that is not 4096 bytes: a key is never overwritten;
 #   - an fstab line for /var/lib/docker-ide that crypttab knows nothing of.
 #   It never wipes anything; when a disk is not blank it prints the command.
@@ -67,11 +72,60 @@ append_line() { # <file> <line>
     printf '%s\n' "$2" >>"$1"
 }
 
+# The name an operator can safely copy across reboots. by-id names are stable;
+# the /dev/sdX the kernel happened to pick this boot is not -- after a reboot
+# the same disk may be sdc while the root disk is sdb, so a `wipefs -a /dev/sdX`
+# copied from an earlier run would wipe whichever table that letter now names.
+# Given the resolved disk, print the by-id link that resolves to it, or
+# nothing when no such link is left.
+# Ponytail: prints the first match in glob order, so a disk carrying the serial
+# under several by-id names is named by one of them, with no way to tell which
+# the operator meant. A link that vanished between ide_disks() and here prints
+# nothing, which refuses the disk rather than fall back to the kernel's letter.
+by_id_path() { # <resolved-disk>
+    local link
+    for link in "$BY_ID"/*"$SERIAL"; do
+        [ -e "$link" ] || continue
+        [ "$(readlink -f "$link" 2>/dev/null)" = "$1" ] || continue
+        printf '%s\n' "$link"
+        return 0
+    done
+    return 1
+}
+
+# B2B_IS_BLOCK is the seam the tests override for [ -b ]; no block device
+# exists where they run. blkid -p cannot tell a blank device from one it could
+# not open, which is why refuse_unless_blank needs this check as well.
+B2B_IS_BLOCK() { [ -b "$1" ]; }
+
 refuse_unless_blank() { # <disk>
-    local found
-    found=$(blkid -p "$1" 2>&1)
-    [ $? = 2 ] && return 0
-    die "$1 is not blank (${found:-blkid -p failed}); it may hold data, so it is not formatted. If it is the IDE disk and nothing on it is needed: cryptsetup close $MAPPER; wipefs -a $1 -- then run this again"
+    local dev by_id found rc
+    dev=$1
+    # Refusing names a disk too: a kernel name here is copied verbatim onto a
+    # wipefs command line, so nothing is said until a by-id name is in hand.
+    by_id=$(by_id_path "$dev") ||
+        die "no $BY_ID name resolves to the disk carrying serial $SERIAL -- not formatting a disk I cannot name stably; udevadm settle, then run this again"
+    found=$(blkid -p "$dev" 2>&1)
+    rc=$?
+    # blkid -p exits 2 both for "no signature found" -- blank, what we want --
+    # and for "cannot open the device" (a missing path, EACCES). Measured on
+    # util-linux 2.39.3: both give rc 2, so rc 2 alone used to mean "blank" and
+    # luksFormat ran on a disk blkid could not even read. Blank only when rc is
+    # 2, there is no signature output, and the disk is a block device to open.
+    if [ "$rc" != 2 ] || [ -n "$found" ]; then
+        # blkid's output leads with the path it was given, that is the kernel
+        # name: the by-id name stands in for it so the line stays safe to
+        # copy into a command.
+        found=${found//"$dev"/"$by_id"}
+        die "$by_id is not blank (${found:-blkid -p rc $rc}); it may hold data, so it is not formatted. If it is the IDE disk and nothing on it is needed: cryptsetup close $MAPPER; wipefs -a $by_id -- then run this again"
+    fi
+    # Ponytail: [ -b ] proves a block node, not that blkid read it -- a probe
+    # failing with only rc 2 and nothing on stderr would read as blank here.
+    # Root on a udev-settled disk avoids it; the stderr merge above is the
+    # second guard, so the cheap test is enough.
+    B2B_IS_BLOCK "$dev" ||
+        die "$by_id is not blank: blkid -p found no signature but it is not a block device that can be read (rc 2); it may hold data, so it is not formatted -- reattach the disk and run this again"
+    return 0
 }
 
 ensure_xfsprogs() {

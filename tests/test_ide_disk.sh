@@ -83,6 +83,10 @@ calls() { cat "$TMP/calls"; }
         luksUUID) cat "$S/luks" 2>/dev/null ;;
         esac
     }
+    # No real block device exists here; B2B_IS_BLOCK is the seam for [ -b ].
+    # FAKE_BLOCK=0 models blkid -p's other rc=2 case: a path that is not a
+    # block device (missing, EACCES) -- which is never "blank".
+    B2B_IS_BLOCK() { [ "${FAKE_BLOCK:-1}" = 1 ]; }
     blkid() {
         case "$1" in
         -p)
@@ -109,6 +113,8 @@ calls() { cat "$TMP/calls"; }
     }
 }
 run() { (main "$@") >"$TMP/out" 2>&1 && echo 0 || echo $?; }
+# The same, for a function main's argument handling would not reach.
+run_refuse() { (refuse_unless_blank "$1") >"$TMP/out" 2>&1 && echo 0 || echo $?; }
 said() { grep -c -- "$1" "$TMP/out" || true; }
 
 # ── which disk ──────────────────────────────────────────────────────────────
@@ -187,13 +193,47 @@ reset_guest
 printf 'PTUUID="abcd" PTTYPE="gpt"\n' >"$S/signature"
 check "a partition table: refused" "$(run)" 1
 check "a partition table: names it" "$(said 'PTTYPE="gpt"')" 1
-check "a partition table: says how to wipe it, does not" "$(said "wipefs -a $DISK")" 1
+check "a partition table: wipefs names the by-id path, does not wipe" \
+    "$(said "wipefs -a $BY_ID/scsi-0QEMU_QEMU_HARDDISK_b2bide0001")" 1
+check "a partition table: no /dev/sd kernel name in the refusal" \
+    "$(grep -c '/dev/sd' "$TMP/out" || true)" 0
 check "a partition table: nothing formatted" "$(grep -c -e luksFormat -e mkfs "$TMP/calls" || true)" 0
 check "a partition table: no key made" "$([ -e "$KEY" ] && echo made || echo none)" none
 rm -f "$S/signature"
 printf '%s\n' "$LUKS_UUID" >"$S/luks"
 check "LUKS, crypttab without ide_crypt: refused" "$(run)" 1
 check "LUKS, crypttab without ide_crypt: nothing formatted" "$(grep -c luksFormat "$TMP/calls" || true)" 0
+
+# ── blkid's rc 2 is not proof of blank ──────────────────────────────────────
+# blkid -p exits 2 both for "no signature found" (blank -- what we want) and
+# for "cannot open the device" (a missing path, EACCES): measured on
+# util-linux 2.39.3, both give rc 2, so rc 2 alone used to mean "blank" and
+# luksFormat ran on a disk blkid could not even read. A disk blkid cannot open
+# must never be formatted.
+reset_guest
+FAKE_BLOCK=0
+check "rc 2 but not a block device: refused" "$(run)" 1
+check "rc 2 but not a block device: says it is not blank" "$(said 'not blank')" 1
+check "rc 2 but not a block device: no luksFormat" "$(grep -c luksFormat "$TMP/calls" || true)" 0
+check "rc 2 but not a block device: names it by its by-id path" \
+    "$(said "$BY_ID/scsi-0QEMU_QEMU_HARDDISK_b2bide0001 is not blank")" 1
+check "rc 2 but not a block device: no /dev/sd kernel name in the refusal" \
+    "$(grep -c '/dev/sd' "$TMP/out" || true)" 0
+FAKE_BLOCK=1
+
+# ── the refusable by-id name, never the kernel's ─────────────────────────────
+# The by-id link can vanish between ide_disks() and the refusal (udev still
+# settling, the disk detached mid-run). There is then no stable name to give
+# the operator, and the kernel's letter this boot is the one thing a refusal
+# must not print: that disk is refused, not named.
+: >"$TMP/out"
+rm -f "$BY_ID"/*
+check "no by-id name left: refused" "$(run_refuse "$DISK")" 1
+check "no by-id name left: says it cannot name the disk" "$(said 'cannot name stably')" 1
+check "no by-id name left: no /dev/sd kernel name anywhere" \
+    "$(grep -c '/dev/sd' "$TMP/out" || true)" 0
+check "no by-id name left: no luksFormat" "$(grep -c luksFormat "$TMP/calls" || true)" 0
+rm -f "$S/luks"
 
 # ── the key, fstab, the mount ───────────────────────────────────────────────
 reset_guest
