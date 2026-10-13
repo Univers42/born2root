@@ -254,6 +254,12 @@ GROUPS_ENABLED                  = "true"
 INVITES_ENABLED                 = "true"
 USER_PUBKEYS_ENABLED            = "true"
 
+# baas was a user service of the seat's login: up at boot, stopped gracefully
+# at shutdown, its backup pulled hourly. `make all` sets that up again (make
+# autostart); linger and the kvm group need root and are printed, not done.
+[host]
+autostart = true
+
 [disk]
 swap_mb = "auto"
 volumes = [
