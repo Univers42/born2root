@@ -56,6 +56,9 @@ import re
 import subprocess
 import sys
 
+# utils/, sys.path[0] when this runs as a script, which is how every caller runs it.
+import host_path
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CONFIG = os.environ.get("B2B_CONFIG") or os.path.join(ROOT, "born2root.toml")
@@ -108,7 +111,8 @@ DEFAULTS = {
         # max tier fills ~16 GB immediately and grows with every engine's
         # volumes. An explicit VM_PATH= on the command line still wins, and
         # disk_images/.vm_path.<vm> still remembers the last one used, so a
-        # VM that already exists is never orphaned by editing this.
+        # VM that already exists is never orphaned by editing this. A list is
+        # tried in order (utils/host_path.py): one profile, several seats.
         "path": "",
         "disk_gb": 15,
         # GiB of a second disk, <name>-ide.qcow2, for the osionos IDE
@@ -160,6 +164,7 @@ DEFAULTS = {
     # datacenter` died at its last step on a personal machine (2026-09-24).
     # "" keeps that campus default; set it to a path on a disk that is not
     # the VM's own, which is the only thing that makes the copy worth taking.
+    # A list is tried in order, like vm.path.
     "dc": {"cors_origins": [], "package": "auto", "backup_dest": ""},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
@@ -963,7 +968,8 @@ class Validator:
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
 
     def _abs_path(self, where, value):
-        """A host path that is empty (keep the default) or absolute.
+        """A host path, or a list of them, each absolute once $HOME is
+        expanded; empty keeps the default.
 
         Relative would resolve against whatever directory the caller happened
         to be in -- make runs these scripts from the repo root, the systemd
@@ -973,10 +979,14 @@ class Validator:
         """
         if value in (None, ""):
             return
-        if not isinstance(value, str):
-            self.err(where, "%r is not a path" % (value,))
-        elif not value.startswith("/"):
-            self.err(where, "%r is not absolute (it must start with /)" % (value,))
+        entries = value if isinstance(value, list) else [value]
+        for index, entry in enumerate(entries):
+            name = "%s[%d]" % (where, index) if isinstance(value, list) else where
+            if not isinstance(entry, str) or not entry:
+                self.err(name, "%r is not a path" % (entry,))
+            elif not host_path.expand(entry).startswith("/"):
+                why = "is not absolute (it must start with / or $HOME)"
+                self.err(name, "%r %s" % (entry, why))
 
     # [network] forwards is the whole port list: every NAT rule both backends
     # create and every port the guest's firewall opens, so it must carry SSH.
@@ -1159,6 +1169,12 @@ def sh_hash(password):
     return out.stdout.strip()
 
 
+def _host_path(value):
+    """A host-path knob -- one path or a list -- resolved on this host."""
+    entries = value if isinstance(value, list) else [value]
+    return host_path.resolve([e for e in entries if isinstance(e, str)])
+
+
 LEGACY = {
     "B2B_LOGIN": lambda c: c.login,
     "B2B_HOSTNAME": lambda c: c.hostname,
@@ -1180,7 +1196,7 @@ LEGACY = {
     "B2B_VM_NAME": lambda c: c.vm.get("name") or "",
     # Host-side only, both of these: the guest has no use for a host path, and
     # build.conf is sourced in the guest, so they stay out of the guest view.
-    "B2B_VM_PATH": lambda c: c.vm.get("path") or "",
+    "B2B_VM_PATH": lambda c: _host_path(c.vm.get("path")),
     "B2B_BACKEND": lambda c: c.vm.get("backend") or "",
     "B2B_PROFILE": lambda c: c.vm.get("profile") or "",
     "B2B_AI_MODE": lambda c: c.vm.get("ai_mode") or "",
@@ -1206,7 +1222,7 @@ LEGACY = {
         o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)
     ),
     "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
-    "B2B_DC_BACKUP_DEST": lambda c: c.dc.get("backup_dest") or "",
+    "B2B_DC_BACKUP_DEST": lambda c: _host_path(c.dc.get("backup_dest")),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],

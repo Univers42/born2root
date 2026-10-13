@@ -62,14 +62,13 @@
 [vm]
 name    = "baas"
 backend = "qemu"
-# The 1 TB disk, not the 98 GB one the repo sits on: a max-tier datacenter is
-# ~16 GB the moment it boots and keeps growing as the engines fill /var, and
-# `make space` counts the repo tree, not this. Empty would mean disk_images/
-# inside the repo. An existing VM is NOT moved by editing this -- the registry
-# at disk_images/.vm_path.baas wins so a built guest is never orphaned -- so
-# relocate one with `make all VM_PATH=…` or by moving the directory and that
-# file together. This is where that registry says baas lives.
-path    = "/mnt/storage/virtual_machines"
+# Tried in order, the first that exists and is writable wins (else the first
+# that can be created): the 1 TB disk of the seat that built baas, then a 42
+# seat's /goinfre, then home. Never the repo's own disk_images/: a max-tier
+# datacenter is ~16 GB the moment it boots and grows as the engines fill /var.
+# An existing VM is NOT moved by editing this -- disk_images/.vm_path.baas
+# wins so a built guest is never orphaned; `make all VM_PATH=…` relocates.
+path    = ["/mnt/storage/virtual_machines", "/goinfre/$USER/virtual_machines", "$HOME/virtual_machines"]
 # Editing disk_gb does not resize an existing VM (the header says what does).
 disk_gb = 120
 ide_disk_gb = 40
@@ -203,14 +202,12 @@ forwards = [
 # expected" probe stays meaningful.
 [dc]
 cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
-# backup_dest: where the copy has lived since 2026-10-07, on /mnt/storage
-# (nvme1n1, 451 GB free) because nothing of the datacenter goes in /home (the
-# ubuntu-vg volume on the other NVMe, 60 GB free). That is the disk the guest
-# lives on too, so the copy survives a broken guest, not a dead nvme1n1: the
-# next tier is a USB disk or a remote (backup_pull.sh). The shipped default is
-# a 42 campus /sgoinfre path that does not exist on a personal machine.
-# Absolute paths only.
-backup_dest = "/mnt/storage/b2b-backups/baas"
+# backup_dest: where `make backup` copies the restic repository, tried in
+# order like vm.path. On the seat that built baas it is /mnt/storage, the disk
+# the guest lives on too, so the copy survives a broken guest, not a dead
+# disk: the next tier is a USB disk or a remote (backup_pull.sh). At school,
+# carry the repository in and put it at the first entry that exists there.
+backup_dest = ["/mnt/storage/b2b-backups/baas", "/goinfre/$USER/b2b-backups/baas", "$HOME/b2b-backups/baas"]
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"

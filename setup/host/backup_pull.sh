@@ -40,12 +40,14 @@ set -u
 # datacenter` looked under students/, so the rebuild path never found the copy
 # `make backup` had made; a copy at the old path is still the one used when
 # there is none at the new one.
-DEST="${BACKUP_DEST:-$(b2b_get B2B_DC_BACKUP_DEST)}"
-# $USER and ${USER} are the host login, the same rule ai.models_dir follows, so
-# a tracked profile can point at a home directory without naming anybody.
+# $USER/$HOME expand, and a list resolves, by the one rule the profile's paths
+# follow (utils/host_path.py), so BACKUP_DEST='/media/$USER/b' works too.
+if [ -n "${BACKUP_DEST:-}" ]; then
+    DEST=$(b2b_host_path "$BACKUP_DEST")
+else
+    DEST=$(b2b_get B2B_DC_BACKUP_DEST)
+fi
 _login=$(id -un)
-DEST=${DEST//\$\{USER\}/$_login}
-DEST=${DEST//\$USER/$_login}
 if [ -z "$DEST" ]; then
     DEST="/sgoinfre/students/$_login/b2b-backups/$VM_NAME"
     legacy_dest="/sgoinfre/$_login/b2b-backups/$VM_NAME"

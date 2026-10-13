@@ -35,6 +35,8 @@
 #   utils/b2b_config.sh --shadow           "name:$6$..." per extra account
 #   utils/b2b_config.sh --ssh-keys         "name key..." lines
 #   utils/b2b_config.sh --render FILE      FILE with every @B2B_KEY@ filled in
+#   utils/b2b_config.sh --host-path V...   one host path: $USER/$HOME expanded,
+#                                          a list resolved to the first usable
 #
 # Env: B2B_CONFIG (born2root.toml at the repo root) -- the tests point it at
 # fixtures; VM_PASS (beats system.luks_passphrase, for the preseed and for the
@@ -106,12 +108,14 @@ b2b_shadow() { _b2b_py --shadow; }
 b2b_ssh_keys() { _b2b_py --ssh-keys; }
 b2b_render() { _b2b_py --render "$1"; }
 b2b_set_ai() { _b2b_py --set-ai "$1" "$2"; }
+# A host path given by hand (BACKUP_DEST=...) read with the profile's rules.
+b2b_host_path() { python3 "$B2B_ROOT/utils/host_path.py" "$@"; }
 
 _b2b_usage() {
     cat >&2 <<EOF
 usage: $0 get KEY | --check | --parses | --show | --dump | --volumes
        | --guest | --users | --shadow | --ssh-keys | --render FILE
-       | --set-ai KEY JSON
+       | --set-ai KEY JSON | --host-path VALUE...
        (env: B2B_CONFIG=path/to/born2root.toml, VM_PASS)
 EOF
 }
@@ -135,6 +139,10 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     --ssh-keys) b2b_ssh_keys ;;
     --render) b2b_render "${2:-}" ;;
     --set-ai) b2b_set_ai "${2:-}" "${3:-}" ;;
+    --host-path)
+        shift
+        b2b_host_path "$@"
+        ;;
     *)
         _b2b_usage
         exit 2
