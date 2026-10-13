@@ -9,7 +9,8 @@
 #                 bonus off, and it fits.
 #   server.toml   backend only at 120 GB: no nvim, docker on, every dc-* row
 #                 on (the max tier's add-ons included), 14 GiB of RAM, a
-#                 40 GB IDE disk, and it fits with /var holding the engines.
+#                 40 GB IDE disk, both of baas's SSH keys, and it fits with
+#                 /var holding the engines.
 set -e
 
 cd "$(dirname "$0")/.."
@@ -75,6 +76,10 @@ check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
 check "server: ram_mb 14336" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_RAM_MB)" 14336
 check "server: an IDE disk of 40 GB" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_IDE_DISK_GB)" 40
+check "server: both authorized keys, from the profile alone" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --ssh-keys | grep -c '^dlesieur ssh-ed25519 ')" 2
+check "server: no editor user (no editor in the build)" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_NVIM_USERS)" ""
 
 # The reweight is the point of the server profile: /var must be the largest
 # volume by a margin, larger than at the shipped shares.

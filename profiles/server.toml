@@ -102,7 +102,13 @@ password = "tempuser123"
 fullname = ""
 sudo     = true
 groups   = ["docker"]
-ssh_keys = []
+# The two keys baas's authorized_keys held (2026-10-13 audit), so both
+# machines that reach it today reach the rebuilt one. Public keys: safe here.
+ssh_keys = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG+mTmZXgfPrUtf20VA/XqDO/4vAAIHwdTMauW6S8HDv dlesieur@dlesieur42",
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDpG2f3FkMoztyY5+MuqGPnJ3SwsTTJcNncEtPAuJH6x dlesieur@dlesieur",
+]
+# No editor in this build (features.nvim = false), so none for the login.
 nvim     = false
 
 [packages]
