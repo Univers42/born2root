@@ -129,7 +129,10 @@ fi
 vm_ssh() { "${SSH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@"; }
 # A pty turns every newline into CR-LF on the way back, which makes the output
 # look double-spaced and breaks anything downstream that matches line ends.
-vm_ssh_tty() { "${SSH_PREFIX[@]}" ssh "${SSH_TTY_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@" | tr -d '\r'; }
+# Line-buffered: behind the provisioners' `| tee`, tr's output is a pipe and
+# stdio holds it in 4 KB blocks -- three lines printed a second apart arrived
+# in the same second, and an operator who sees nothing presses Ctrl+C mid-step.
+vm_ssh_tty() { "${SSH_PREFIX[@]}" ssh "${SSH_TTY_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@" | stdbuf -oL tr -d '\r'; }
 vm_scp() { "${SSH_PREFIX[@]}" scp "${SCP_OPTS[@]}" "$@"; }
 
 # Run a privileged command in the VM.
@@ -290,6 +293,20 @@ key_fifo_open() {
 # A writer still waiting in open() is let go by a reader; then the directory goes.
 key_fifo_close() {
     [ -n "$KEY_DIR" ] || return 0
+    # KEY_DIR is whatever the guest's `mktemp -d /dev/shm/b2b-grow-root.XXXXXX`
+    # echoed, and the rm -rf below is built from it: a guest that answers a
+    # banner -- or an injection that reached the guest's stdout -- must not
+    # turn this into `rm -rf /`. The prefix is the one key_fifo_open asks for.
+    case "$KEY_DIR" in
+    /dev/shm/b2b-grow-root.?*) ;;
+    *)
+        # The feeder is let go first: no writer left behind on the way out.
+        # die names the value (and exits), so KEY_DIR is still set in it.
+        kill "$KEY_FEEDER" 2>/dev/null
+        wait "$KEY_FEEDER" 2>/dev/null
+        die "key_fifo_close: refusing to rm -rf invalid KEY_DIR='$KEY_DIR' (expected /dev/shm/b2b-grow-root.?*)"
+        ;;
+    esac
     vm_ssh "dd if='$KEY_DIR/key' of=/dev/null iflag=nonblock status=none 2>/dev/null; rm -rf '$KEY_DIR'" >/dev/null 2>&1 ||
         warn "could not remove $KEY_DIR in the guest (it holds no data: a FIFO keeps nothing)"
     kill "$KEY_FEEDER" 2>/dev/null
@@ -299,12 +316,21 @@ key_fifo_close() {
 # The guest saves the partition table before changing it and prints it between
 # markers; the copy that matters is the one off the guest, beside its disk.
 grow_root() {
-    local transcript rc saved vm_dir="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME"
+    local rc saved vm_dir="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME"
+    # Global, not local: the EXIT trap below outlives this function, and a
+    # local is unbound (set -u) by the time the trap runs on the normal path.
     transcript=$(mktemp) || die "mktemp failed"
+    # The transcript comes off every way out: success, guest_script failure,
+    # grow_root.sh non-zero. This trap replaces the script's askpass one, so
+    # cleanup_askpass stays in both modes, and runs BEFORE key_fifo_close: that
+    # one dies on a KEY_DIR the guest lied about, and a die inside the trap
+    # would skip whatever came after it -- the password file on the VM.
     if [ "${GROW_ROOT_APPLY:-0}" = 1 ]; then
         # Closed on every way out, the dies included.
-        trap 'key_fifo_close; cleanup_askpass' EXIT
+        trap 'rm -f "$transcript"; cleanup_askpass; key_fifo_close' EXIT
         key_fifo_open
+    else
+        trap 'rm -f "$transcript"; cleanup_askpass' EXIT
     fi
     guest_script setup/install/dc/grow_root.sh grow_root.sh GROW_ROOT_ "grow_root.sh" "$transcript"
     rc=$?
@@ -313,7 +339,6 @@ grow_root() {
     0) ok "the partition table before the change, off the guest: $saved" ;;
     2) warn "could not write the partition table's copy under $vm_dir; the guest keeps one in /var/backups/b2b" ;;
     esac
-    rm -f "$transcript"
     [ "$rc" -eq 0 ] || die "grow_root.sh exited $rc -- read its output above"
 }
 
