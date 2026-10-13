@@ -1,0 +1,10 @@
+/dev/mapper/sda5_crypt is active and is in use.
+  type:    LUKS2
+  cipher:  aes-xts-plain64
+  keysize: 512 bits
+  key location: keyring
+  device:  /dev/sda5
+  sector size:  512
+  offset:  32768 sectors
+  size:    166756352 sectors
+  mode:    read/write
