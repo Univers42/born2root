@@ -385,8 +385,15 @@ class Config:
     def is_first(self, user):
         return bool(self.users) and user is self.users[0]
 
+    def gets_editor(self, user):
+        """Every account that asked; the login unless it said nvim = false,
+        which --check allows only in a build with no editor at all."""
+        if user is self.users[0]:
+            return not ("nvim" in user["given"] and user.get("nvim") is False)
+        return bool(user.get("nvim"))
+
     def nvim_users(self):
-        return [u["name"] for u in self.users if u is self.users[0] or u.get("nvim")]
+        return [u["name"] for u in self.users if self.gets_editor(u)]
 
     def groups_of(self, user):
         """Every group but the primary one: user42 always, sudo when asked."""
@@ -1536,7 +1543,7 @@ def show(config):
                 user["name"] + ("*" if config.is_first(user) else ""),
                 state,
                 "yes" if user.get("sudo") or config.is_first(user) else "no",
-                "yes" if user.get("nvim") or config.is_first(user) else "no",
+                "yes" if config.gets_editor(user) else "no",
                 ",".join(config.groups_of(user)),
                 len(user.get("ssh_keys") or []),
             )

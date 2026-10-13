@@ -302,6 +302,16 @@ refuse "turning a base feature off" features.devtools-apt \
 # toml may set: both used to be refusals.
 check "turning nvim (core) off is accepted" \
     "$(rc_of "$(variant "core$$" 's/^docker         = "auto"/nvim = false/')" --check)" 0
+# A build without the editor: the login gets none either when it says so, and
+# keeps the implicit "yes" when it says nothing (verify_guest and the space
+# budget read B2B_NVIM_USERS, and would look for an editor nobody installed).
+NO_EDITOR=$(variant "noeditor$$" 's/^docker         = "auto"/nvim = false/' 's/^nvim     = true/nvim     = false/')
+check "features.nvim and the login's nvim false: valid" "$(rc_of "$NO_EDITOR" --check)" 0
+check "  B2B_NVIM_USERS leaves the login out" "$(get_of "$NO_EDITOR" B2B_NVIM_USERS)" ""
+check "  --show says no editor for the login" \
+    "$(env B2B_CONFIG="$NO_EDITOR" "${CFG[@]}" --show | grep -cE '^ +dlesieur\* +set +yes +no ')" 1
+check "the login with no nvim key: still the editor user" \
+    "$(get_of "$(variant "implicit$$" '/^nvim     = true/d')" B2B_NVIM_USERS)" dlesieur
 check "a bundle name is accepted in [features]" \
     "$(rc_of "$(variant "bundle$$" 's/^docker         = "auto"/dc-full = true/')" --check)" 0
 refuse "turning hellish off" features.hellish \
