@@ -29,7 +29,17 @@ check() {
 }
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# A feeder whose FIFO was never opened is still waiting: killed by its pid.
+cleanup() {
+    local p
+    if [ -f "$TMP/feeders" ]; then
+        while read -r p; do
+            kill "$p" 2>/dev/null || true
+        done <"$TMP/feeders"
+    fi
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
 FIX=tests/fixtures/grow_root
 STATUS=$(cat "$FIX/cryptsetup-status.txt")
 DUMP80=$(cat "$FIX/sfdisk-80g.dump")
@@ -173,6 +183,7 @@ feed() { # <passphrase> -> GROW_ROOT_KEY_FIFO, fed in the background
     rm -f "$TMP/key.fifo"
     mkfifo "$TMP/key.fifo"
     printf '%s' "$1" | timeout 20 dd of="$TMP/key.fifo" conv=nocreat,notrunc status=none >/dev/null 2>&1 &
+    printf '%s\n' "$!" >>"$TMP/feeders"
     export GROW_ROOT_KEY_FIFO="$TMP/key.fifo"
 }
 feed wrong-passphrase
@@ -257,4 +268,6 @@ fi
 
 printf '\n'
 [ "$fail" = 0 ] && printf 'all ok\n'
+cleanup
+trap - EXIT
 exit "$fail"

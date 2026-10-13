@@ -28,13 +28,35 @@ check() {
 
 TMP=$(mktemp -d)
 GUEST="$TMP/guest"
-trap 'pkill -f "$GUEST/shm" 2>/dev/null || true; rm -rf "$TMP"' EXIT
+# Every fake ssh records its pid (it execs, so the pid is whatever it runs).
+# One still running something under $GUEST after provision_vm.sh returned is
+# a writer left behind; the cmdline check keeps a reused pid out of it.
+alive_fakes() { # [--kill] -> how many
+    local p n=0
+    while read -r p; do
+        case "$(awk '{ print $3 }' "/proc/$p/stat" 2>/dev/null)" in '' | Z) continue ;; esac
+        case "$(tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null)" in *"$GUEST"*) ;; *) continue ;; esac
+        n=$((n + 1))
+        if [ "${1:-}" = --kill ]; then
+            kill "$p" 2>/dev/null || true
+        fi
+    done <"$GUEST/ssh.pids"
+    echo "$n"
+}
+cleanup() {
+    if [ -f "$GUEST/ssh.pids" ]; then
+        alive_fakes --kill >/dev/null
+    fi
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
 mkdir -p "$TMP/bin" "$GUEST/tmp" "$GUEST/shm" "$TMP/vm/t-grow"
 printf 'ssh=4242\n' >"$TMP/vm/t-grow/ports.env"
 
 cat >"$TMP/bin/ssh" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >>"$GUEST/ssh.argv"
+printf '%s\n' "$$" >>"$GUEST/ssh.pids"
 while [ $# -gt 0 ]; do
     case "$1" in
     -o | -p) shift 2 ;;
@@ -82,7 +104,6 @@ grow_root() { # <apply> <reads key> <prints dump> <guest rc> -> rc
         echo 0 || echo $?
 }
 leftovers() { find "$GUEST/shm" -mindepth 1 | grep -c . || true; }
-writers() { pgrep -fc "$GUEST/shm" || true; }
 
 check "dry run: 0" "$(grow_root '' 0 0 0)" 0
 check "dry run: no FIFO made" "$(grep -c 'mktemp -d /dev/shm/' "$GUEST/ssh.argv" || true)" 0
@@ -97,11 +118,11 @@ check "apply: on no ssh command line" "$(grep -cF -- "$PASS" "$GUEST/ssh.argv" |
 check "apply: not in the output" "$(grep -cF -- "$PASS" "$TMP/out" || true)" 0
 check "apply: the table's copy beside the disk" "$(cmp -s tests/fixtures/grow_root/sfdisk-80g.dump "$TMP/vm/t-grow/sfdisk-20261013T120000.dump" && echo same)" same
 check "apply: the FIFO is gone" "$(leftovers)" 0
-check "apply: no writer left" "$(writers)" 0
+check "apply: no writer left" "$(alive_fakes)" 0
 
 check "apply, key never read: 0, no hang" "$(grow_root 1 0 0 0)" 0
 check "apply, key never read: the FIFO is gone" "$(leftovers)" 0
-check "apply, key never read: no writer left" "$(writers)" 0
+check "apply, key never read: no writer left" "$(alive_fakes)" 0
 
 check "apply, the guest script fails: 1" "$(grow_root 1 1 0 4)" 1
 check "apply, the guest script fails: says so" "$(grep -c 'grow_root.sh exited 4' "$TMP/out")" 1
@@ -109,4 +130,6 @@ check "apply, the guest script fails: the FIFO is gone" "$(leftovers)" 0
 
 printf '\n'
 [ "$fail" = 0 ] && printf 'all ok\n'
+cleanup
+trap - EXIT
 exit "$fail"
