@@ -12,8 +12,8 @@
 #                 40 GB IDE disk, both of baas's SSH keys, baas's grobase
 #                 commit and hand-set grobase keys (none of them a secret,
 #                 neither REMOTE_ACCESS nor CATALOG_MANAGEMENT, as live), its
-#                 tailnet name and funnel, and it fits with /var holding the
-#                 engines.
+#                 tailnet name and funnel, only the ports baas serves, and it
+#                 fits with /var holding the engines.
 set -e
 
 cd "$(dirname "$0")/.."
@@ -88,6 +88,8 @@ check "server: grobase at baas's commit" \
     "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_REF=//p')" dab5f43060aab2914183173c91dc7a39a7aab9f6
 check "server: baas's hand-set grobase keys, DynamoDB data plane included" \
     "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_ENV_DATA_PLANE_FEATURES=//p')" '"--features dynamodb"'
+check "server: the guest's firewall opens exactly what baas serves (ssh, the WAF)" \
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_FIREWALL)" "ssh:4242 http:8880 https:8443"
 check "server: the tailnet name baas has (kong.yml, cert SANs, origins name it)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_TAILNET_HOSTNAME)" dlesieur42-1
 check "server: the funnel opened, as on baas" \

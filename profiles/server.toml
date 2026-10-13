@@ -5,24 +5,26 @@
 # Same schema as born2root.toml (utils/b2b_config.py reads both; the shipped
 # file's comments explain every key). What differs, and why:
 #
-#   [features]   nvim and the whole workstation set are OFF, dc-full is ON.
-#                A server has no editor; what it has is Kong, the identity
-#                plane, seven engines, object storage, observability, a
-#                backup job, the /var garbage collector, Tailscale and
-#                cloudflared. `make packages FEATURE=dc-full` lists what
-#                that pulls. Frontends (groot, osionos, transcendence) live
-#                on the host and talk to the gateway.
+#   [features]   No editor: nvim, its extras, webstack, pytools and
+#                playwright are off. nodejs, devtools-extra and claude-code
+#                stay on, as baas had them (2026-10-13 features.status).
+#                dc-full is ON: Kong and the WAF, the identity plane, every
+#                dc-db-* engine, realtime, vault, object storage,
+#                observability, restic, Tailscale and cloudflared (the
+#                BUNDLES in generate/feature_profile.sh), plus graph_render's
+#                motor. `make packages FEATURE=dc-full` lists what that
+#                pulls. Frontends (groot, osionos, transcendence) live on the
+#                host and talk to the gateway.
 #
-#   [disk]       120 GB, and / and /home give up share, /var takes it. The
-#                workstation image spent 11 GB on / and 6.4 GB on /home at
-#                44 GB for nvim, npm caches and VS Code servers; without
-#                them / needs 2 GB (5.5 GiB here) and /home only holds its
-#                floor, 1 GB for the VS Code and Inception reservations.
-#                /var is the `rest` volume, so every point of share they
-#                release lands where Docker, the engines and their data
-#                live: 94 GiB of 120, for 16.3 GB the dc-full set needs.
-#                Measured layout:
-#                `make partitions B2B_CONFIG=profiles/server.toml SIZE_B2B=120`.
+#   [disk]       120 GB, and / and /home give up share, /var takes it. / is
+#                charged 2524 MB without the editor (5.5 GiB here), /home
+#                701 MB: the VS Code and Inception reservations (its volume
+#                says why the floor is 2 GB anyway). /var is the `rest`
+#                volume, so every point of share they release lands where
+#                Docker, the engines and their data live: 94 GiB of 120,
+#                for the 16417 MB the dc rows are charged. Measured, both
+#                with B2B_CONFIG=profiles/server.toml SIZE_B2B=120:
+#                `make features` (the charges), `make partitions` (the layout).
 #                vm.disk_gb sizes a NEW build. An existing VM is grown in
 #                place, offline: qemu_vm.sh grow-disk, then make grow_root
 #                (the window, in order, is in grow_root.sh's header).
@@ -48,7 +50,8 @@
 #                scripts/service.sh). 14 GiB holds both; a fully touched
 #                guest still leaves this host 17593 MB (31929 - 14336, before
 #                QEMU's own overhead). qemu_vm.sh refuses a value above the
-#                host's RAM: a smaller seat lowers it here.
+#                host's RAM: a smaller seat lowers it here. A school seat's
+#                RAM is not measured yet (doc/rebuild-baas-at-school.md).
 #
 #   [vm] ide_disk_gb 40, not 0: the osionos IDE sandbox's own disk. First
 #                boot makes it ide_crypt, XFS with prjquota at
@@ -56,8 +59,23 @@
 #                the quotas that cap a sandbox's layers need XFS, and a
 #                sandbox that fills its disk does not fill /var with it.
 #
-# Everything else is the shipped default. Credentials are the temporary
-# ones; change them here as in born2root.toml.
+#   [network]    ssh and grobase's WAF, the only ports baas listens on
+#                outside its loopback. A guest that is already running keeps
+#                every UFW rule an older profile opened: `make firewall`
+#                deletes those (setup/host/firewall_guest.sh).
+#
+#   [dc]         the grobase commit baas runs, the grobase keys it had set
+#                by hand, its tailnet name and Funnel, the secrets file and
+#                where backups land. With the carried restic repository,
+#                `make datacenter` brings baas's platform back from these
+#                (doc/rebuild-baas-at-school.md).
+#
+#   [host]       autostart: `make all` makes the VM a user service of the
+#                host's login, with an hourly backup pull (make autostart).
+#
+# Everything else is born2root.toml's default, credentials included: the
+# temporary ones, changed in the guest (`passwd`) after the build. They
+# expire after [policy.password] max_days.
 
 [vm]
 name    = "baas"
@@ -115,7 +133,7 @@ nvim     = false
 apt = []
 
 [features]
-# workstation: off
+# workstation: no editor; node, the extra dev tools and Claude Code, as baas had
 nvim           = false
 nvim-extras    = false
 webstack       = false
@@ -123,19 +141,18 @@ nodejs         = true
 pytools        = false
 devtools-extra = true
 claude-code    = true
-# The browser the agents drive. Off here for the same reason as the rows above:
-# a server image has no editor and no agent, and the feature is `full` tier, so
-# leaving it to size would switch on 700 MB of chromium for a machine that will
-# never call it -- and it requires devtools-extra, which is off here. A host that
-# does want agents on its server image asks by name: FEATURES="+playwright".
+# The browser the agents drive: off. The feature is `full` tier, so leaving it
+# to size would switch on 700 MB of chromium on a server nothing browses from.
+# A host that wants it asks by name: FEATURES="+playwright".
 playwright     = false
 # the machine
 docker         = true
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
-# Not on a 7.6 GB seat: these are the max tier's add-ons (engines: mssql with a
-# 2 GB cap, cockroach; observability: loki, prometheus, grafana). Together
-# grobase measures max at 3128 MiB idle and asks 6 GB / 8 vCPU.
+# The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
+# observability: loki, prometheus, grafana). dc-full already holds all three;
+# they are named so the cost stays in sight: grobase measures max at 3128 MiB
+# idle and asks 6 GB / 8 vCPU; ram_mb above covers the 6 GB.
 dc-db-cockroach  = true
 dc-db-mssql      = true
 dc-observability = true
@@ -165,47 +182,28 @@ password_login = true
 interval_min = 10
 
 [network]
-# No forward for groot's frontends (website 4322, osionos 3001/3002/3003, the
-# bridges 4000/4100/4200, auth-gateway 8787): they run on the HOST against this
-# guest's grobase (groot: make link, over the ssh entry), and a hostfwd here
-# would hold the host port each of them must bind. None for Kong 8000, its
-# admin 8001 or Mailpit 8025 either: they bind the guest's loopback, which a
-# hostfwd never reaches (it targets the NIC), so those entries only squatted
-# the ports a grobase running on the host publishes. Removed 2026-10-08.
+# What baas serves, nothing else: each entry is a QEMU hostfwd on the host's
+# 127.0.0.1 (qemu_vm.sh reads this list at every start) and a UFW rule in the
+# guest. On 2026-10-13 baas listened outside its loopback and tailscale0 on
+# 4242, 8880 and 8443 only (ss -ltnH); Kong 8000, the engines (3306, 6379,
+# 5432, 27017, ...), realtime and mailpit bind the guest's loopback, which a
+# hostfwd never reaches -- reach them over ssh. The Inception set (8090,
+# 8080, 21, 21000-21010), 5000, 3306, 6379, 5173, 3000 and 18200 were
+# removed then: nothing answered them where a hostfwd arrives, and each held
+# a host port. groot's frontends (website 4322, osionos 3001-3003, the
+# bridges 4000/4100/4200, auth-gateway 8787) run on the HOST against this
+# guest's grobase (groot: make link, over ssh), so they get no forward
+# either.
 forwards = [
-  { name = "ssh",                      guest = 4242,  host = 4242  },
-  # http/https target the grobase WAF, which binds the guest's 0.0.0.0:8880 and :8443.
-  # Nothing listens on the guest's 80/443 (measured 2026-10-10: ss -ltn shows only
-  # 8443/8880), so the old 80/443 rules connected, died, and squatted 8082/8443 on
-  # the host. Kong 8000, redis, realtime, mailpit bind the guest loopback: ssh only.
-  { name = "http",                     guest = 8880,  host = 8082  },
-  { name = "https",                    guest = 8443,  host = 8443  },
-  { name = "inception-static",         guest = 8090,  host = 8090  },
-  { name = "inception-adminer",        guest = 8080,  host = 8081  },
-  { name = "inception-ftp",            guest = 21,    host = 2121  },
-  { name = "inception-ftp-pasv-21000", guest = 21000, host = 21000 },
-  { name = "inception-ftp-pasv-21001", guest = 21001, host = 21001 },
-  { name = "inception-ftp-pasv-21002", guest = 21002, host = 21002 },
-  { name = "inception-ftp-pasv-21003", guest = 21003, host = 21003 },
-  { name = "inception-ftp-pasv-21004", guest = 21004, host = 21004 },
-  { name = "inception-ftp-pasv-21005", guest = 21005, host = 21005 },
-  { name = "inception-ftp-pasv-21006", guest = 21006, host = 21006 },
-  { name = "inception-ftp-pasv-21007", guest = 21007, host = 21007 },
-  { name = "inception-ftp-pasv-21008", guest = 21008, host = 21008 },
-  { name = "inception-ftp-pasv-21009", guest = 21009, host = 21009 },
-  { name = "inception-ftp-pasv-21010", guest = 21010, host = 21010 },
-  { name = "docker",                   guest = 5000,  host = 5000  },
-  { name = "mariadb",                  guest = 3306,  host = 3306  },
-  { name = "redis",                    guest = 6379,  host = 6379  },
-  { name = "frontend",                 guest = 5173,  host = 5173  },
-  { name = "backend",                  guest = 3000,  host = 3000  },
-  { name = "vault",                    guest = 18200, host = 18200 },
+  { name = "ssh",   guest = 4242, host = 4242 },
+  # grobase's WAF, on the guest's 0.0.0.0:8880 and :8443.
+  { name = "http",  guest = 8880, host = 8082 },
+  { name = "https", guest = 8443, host = 8443 },
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──
-# cors_origins: the Laboratory bench on :5180 (5173 is QEMU's own forward);
-# its hostile origin (:5181) is deliberately absent, so the "blocked as
-# expected" probe stays meaningful.
+# cors_origins: the Laboratory bench on :5180; its hostile origin (:5181) is
+# deliberately absent, so the "blocked as expected" probe stays meaningful.
 [dc]
 cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
 # backup_dest: where `make backup` copies the restic repository, tried in
@@ -264,8 +262,9 @@ autostart = true
 swap_mb = "auto"
 volumes = [
   { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
-  # 2048, not 1024: with the editor rows on, nvim, node and claude-code put
-  # ~1.2 GB in /home, and share = 0 means the floor is all it ever gets.
+  # 2048, not 1024: share = 0 means the floor is all /home ever gets. It is
+  # charged 701 MB (make features), and baas, built with the editor on, used
+  # 687 MB of its 1.9 GiB (2026-10-13, df).
   { name = "home",    mount = "/home",    floor_mb = 2048, share = 0,      cap_mb = 102400 },
   { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },
   { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
