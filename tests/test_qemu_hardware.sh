@@ -157,6 +157,13 @@ check_lacks "installer: no hd1 even with the key and the file" "$line" "id=hd1"
 B2B_VM_IDE_DISK_GB=0
 line=$(run_launch disk)
 check_lacks "key 0: no hd1 even with the file" "$line" "id=hd1"
+# Test the warning for key 0 with file present
+rm -f "$TMP/warnings"
+# shellcheck disable=SC2317,SC2329 # warn is overridden and called indirectly via launch
+warn() { printf '%s\n' "$*" >>"$TMP/warnings"; }
+(launch disk) >/dev/null 2>&1 || true
+check_has "key 0, file present: warns about missing B2B_CONFIG" "$(cat "$TMP/warnings" 2>/dev/null)" "likely started without B2B_CONFIG"
+check_has "key 0, file present: warns about IDE disk not attached" "$(cat "$TMP/warnings" 2>/dev/null)" "the IDE disk will not be attached"
 rm -f "$VM_DIR/$VM_NAME-ide.qcow2"
 B2B_VM_IDE_DISK_GB=40
 line=$(run_launch disk)

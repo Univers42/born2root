@@ -49,7 +49,8 @@
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
 #                          GRACEFUL=1 STOP_ON_TIMEOUT=abort: never force it; exit 3 if still up
-#   qemu_vm.sh grow-disk N stopped guest only: qemu-img check, then resize to N GiB
+#   qemu_vm.sh grow-disk N stopped guest only: qemu-img check, compare against
+#                          COLD_COPY=<path> (must exist and be identical), then resize to N GiB
 #                          (an EXISTING VM only -- a fresh build is sized by
 #                          vm.disk_gb; the guest half is make grow_root)
 #   qemu_vm.sh ide-disk-create  stopped guest only: the IDE sandbox disk,
@@ -649,6 +650,12 @@ launch() {
                 -device "scsi-hd,drive=hd1,bus=scsi0.0,scsi-id=1,serial=b2bide0001"
             )
         fi
+    elif [ "$boot" = disk ] && [ -f "$IDE_DISK" ]; then
+        # Ponytail: one runbook step boots without the IDE disk on purpose (key 0
+        # with the file present). We warn but never refuse, because that step is
+        # deliberate. The likely cause is starting the VM without B2B_CONFIG, so
+        # born2root.toml's vm.ide_disk_gb=0 is read instead of the profile's value.
+        warn "vm.ide_disk_gb is ${B2B_VM_IDE_DISK_GB} but $IDE_DISK exists — likely started without B2B_CONFIG (the IDE disk will not be attached)"
     fi
     if [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
         disk_args=(
@@ -988,17 +995,29 @@ stop_guest() {
 # guest's own (setup/install/dc/grow_root.sh, `make grow_root`). qemu-img also
 # takes the image's write lock, so a guest running from another VM_PATH makes
 # it fail rather than corrupt anything. Sizes are GiB, as vm.disk_gb is.
+# A resize is refused without COLD_COPY, a copy qemu-img compare finds identical:
+# the risk ruling says never grow the disk without a cold copy, and only code
+# can make sure nobody skips it.
 qcow2_virtual_bytes() { # <image> -> its virtual size in bytes
     qemu-img info --output=json "$1" |
         python3 -c 'import json, sys; print(json.load(sys.stdin)["virtual-size"])'
 }
 grow_disk() {
-    local gb="$1" cur rc
+    local gb="$1" cur rc cold_copy
     case "$gb" in '' | *[!0-9]*) die "usage: $0 grow-disk <GiB>   (the new virtual size, larger than today's)" ;; esac
     is_running && die "running (pid $(qemu_pid)) — stop it first: GRACEFUL=1 STOP_ON_TIMEOUT=abort $0 stop"
     [ -f "$DISK" ] || die "no disk at $DISK"
+    cold_copy="${COLD_COPY:-}"
+    [ -n "$cold_copy" ] || die "COLD_COPY is not set — provide the path to a verified cold copy of the disk"
+    [ -f "$cold_copy" ] || die "COLD_COPY='$cold_copy' does not exist"
+    info "qemu-img compare $DISK $cold_copy"
+    qemu-img compare "$DISK" "$cold_copy"
+    rc=$?
+    [ "$rc" -eq 0 ] || die "qemu-img compare exited $rc: the cold copy differs from the disk (output above) — refusing to resize"
     cur=$(qcow2_virtual_bytes "$DISK") || die "qemu-img info could not read $DISK (in use by another QEMU?)"
-    [ $((gb * 1073741824)) -gt "$cur" ] ||
+    # Ponytail: $((10#$gb)) forces decimal even if the argument has leading zeros (0120 → 120, not octal).
+    # Without 10#, bash reads 0120 as octal 80; qemu-img reads it as decimal 120. 099 errors outright.
+    [ $((10#$gb * 1073741824)) -gt "$cur" ] ||
         die "${gb} GiB is not larger than the current $((cur / 1073741824)) GiB ($cur bytes)"
     info "qemu-img check $DISK"
     qemu-img check "$DISK"
@@ -1009,7 +1028,7 @@ grow_disk() {
     *) die "qemu-img check exited $rc: the image is not clean, refusing to resize it" ;;
     esac
     qemu-img resize "$DISK" "${gb}G" || die "qemu-img resize failed"
-    ok "$DISK: $((cur / 1073741824)) → ${gb} GiB virtual. In the guest: make grow_root (dry run), then APPLY=1"
+    ok "$DISK: $((cur / 1073741824)) → ${gb} GiB virtual (cold copy verified). In the guest: make grow_root (dry run), then APPLY=1"
 }
 
 # The IDE sandbox's disk, vm.ide_disk_gb GiB, next to the root disk. Refused

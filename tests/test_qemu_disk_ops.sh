@@ -51,6 +51,8 @@ rc_of() { ("$@") >"$TMP/out" 2>&1 && echo 0 || echo $?; }
 
 # ── grow-disk ───────────────────────────────────────────────────────────────
 qemu-img create -q -f qcow2 "$DISK" 1G
+COLD_COPY="$VM_DIR/cold.qcow2"
+qemu-img create -q -f qcow2 "$COLD_COPY" 1G
 
 # shellcheck disable=SC2329,SC2317 # called by grow_disk
 is_running() { return 0; }
@@ -59,6 +61,28 @@ check "running: the message says stop it first" "$(grep -c 'stop it first' "$TMP
 check "running: image untouched" "$(virtual_gib "$DISK")" 1
 
 # shellcheck disable=SC2329,SC2317
+is_running() { return 1; }
+check "no COLD_COPY: refused" "$(
+    unset COLD_COPY
+    rc_of grow_disk 2
+)" 1
+check "no COLD_COPY: image untouched" "$(virtual_gib "$DISK")" 1
+
+COLD_COPY="$VM_DIR/missing.qcow2"
+check "missing COLD_COPY: refused" "$(rc_of grow_disk 2)" 1
+check "missing COLD_COPY: image untouched" "$(virtual_gib "$DISK")" 1
+
+# A differing cold copy: write different data to it
+qemu-img create -q -f qcow2 "$VM_DIR/diff.qcow2" 1G
+# Write a pattern to make it differ
+printf 'different' | dd of="$VM_DIR/diff.qcow2" bs=1 count=9 conv=notrunc 2>/dev/null
+COLD_COPY="$VM_DIR/diff.qcow2"
+check "differing COLD_COPY: refused" "$(rc_of grow_disk 2)" 1
+check "differing COLD_COPY: image untouched" "$(virtual_gib "$DISK")" 1
+
+# Identical cold copy: recreate it from the original
+qemu-img create -q -f qcow2 "$COLD_COPY" 1G
+# shellcheck disable=SC2329,SC2317 # called by grow_disk
 is_running() { return 1; }
 check "not a number: refused" "$(rc_of grow_disk 2G)" 1
 check "the same size: refused" "$(rc_of grow_disk 1)" 1
@@ -79,6 +103,12 @@ check "a dirty check: image untouched" "$(virtual_gib "$DISK")" 1
 
 check "stopped, larger, clean: resized (0)" "$(rc_of grow_disk 2)" 0
 check "stopped, larger, clean: 2 GiB virtual" "$(virtual_gib "$DISK")" 2
+
+# Leading zeros in size: 0120 should be 120 decimal, not octal 80
+qemu-img create -q -f qcow2 "$DISK" 1G
+qemu-img create -q -f qcow2 "$COLD_COPY" 1G
+check "leading zeros 0120: resized to 120 GiB" "$(rc_of grow_disk 0120)" 0
+check "leading zeros 0120: 120 GiB virtual" "$(virtual_gib "$DISK")" 120
 
 # ── ide-disk-create ─────────────────────────────────────────────────────────
 # Refused with no size configured, while the guest runs, and over an existing

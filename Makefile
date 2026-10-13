@@ -469,6 +469,17 @@ qemu_install:
 		printf "    $(C_BOLD)make qemu_install FORCE_INSTALL=1$(C_RESET)  wipe it and install again\n\n"; \
 		exit 1; \
 	fi
+	@if [ "$(FORCE_INSTALL)" = "1" ]; then \
+		dir="$(VM_PATH)/$(VM_NAME)"; ide="$$dir/$(VM_NAME)-ide.qcow2"; \
+		if [ -f "$$ide" ]; then \
+			printf "$(C_YELLOW)⚠$(C_RESET) FORCE_INSTALL=1: the IDE sandbox disk $$ide exists.\n"; \
+			printf "    The old disk's LUKS key went with the old root, so first boot will\n"; \
+			printf "    refuse it as \"not blank\". Before the reinstall, either:\n"; \
+			printf "      wipe it:  qemu-img create -f qcow2 $$ide $(B2B_VM_IDE_DISK_GB)G\n"; \
+			printf "      or delete it:  rm -f $$ide\n"; \
+			printf "    then run make qemu_install FORCE_INSTALL=1 again.\n\n"; \
+		fi; \
+	fi
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh create
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh install
 
@@ -495,8 +506,9 @@ qemu_create:
 
 # Grow an EXISTING, stopped VM's root qcow2 to SIZE_GB GiB (the guest half is
 # grow_root). A fresh build takes its size from vm.disk_gb and needs neither.
+# COLD_COPY must be set to a verified cold copy of the disk (qemu-img compare exits 0).
 qemu_grow_disk:
-	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh grow-disk "$(SIZE_GB)"
+	@$(QEMU_ENV) COLD_COPY="$(COLD_COPY)" $(SCRIPT_SH) setup/host/qemu_vm.sh grow-disk "$(SIZE_GB)"
 
 # Add the IDE sandbox disk (vm.ide_disk_gb) to an EXISTING, stopped VM; a fresh
 # build gets it from qemu_create. The guest half is ide_disk.
