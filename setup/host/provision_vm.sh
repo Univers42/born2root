@@ -206,22 +206,34 @@ build_env() {
     printf '%s' "$out"
 }
 
-# run_provisioner <local script> <remote name> <env prefix> <label>
-run_provisioner() {
-    local src="$1" remote="$2" prefix="$3" label="$4"
+# guest_script <local script> <remote name> <env prefix> <label> [transcript]
+# Runs the script as root in the guest, output live and also copied to
+# <transcript>; returns the script's exit status.
+guest_script() {
+    local src="$1" remote="$2" prefix="$3" label="$4" transcript="${5:-/dev/null}" envs rc
     [ -f "$src" ] || die "$src not found"
 
     info "uploading $(basename "$src")"
     vm_scp "$src" "${VM_USER}@127.0.0.1:/tmp/${remote}" >/dev/null ||
         die "upload of $src failed"
 
-    local envs
     envs=$(build_env "$prefix")
     info "running ${label} inside the VM (this takes a while — output is live)"
-    vm_ssh_tty "chmod +x /tmp/${remote} && ${SUDO_CMD} env ${envs} bash /tmp/${remote}"
-    local rc=${PIPESTATUS[0]}
+    # With pipefail this is ssh's status, which is the script's, unless tee
+    # itself failed.
+    vm_ssh_tty "chmod +x /tmp/${remote} && ${SUDO_CMD} env ${envs} bash /tmp/${remote}" | tee "$transcript"
+    rc=$?
     vm_ssh "rm -f /tmp/${remote}" >/dev/null 2>&1 || true
-    [ "$rc" -eq 0 ] || warn "${label} exited ${rc} -- read the output above before trusting it"
+    return "$rc"
+}
+
+# run_provisioner <local script> <remote name> <env prefix> <label>
+# A failed provisioner is reported, not fatal: `all` goes on to the next one.
+run_provisioner() {
+    local rc
+    guest_script "$@"
+    rc=$?
+    [ "$rc" -eq 0 ] || warn "${4} exited ${rc} -- read the output above before trusting it"
 }
 
 show_health() {
