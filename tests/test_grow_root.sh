@@ -99,9 +99,25 @@ reset_guest() { # <disk GiB> <device> <key location>
     printf '20355\n' >"$S/pe_count"
     printf '20355\n' >"$S/pe_used"
     printf 'tempencrypt123' >"$S/key"
+    # The filesystem fills the LV; reset_guest starts from a consistent guest.
+    printf '%s\n' "$(($(cat "$S/pe_used") * 8192 * 512))" >"$S/fs_b"
 }
 # shellcheck disable=SC2329,SC2317 # stubs: grow_root.sh's functions call them
 {
+    # grow_root.sh bounds the parted call with `timeout 120`, and the real
+    # timeout is an external binary that cannot see a shell-function stub. So
+    # the stub lives here: it records the bound the script asked for, runs the
+    # command it was given, and passes 124 through as it.
+    timeout() { # <seconds> <cmd> ...
+        printf '%s\n' "timeout $*" >>"$TMP/bounding"
+        case "$1" in '' | *[!0-9]*)
+            printf 'stub timeout: not a number of seconds: %s\n' "$1" >&2
+            return 125
+            ;;
+        esac
+        shift
+        "$@"
+    }
     id() { echo 0; }
     blockdev() {
         case "$2" in
@@ -123,7 +139,7 @@ reset_guest() { # <disk GiB> <device> <key location>
             ;;
         esac
     }
-    parted() { # ---pretend-input-tty <disk> unit s resizepart <n> 100%
+    parted() { # timeout 120 ---pretend-input-tty <disk> unit s resizepart <n> 100%
         printf '%s\n' "parted $* <<$(cat)" >>"$TMP/mutations"
         local disk_s
         disk_s=$(cat "$S/disk_s")
@@ -139,6 +155,13 @@ reset_guest() { # <disk GiB> <device> <key location>
     }
     partx() {
         printf '%s\n' "partx $*" >>"$TMP/mutations"
+        # A counter file models a partx -u that fails: parted wrote the table,
+        # the kernel never heard about it.
+        if [ -e "$S/partx_fails" ]; then
+            n=$(cat "$S/partx_fails")
+            printf '%s\n' "$((n - 1))" >"$S/partx_fails"
+            [ "$n" -gt 0 ] && return 1
+        fi
         dump_field "$(cat "$S/dump")" "$(partition_disk "$(crypt_field device "$(cat "$S/status")")")5" size >"$S/part_s"
     }
     pvs() {
@@ -151,12 +174,24 @@ reset_guest() { # <disk GiB> <device> <key location>
         echo $((($(cat "$S/crypt_s") - 2048) / 8192)) >"$S/pe_count"
     }
     vgs() { echo "  $(($(cat "$S/pe_count") - $(cat "$S/pe_used")))"; }
-    lvs() { echo "  <64.63g"; }
+    # The LV takes every extent of the PV, and the filesystem takes the whole
+    # LV, the way -r leaves them after a successful lvextend.
+    lvs() { echo "  <$(($(cat "$S/pe_used") * 8192))"; }
     lvextend() {
         printf '%s\n' "lvextend $*" >>"$TMP/mutations"
         cp "$S/pe_count" "$S/pe_used"
+        printf '%s\n' "$(($(cat "$S/pe_used") * 8192 * 512))" >"$S/fs_b"
+    }
+    # The superblock's view: a 4 KiB-block ext4 that fills fs_b bytes.
+    tune2fs() {
+        [ -e "$S/no_superblock" ] && return 1
+        printf 'Block count:              %s\nBlock size:               4096\n' "$(($(cat "$S/fs_b") / 4096))"
     }
     findmnt() { echo "/var 63.5G 50.1G"; }
+    fsadm() {
+        printf '%s\n' "fsadm $*" >>"$TMP/mutations"
+        printf '%s\n' "$(($(cat "$S/pe_used") * 8192 * 512))" >"$S/fs_b"
+    }
     apt-get() { printf '%s\n' "apt-get $*" >>"$TMP/mutations"; }
 }
 run() { (main "$@") >"$TMP/out" 2>&1 && echo 0 || echo $?; }
@@ -229,6 +264,56 @@ sed -i 's#^\(/dev/sda3 : start=      980992, size=\) *[0-9]*#\1   250677248#' "$
 feed tempencrypt123
 check "extended already grown: 0" "$(run --apply)" 0
 check "  resizepart 5 only" "$(grep -c '^parted' "$TMP/mutations") $(grep -c 'resizepart 5 ' "$TMP/mutations")" "1 1"
+unset GROW_ROOT_KEY_FIFO
+
+# lvextend -r grew the LV but resize2fs failed online: the VG is full again
+# while the filesystem is still the old size. The re-run grows only it.
+reset_guest 120 /dev/sda5 keyring
+old_fs=$(cat "$S/fs_b")
+feed tempencrypt123
+check "fs behind setup: apply 0" "$(run --apply)" 0
+unset GROW_ROOT_KEY_FIFO
+printf '%s\n' "$old_fs" >"$S/fs_b"
+: >"$TMP/mutations"
+check "fs behind: dry run 0" "$(run)" 0
+check "fs behind: dry plans fsadm" "$(said 'fsadm resize /dev/LVMGroup/var')" 1
+check "fs behind: dry is not nothing to grow" "$(said 'nothing to grow')" 0
+check "fs behind: dry made no mutation" "$(n_mutations)" 0
+check "fs behind: apply 0" "$(run --apply)" 0
+check "fs behind: apply ran fsadm" "$(grep -c '^fsadm resize /dev/LVMGroup/var$' "$TMP/mutations")" 1
+check "fs behind: apply ran nothing else" "$(n_mutations)" 1
+check "fs behind: apply is not nothing to grow" "$(said 'nothing to grow')" 0
+: >"$TMP/mutations"
+check "fs behind re-run: 0" "$(run --apply)" 0
+check "fs behind re-run: nothing to grow" "$(said 'nothing to grow')" 1
+check "fs behind re-run: no mutation" "$(n_mutations)" 0
+# A filesystem whose superblock cannot be read is not resized on a guess.
+printf '%s\n' "$old_fs" >"$S/fs_b"
+: >"$S/no_superblock"
+: >"$TMP/mutations"
+check "unreadable superblock: 0" "$(run --apply)" 0
+check "unreadable superblock: nothing to grow" "$(said 'nothing to grow')" 1
+check "unreadable superblock: no fsadm" "$(n_mutations)" 0
+rm -f "$S/no_superblock"
+
+# partx -u failed after parted wrote the table: the table is at the end but
+# the kernel still has the old size. The re-run re-runs partx, not parted.
+reset_guest 120 /dev/sda5 keyring
+printf '1\n' >"$S/partx_fails"
+feed tempencrypt123
+check "partx fails: first run dies (1)" "$(run --apply)" 1
+check "partx fails: says reboot" "$(said 'reboot')" 1
+check "partx fails: partx ran" "$(grep -c '^partx -u /dev/sda$' "$TMP/mutations")" 1
+: >"$TMP/mutations"
+check "partx behind: dry run 0" "$(run)" 0
+check "partx behind: dry is not nothing to grow" "$(said 'nothing to grow')" 0
+check "partx behind: dry plans partx" "$(said 'partx -u /dev/sda')" 1
+check "partx behind: dry made no mutation" "$(n_mutations)" 0
+feed tempencrypt123
+check "partx behind: re-run 0" "$(run --apply)" 0
+check "partx behind: re-ran partx" "$(grep -c '^partx -u /dev/sda$' "$TMP/mutations")" 1
+check "partx behind: did not re-run parted" "$(grep -c '^parted' "$TMP/mutations")" 0
+check "partx behind: re-run is not nothing to grow" "$(said 'nothing to grow')" 0
 unset GROW_ROOT_KEY_FIFO
 
 # Refused layouts and moved names.
