@@ -223,6 +223,14 @@ package = "max"
 # grobase's main as baas ran it on 2026-10-13 (git -C /opt/grobase rev-parse
 # HEAD), ahead of the pin install_grobase.sh carries for other profiles.
 grobase_ref = "dab5f43060aab2914183173c91dc7a39a7aab9f6"
+# baas's node name: dlesieur42-1.tail10f2ea.ts.net is in kong.yml, the cert
+# SANs and REALTIME_ALLOWED_ORIGINS below. The old node must be removed from
+# the tailnet before a rebuild takes the name, or this one gets a suffix
+# (make tailnet stops and says so).
+tailnet_hostname = "dlesieur42-1"
+# baas serves its WAF on the open Internet through Tailscale Funnel; `make
+# datacenter` opens it again (funnel.sh: two console switches, once).
+funnel = true
 
 # The grobase keys baas had set by hand (2026-10-13 audit), kept in
 # /opt/grobase/.env.local so `make env` and a restore keep them. This table
