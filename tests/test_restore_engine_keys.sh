@@ -17,6 +17,13 @@
 #   when b2b-stack-health fails or is missing; b2b-backup exits 1 naming an
 #   engine that runs and was not dumped, and leaves that verdict in a
 #   world-readable file for verify_platform.
+#   The rebuild set: b2b-backup snapshots the TLS certs (the CA clients
+#   trust), vault42's admin env, the 42ctl project and the login's 42ctl
+#   identity, and the MinIO and DynamoDB volumes, and dumps SQL Server
+#   through grobase's engine-backup.sh. b2b-restore puts them back in an
+#   order that is asserted: the certs before `make certs` (so the CA is
+#   reused), MySQL into a fresh volume like Postgres, the volumes while the
+#   stack is down, Mongo and SQL Server once it is up.
 #
 # HOW
 #   Both scripts are heredocs in setup/install/dc/install_backup.sh, cut out
@@ -49,7 +56,7 @@ extract() {
         setup/install/dc/install_backup.sh |
         sed -e "s#/opt/grobase#$TMP/opt/grobase#g" -e "s#/etc/b2b#$TMP/etc/b2b#g" \
             -e "s#/var/tmp#$TMP#g" -e "s#/var/log#$TMP#g" -e "s#/var/backups#$TMP/backups#g" \
-            -e "s#/var/lib/b2b#$TMP/lib#g" >"$TMP/$1"
+            -e "s#/var/lib/b2b#$TMP/lib#g" -e "s#/var/lib/docker#$TMP/docker#g" >"$TMP/$1"
     [ -s "$TMP/$1" ] || {
         echo "FAIL could not extract $1 from install_backup.sh"
         exit 1
@@ -61,14 +68,22 @@ extract b2b-backup BKEOF
 
 mkdir -p "$TMP/bin" "$TMP/etc/b2b" "$TMP/opt/grobase" "$TMP/snap"
 echo pass >"$TMP/etc/b2b/restic.pass"
+printf 'B2B_LOGIN="tester"\n' >"$TMP/etc/b2b/build.conf"
+# Every docker, make and engine-backup call lands in order.log, in order.
 cat >"$TMP/bin/docker" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$STUB_DIR/docker.log"
+printf 'docker %s\n' "$*" >>"$STUB_DIR/order.log"
 case "$*" in
-"volume ls -q") echo mini-baas_postgres-data ;;
+"volume ls -q") printf 'mini-baas_postgres-data\nmini-baas_mysql-data\nmini-baas_minio-data\nmini-baas_dynamodb-data\n' ;;
 "ps --format {{.Names}}") cat "$STUB_DIR/running" ;;
-*"command -v mongodump"*) exit 0 ;;
+inspect*) echo healthy ;;
+*"command -v mongodump"* | *"command -v mongorestore"*) exit 0 ;;
 *mongodump*) [ -f "$STUB_DIR/mongo_fails" ] && exit 1 ;;
+*mongorestore*)
+    cat >"$STUB_DIR/mongo.restored"
+    [ ! -f "$STUB_DIR/mongorestore_fails" ] || exit 1
+    ;;
 *pg_dumpall*) echo "-- dump" ;;
 *"psql -U postgres -tA"*) echo 3 ;;
 esac
@@ -78,8 +93,24 @@ cat >"$TMP/bin/restic" <<'EOF'
 #!/bin/sh
 case "$1" in
 snapshots) echo '[{"short_id":"abcd1234"}]' ;;
-restore) cp "$STUB_DIR"/snap/* "$4"/ ;;
+restore) cp -a "$STUB_DIR"/snap/. "$4"/ ;;
+backup) printf '%s\n' "$@" >"$STUB_DIR/backup.args" ;;
 esac
+exit 0
+EOF
+cat >"$TMP/bin/getent" <<'EOF'
+#!/bin/sh
+echo "tester:x:1000:1000::$STUB_DIR/home/tester:/bin/sh"
+EOF
+# grobase's engine-backup.sh, as the guest has it at /opt/grobase.
+mkdir -p "$TMP/opt/grobase/scripts/ops"
+cat >"$TMP/opt/grobase/scripts/ops/engine-backup.sh" <<'EOF'
+printf 'engine-backup %s\n' "$*" >>"$STUB_DIR/order.log"
+if [ "$1" = dump ]; then
+    [ ! -f "$STUB_DIR/mssql_empty" ] || { echo "engine-backup: mssql has no user database to back up" >&2; exit 1; }
+    [ ! -f "$STUB_DIR/mssql_fails" ] || { echo "engine-backup: dump of mssql failed" >&2; exit 1; }
+    echo mssql-archive >"$3"
+fi
 exit 0
 EOF
 # install -m MODE -o U -g G SRC DST as a copy, install -d -m MODE DIR as
@@ -93,7 +124,13 @@ fi
 for a in "$@"; do src=$dst; dst=$a; done
 cp "$src" "$dst"
 EOF
-printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/make"
+# make in /opt/grobase: logged; `make certs` notes which CA it found.
+cat >"$TMP/bin/make" <<'EOF'
+#!/bin/sh
+printf 'make %s\n' "$*" >>"$STUB_DIR/order.log"
+case " $* " in *" certs "*) cat certs/ca.key >"$STUB_DIR/ca.at.certs" 2>/dev/null ;; esac
+exit 0
+EOF
 printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/sleep"
 cat >"$TMP/bin/b2b-stack-health" <<'EOF'
 #!/bin/sh
@@ -109,6 +146,10 @@ cat >"$TMP/snap/grobase.env.secrets" <<'EOF'
 POSTGRES_PASSWORD=snap-pg
 JWT_SECRET=snap=jwt=with=equals
 MONGO_INITDB_ROOT_PASSWORD=snap-mongo
+MYSQL_ROOT_PASSWORD=snap-mysql
+MSSQL_SA_PASSWORD=snap-mssql
+MARIADB_ROOT_PASSWORD=snap-mariadb
+MARIADB_PASSWORD=snap-mariadb-app
 LOG_STREAM_TOKEN=snap-log
 EOF
 guest_secrets() {
@@ -116,6 +157,10 @@ guest_secrets() {
 POSTGRES_PASSWORD=guest-pg
 JWT_SECRET=guest-jwt
 MONGO_INITDB_ROOT_PASSWORD=guest-mongo
+MYSQL_ROOT_PASSWORD=guest-mysql
+MSSQL_SA_PASSWORD=guest-mssql
+MARIADB_ROOT_PASSWORD=guest-mariadb
+MARIADB_PASSWORD=guest-mariadb-app
 EOF
 }
 value() { sed -n "s/^$1=//p" "$TMP/opt/grobase/.env.secrets"; }
@@ -131,6 +176,9 @@ restore
 check "restore, healthy stack: exit 0" "$rc" 0
 check "Mongo keeps this guest's password (its volume is not reloaded)" "$(value MONGO_INITDB_ROOT_PASSWORD)" guest-mongo
 check "Postgres takes the snapshot's (its cluster is rebuilt from the dump)" "$(value POSTGRES_PASSWORD)" snap-pg
+check "MySQL takes the snapshot's (its volume is rebuilt from the dump too)" "$(value MYSQL_ROOT_PASSWORD)" snap-mysql
+check "SQL Server keeps this guest's (only its user databases are replaced)" "$(value MSSQL_SA_PASSWORD)" guest-mssql
+check "MariaDB keeps this guest's (its volume is not reloaded)" "$(value MARIADB_ROOT_PASSWORD) $(value MARIADB_PASSWORD)" "guest-mariadb guest-mariadb-app"
 check "a value holding '=' comes through whole" "$(value JWT_SECRET)" snap=jwt=with=equals
 check "a key only the snapshot has is kept" "$(value LOG_STREAM_TOKEN)" snap-log
 check "each key appears once" "$(grep -c '^MONGO_INITDB_ROOT_PASSWORD=' "$TMP/opt/grobase/.env.secrets")" 1
@@ -181,5 +229,97 @@ check "backup, Mongo running and its dump refused: exit 1" "$rc" 1
 check "... naming mongo" "$(printf '%s\n' "$out" | grep -c 'FAILED: mongo')" 1
 check "... after snapshotting what it has" "$(printf '%s\n' "$out" | grep -c 'dump(s) snapshotted')" 1
 check "... and the verdict file names it" "$(cut -d' ' -f1,3 "$TMP/lib/backup.last")" "failed mongo"
+
+# --- the rebuild set: what b2b-backup snapshots ------------------------------------
+G="$TMP/opt/grobase"
+H="$TMP/home/tester"
+DDB="$TMP/docker/volumes/mini-baas_dynamodb-data/_data"
+MINIO="$TMP/docker/volumes/mini-baas_minio-data/_data"
+mkdir -p "$G/certs" "$G/secrets" "$G/.42ctl" "$H/.config/42ctl" "$DDB" "$MINIO/bucket"
+echo guest-ca >"$G/certs/ca.key"
+echo guest-admin >"$G/secrets/vault42-admin.env"
+echo '{"guest":1}' >"$G/.42ctl/project.json"
+echo guest-token >"$H/.config/42ctl/session-default.tok"
+echo guest-ddb >"$DDB/stale.db"
+echo guest-obj >"$MINIO/bucket/guest-obj"
+rm -f "$TMP/mongo_fails"
+printf 'mini-baas-postgres\nmini-baas-mssql\n' >"$TMP/running"
+in_backup() { grep -cxF -- "$1" "$TMP/backup.args" || true; }
+backup
+check "backup with SQL Server running: exit 0" "$rc" 0
+check "... the TLS certs (the CA every client trusts)" "$(in_backup "$G/certs")" 1
+check "... vault42's admin env" "$(in_backup "$G/secrets/vault42-admin.env")" 1
+check "... the 42ctl project" "$(in_backup "$G/.42ctl/project.json")" 1
+check "... the login's 42ctl identity" "$(in_backup "$H/.config/42ctl")" 1
+check "... the DynamoDB volume" "$(in_backup "$DDB")" 1
+check "... the MinIO volume, as before" "$(in_backup "$MINIO")" 1
+check "... SQL Server dumped through grobase's engine-backup.sh" \
+    "$(grep -c "^engine-backup dump mssql $TMP/backups/b2b/dumps/mssql-[0-9T]*\.tar\$" "$TMP/order.log")" 1
+check "... and no longer 'not dumped here'" "$(printf '%s\n' "$out" | grep -c 'mini-baas-mssql is running and not dumped')" 0
+rm "$G/.42ctl/project.json"
+backup
+check "a path this guest does not have is not handed to restic" "$(in_backup "$G/.42ctl/project.json") $rc" "0 0"
+echo '{"guest":1}' >"$G/.42ctl/project.json"
+touch "$TMP/mssql_empty"
+backup
+check "SQL Server without a user database: not a failure (0)" "$rc" 0
+check "... says so" "$(printf '%s\n' "$out" | grep -c 'mssql: no user database')" 1
+rm "$TMP/mssql_empty"
+touch "$TMP/mssql_fails"
+backup
+check "SQL Server's dump failing: exit 1 naming mssql" "$rc $(printf '%s\n' "$out" | grep -c 'FAILED: mssql')" "1 1"
+rm "$TMP/mssql_fails"
+
+# --- the rebuild set: what b2b-restore puts back, and in which order ---------------
+S="$TMP/snap$TMP"
+mkdir -p "$S/opt/grobase/certs" "$S/opt/grobase/.42ctl" "$S/home/tester/.config" \
+    "$S/docker/volumes/mini-baas_dynamodb-data/_data" "$S/docker/volumes/mini-baas_minio-data/_data/bucket"
+mkdir -p "$S/opt/grobase/secrets" "$S/home/tester/.config/42ctl"
+chmod 700 "$S/opt/grobase/secrets" "$S/home/tester/.config/42ctl"
+echo snap-ca >"$S/opt/grobase/certs/ca.key"
+echo snap-admin >"$S/opt/grobase/secrets/vault42-admin.env"
+chmod 600 "$S/opt/grobase/secrets/vault42-admin.env"
+echo '{"snap":1}' >"$S/opt/grobase/.42ctl/project.json"
+echo snap-token >"$S/home/tester/.config/42ctl/session-default.tok"
+chmod 600 "$S/home/tester/.config/42ctl/session-default.tok"
+echo snap-ddb >"$S/docker/volumes/mini-baas_dynamodb-data/_data/shared-local-instance.db"
+echo snap-obj >"$S/docker/volumes/mini-baas_minio-data/_data/bucket/snap-obj"
+echo "-- my" >"$TMP/snap/mysql-20261007T012610.sql"
+echo mongo-archive >"$TMP/snap/mongo-20261007T012610.archive"
+echo mssql-archive >"$TMP/snap/mssql-20261007T012610.tar"
+# A guest whose secrets/ and ~/.config never existed: made with the snapshot's modes.
+rm -rf "${G:?}/secrets" "${H:?}/.config"
+guest_secrets
+echo 0 >"$TMP/health"
+: >"$TMP/order.log"
+restore
+check "restore of the whole set: exit 0" "$rc" 0
+check "the certs were back BEFORE make certs (the CA is reused)" "$(cat "$TMP/ca.at.certs" 2>/dev/null)" snap-ca
+check "vault42's admin env: the snapshot's, 600" "$(cat "$G/secrets/vault42-admin.env") $(stat -c %a "$G/secrets/vault42-admin.env")" "snap-admin 600"
+check "... in a 700 secrets/" "$(stat -c %a "$G/secrets")" 700
+check "the 42ctl project: the snapshot's" "$(cat "$G/.42ctl/project.json")" '{"snap":1}'
+check "the login's 42ctl identity: the snapshot's, 700/600" \
+    "$(cat "$H/.config/42ctl/session-default.tok") $(stat -c %a "$H/.config/42ctl") $(stat -c %a "$H/.config/42ctl/session-default.tok")" "snap-token 700 600"
+check "DynamoDB's volume: the snapshot's files, this guest's gone" \
+    "$(cat "$DDB/shared-local-instance.db") $([ -e "$DDB/stale.db" ] && echo kept || echo gone)" "snap-ddb gone"
+check "MinIO's volume: the snapshot's files, this guest's gone" \
+    "$(cat "$MINIO/bucket/snap-obj") $(find "$MINIO" -name guest-obj | grep -c .)" "snap-obj 0"
+check "Mongo: the archive went to mongorestore" "$(cat "$TMP/mongo.restored")" mongo-archive
+check "... dropping each collection first, never touching admin (its users)" \
+    "$(grep 'mongorestore' "$TMP/order.log" | grep -c -e '--drop.*--nsExclude "admin\.\*"')" 1
+check "SQL Server: through engine-backup.sh restore" \
+    "$(grep -c "^engine-backup restore mssql .*/mssql-20261007T012610\.tar\$" "$TMP/order.log")" 1
+# The order: first match of each step, ascending.
+at() { grep -n -m1 -e "$1" "$TMP/order.log" | cut -d: -f1; }
+order=$(for step in '^make .*env' '^make .*certs' '^make .*down' '^docker volume rm mini-baas_mysql-data' \
+    '^docker compose up -d mysql' '^make .* up ' 'mongorestore' '^engine-backup restore mssql'; do at "$step"; done)
+check "the order: env, certs, down, mysql's volume, mysql alone, up, mongo, mssql" \
+    "$(printf '%s\n' "$order" | grep -c .) $(printf '%s\n' "$order" | sort -n -c && echo ascending)" "8 ascending"
+check "MySQL's volume goes after the stack is down, before it starts alone" \
+    "$([ "$(at '^make .*down')" -lt "$(at '^docker volume rm mini-baas_mysql-data')" ] && echo yes)" yes
+touch "$TMP/mongorestore_fails"
+restore
+check "Mongo's load failing: exit 1 naming mongo" "$rc $(printf '%s\n' "$out" | grep -c 'not loaded:.*mongo')" "1 1"
+rm "$TMP/mongorestore_fails"
 
 exit "$fail"
