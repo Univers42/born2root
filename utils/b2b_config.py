@@ -165,7 +165,10 @@ DEFAULTS = {
     # "" keeps that campus default; set it to a path on a disk that is not
     # the VM's own, which is the only thing that makes the copy worth taking.
     # A list is tried in order, like vm.path.
-    "dc": {"cors_origins": [], "package": "auto", "backup_dest": ""},
+    # secrets_file: the host's KEY=VALUE secrets (setup/host/dc_lib.sh), for a
+    # profile whose keys live somewhere else than the defaults dc_lib.sh tries.
+    # "" keeps those defaults; B2B_SECRETS= beats it.
+    "dc": {"cors_origins": [], "package": "auto", "backup_dest": "", "secrets_file": ""},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -966,6 +969,7 @@ class Validator:
                 "%r is not a grobase tier (one of: %s)" % (package, ", ".join(self.DC_PACKAGES)),
             )
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
+        self._abs_path("dc.secrets_file", self.c.dc.get("secrets_file"))
 
     def _abs_path(self, where, value):
         """A host path, or a list of them, each absolute once $HOME is
@@ -1223,6 +1227,7 @@ LEGACY = {
     ),
     "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
     "B2B_DC_BACKUP_DEST": lambda c: _host_path(c.dc.get("backup_dest")),
+    "B2B_DC_SECRETS_FILE": lambda c: _host_path(c.dc.get("secrets_file")),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],

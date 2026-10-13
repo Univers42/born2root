@@ -1188,8 +1188,12 @@ ide_disk:
 #   make restore_drill       restore the newest snapshot into a scratch database and count what came back
 #   make seed / loadtest     rows from grobase's own seeder; k6 against Kong, inside the guest
 # Secrets live under $HOME, not in the repo: the campus wipes /goinfre and
-# took the restic password with it once (see setup/host/dc_lib.sh).
-B2B_SECRETS ?= $(or $(wildcard $(CURDIR)/.b2b-secrets),$(HOME)/.config/born2root/b2b-secrets)
+# took the restic password with it once (see setup/host/dc_lib.sh, which
+# resolves it in the same order). B2B_SECRETS= wins, then [dc] secrets_file.
+# := so the profile is read once, not at every recipe line the export reaches.
+ifeq ($(origin B2B_SECRETS),undefined)
+B2B_SECRETS := $(or $(call b2b_conf,B2B_DC_SECRETS_FILE),$(wildcard $(CURDIR)/.b2b-secrets),$(HOME)/.config/born2root/b2b-secrets)
+endif
 export B2B_SECRETS
 DC_ENV = VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" SCRIPT_SH="$(SCRIPT_SH)"
 

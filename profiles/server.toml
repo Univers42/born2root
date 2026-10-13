@@ -208,6 +208,9 @@ cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
 # disk: the next tier is a USB disk or a remote (backup_pull.sh). At school,
 # carry the repository in and put it at the first entry that exists there.
 backup_dest = ["/mnt/storage/b2b-backups/baas", "/goinfre/$USER/b2b-backups/baas", "$HOME/b2b-backups/baas"]
+# secrets_file: baas's keys (RESTIC_PASSWORD, TS_AUTHKEY, ...), mode 600, never
+# in the repo. Carry it to the new seat at this path before `make datacenter`.
+secrets_file = "$HOME/.b2b_secrets/.env"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
