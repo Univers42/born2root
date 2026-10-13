@@ -1,13 +1,19 @@
 #!/usr/bin/env hellish
-# Regression test: the profile names the secrets file.
+# Regression test: the profile names the secrets file, and a backup that
+# exists is never given a new password.
 #
-# THE PROBLEM IT PINS
-#   The secrets file was found by B2B_SECRETS=, a .b2b-secrets in the repo,
-#   or ~/.config/born2root/b2b-secrets -- and the file that holds baas's keys
-#   is ~/.b2b_secrets/.env, which only an exported B2B_SECRETS found. Rebuilt
-#   from the profile alone, every datacenter step read an empty file.
-#   [dc] secrets_file names it ($HOME/$USER expanded, a list allowed);
-#   B2B_SECRETS= still wins, for the Makefile and dc_lib.sh alike.
+# THE PROBLEMS IT PINS
+#   1. The secrets file was found by B2B_SECRETS=, a .b2b-secrets in the repo,
+#      or ~/.config/born2root/b2b-secrets -- and the file that holds baas's
+#      keys is ~/.b2b_secrets/.env, which only an exported B2B_SECRETS found.
+#      Rebuilt from the profile alone, every datacenter step read an empty
+#      file. [dc] secrets_file names it ($HOME/$USER expanded, a list
+#      allowed); B2B_SECRETS= still wins, for the Makefile and dc_lib.sh alike.
+#   2. backup_pull.sh minted a RESTIC_PASSWORD whenever the file had none --
+#      also for `make restore`, and also beside a repository made with another
+#      password. The new password opens nothing, and the next `make backup`
+#      cannot even add to the repository. It now refuses, naming the key and
+#      the file, before it touches the guest.
 #
 # Every secret here is a fake made in a temp dir; nothing reads the real file:
 # B2B_SECRETS from the caller's shell is dropped first, because it would win.
@@ -71,5 +77,34 @@ check "a relative secrets_file is refused at --check" \
 check "the server profile names ~/.b2b_secrets/.env" \
     "$(env HOME="$TMP/home" B2B_CONFIG=profiles/server.toml "${SCRIPT_SH:-bash}" utils/b2b_config.sh get B2B_DC_SECRETS_FILE)" \
     "$TMP/home/.b2b_secrets/.env"
+
+# ── backup_pull.sh never mints over an existing backup ──────────────────────
+SECRETS="$TMP/home/.b2b_secrets/.env"
+mkdir -p "${SECRETS%/*}"
+# The cases below write a password: only ever into the temp file.
+if [ "$(dc_secrets "$P")" != "$SECRETS" ]; then
+    echo "FAIL the secrets file would not be the temp one; not running backup_pull.sh"
+    exit 1
+fi
+pull() { # <BACKUP_DEST> [--restore] -> rc; output in $TMP/out
+    env -u B2B_SECRETS PATH="$TMP/bin:$PATH" HOME="$TMP/home" B2B_CONFIG="$P" VM_NAME=t-none VM_PATH="$TMP/vm" \
+        BACKUP_DEST="$1" "${SCRIPT_SH:-bash}" setup/host/backup_pull.sh ${2:+"$2"} >"$TMP/out" 2>&1 &&
+        echo 0 || echo $?
+}
+printf 'TS_AUTHKEY=fake-not-a-key\n' >"$SECRETS"
+chmod 600 "$SECRETS"
+mkdir -p "$TMP/dest/repo"
+printf 'fake restic config\n' >"$TMP/dest/repo/config"
+check "a repository, no RESTIC_PASSWORD: refused (1)" "$(pull "$TMP/dest")" 1
+check "  names the key and the file" "$(grep -c "RESTIC_PASSWORD.*$SECRETS" "$TMP/out")" 1
+check "  minted nothing" "$(grep -c '^RESTIC_PASSWORD=' "$SECRETS")" 0
+check "  never reached for the guest" "$(grep -c 'fake ssh must not run' "$TMP/out")" 0
+check "--restore, no RESTIC_PASSWORD: refused (1)" "$(pull "$TMP/empty" --restore)" 1
+check "  names the key and the file" "$(grep -c "RESTIC_PASSWORD.*$SECRETS" "$TMP/out")" 1
+check "  minted nothing" "$(grep -c '^RESTIC_PASSWORD=' "$SECRETS")" 0
+check "no repository yet: a password is minted (then no VM: 1)" "$(pull "$TMP/empty")" 1
+check "  minted one" "$(grep -c '^RESTIC_PASSWORD=.' "$SECRETS")" 1
+check "  the other keys kept" "$(grep -c '^TS_AUTHKEY=fake-not-a-key$' "$SECRETS")" 1
+check "  the value is not printed" "$(grep -cF -- "$(sed -n 's/^RESTIC_PASSWORD=//p' "$SECRETS")" "$TMP/out")" 0
 
 exit "$fail"
