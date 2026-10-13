@@ -192,6 +192,11 @@ DEFAULTS = {
         "tailnet_hostname": "",
         "funnel": False,
     },
+    # [host]: what the build sets up on the host itself. autostart: `make all`
+    # ends with `make autostart` -- the VM as a user service of this login,
+    # started at boot and stopped gracefully at shutdown, and `make backup`
+    # hourly (setup/host/autostart.sh).
+    "host": {"autostart": False},
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -316,6 +321,7 @@ class Config:
             DEFAULTS["network"], raw.get("network"), "network", self.errors
         )
         self.dc = _merge(DEFAULTS["dc"], raw.get("dc"), "dc", self.errors)
+        self.host = _merge(DEFAULTS["host"], raw.get("host"), "host", self.errors)
         self.disk = _merge(DEFAULTS["disk"], raw.get("disk"), "disk", self.errors)
         self.policy = {}
         given_policy = raw.get("policy") or {}
@@ -1228,6 +1234,7 @@ class Validator:
         self.policy()
         self.network()
         self.dc()
+        self._bool("host.autostart", self.c.host.get("autostart"))
         self.disk()
         return self.errors, self.warnings
 
@@ -1315,6 +1322,7 @@ LEGACY = {
     "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
     "B2B_DC_TAILNET_HOSTNAME": lambda c: c.dc.get("tailnet_hostname") or "",
     "B2B_DC_FUNNEL": lambda c: c.dc.get("funnel"),
+    "B2B_HOST_AUTOSTART": lambda c: c.host.get("autostart"),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
@@ -1377,6 +1385,7 @@ def _dotted(config, path):
         "policy": config.policy,
         "features": config.features,
         "ai": config.ai,
+        "host": config.host,
     }.get(head)
     for part in parts[1:]:
         if not isinstance(node, dict):

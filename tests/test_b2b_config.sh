@@ -646,4 +646,16 @@ refuse "a tailnet_hostname that is not a DNS label is refused" "dc.tailnet_hostn
 refuse "funnel must be true or false" "dc.funnel" \
     's|^package = "auto"|package = "auto"\nfunnel = "yes"|'
 
+# ── [host] autostart ────────────────────────────────────────────────────────
+check "no [host]: autostart false (make all leaves the host's units alone)" \
+    "$(get_of "$DEFAULTS" B2B_HOST_AUTOSTART)" false
+HOST=$(append host '[host]
+autostart = true')
+check "[host] autostart = true passes --check" "$(rc_of "$HOST" --check)" 0
+check "  and reaches B2B_HOST_AUTOSTART" "$(get_of "$HOST" B2B_HOST_AUTOSTART)" true
+refuse_add "autostart must be true or false" "host.autostart" '[host]
+autostart = "yes"'
+refuse_add "an unknown [host] key is refused" "host.autostrat" '[host]
+autostrat = true'
+
 exit "$fail"

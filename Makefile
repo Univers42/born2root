@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all autostart prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -393,6 +393,7 @@ all: no_root prepare
 		sel="$(SIZE_B2B)"; \
 	fi; \
 	$(MAKE_BIN) --no-print-directory _build SIZE_B2B="$$sel" VM_SIZE= B2B_NO_SELECT=1
+	$(if $(filter true,$(call b2b_conf,B2B_HOST_AUTOSTART)),@$(MAKE_BIN) --no-print-directory autostart || printf '  ! autostart did not finish -- the VM is built; rerun make autostart\n')
 
 # The build proper. Never call this directly -- `make all` is the entry point;
 # this exists only so the size the picker chose can be a real make variable.
@@ -478,6 +479,12 @@ qemu_start:
 
 qemu_stop:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop
+
+# The VM as a user service of this login: up at boot, stopped gracefully at
+# shutdown, `make backup` hourly (setup/host/autostart.sh). `make all` ends
+# with it when the profile says [host] autostart = true.
+autostart:
+	@B2B_CONFIG="$(B2B_CONFIG)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/autostart.sh
 
 qemu_status:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh status
