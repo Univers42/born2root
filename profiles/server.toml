@@ -220,6 +220,31 @@ secrets_file = "$HOME/.b2b_secrets/.env"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
+# grobase's main as baas ran it on 2026-10-13 (git -C /opt/grobase rev-parse
+# HEAD), ahead of the pin install_grobase.sh carries for other profiles.
+grobase_ref = "dab5f43060aab2914183173c91dc7a39a7aab9f6"
+
+# The grobase keys baas had set by hand (2026-10-13 audit), kept in
+# /opt/grobase/.env.local so `make env` and a restore keep them. This table
+# replaces the default one, so REMOTE_ACCESS and CATALOG_MANAGEMENT are not
+# written: baas has neither, and trino is healthy without it. Not here:
+# GROBASE_PUBLIC_ADDRESSES (the tailnet name and address; grobase's `make
+# expose` writes it) and every secret (the secrets file and the snapshot's
+# .env.local carry those; --check refuses a secret-looking name).
+[dc.grobase_env]
+DATA_PLANE_ADMIN_BYPASS         = "1"
+DATA_PLANE_FEATURES             = "--features dynamodb"
+DATA_PLANE_IMAGE_SUFFIX         = "-dynamodb"
+DYNAMODB_ENGINE_ENABLED         = "1"
+DATA_PLANE_PER_TABLE_ISOLATION  = "1"
+RUST_DATA_PLANE_FORWARD_ENGINES = "postgresql,cockroachdb,mongodb,mysql,mariadb,redis,sqlite,mssql,http,dynamodb"
+REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://dlesieur42-1.tail10f2ea.ts.net"
+ORG_MODEL_ENABLED               = "true"
+RBAC_HIERARCHY_ENABLED          = "true"
+ENVIRONMENTS_ENABLED            = "true"
+GROUPS_ENABLED                  = "true"
+INVITES_ENABLED                 = "true"
+USER_PUBKEYS_ENABLED            = "true"
 
 [disk]
 swap_mb = "auto"
