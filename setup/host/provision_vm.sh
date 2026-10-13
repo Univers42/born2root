@@ -267,15 +267,16 @@ show_health() {
 }
 
 # ── grow-root: setup/install/dc/grow_root.sh, and what it needs from here ──
-# The LUKS passphrase, resolved the way the boot unlock resolves it
-# (unlock_vm.sh: VM_PASS, else born2root.toml), goes into a FIFO in the
+# The LUKS passphrase, resolved the way qemu_vm.sh's unlock resolves it
+# (b2b_luks_passphrase: VM_PASS, else born2root.toml), goes into a FIFO in the
 # guest's /dev/shm over an ssh of its own: no pty to echo it, no sudo to log
 # it (the guest's sudoers has log_input), no command line, no file.
 KEY_DIR=""
 KEY_FEEDER=""
 key_fifo_open() {
     local pass
-    pass=$(. "$REPO_ROOT/unlock_vm.sh" && resolve_passphrase) || die "no LUKS passphrase: set VM_PASS, or luks_passphrase in born2root.toml"
+    pass=$(b2b_luks_passphrase 2>/dev/null)
+    [ -n "$pass" ] || die "no LUKS passphrase: set VM_PASS, or luks_passphrase in born2root.toml"
     if ! KEY_DIR=$(vm_ssh "d=\$(mktemp -d /dev/shm/b2b-grow-root.XXXXXX) && mkfifo -m 600 \"\$d/key\" && echo \"\$d\"") ||
         [ -z "$KEY_DIR" ]; then
         die "could not make the key FIFO in the guest's /dev/shm"
