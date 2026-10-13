@@ -86,7 +86,7 @@ check "no dump in the transcript: 1" "$(save_sfdisk_dump "$TMP/transcript" "$TMP
 S="$TMP/state"
 DUMP_DIR="$TMP/backups"
 reset_guest() { # <disk GiB> <device> <key location>
-    rm -rf "$S" "$DUMP_DIR" "$TMP/mutations"
+    rm -rf "${S:?}" "${DUMP_DIR:?}" "${TMP:?}/mutations"
     mkdir -p "$S"
     : >"$TMP/mutations"
     disk=${2%[0-9]}

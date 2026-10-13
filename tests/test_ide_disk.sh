@@ -53,7 +53,7 @@ ROOT_CRYPT='sda5_crypt UUID=aaaa none luks,discard'
 DISK="$TMP/dev/sdb"
 
 reset_guest() {
-    rm -rf "$S" "$BY_ID" "${TMP:?}/etc" "${TMP:?}/var" "${TMP:?}/dev" "$TMP/calls"
+    rm -rf "${S:?}" "${BY_ID:?}" "${TMP:?}/etc" "${TMP:?}/var" "${TMP:?}/dev" "${TMP:?}/calls"
     mkdir -p "$S" "$BY_ID" "$TMP/etc" "$TMP/dev"
     : >"$DISK"
     : >"$TMP/calls"

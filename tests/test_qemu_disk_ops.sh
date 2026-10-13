@@ -37,6 +37,8 @@ PORTS_SPEC="ssh:4242:4242"
 export VM_NAME VM_PATH PORTS_SPEC VM_PATH_REGISTRY="$TMP/registry"
 
 . ./setup/host/qemu_vm.sh
+# This test deletes VM_DIR: it must be the scratch one, never disk_images/.
+case "$VM_DIR" in "$TMP"/?*) ;; *) exit 1 ;; esac
 mkdir -p "$VM_DIR"
 
 REAL_QEMU_IMG=$(command -v qemu-img || true)
@@ -112,11 +114,11 @@ run_create() { # <ide_disk_gb>
     env B2B_VM_IDE_DISK_GB="$1" DISK_SIZE_MB=1024 \
         "${SCRIPT_SH:-bash}" ./setup/host/qemu_vm.sh create >"$TMP/out" 2>&1 && echo 0 || echo $?
 }
-rm -rf "$VM_DIR"
+rm -rf "${VM_DIR:?}"
 check "fresh, key 0: created (0)" "$(run_create 0)" 0
 check "fresh, key 0: root disk" "$(virtual_gib "$DISK")" 1
 check "fresh, key 0: no IDE disk" "$(exists "$IDE")" no
-rm -rf "$VM_DIR"
+rm -rf "${VM_DIR:?}"
 check "fresh, key 2: created (0)" "$(run_create 2)" 0
 check "fresh, key 2: root disk" "$(virtual_gib "$DISK")" 1
 check "fresh, key 2: IDE disk of 2 GiB" "$(virtual_gib "$IDE")" 2
