@@ -15,7 +15,9 @@
 #   new file is mode 600, an old build.conf gets the two keys born2root always
 #   wrote, an empty table touches nothing. install_grobase.sh checks out
 #   build.conf's B2B_DC_GROBASE_REF (GROBASE_REF= still wins), runs the helper
-#   before `make env`, and writes no grobase key into .env any more.
+#   before `make env`, and writes no grobase key into .env any more. The
+#   restore passes ENV_ORPHANS=carry to its `make env`, so a newer grobase
+#   never stops an unattended restore on a key only the old .env held.
 #
 # HOW
 #   The helper is cut out of install_grobase.sh by its exact
@@ -138,5 +140,12 @@ check "the profile's keys are in .env.local before the first make env" \
     "$([ -n "$helper" ] && [ -n "$first_env" ] && [ "$helper" -lt "$first_env" ] && echo before)" before
 check "nothing but the helper writes .env or .env.local (make env would drop it)" \
     "$(grep -vE '^[[:space:]]*#' "$SRC" | grep -cE '(>>?|sed -i.*)[[:space:]]*\.env(\.local)?$' || true)" 0
+
+# ── the restore: an unattended `make env` carries orphans, never stops ──────
+RESTORE=setup/install/dc/install_backup.sh
+check "every make env in the restore passes ENV_ORPHANS=carry" \
+    "$(grep -vE '^[[:space:]]*#' "$RESTORE" | grep -E 'make --no-print-directory env' | grep -cv 'ENV_ORPHANS=carry' || true)" 0
+check "the restore runs make env at all" \
+    "$(grep -cE 'ENV_ORPHANS=carry make --no-print-directory env' "$RESTORE")" 1
 
 exit "$fail"

@@ -358,7 +358,16 @@ if [ -d /opt/grobase ]; then
     else
         echo "restore: WARN b2b-grobase-env failed: the profile's grobase keys are not re-applied"
     fi
-    (cd /opt/grobase && make --no-print-directory env >/dev/null 2>&1) && echo "restore: .env re-assembled" || echo "restore: WARN make env failed"
+    # ENV_ORPHANS=carry: a grobase whose `make env` refuses to drop a key only
+    # the old .env held (scripts/env/assemble-env.sh, after 5ba7795d) puts it
+    # into .env.local instead of stopping an unattended restore with a stale
+    # .env. Its stderr names keys, never values, so it is shown.
+    if (cd /opt/grobase && ENV_ORPHANS=carry make --no-print-directory env >/dev/null 2>"$work/make-env.err"); then
+        echo "restore: .env re-assembled"
+    else
+        echo "restore: WARN make env failed"
+    fi
+    sed 's/^/restore:   /' "$work/make-env.err"
     (cd /opt/grobase && make --no-print-directory certs >/dev/null 2>&1) && echo "restore: certs re-issued from the restored CA" || echo "restore: WARN make certs failed"
 fi
 # Into an EMPTY cluster, never over a populated one. A fresh guest's first
