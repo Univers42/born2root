@@ -331,7 +331,7 @@ C_CYAN   := \033[36m
         tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
-        qemu_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
+        qemu_create qemu_grow_disk qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
         qemu_screenshot qemu_ssh qemu_ssh_config qemu_list qemu_monitor no_root \
         space slim partitions features features_select packages _build config
 
@@ -483,6 +483,11 @@ qemu_watch:
 # Just the disk (qemu_install = create + install).
 qemu_create:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh create
+
+# Grow an EXISTING, stopped VM's root qcow2 to SIZE_GB GiB (the guest half is
+# grow_root). A fresh build takes its size from vm.disk_gb and needs neither.
+qemu_grow_disk:
+	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh grow-disk "$(SIZE_GB)"
 
 qemu_kill:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh kill

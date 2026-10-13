@@ -49,6 +49,8 @@
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
 #                          GRACEFUL=1 STOP_ON_TIMEOUT=abort: never force it; exit 3 if still up
+#   qemu_vm.sh grow-disk N stopped guest only: qemu-img check, then resize to N GiB
+#                          (an existing VM; the guest half is make grow_root)
 #   qemu_vm.sh kill        last resort: SIGTERM the QEMU process
 #   qemu_vm.sh reset       hard reset;  pause / resume  freeze and continue
 #   qemu_vm.sh status      pid, ports, disk size, what the console last said
@@ -946,6 +948,37 @@ stop_guest() {
     ok "stopped"
 }
 
+# ── Growing the root disk, offline ──────────────────────────────────────────
+# Only with the guest stopped, never block_resize on a live monitor: that
+# hands a running kernel a disk larger than its partition table without the
+# guest asking, and the step that matters -- moving the partitions -- is the
+# guest's own (setup/install/dc/grow_root.sh, `make grow_root`). qemu-img also
+# takes the image's write lock, so a guest running from another VM_PATH makes
+# it fail rather than corrupt anything. Sizes are GiB, as vm.disk_gb is.
+qcow2_virtual_bytes() { # <image> -> its virtual size in bytes
+    qemu-img info --output=json "$1" |
+        python3 -c 'import json, sys; print(json.load(sys.stdin)["virtual-size"])'
+}
+grow_disk() {
+    local gb="$1" cur rc
+    case "$gb" in '' | *[!0-9]*) die "usage: $0 grow-disk <GiB>   (the new virtual size, larger than today's)" ;; esac
+    is_running && die "running (pid $(qemu_pid)) — stop it first: GRACEFUL=1 STOP_ON_TIMEOUT=abort $0 stop"
+    [ -f "$DISK" ] || die "no disk at $DISK"
+    cur=$(qcow2_virtual_bytes "$DISK") || die "qemu-img info could not read $DISK (in use by another QEMU?)"
+    [ $((gb * 1073741824)) -gt "$cur" ] ||
+        die "${gb} GiB is not larger than the current $((cur / 1073741824)) GiB ($cur bytes)"
+    info "qemu-img check $DISK"
+    qemu-img check "$DISK"
+    rc=$?
+    case "$rc" in
+    0) ;;
+    3) die "leaked clusters (wasted space, no corruption) — reclaim them first: qemu-img check -r leaks $DISK" ;;
+    *) die "qemu-img check exited $rc: the image is not clean, refusing to resize it" ;;
+    esac
+    qemu-img resize "$DISK" "${gb}G" || die "qemu-img resize failed"
+    ok "$DISK: $((cur / 1073741824)) → ${gb} GiB virtual. In the guest: make grow_root (dry run), then APPLY=1"
+}
+
 # ── Actions ─────────────────────────────────────────────────────────────────
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
@@ -1132,6 +1165,10 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         need_running
         need_control qemu_stop
         stop_guest "$(qemu_pid)"
+        ;;
+
+    grow-disk)
+        grow_disk "${2:-}"
         ;;
 
     kill)
@@ -1329,6 +1366,6 @@ PYEOF
         printf "\n"
         ;;
 
-    *) die "unknown action '${1}' (create|install|start|restart|stop|kill|reset|pause|resume|unlock|status|list|console|watch|screenshot|monitor|ssh|ssh-config)" ;;
+    *) die "unknown action '${1}' (create|install|start|restart|stop|kill|reset|pause|resume|unlock|status|list|console|watch|screenshot|monitor|ssh|ssh-config|grow-disk)" ;;
     esac
 fi
