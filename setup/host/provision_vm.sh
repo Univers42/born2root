@@ -22,6 +22,8 @@
 #   setup/host/provision_vm.sh <vm-name> hellish
 #   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
 #   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
+#   setup/host/provision_vm.sh <vm-name> grow-root       # /var into a grown disk (dry run;
+#                                                          GROW_ROOT_APPLY=1 acts)
 #   setup/host/provision_vm.sh <vm-name> all
 #
 # Environment passed through to the guest script, e.g.
@@ -262,6 +264,56 @@ show_health() {
     fi
 }
 
+# ── grow-root: setup/install/dc/grow_root.sh, and what it needs from here ──
+# The LUKS passphrase, resolved the way the boot unlock resolves it
+# (unlock_vm.sh: VM_PASS, else born2root.toml), goes into a FIFO in the
+# guest's /dev/shm over an ssh of its own: no pty to echo it, no sudo to log
+# it (the guest's sudoers has log_input), no command line, no file.
+KEY_DIR=""
+KEY_FEEDER=""
+key_fifo_open() {
+    local pass
+    pass=$(. "$REPO_ROOT/unlock_vm.sh" && resolve_passphrase) || die "no LUKS passphrase: set VM_PASS, or luks_passphrase in born2root.toml"
+    if ! KEY_DIR=$(vm_ssh "d=\$(mktemp -d /dev/shm/b2b-grow-root.XXXXXX) && mkfifo -m 600 \"\$d/key\" && echo \"\$d\"") ||
+        [ -z "$KEY_DIR" ]; then
+        die "could not make the key FIFO in the guest's /dev/shm"
+    fi
+    # Ponytail: the writer waits 15 min for grow_root.sh to open the FIFO; it
+    # does so seconds in, before any change, so only a stalled ssh reaches it.
+    printf '%s' "$pass" | vm_ssh "timeout 900 dd of='$KEY_DIR/key' conv=nocreat,notrunc status=none" >/dev/null 2>&1 &
+    KEY_FEEDER=$!
+    export GROW_ROOT_KEY_FIFO="$KEY_DIR/key"
+}
+# A writer still waiting in open() is let go by a reader; then the directory goes.
+key_fifo_close() {
+    [ -n "$KEY_DIR" ] || return 0
+    vm_ssh "dd if='$KEY_DIR/key' of=/dev/null iflag=nonblock status=none 2>/dev/null; rm -rf '$KEY_DIR'" >/dev/null 2>&1 ||
+        warn "could not remove $KEY_DIR in the guest (it holds no data: a FIFO keeps nothing)"
+    kill "$KEY_FEEDER" 2>/dev/null
+    wait "$KEY_FEEDER" 2>/dev/null
+    KEY_DIR=""
+}
+# The guest saves the partition table before changing it and prints it between
+# markers; the copy that matters is the one off the guest, beside its disk.
+grow_root() {
+    local transcript rc saved vm_dir="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME"
+    transcript=$(mktemp) || die "mktemp failed"
+    if [ "${GROW_ROOT_APPLY:-0}" = 1 ]; then
+        # Closed on every way out, the dies included.
+        trap 'key_fifo_close; cleanup_askpass' EXIT
+        key_fifo_open
+    fi
+    guest_script setup/install/dc/grow_root.sh grow_root.sh GROW_ROOT_ "grow_root.sh" "$transcript"
+    rc=$?
+    saved=$(. "$REPO_ROOT/setup/install/dc/grow_root.sh" && save_sfdisk_dump "$transcript" "$vm_dir")
+    case $? in
+    0) ok "the partition table before the change, off the guest: $saved" ;;
+    2) warn "could not write the partition table's copy under $vm_dir; the guest keeps one in /var/backups/b2b" ;;
+    esac
+    rm -f "$transcript"
+    [ "$rc" -eq 0 ] || die "grow_root.sh exited $rc -- read its output above"
+}
+
 # `health` only reads files, so it never needs to become root.
 [ "$ACTION" = "health" ] || setup_sudo
 
@@ -364,6 +416,9 @@ graph-render)
     run_provisioner setup/install/dc/install_graph_render.sh \
         install_graph_render.sh GRAPH_RENDER_ "graph_render"
     ;;
+grow-root)
+    grow_root
+    ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
 # An ad-hoc script as root in the guest, through the same upload + sudo
@@ -427,6 +482,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | root-sh | restore-drill | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | grow-root | root-sh | restore-drill | all)"
     ;;
 esac

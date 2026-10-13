@@ -333,7 +333,7 @@ C_CYAN   := \033[36m
         drawnosaurus drawnosaurus_status drawnosaurus_undo \
         graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code claude_debug ai \
-        var_gc edge grobase backup_install verify_platform baas_access baas_access_status baas_access_undo \
+        var_gc edge grobase backup_install grow_root verify_platform baas_access baas_access_status baas_access_undo \
         tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
@@ -1162,6 +1162,10 @@ backup_install:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" backup
 graph_render_install:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" graph-render
+# Grow an EXISTING VM's /var into the space qemu_grow_disk added: the plan,
+# unless APPLY=1. The window it belongs to is in grow_root.sh's header.
+grow_root:
+	@VM_PATH="$(VM_PATH)" GROW_ROOT_APPLY="$(APPLY)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" grow-root
 
 # =========@@ datacenter: operate the server image from the host @@===========
 # Every one of these reads the guest's SSH port back the way provision_vm.sh
