@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all autostart prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all autostart firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -1255,6 +1255,12 @@ backup_verify:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --verify
 restore_drill:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" restore-drill
+# UFW on a running guest made to match [network] forwards as the profile says
+# them NOW: listed ports allowed, born2root's rules for ports no longer
+# listed deleted, 4242, tailscale0 and hand-made rules kept
+# (setup/host/firewall_guest.sh). First boot already applies the list.
+firewall:
+	@ROOTSH_FIREWALL="$(call b2b_conf,B2B_FIREWALL)" ROOT_SH=setup/host/firewall_guest.sh VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" root-sh
 # The rebuild path: push the copy on BACKUP_DEST back into a fresh guest and
 # load the newest snapshot into the engines -- tenants, keys and rows return.
 restore:
