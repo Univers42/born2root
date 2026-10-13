@@ -349,6 +349,15 @@ for p in /opt/grobase/certs /opt/grobase/secrets/vault42-admin.env /opt/grobase/
     put_back "$p" || echo "restore: WARN could not put back $p"
 done
 if [ -d /opt/grobase ]; then
+    # The profile's [dc.grobase_env] over the snapshot's .env.local: a key the
+    # profile gained since that snapshot is not lost (install_grobase.sh).
+    if ! command -v b2b-grobase-env >/dev/null 2>&1; then
+        echo "restore: WARN no b2b-grobase-env in this guest (make grobase installs it): the profile's grobase keys are not re-applied"
+    elif genv=$(b2b-grobase-env); then
+        [ -z "$genv" ] || echo "restore: $genv"
+    else
+        echo "restore: WARN b2b-grobase-env failed: the profile's grobase keys are not re-applied"
+    fi
     (cd /opt/grobase && make --no-print-directory env >/dev/null 2>&1) && echo "restore: .env re-assembled" || echo "restore: WARN make env failed"
     (cd /opt/grobase && make --no-print-directory certs >/dev/null 2>&1) && echo "restore: certs re-issued from the restored CA" || echo "restore: WARN make certs failed"
 fi

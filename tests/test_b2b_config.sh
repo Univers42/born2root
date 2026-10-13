@@ -590,4 +590,48 @@ check "an unknown [dc] key is refused" \
     "$(rc_of "$(variant dckey 's|^cors_origins = \[\]|cors_origin = []|')" --check)" 1
 contains "  with a did-you-mean" "$(cat "$TMP/out")" "did you mean cors_origins"
 
+# ── [dc] grobase_ref and [dc.grobase_env] ───────────────────────────────────
+# build.conf is sourced in the guest, so a value reaches it only when it needs
+# no escaping; a secret never reaches the profile at all (it is tracked).
+GUEST_DEFAULT=$(env B2B_CONFIG="$DEFAULTS" "${CFG[@]}" --guest)
+contains "no grobase_ref: build.conf leaves install_grobase.sh's own pin" \
+    "$GUEST_DEFAULT" 'B2B_DC_GROBASE_REF='
+contains "no [dc.grobase_env]: today's two keys, CATALOG_MANAGEMENT ..." \
+    "$GUEST_DEFAULT" 'B2B_DC_GROBASE_ENV_CATALOG_MANAGEMENT="static"'
+contains "  ... and REMOTE_ACCESS" "$GUEST_DEFAULT" 'B2B_DC_GROBASE_ENV_REMOTE_ACCESS="1"'
+contains "  ... named on the list line" "$GUEST_DEFAULT" 'B2B_DC_GROBASE_ENV="CATALOG_MANAGEMENT REMOTE_ACCESS"'
+GENV=$(append genv '[dc.grobase_env]
+DATA_PLANE_FEATURES = "--features dynamodb"
+DATA_PLANE_ADMIN_BYPASS = "1"')
+check "a [dc.grobase_env] table passes --check" "$(rc_of "$GENV" --check)" 0
+GUEST_GENV=$(env B2B_CONFIG="$GENV" "${CFG[@]}" --guest)
+check "  it replaces the default table (CATALOG_MANAGEMENT and REMOTE_ACCESS gone)" \
+    "$(printf '%s\n' "$GUEST_GENV" | grep -c 'CATALOG_MANAGEMENT\|REMOTE_ACCESS' || true)" 0
+check "  and build.conf sources to the value, space and all" \
+    "$(printf '%s\n' "$GUEST_GENV" >"$TMP/genv.conf" && "${SCRIPT_SH:-bash}" -c ". '$TMP/genv.conf'; printf '%s|%s' \"\$B2B_DC_GROBASE_ENV\" \"\$B2B_DC_GROBASE_ENV_DATA_PLANE_FEATURES\"")" \
+    "DATA_PLANE_FEATURES DATA_PLANE_ADMIN_BYPASS|--features dynamodb"
+EMPTY_GENV=$(append genvempty '[dc.grobase_env]')
+contains "an empty table writes nothing (the list line says so)" \
+    "$(env B2B_CONFIG="$EMPTY_GENV" "${CFG[@]}" --guest)" 'B2B_DC_GROBASE_ENV=""'
+refuse_add "a lowercase key is refused" "dc.grobase_env.data_plane" '[dc.grobase_env]
+data_plane = "1"'
+refuse_add "a value build.conf would expand is refused" "dc.grobase_env.FOO" '[dc.grobase_env]
+FOO = "a$HOME"'
+refuse_add "a value with a double quote is refused" "dc.grobase_env.FOO" '[dc.grobase_env]
+FOO = "a\"b"'
+refuse_add "a number is refused (quote it)" "dc.grobase_env.FOO" '[dc.grobase_env]
+FOO = 1'
+refuse_add "a password is refused: secrets go in the secrets file" "secrets file" '[dc.grobase_env]
+MYSQL_PASSWORD = "x"'
+refuse_add "  so is a token" "dc.grobase_env.FLY_TOKEN" '[dc.grobase_env]
+FLY_TOKEN = "x"'
+refuse_add "  and a PAT" "dc.grobase_env.GH_PAT" '[dc.grobase_env]
+GH_PAT = "x"'
+REF=$(variant genvref 's|^package = "auto"|package = "auto"\ngrobase_ref = "dab5f43060aab2914183173c91dc7a39a7aab9f6"|')
+check "a full grobase_ref passes --check" "$(rc_of "$REF" --check)" 0
+contains "  and reaches build.conf" "$(env B2B_CONFIG="$REF" "${CFG[@]}" --guest)" \
+    'B2B_DC_GROBASE_REF=dab5f43060aab2914183173c91dc7a39a7aab9f6'
+refuse "an abbreviated grobase_ref is refused (git fetch takes no abbreviation)" "dc.grobase_ref" \
+    's|^package = "auto"|package = "auto"\ngrobase_ref = "dab5f43"|'
+
 exit "$fail"

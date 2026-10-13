@@ -71,6 +71,11 @@ GROBASE_REPO="${GROBASE_REPO:-https://github.com/Univers42/grobase.git}"
 # found", every dc-* feature failed). So: main's head, by its full SHA (the
 # `git fetch origin <sha>` below takes no abbreviation). Moving it means
 # checking ghcr has sha-<new pin> images, the way realtime is tagged below.
+# A profile moves it for itself with [dc] grobase_ref (B2B_DC_GROBASE_REF in
+# build.conf); GROBASE_REF= in the environment beats both.
+if [ -z "${GROBASE_REF:-}" ] && [ -f "$BUILD" ]; then
+    GROBASE_REF=$(sed -n 's/^B2B_DC_GROBASE_REF=//p' "$BUILD" | head -n1 | tr -d '"')
+fi
 GROBASE_REF="${GROBASE_REF:-d180542b0a3f9c4029484e4e15e43f057ecdbc0d}"
 GROBASE_DIR="${GROBASE_DIR:-/opt/grobase}"
 CONF=/etc/b2b/grobase.conf
@@ -229,6 +234,63 @@ done <<ORIGINS
 $(cors_origins)
 ORIGINS
 
+# ── the profile's grobase keys, where `make env` keeps them ─────────────────
+# grobase's `make env` (orchestrators/makes/60-secrets.mk:18-19 at dab5f43)
+# runs scripts/env/assemble-env.sh, which writes .env as config.env, then
+# .env.secrets, then .env.local LAST (:107-121, "duplicate keys: later wins").
+# A key put in .env by hand is gone at the next `make env`; one in .env.local
+# wins every time. On 2026-10-13 baas carried seven hand-set keys in .env
+# that a restore's `make env` would have dropped. So the profile's
+# [dc.grobase_env] goes into .env.local, through this helper, which b2b-restore
+# also runs after it puts a snapshot's .env.local back.
+cat >/usr/local/sbin/b2b-grobase-env <<'GENVEOF'
+#!/bin/sh
+# b2b-grobase-env [KEY=VALUE...] — upsert into /opt/grobase/.env.local the
+# given pairs, or with none the [dc.grobase_env] /etc/b2b/build.conf carries.
+# Installed by setup/install/dc/install_grobase.sh (born2root).
+# A key already in the file has its line replaced where it stands (a later
+# duplicate of it is dropped: it would win); every other line is kept.
+set -u
+BUILD=/etc/b2b/build.conf
+LOCAL=/opt/grobase/.env.local
+pairs() {
+    if [ "$#" -gt 0 ]; then
+        printf '%s\n' "$@"
+        return
+    fi
+    if ! grep -q '^B2B_DC_GROBASE_ENV=' "$BUILD" 2>/dev/null; then
+        # A build.conf from before the key: what install_grobase.sh wrote then.
+        printf '%s\n' CATALOG_MANAGEMENT=static REMOTE_ACCESS=1
+        return
+    fi
+    keys=$(sed -n 's/^B2B_DC_GROBASE_ENV="\(.*\)"$/\1/p' "$BUILD")
+    for key in $keys; do
+        printf '%s=%s\n' "$key" "$(sed -n "s/^B2B_DC_GROBASE_ENV_${key}=\"\(.*\)\"\$/\1/p" "$BUILD" | head -n1)"
+    done
+}
+want=$(pairs "$@")
+[ -n "$want" ] || exit 0
+if [ ! -f "$LOCAL" ]; then
+    (umask 077 && : >"$LOCAL") || exit 1
+    chown --reference="${LOCAL%/*}" "$LOCAL" 2>/dev/null || true
+fi
+tmp=$(mktemp "$LOCAL.XXXXXX") || exit 1
+printf '%s\n' "$want" | awk '
+    FILENAME == "-" { k = $0; sub(/=.*/, "", k); if (!(k in line)) order[++n] = k; line[k] = $0; next }
+    { k = $0; sub(/=.*/, "", k) }
+    k in line { if (!(k in done)) print line[k]; done[k] = 1; next }
+    { print }
+    END { for (i = 1; i <= n; i++) if (!(order[i] in done)) print line[order[i]] }
+' - "$LOCAL" >"$tmp" && cat "$tmp" >"$LOCAL"
+rc=$?
+rm -f "$tmp"
+[ "$rc" = 0 ] && echo "grobase env: $(printf '%s\n' "$want" | sed 's/=.*//' | tr '\n' ' ')in $LOCAL"
+exit "$rc"
+GENVEOF
+chmod 755 /usr/local/sbin/b2b-grobase-env
+genv_out=$(/usr/local/sbin/b2b-grobase-env) || die "b2b-grobase-env failed"
+[ -z "$genv_out" ] || log "$genv_out"
+
 # ── env, certs, images, up ──────────────────────────────────────────────────
 # grobase's own steps. `make env` mints .env.secrets (mode 600) on first run
 # and keeps it afterwards; `make certs` is idempotent.
@@ -243,45 +305,28 @@ make --no-print-directory certs >/dev/null || die "make certs failed"
 # from an origin the gateway does not allow (2026-09-20). grobase's realtime
 # reads REALTIME_ALLOWED_ORIGINS from .env and checks the Origin header only
 # when it is non-empty; a handshake without an Origin (a server-side client)
-# is always allowed. Written after `make env` because that is what creates
-# .env, and before `up` so the first container already has it.
-rt_origins=$(sed -n 's/^KONG_CORS_ORIGIN_[A-Z]*=//p' .env | grep . | tr '\n' ',')
-while IFS= read -r origin; do
-    [ -n "$origin" ] || continue
-    case ",${rt_origins}" in
-    *",${origin},"*) ;;
-    *) rt_origins="${rt_origins}${origin}," ;;
-    esac
-done <<ORIGINS
+# is always allowed. Computed from the .env `make env` made, kept in
+# .env.local like the profile's keys, and assembled again before `up`. A
+# profile that names REALTIME_ALLOWED_ORIGINS in [dc.grobase_env] has already
+# set it, and its list wins.
+if grep -q '^B2B_DC_GROBASE_ENV_REALTIME_ALLOWED_ORIGINS=' "$BUILD" 2>/dev/null; then
+    log "realtime: sockets allowed from the profile's REALTIME_ALLOWED_ORIGINS"
+else
+    rt_origins=$(sed -n 's/^KONG_CORS_ORIGIN_[A-Z]*=//p' .env | grep . | tr '\n' ',')
+    while IFS= read -r origin; do
+        [ -n "$origin" ] || continue
+        case ",${rt_origins}" in
+        *",${origin},"*) ;;
+        *) rt_origins="${rt_origins}${origin}," ;;
+        esac
+    done <<ORIGINS
 $(cors_origins)
 ORIGINS
-rt_origins=${rt_origins%,}
-if grep -q '^REALTIME_ALLOWED_ORIGINS=' .env; then
-    sed -i 's|^REALTIME_ALLOWED_ORIGINS=.*|REALTIME_ALLOWED_ORIGINS='"${rt_origins}"'|' .env
-else
-    printf 'REALTIME_ALLOWED_ORIGINS=%s\n' "$rt_origins" >>.env
+    rt_origins=${rt_origins%,}
+    /usr/local/sbin/b2b-grobase-env "REALTIME_ALLOWED_ORIGINS=$rt_origins" >/dev/null || die "b2b-grobase-env failed"
+    make --no-print-directory env >/dev/null || die "make env failed"
+    log "realtime: sockets allowed from ${rt_origins}"
 fi
-log "realtime: sockets allowed from ${rt_origins}"
-
-# ── trino's catalog.management, which nothing else sets ────────────────────
-# grobase's infra/docker/services/trino/conf/config.properties has
-# `catalog.management=${ENV:CATALOG_MANAGEMENT}`, but the trino service in
-# orchestrators/compose/base/lakehouse.yml sets only MYSQL_* and MINIO_*, and
-# `make env` never writes CATALOG_MANAGEMENT. Trino refuses to boot on a
-# config placeholder it cannot resolve -- "Configuration is invalid ...
-# Environment variable is not set: CATALOG_MANAGEMENT" -- so on the first max
-# build (2026-09-24) mini-baas-trino was Restarting (100) while every other
-# engine was healthy. The tier only ever mounts static catalog files
-# (postgresql, mongodb, mysql, iceberg), so `static` is the value that matches
-# what is on disk; `dynamic` would expose a catalog REST API nothing calls.
-# Written here, beside REALTIME_ALLOWED_ORIGINS, for the same reason: after
-# `make env` creates .env, before `up` reads it.
-if grep -q '^CATALOG_MANAGEMENT=' .env; then
-    sed -i 's|^CATALOG_MANAGEMENT=.*|CATALOG_MANAGEMENT=static|' .env
-else
-    printf 'CATALOG_MANAGEMENT=%s\n' static >>.env
-fi
-log "trino: catalog.management=static"
 
 # ── healthchecks that cannot run: CMD-SHELL in a shell-less image ───────────
 # grobase gives prometheus and loki `test: ["CMD-SHELL", "wget -qO- …"]`.
@@ -516,12 +561,6 @@ if [ -n "$rt_img" ]; then
             die "realtime image build failed"
     fi
 fi
-
-# groot on the host reaches realtime (4000) and mailpit SMTP (1025) over the ssh entry
-# only if grobase publishes them on the guest loopback: REMOTE_ACCESS=1 adds its
-# remote-access compose overlay (orchestrators/makes/00-config.mk reads .env.local).
-# Loopback only; nothing new is reachable from the network.
-grep -qx REMOTE_ACCESS=1 .env.local 2>/dev/null || printf 'REMOTE_ACCESS=1\n' >>.env.local
 
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
 

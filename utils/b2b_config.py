@@ -168,7 +168,24 @@ DEFAULTS = {
     # secrets_file: the host's KEY=VALUE secrets (setup/host/dc_lib.sh), for a
     # profile whose keys live somewhere else than the defaults dc_lib.sh tries.
     # "" keeps those defaults; B2B_SECRETS= beats it.
-    "dc": {"cors_origins": [], "package": "auto", "backup_dest": "", "secrets_file": ""},
+    # grobase_ref: the grobase commit install_grobase.sh checks out, by its
+    # full SHA; "" keeps the pin that script carries.
+    # grobase_env: NON-secret KEY = "value" lines kept in /opt/grobase/.env.local,
+    # the layer grobase's `make env` appends last, so they survive every
+    # re-assembly. A profile's table REPLACES this default one. The default is
+    # what install_grobase.sh always wrote: REMOTE_ACCESS=1 publishes realtime
+    # and mailpit on the guest loopback for the ssh entry (grobase's
+    # 00-config.mk reads it at dab5f43; d180542 ignores it), and
+    # CATALOG_MANAGEMENT=static, which trino needed at 5af95cdf and neither
+    # pin names any more (git grep, 2026-10-13).
+    "dc": {
+        "cors_origins": [],
+        "package": "auto",
+        "backup_dest": "",
+        "secrets_file": "",
+        "grobase_ref": "",
+        "grobase_env": {"CATALOG_MANAGEMENT": "static", "REMOTE_ACCESS": "1"},
+    },
     "disk": {"swap_mb": "auto", "volumes": DEFAULT_VOLUMES},
     "policy": {
         "password": {
@@ -977,6 +994,50 @@ class Validator:
             )
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
         self._abs_path("dc.secrets_file", self.c.dc.get("secrets_file"))
+        ref = self.c.dc.get("grobase_ref")
+        if ref and not (isinstance(ref, str) and self.SHA_RE.match(ref)):
+            self.err(
+                "dc.grobase_ref",
+                "%r is not a full commit SHA (40 hex digits: git fetch "
+                "origin <sha> takes no abbreviation)" % (ref,),
+            )
+        self._grobase_env(self.c.dc.get("grobase_env"))
+
+    SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+    ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+    # build.conf is sourced, each value inside double quotes: nothing that
+    # would end the quotes or expand there, and no control character.
+    ENV_VALUE_RE = re.compile(r'^[^"$`\\\x00-\x1f\x7f]*$')
+    # Ponytail: a secret is recognised by its NAME. A secret under an innocent
+    # name (DSN, URL with a password in it) passes; a harmless key that happens
+    # to be named *_TOKEN or *_KEY is refused -- put that one in .env.local by
+    # hand on the guest. BYPASS is not PASS: the word must stand alone.
+    SECRET_NAME_RE = re.compile(
+        r"PASSWORD|SECRET|TOKEN|PRIVATE|(^|_)(PAT|KEY|PASS|PWD|CREDENTIALS?)(_|$)"
+    )
+
+    def _grobase_env(self, table):
+        if not isinstance(table, dict):
+            self.err("dc.grobase_env", "is a table: [dc.grobase_env] then KEY = \"value\" lines")
+            return
+        for key, value in table.items():
+            where = "dc.grobase_env.%s" % key
+            if not self.ENV_KEY_RE.match(key):
+                self.err(where, "is not an env name (A-Z, 0-9 and _, a letter first)")
+            elif self.SECRET_NAME_RE.search(key):
+                self.err(
+                    where,
+                    "looks like a secret; the profile is tracked, so it goes "
+                    "in the secrets file, never here",
+                )
+            elif not isinstance(value, str):
+                self.err(where, "%r is not a string (quote it: %s = \"%s\")" % (value, key, value))
+            elif not self.ENV_VALUE_RE.match(value):
+                self.err(
+                    where,
+                    "%r holds a character build.conf cannot carry "
+                    "(\" $ ` \\ or a control character)" % (value,),
+                )
 
     def _abs_path(self, where, value):
         """A host path, or a list of them, each absolute once $HOME is
@@ -1235,6 +1296,7 @@ LEGACY = {
     "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
     "B2B_DC_BACKUP_DEST": lambda c: _host_path(c.dc.get("backup_dest")),
     "B2B_DC_SECRETS_FILE": lambda c: _host_path(c.dc.get("secrets_file")),
+    "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],
     "B2B_PASS_WARN_AGE": lambda c: c.policy["password"]["warn_days"],
@@ -1370,6 +1432,8 @@ def guest_view(config):
         "B2B_DC_CORS_ORIGINS",
         # [dc] package: the grobase tier install_grobase.sh starts.
         "B2B_DC_PACKAGE",
+        # [dc] grobase_ref: the commit it checks out ("" = its own pin).
+        "B2B_DC_GROBASE_REF",
     )
     for key in keys:
         if key == "B2B_VOLUMES":
@@ -1390,7 +1454,20 @@ def guest_view(config):
             lines.append('%s="%s"' % (key, value))
         else:
             lines.append("%s=%s" % (key, value))
+    lines.extend(_grobase_env_lines(config.dc.get("grobase_env")))
     return "\n".join(lines)
+
+
+def _grobase_env_lines(table):
+    """[dc.grobase_env] for build.conf: the names on one line (b2b-grobase-env
+    reads it, and an old build.conf without it means "today's defaults"), then
+    one quoted line per value, which may hold a space."""
+    if not isinstance(table, dict):
+        return []
+    lines = ['B2B_DC_GROBASE_ENV="%s"' % " ".join(table)]
+    for key, value in table.items():
+        lines.append('B2B_DC_GROBASE_ENV_%s="%s"' % (key, value))
+    return lines
 
 
 def users_view(config):

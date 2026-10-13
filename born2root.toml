@@ -306,6 +306,14 @@ package = "auto"
 # [ai] models_dir. Worth putting on a different physical disk from [vm] path
 # -- a copy beside the guest survives a rebuild, not a dead disk.
 backup_dest = ""
+# Not set here, each with its default (profiles/server.toml sets all three):
+#   secrets_file  the host's KEY=VALUE secrets, mode 600 ("" keeps
+#                 setup/host/dc_lib.sh's search; B2B_SECRETS= beats it)
+#   grobase_ref   the grobase commit to check out, full SHA ("" keeps
+#                 install_grobase.sh's pin)
+#   [dc.grobase_env]  non-secret KEY = "value" lines kept in grobase's
+#                 .env.local; a table REPLACES the default one,
+#                 CATALOG_MANAGEMENT = "static" and REMOTE_ACCESS = "1"
 
 [disk]
 # "auto" is the guest's RAM clamped to 1024-4096 MB and to a quarter of the

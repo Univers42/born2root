@@ -132,6 +132,11 @@ case " $* " in *" certs "*) cat certs/ca.key >"$STUB_DIR/ca.at.certs" 2>/dev/nul
 exit 0
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/sleep"
+# install_grobase.sh's helper: the profile's [dc.grobase_env] into .env.local.
+cat >"$TMP/bin/b2b-grobase-env" <<'EOF'
+#!/bin/sh
+printf 'b2b-grobase-env %s\n' "$*" >>"$STUB_DIR/order.log"
+EOF
 cat >"$TMP/bin/b2b-stack-health" <<'EOF'
 #!/bin/sh
 exit "$(cat "$STUB_DIR/health")"
@@ -311,10 +316,11 @@ check "SQL Server: through engine-backup.sh restore" \
     "$(grep -c "^engine-backup restore mssql .*/mssql-20261007T012610\.tar\$" "$TMP/order.log")" 1
 # The order: first match of each step, ascending.
 at() { grep -n -m1 -e "$1" "$TMP/order.log" | cut -d: -f1; }
-order=$(for step in '^make .*env' '^make .*certs' '^make .*down' '^docker volume rm mini-baas_mysql-data' \
-    '^docker compose up -d mysql' '^make .* up ' 'mongorestore' '^engine-backup restore mssql'; do at "$step"; done)
-check "the order: env, certs, down, mysql's volume, mysql alone, up, mongo, mssql" \
-    "$(printf '%s\n' "$order" | grep -c .) $(printf '%s\n' "$order" | sort -n -c && echo ascending)" "8 ascending"
+order=$(for step in '^b2b-grobase-env' '^make .*env' '^make .*certs' '^make .*down' \
+    '^docker volume rm mini-baas_mysql-data' '^docker compose up -d mysql' '^make .* up ' 'mongorestore' \
+    '^engine-backup restore mssql'; do at "$step"; done)
+check "the order: profile env, env, certs, down, mysql's volume, mysql alone, up, mongo, mssql" \
+    "$(printf '%s\n' "$order" | grep -c .) $(printf '%s\n' "$order" | sort -n -c && echo ascending)" "9 ascending"
 check "MySQL's volume goes after the stack is down, before it starts alone" \
     "$([ "$(at '^make .*down')" -lt "$(at '^docker volume rm mini-baas_mysql-data')" ] && echo yes)" yes
 touch "$TMP/mongorestore_fails"
