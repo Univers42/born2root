@@ -22,6 +22,10 @@
 #   setup/host/provision_vm.sh <vm-name> hellish
 #   setup/host/provision_vm.sh <vm-name> shell     (hellish from upstream)
 #   setup/host/provision_vm.sh <vm-name> health          # print checkhealth
+#   setup/host/provision_vm.sh <vm-name> grow-root       # /var into a grown disk (dry run;
+#                                                          GROW_ROOT_APPLY=1 acts)
+#   setup/host/provision_vm.sh <vm-name> ide-disk        # the IDE disk: ide_crypt, XFS,
+#                                                          /var/lib/docker-ide
 #   setup/host/provision_vm.sh <vm-name> all
 #
 # Environment passed through to the guest script, e.g.
@@ -125,7 +129,10 @@ fi
 vm_ssh() { "${SSH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@"; }
 # A pty turns every newline into CR-LF on the way back, which makes the output
 # look double-spaced and breaks anything downstream that matches line ends.
-vm_ssh_tty() { "${SSH_PREFIX[@]}" ssh "${SSH_TTY_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@" | tr -d '\r'; }
+# Line-buffered: behind the provisioners' `| tee`, tr's output is a pipe and
+# stdio holds it in 4 KB blocks -- three lines printed a second apart arrived
+# in the same second, and an operator who sees nothing presses Ctrl+C mid-step.
+vm_ssh_tty() { "${SSH_PREFIX[@]}" ssh "${SSH_TTY_OPTS[@]}" "${VM_USER}@127.0.0.1" "$@" | stdbuf -oL tr -d '\r'; }
 vm_scp() { "${SSH_PREFIX[@]}" scp "${SCP_OPTS[@]}" "$@"; }
 
 # Run a privileged command in the VM.
@@ -206,22 +213,34 @@ build_env() {
     printf '%s' "$out"
 }
 
-# run_provisioner <local script> <remote name> <env prefix> <label>
-run_provisioner() {
-    local src="$1" remote="$2" prefix="$3" label="$4"
+# guest_script <local script> <remote name> <env prefix> <label> [transcript]
+# Runs the script as root in the guest, output live and also copied to
+# <transcript>; returns the script's exit status.
+guest_script() {
+    local src="$1" remote="$2" prefix="$3" label="$4" transcript="${5:-/dev/null}" envs rc
     [ -f "$src" ] || die "$src not found"
 
     info "uploading $(basename "$src")"
     vm_scp "$src" "${VM_USER}@127.0.0.1:/tmp/${remote}" >/dev/null ||
         die "upload of $src failed"
 
-    local envs
     envs=$(build_env "$prefix")
     info "running ${label} inside the VM (this takes a while — output is live)"
-    vm_ssh_tty "chmod +x /tmp/${remote} && ${SUDO_CMD} env ${envs} bash /tmp/${remote}"
-    local rc=${PIPESTATUS[0]}
+    # With pipefail this is ssh's status, which is the script's, unless tee
+    # itself failed.
+    vm_ssh_tty "chmod +x /tmp/${remote} && ${SUDO_CMD} env ${envs} bash /tmp/${remote}" | tee "$transcript"
+    rc=$?
     vm_ssh "rm -f /tmp/${remote}" >/dev/null 2>&1 || true
-    [ "$rc" -eq 0 ] || warn "${label} exited ${rc} -- read the output above before trusting it"
+    return "$rc"
+}
+
+# run_provisioner <local script> <remote name> <env prefix> <label>
+# A failed provisioner is reported, not fatal: `all` goes on to the next one.
+run_provisioner() {
+    local rc
+    guest_script "$@"
+    rc=$?
+    [ "$rc" -eq 0 ] || warn "${4} exited ${rc} -- read the output above before trusting it"
 }
 
 show_health() {
@@ -248,6 +267,79 @@ show_health() {
     else
         warn "no checkhealth log yet — run: $0 $VM_NAME nvim"
     fi
+}
+
+# ── grow-root: setup/install/dc/grow_root.sh, and what it needs from here ──
+# The LUKS passphrase, resolved the way qemu_vm.sh's unlock resolves it
+# (b2b_luks_passphrase: VM_PASS, else born2root.toml), goes into a FIFO in the
+# guest's /dev/shm over an ssh of its own: no pty to echo it, no sudo to log
+# it (the guest's sudoers has log_input), no command line, no file.
+KEY_DIR=""
+KEY_FEEDER=""
+key_fifo_open() {
+    local pass
+    pass=$(b2b_luks_passphrase 2>/dev/null)
+    [ -n "$pass" ] || die "no LUKS passphrase: set VM_PASS, or luks_passphrase in born2root.toml"
+    if ! KEY_DIR=$(vm_ssh "d=\$(mktemp -d /dev/shm/b2b-grow-root.XXXXXX) && mkfifo -m 600 \"\$d/key\" && echo \"\$d\"") ||
+        [ -z "$KEY_DIR" ]; then
+        die "could not make the key FIFO in the guest's /dev/shm"
+    fi
+    # Ponytail: the writer waits 15 min for grow_root.sh to open the FIFO; it
+    # does so seconds in, before any change, so only a stalled ssh reaches it.
+    printf '%s' "$pass" | vm_ssh "timeout 900 dd of='$KEY_DIR/key' conv=nocreat,notrunc status=none" >/dev/null 2>&1 &
+    KEY_FEEDER=$!
+    export GROW_ROOT_KEY_FIFO="$KEY_DIR/key"
+}
+# A writer still waiting in open() is let go by a reader; then the directory goes.
+key_fifo_close() {
+    [ -n "$KEY_DIR" ] || return 0
+    # KEY_DIR is whatever the guest's `mktemp -d /dev/shm/b2b-grow-root.XXXXXX`
+    # echoed, and the rm -rf below is built from it: a guest that answers a
+    # banner -- or an injection that reached the guest's stdout -- must not
+    # turn this into `rm -rf /`. The prefix is the one key_fifo_open asks for.
+    case "$KEY_DIR" in
+    /dev/shm/b2b-grow-root.?*) ;;
+    *)
+        # The feeder is let go first: no writer left behind on the way out.
+        # die names the value (and exits), so KEY_DIR is still set in it.
+        kill "$KEY_FEEDER" 2>/dev/null
+        wait "$KEY_FEEDER" 2>/dev/null
+        die "key_fifo_close: refusing to rm -rf invalid KEY_DIR='$KEY_DIR' (expected /dev/shm/b2b-grow-root.?*)"
+        ;;
+    esac
+    vm_ssh "dd if='$KEY_DIR/key' of=/dev/null iflag=nonblock status=none 2>/dev/null; rm -rf '$KEY_DIR'" >/dev/null 2>&1 ||
+        warn "could not remove $KEY_DIR in the guest (it holds no data: a FIFO keeps nothing)"
+    kill "$KEY_FEEDER" 2>/dev/null
+    wait "$KEY_FEEDER" 2>/dev/null
+    KEY_DIR=""
+}
+# The guest saves the partition table before changing it and prints it between
+# markers; the copy that matters is the one off the guest, beside its disk.
+grow_root() {
+    local rc saved vm_dir="${VM_PATH:-$REPO_ROOT/disk_images}/$VM_NAME"
+    # Global, not local: the EXIT trap below outlives this function, and a
+    # local is unbound (set -u) by the time the trap runs on the normal path.
+    transcript=$(mktemp) || die "mktemp failed"
+    # The transcript comes off every way out: success, guest_script failure,
+    # grow_root.sh non-zero. This trap replaces the script's askpass one, so
+    # cleanup_askpass stays in both modes, and runs BEFORE key_fifo_close: that
+    # one dies on a KEY_DIR the guest lied about, and a die inside the trap
+    # would skip whatever came after it -- the password file on the VM.
+    if [ "${GROW_ROOT_APPLY:-0}" = 1 ]; then
+        # Closed on every way out, the dies included.
+        trap 'rm -f "$transcript"; cleanup_askpass; key_fifo_close' EXIT
+        key_fifo_open
+    else
+        trap 'rm -f "$transcript"; cleanup_askpass' EXIT
+    fi
+    guest_script setup/install/dc/grow_root.sh grow_root.sh GROW_ROOT_ "grow_root.sh" "$transcript"
+    rc=$?
+    saved=$(. "$REPO_ROOT/setup/install/dc/grow_root.sh" && save_sfdisk_dump "$transcript" "$vm_dir")
+    case $? in
+    0) ok "the partition table before the change, off the guest: $saved" ;;
+    2) warn "could not write the partition table's copy under $vm_dir; the guest keeps one in /var/backups/b2b" ;;
+    esac
+    [ "$rc" -eq 0 ] || die "grow_root.sh exited $rc -- read its output above"
 }
 
 # `health` only reads files, so it never needs to become root.
@@ -352,6 +444,15 @@ graph-render)
     run_provisioner setup/install/dc/install_graph_render.sh \
         install_graph_render.sh GRAPH_RENDER_ "graph_render"
     ;;
+grow-root)
+    grow_root
+    ;;
+# Not run_provisioner: a refusal here (a disk that is not blank, two disks
+# with the serial) is the answer the operator needs, so it is the exit status.
+ide-disk)
+    guest_script setup/install/dc/install_ide_disk.sh install_ide_disk.sh IDE_DISK_ "install_ide_disk.sh" ||
+        die "install_ide_disk.sh exited $? -- read its output above"
+    ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
 # An ad-hoc script as root in the guest, through the same upload + sudo
@@ -415,6 +516,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | root-sh | restore-drill | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | grow-root | ide-disk | root-sh | restore-drill | all)"
     ;;
 esac

@@ -48,6 +48,13 @@
 #   qemu_vm.sh restart     stop, then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
+#                          GRACEFUL=1 STOP_ON_TIMEOUT=abort: never force it; exit 3 if still up
+#   qemu_vm.sh grow-disk N stopped guest only: qemu-img check, compare against
+#                          COLD_COPY=<path> (must exist and be identical), then resize to N GiB
+#                          (an EXISTING VM only -- a fresh build is sized by
+#                          vm.disk_gb; the guest half is make grow_root)
+#   qemu_vm.sh ide-disk-create  stopped guest only: the IDE sandbox disk,
+#                          vm.ide_disk_gb GiB (create makes it on a fresh build)
 #   qemu_vm.sh kill        last resort: SIGTERM the QEMU process
 #   qemu_vm.sh reset       hard reset;  pause / resume  freeze and continue
 #   qemu_vm.sh status      pid, ports, disk size, what the console last said
@@ -67,6 +74,7 @@
 #   VM_NAME (debian)  VM_PATH (./disk_images)  DISK_SIZE_MB (15360 = SIZE_B2B*1024)
 #   VM_RAM_MB (auto)  B2B_VM_CPUS (auto)  VM_PASS (default: born2root.toml's B2B_LUKS_PASSPHRASE)
 #   VM_USER (default: born2root.toml's B2B_LOGIN)
+#   B2B_VM_IDE_DISK_GB (born2root.toml vm.ide_disk_gb; 0 = no IDE sandbox disk)
 #   LUKS (ON)         ISO (newest ISO in the repo root matching LUKS's glob)
 #   B2B_QEMU_LEGACY_HW=1   give the guest the old emulated AHCI + e1000 back,
 #                          PCI slots included. The rollback for a guest that
@@ -104,6 +112,7 @@ vm_paths() {
     SERIAL="$VM_DIR/serial.log"
     MONITOR="$VM_DIR/monitor.sock"
     PIDFILE="$VM_DIR/qemu.pid"
+    IDE_DISK="$VM_DIR/$VM_NAME-ide.qcow2"
     # What the disk holds is recorded, not guessed from its size: a qcow2 grows
     # past 1 GB minutes into an install, long before there is a system on it.
     PHASE="$VM_DIR/.phase"     # "installing" while d-i owns the disk
@@ -112,6 +121,16 @@ vm_paths() {
 vm_paths
 
 DISK_SIZE_MB="${DISK_SIZE_MB:-15360}"
+# A second disk for the IDE sandbox's dockerd (setup/install/dc/install_ide_disk.sh).
+# make passes it; read from the config otherwise, so a guest started by hand
+# does not quietly come up without its sandbox disk.
+B2B_VM_IDE_DISK_GB="${B2B_VM_IDE_DISK_GB:-$(b2b_get B2B_VM_IDE_DISK_GB)}"
+case "${B2B_VM_IDE_DISK_GB:=0}" in
+*[!0-9]*)
+    echo "B2B_VM_IDE_DISK_GB='$B2B_VM_IDE_DISK_GB' is not a whole number of GiB (born2root.toml vm.ide_disk_gb)" >&2
+    exit 1
+    ;;
+esac
 # Empty RAM and cores mean the same share install_vm_debian.sh gives a
 # VirtualBox guest: 25% of host RAM clamped to [2048,8192] MB, half the cores
 # clamped to [2,8]. This used to be a flat 2048 MB and 3 cores, so the
@@ -614,7 +633,30 @@ launch() {
     # stalled on retransmits that UFW logged as blocked inbound ACK/FIN, not
     # as a failure to connect. ipv6=off removes the address at the source, so
     # the guest never has a broken route to prefer.
-    local disk_args=() net_args=()
+    #
+    # hd1, the IDE sandbox's disk, is attached to the installed system only:
+    # the installer must see exactly one disk, because partman's recipe names
+    # /dev/sda. It is found in the guest by its serial, never booted from, and
+    # mounted nofail, so a boot without it costs the sandbox and not the boot.
+    local disk_args=() net_args=() ide_args=()
+    if [ "$boot" = disk ] && [ "$B2B_VM_IDE_DISK_GB" -gt 0 ]; then
+        if [ ! -f "$IDE_DISK" ]; then
+            warn "vm.ide_disk_gb is ${B2B_VM_IDE_DISK_GB} but $IDE_DISK is missing — booting without it (stop, then: $0 ide-disk-create)"
+        elif [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
+            warn "B2B_QEMU_LEGACY_HW=1: booting without the IDE disk (it hangs off virtio-scsi)"
+        else
+            ide_args=(
+                -drive "file=${IDE_DISK},if=none,id=hd1,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring"
+                -device "scsi-hd,drive=hd1,bus=scsi0.0,scsi-id=1,serial=b2bide0001"
+            )
+        fi
+    elif [ "$boot" = disk ] && [ -f "$IDE_DISK" ]; then
+        # Ponytail: one runbook step boots without the IDE disk on purpose (key 0
+        # with the file present). We warn but never refuse, because that step is
+        # deliberate. The likely cause is starting the VM without B2B_CONFIG, so
+        # born2root.toml's vm.ide_disk_gb=0 is read instead of the profile's value.
+        warn "vm.ide_disk_gb is ${B2B_VM_IDE_DISK_GB} but $IDE_DISK exists — likely started without B2B_CONFIG (the IDE disk will not be attached)"
+    fi
     if [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
         disk_args=(
             -device "ich9-ahci,id=ahci"
@@ -630,6 +672,7 @@ launch() {
             -device "virtio-scsi-pci,id=scsi0,addr=0x3,iothread=iothread0"
             -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring"
             -device "scsi-hd,drive=hd0,bus=scsi0.0,bootindex=${hd_index}"
+            "${ide_args[@]}"
         )
         net_args=(-device "virtio-net-pci,netdev=net0,addr=0x4")
         # The CD still needs a SATA controller to hang off. addr=0x5 keeps it
@@ -892,6 +935,128 @@ await_shutdown() {
     ! is_running
 }
 
+# Power off the guest at pid $1. Immediate by default -- like VirtualBox's
+# `controlvm poweroff`, and what people mean by "stop". The monitor `quit`
+# exits QEMU at once AND flushes the qcow2 (kill -9 would not), so the guest's
+# journal replays cleanly on the next boot. GRACEFUL=1 asks the guest to shut
+# its services down first, which is the slow path this used to always take.
+#
+# A graceful stop that outlives STOP_GRACE pulls the plug: the systemd unit's
+# ExecStop relies on that, so a host shutdown never waits on a hung guest.
+# STOP_ON_TIMEOUT=abort is the other contract, for a maintenance window whose
+# next step resizes the disk: the guest is left running and the exit is 3,
+# because a plug pulled there hands qemu-img a filesystem nobody unmounted.
+stop_guest() {
+    local pid="$1" grace="${STOP_GRACE:-90}"
+    case "${STOP_ON_TIMEOUT:-}" in
+    '') ;;
+    abort)
+        [ -n "${GRACEFUL:-}" ] ||
+            die "STOP_ON_TIMEOUT=abort needs GRACEFUL=1: without it stop quits at once, the plug abort promises not to pull"
+        ;;
+    *) die "STOP_ON_TIMEOUT='${STOP_ON_TIMEOUT}' is not a mode: abort, or unset to pull the plug at the timeout" ;;
+    esac
+    if [ -n "${GRACEFUL:-}" ]; then
+        info "orderly shutdown (pid $pid) — letting the guest stop its services"
+        mon "system_powerdown" >/dev/null
+        if ! await_shutdown "$grace"; then
+            if [ "${STOP_ON_TIMEOUT:-}" = abort ]; then
+                printf "  ${C_RED}✗${C_RESET} still up after %ss and STOP_ON_TIMEOUT=abort: left running (pid %s), nothing forced\n" \
+                    "$grace" "$pid" >&2
+                printf "    ${C_DIM}see what it waits on: %s console | %s screenshot; then retry with a longer STOP_GRACE${C_RESET}\n" \
+                    "$0" "$0" >&2
+                exit 3
+            fi
+            warn "still up after ${grace}s — pulling the plug"
+        fi
+    else
+        info "powering off (pid $pid)"
+        mon "quit" >/dev/null 2>&1
+    fi
+    # Confirm it is really gone, escalating only if it is not.
+    await_shutdown 3 || true
+    is_running && {
+        kill "$pid" 2>/dev/null
+        await_shutdown 3 || true
+    }
+    is_running && {
+        kill -9 "$pid" 2>/dev/null
+        sleep 1
+    }
+    is_running && die "could not stop pid $pid — force it: $0 kill"
+    rm -f "$PIDFILE" "$MONITOR"
+    ok "stopped"
+}
+
+# ── Growing the root disk, offline ──────────────────────────────────────────
+# Only with the guest stopped, never block_resize on a live monitor: that
+# hands a running kernel a disk larger than its partition table without the
+# guest asking, and the step that matters -- moving the partitions -- is the
+# guest's own (setup/install/dc/grow_root.sh, `make grow_root`). qemu-img also
+# takes the image's write lock, so a guest running from another VM_PATH makes
+# it fail rather than corrupt anything. Sizes are GiB, as vm.disk_gb is.
+# A resize is refused without COLD_COPY, a copy qemu-img compare finds identical:
+# the risk ruling says never grow the disk without a cold copy, and only code
+# can make sure nobody skips it.
+qcow2_virtual_bytes() { # <image> -> its virtual size in bytes
+    qemu-img info --output=json "$1" |
+        python3 -c 'import json, sys; print(json.load(sys.stdin)["virtual-size"])'
+}
+grow_disk() {
+    local gb="$1" cur rc cold_copy
+    case "$gb" in '' | *[!0-9]*) die "usage: $0 grow-disk <GiB>   (the new virtual size, larger than today's)" ;; esac
+    is_running && die "running (pid $(qemu_pid)) — stop it first: GRACEFUL=1 STOP_ON_TIMEOUT=abort $0 stop"
+    [ -f "$DISK" ] || die "no disk at $DISK"
+    cold_copy="${COLD_COPY:-}"
+    [ -n "$cold_copy" ] || die "COLD_COPY is not set — provide the path to a verified cold copy of the disk"
+    [ -f "$cold_copy" ] || die "COLD_COPY='$cold_copy' does not exist"
+    info "qemu-img compare $DISK $cold_copy"
+    qemu-img compare "$DISK" "$cold_copy"
+    rc=$?
+    [ "$rc" -eq 0 ] || die "qemu-img compare exited $rc: the cold copy differs from the disk (output above) — refusing to resize"
+    cur=$(qcow2_virtual_bytes "$DISK") || die "qemu-img info could not read $DISK (in use by another QEMU?)"
+    # Ponytail: $((10#$gb)) forces decimal even if the argument has leading zeros (0120 → 120, not octal).
+    # Without 10#, bash reads 0120 as octal 80; qemu-img reads it as decimal 120. 099 errors outright.
+    [ $((10#$gb * 1073741824)) -gt "$cur" ] ||
+        die "${gb} GiB is not larger than the current $((cur / 1073741824)) GiB ($cur bytes)"
+    info "qemu-img check $DISK"
+    qemu-img check "$DISK"
+    rc=$?
+    case "$rc" in
+    0) ;;
+    3) die "leaked clusters (wasted space, no corruption) — reclaim them first: qemu-img check -r leaks $DISK" ;;
+    *) die "qemu-img check exited $rc: the image is not clean, refusing to resize it" ;;
+    esac
+    qemu-img resize "$DISK" "${gb}G" || die "qemu-img resize failed"
+    ok "$DISK: $((cur / 1073741824)) → ${gb} GiB virtual (cold copy verified). In the guest: make grow_root (dry run), then APPLY=1"
+}
+
+# The IDE sandbox's disk, vm.ide_disk_gb GiB, next to the root disk. Refused
+# while the guest runs (it would not see the disk before its next boot, and
+# the operator would believe it had) and over an existing file, which holds
+# an encrypted docker data-root once install_ide_disk.sh has run.
+ide_disk_create() {
+    [ "$B2B_VM_IDE_DISK_GB" -gt 0 ] || die "vm.ide_disk_gb is 0: set the size in the profile first"
+    is_running && die "running (pid $(qemu_pid)) — stop it first: GRACEFUL=1 STOP_ON_TIMEOUT=abort $0 stop"
+    [ -e "$IDE_DISK" ] && die "$IDE_DISK already exists — refusing to replace a disk that may hold data"
+    [ -f "$DISK" ] || die "no disk at $DISK — the IDE disk goes next to an existing VM's"
+    qemu-img create -q -f qcow2 "$IDE_DISK" "${B2B_VM_IDE_DISK_GB}G" || die "qemu-img create failed"
+    ok "created $IDE_DISK (${B2B_VM_IDE_DISK_GB} GiB virtual, attached at the next boot)"
+}
+
+# The create step's half, so a fresh build gets the IDE disk without a verb
+# of its own. A guest that is already up keeps running without it.
+ensure_ide_disk() {
+    [ "$B2B_VM_IDE_DISK_GB" -gt 0 ] || return 0
+    if [ -f "$IDE_DISK" ]; then
+        ok "IDE disk already exists: $IDE_DISK"
+    elif is_running; then
+        warn "vm.ide_disk_gb is ${B2B_VM_IDE_DISK_GB} but the guest is running — stop it, then: $0 ide-disk-create"
+    else
+        ide_disk_create
+    fi
+}
+
 # ── Actions ─────────────────────────────────────────────────────────────────
 # Guarded so tests/test_qemu_ports.sh can source this file for its port
 # resolution functions without also running whatever action $1 says.
@@ -910,6 +1075,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
                 die "qemu-img create failed"
             ok "created $DISK (${DISK_SIZE_MB}MB virtual, grows on demand)"
         fi
+        ensure_ide_disk
         printf '%s (qemu/kvm, kernel %s, %s)\n' "$(hostname -f 2>/dev/null || hostname)" \
             "$(uname -r)" "$(date '+%Y-%m-%d %H:%M:%S')" >"$VM_DIR/.built-on" 2>/dev/null || true
         ;;
@@ -1077,33 +1243,16 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
     stop)
         need_running
         need_control qemu_stop
-        pid=$(qemu_pid)
-        # Immediate by default -- like VirtualBox's `controlvm poweroff`, and what
-        # people mean by "stop". The monitor `quit` exits QEMU at once AND flushes
-        # the qcow2 (kill -9 would not), so the guest's journal replays cleanly on
-        # the next boot. GRACEFUL=1 asks the guest to shut its services down first,
-        # which is the slow path this used to always take.
-        if [ -n "${GRACEFUL:-}" ]; then
-            info "orderly shutdown (pid $pid) — letting the guest stop its services"
-            mon "system_powerdown" >/dev/null
-            await_shutdown "${STOP_GRACE:-90}" || warn "still up after ${STOP_GRACE:-90}s — pulling the plug"
-        else
-            info "powering off (pid $pid)"
-            mon "quit" >/dev/null 2>&1
-        fi
-        # Confirm it is really gone, escalating only if it is not.
-        await_shutdown 3 || true
-        is_running && {
-            kill "$pid" 2>/dev/null
-            await_shutdown 3 || true
-        }
-        is_running && {
-            kill -9 "$pid" 2>/dev/null
-            sleep 1
-        }
-        is_running && die "could not stop pid $pid — force it: $0 kill"
-        rm -f "$PIDFILE" "$MONITOR"
-        ok "stopped"
+        stop_guest "$(qemu_pid)"
+        ;;
+
+    grow-disk)
+        grow_disk "${2:-}"
+        ;;
+
+    ide-disk-create)
+        refuse_sudo_build "make qemu_ide_disk_create VM_PATH=$VM_PATH" || exit 1
+        ide_disk_create
         ;;
 
     kill)
@@ -1286,6 +1435,7 @@ PYEOF
         [ -n "$others" ] && printf "  %-12s ${C_YELLOW}%s${C_RESET}\n" "elsewhere:" \
             "$(printf '%s\n' "$others" | awk '{printf "pid %s (VM_PATH=%s) ", $1, $2}')"
         [ -f "$DISK" ] && printf "  %-12s %s (%s on host)\n" "disk:" "$DISK" "$(du -h "$DISK" 2>/dev/null | cut -f1)"
+        [ -f "$IDE_DISK" ] && printf "  %-12s %s (%s on host)\n" "ide disk:" "$IDE_DISK" "$(du -h "$IDE_DISK" 2>/dev/null | cut -f1)"
         printf "  %-12s %s\n" "iso:" "$(basename "$(find_iso)" 2>/dev/null || echo none)"
         printf "  %-12s " "ports:"
         for _spec in $PORTS_SPEC; do
@@ -1301,6 +1451,6 @@ PYEOF
         printf "\n"
         ;;
 
-    *) die "unknown action '${1}' (create|install|start|restart|stop|kill|reset|pause|resume|unlock|status|list|console|watch|screenshot|monitor|ssh|ssh-config)" ;;
+    *) die "unknown action '${1}' (create|install|start|restart|stop|kill|reset|pause|resume|unlock|status|list|console|watch|screenshot|monitor|ssh|ssh-config|grow-disk|ide-disk-create)" ;;
     esac
 fi

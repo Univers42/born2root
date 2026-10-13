@@ -166,6 +166,14 @@ check "get B2B_VM_RAM_MB: a number comes through" \
     "$(get_of "$DEFAULTS" B2B_VM_RAM_MB)" 20480
 check "get B2B_VM_CPUS: a number comes through" \
     "$(get_of "$DEFAULTS" B2B_VM_CPUS)" 12
+# vm.ide_disk_gb: the IDE sandbox disk, host-side only. 0 (off) unless a
+# profile asks; the Makefile hands it to qemu_vm.sh as B2B_VM_IDE_DISK_GB.
+check "get B2B_VM_IDE_DISK_GB: 0 (no IDE disk) by default" \
+    "$(get_of "$DEFAULTS" B2B_VM_IDE_DISK_GB)" 0
+check "get B2B_VM_IDE_DISK_GB: a number comes through" \
+    "$(get_of "$(variant ide40 's/^ide_disk_gb = 0$/ide_disk_gb = 40/')" B2B_VM_IDE_DISK_GB)" 40
+check "vm.ide_disk_gb = 40 validates" \
+    "$(rc_of "$(variant ide40ok 's/^ide_disk_gb = 0$/ide_disk_gb = 40/')" --check)" 0
 check "get B2B_FEATURES: all auto means empty, so the picker still runs" \
     "$(get_of "$DEFAULTS" B2B_FEATURES)" ""
 check "get B2B_NVIM_USERS" "$(get_of "$DEFAULTS" B2B_NVIM_USERS)" dlesieur
@@ -217,6 +225,8 @@ refuse "vm.name with a space" vm.name 's/^name    = "debian"/name    = "my vm"/'
 refuse "vm.backend nonsense" vm.backend 's/^backend = "auto"/backend = "hyperv"/'
 refuse "vm.disk_gb below 8" vm.disk_gb 's/^disk_gb = 15/disk_gb = 4/'
 refuse "vm.disk_gb quoted" vm.disk_gb 's/^disk_gb = 15/disk_gb = "15"/'
+refuse "vm.ide_disk_gb negative" vm.ide_disk_gb 's/^ide_disk_gb = 0$/ide_disk_gb = -1/'
+refuse "vm.ide_disk_gb quoted" vm.ide_disk_gb 's/^ide_disk_gb = 0$/ide_disk_gb = "40"/'
 refuse "vm.ram_mb below 512" vm.ram_mb 's/^ram_mb  = .*/ram_mb  = 128/'
 refuse "vm.cpus of zero" vm.cpus 's/^cpus    = .*/cpus    = 0/'
 refuse "vm.profile nonsense" vm.profile 's/^profile = "auto"/profile = "enormous"/'
@@ -394,6 +404,8 @@ contains "--guest carries the ssh password-login switch" "$GUEST" "B2B_SSH_PASSW
 contains "--guest names the login" "$GUEST" "B2B_LOGIN=dlesieur"
 contains "--guest names the hostname" "$GUEST" "B2B_HOSTNAME=dlesieur42"
 contains "--guest quotes the volume list" "$GUEST" 'B2B_VOLUMES="root:/ home:/home'
+check "--guest leaves the host-side IDE disk size out" \
+    "$(env B2B_CONFIG="$(variant ideguest 's/^ide_disk_gb = 0$/ide_disk_gb = 40/')" "${CFG[@]}" --guest | grep -c IDE_DISK)" 0
 check "--guest is sourceable" \
     "$(printf '%s\n' "$GUEST" >"$TMP/build.conf" && "${SCRIPT_SH:-bash}" -c ". '$TMP/build.conf'; printf '%s' \"\$B2B_KEYMAP\"")" es
 

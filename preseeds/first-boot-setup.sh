@@ -168,6 +168,7 @@ feature_retry() {
     case "$1" in
     nvim-extras) echo "make nvim" ;;
     devtools-extra) echo "make devtools" ;;
+    ide-disk) echo "make ide_disk" ;;
     dc-*) echo "make grobase (or make edge / make backup_install)" ;;
     *) echo "make provision" ;;
     esac
@@ -341,6 +342,23 @@ elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_var_gc.sh; th
 else
     echo "[FAIL] var-gc install reported errors — see /var/log/b2b-provision.log"
     feature_end var-gc failed
+fi
+
+### ─── 3e. The IDE sandbox's disk, before Docker ───────────────────────────
+# vm.ide_disk_gb attaches a second disk (qemu_vm.sh); this makes it ide_crypt,
+# XFS with prjquota at /var/lib/docker-ide (setup/install/dc/install_ide_disk.sh).
+# It goes by the hardware the guest sees, not by a feature flag: no such disk
+# (the key at 0, VirtualBox) and --if-attached leaves the guest alone. Ahead of
+# 4a so that no dockerd exists yet when the directory becomes a mount.
+feature_begin ide-disk /
+if [ ! -f /root/install_ide_disk.sh ]; then
+    echo "[FAIL] ide-disk — /root/install_ide_disk.sh is not in the ISO"
+    feature_end ide-disk failed
+elif run_logged /var/log/b2b-provision.log "$B2B_SH" /root/install_ide_disk.sh --if-attached; then
+    feature_end ide-disk ok
+else
+    echo "[FAIL] ide-disk reported errors — see /var/log/b2b-provision.log"
+    feature_end ide-disk failed
 fi
 
 ### ─── 4b. Neovim + kickstart.nvim, and the hellishrc plugin framework ───────

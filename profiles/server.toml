@@ -13,16 +13,19 @@
 #                that pulls. Frontends (groot, osionos, transcendence) live
 #                on the host and talk to the gateway.
 #
-#   [disk]       50 GB, and / and /home give up share, /var takes it. The
+#   [disk]       120 GB, and / and /home give up share, /var takes it. The
 #                workstation image spent 11 GB on / and 6.4 GB on /home at
 #                44 GB for nvim, npm caches and VS Code servers; without
-#                them / needs 2 GB (3.6 GiB here) and /home only holds its
+#                them / needs 2 GB (5.5 GiB here) and /home only holds its
 #                floor, 1 GB for the VS Code and Inception reservations.
 #                /var is the `rest` volume, so every point of share they
 #                release lands where Docker, the engines and their data
-#                live: 34 GiB of 50, for 16.3 GB the dc-full set needs.
+#                live: 94 GiB of 120, for 16.3 GB the dc-full set needs.
 #                Measured layout:
-#                `make partitions B2B_CONFIG=profiles/server.toml SIZE_B2B=50`.
+#                `make partitions B2B_CONFIG=profiles/server.toml SIZE_B2B=120`.
+#                vm.disk_gb sizes a NEW build. An existing VM is grown in
+#                place, offline: qemu_vm.sh grow-disk, then make grow_root
+#                (the window, in order, is in grow_root.sh's header).
 #
 #   [vm] name    "baas", not "debian": a different machine under
 #                disk_images/, so the destructive targets never confuse the
@@ -43,7 +46,15 @@
 #                left, while one graph_render worker slot is 4.32 GiB
 #                inside its 8g container cap (graph_render
 #                scripts/service.sh). 14 GiB holds both; a fully touched
-#                guest still leaves the host ~7.8 GB.
+#                guest still leaves this host 17593 MB (31929 - 14336, before
+#                QEMU's own overhead). qemu_vm.sh refuses a value above the
+#                host's RAM: a smaller seat lowers it here.
+#
+#   [vm] ide_disk_gb 40, not 0: the osionos IDE sandbox's own disk. First
+#                boot makes it ide_crypt, XFS with prjquota at
+#                /var/lib/docker-ide (setup/install/dc/install_ide_disk.sh):
+#                the quotas that cap a sandbox's layers need XFS, and a
+#                sandbox that fills its disk does not fill /var with it.
 #
 # Everything else is the shipped default. Credentials are the temporary
 # ones; change them here as in born2root.toml.
@@ -59,10 +70,10 @@ backend = "qemu"
 # relocate one with `make all VM_PATH=…` or by moving the directory and that
 # file together. This is where that registry says baas lives.
 path    = "/mnt/storage/virtual_machines"
-disk_gb = 80
-# On a 7.6 GB campus seat: 4048 left the host 3.6 GB and swapping (2026-10-08).
-# 3 GB is grobase's own figure for the pro tier below (cost-analysis.md).
-ram_mb  = 10000
+# Editing disk_gb does not resize an existing VM (the header says what does).
+disk_gb = 120
+ide_disk_gb = 40
+ram_mb  = 14336
 cpus    = "auto"
 profile = "auto"
 ai_mode = "off"
