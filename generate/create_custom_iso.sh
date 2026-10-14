@@ -435,7 +435,7 @@ echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") 
 # them the browser side would point at ports UFW keeps closed. Refuse here,
 # before the install, rather than 20 minutes in.
 if feature_env --has inception-data; then
-    for INCEPTION_FWD in https http inception-static inception-adminer; do
+    for INCEPTION_FWD in inception-https http inception-static inception-adminer; do
         if ! b2b_forward "$INCEPTION_FWD" >/dev/null; then
             echo "Error: Inception is in this build but [network] forwards has no '$INCEPTION_FWD'" >&2
             echo "       (born2root.toml, or the B2B_CONFIG profile). Nothing was built." >&2

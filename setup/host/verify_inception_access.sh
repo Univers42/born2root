@@ -49,19 +49,19 @@ get_forward_port() { vm_forward_port "$1"; }
 
 # ── 1. NAT forwards ─────────────────────────────────────────────────────────
 head_ "NAT port forwarding"
-P_HTTPS=$(get_forward_port https)
+P_HTTPS=$(get_forward_port inception-https)
 P_STATIC=$(get_forward_port inception-static)
 if [ -n "$P_HTTPS" ]; then
     pass "https  host:${P_HTTPS} → guest:443"
 else
-    fail "no 'https' NAT rule"
+    fail "no 'inception-https' NAT rule"
 fi
 if [ -n "$P_STATIC" ]; then
     pass "static host:${P_STATIC} → guest:8090"
 else
     fail "no 'inception-static' NAT rule"
 fi
-: "${P_HTTPS:=8443}"
+: "${P_HTTPS:=8444}"
 : "${P_STATIC:=8090}"
 
 # ── 2/3. The domain over HTTPS, as the browser will ask for it ──────────────

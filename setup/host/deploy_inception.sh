@@ -322,6 +322,67 @@ else
     ok "the Dockerfiles parse now (commit the patch in Inception to make it stick)"
 fi
 
+# ── 3c. Which guest addresses the stack publishes on ────────────────────────
+# Upstream publishes "443:443" (and 8090, 8080, the FTP set) on every address
+# of the guest. A guest running the tailnet plane already has `tailscale serve`
+# on <tailnet address>:443, and docker cannot take the wildcard beside it, so
+# nginx never starts (measured on baas, 2026-10-14):
+#
+#     failed to bind host port 0.0.0.0:443/tcp: address already in use
+#
+# Inception is reached by the guest's own curl (127.0.0.1, /etc/hosts below)
+# and by the NAT forwards (the address on the default route), so it is
+# published on exactly those two, through the git-ignored
+# srcs/docker-compose.local.yml that upstream's Makefile already adds to every
+# compose call. A file there that this script did not write is moved aside.
+COMPOSE_LOCAL="$GUEST_DIR/srcs/docker-compose.local.yml"
+COMPOSE_MARK="# b2b: written by born2root deploy_inception.sh on every deploy"
+
+# The guest's address on its default route, where a natpf/hostfwd rule lands
+# (10.0.2.15 on the NAT of both backends).
+nat_address() {
+    vm_ssh 'sh -s' <<'EOF'
+dev=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+[ -n "$dev" ] && ip -4 -o addr show dev "$dev" scope global | awk '{ sub(/\/.*/, "", $4); print $4; exit }'
+EOF
+}
+
+# The override for the compose file on stdin: each service's ports, every
+# unpinned "published:target" doubled onto 127.0.0.1 and the NAT address $1.
+# x-b2b-https-port is for upstream's Makefile, which takes its HTTPS_PORT from
+# the first `- "N:443"` line of this file with sed.
+# Caveat: reads the short port syntax at upstream's indentation (services at
+# 2 spaces, their keys at 4); a long-syntax port (target:/published:) is not
+# seen and stays on every address, where the bind error above names it.
+local_compose() {
+    printf '%s\n' "$COMPOSE_MARK" 'x-b2b-https-port: |' '  - "443:443"' 'services:'
+    awk -v nat="$1" '
+        /^services:/ { in_svc = 1; next }
+        /^[^ #]/ { in_svc = 0 }
+        !in_svc { next }
+        /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ { svc = $1; sub(/:$/, "", svc); in_ports = 0; next }
+        /^    ports:/ { in_ports = 1; printf "  %s:\n    ports: !override\n", svc; next }
+        /^    [^ -]/ { in_ports = 0 }
+        in_ports && /^ *- / {
+            p = $0
+            sub(/^ *- *"?/, "", p)
+            sub(/"?[[:space:]]*(#.*)?$/, "", p)
+            if (p ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:/) printf "      - \"%s\"\n", p
+            else printf "      - \"127.0.0.1:%s\"\n      - \"%s:%s\"\n", p, nat, p
+        }
+    '
+}
+
+step "Publishing the stack on the guest's loopback and NAT address only"
+nat=$(nat_address 2>/dev/null | tr -d '\r')
+[ -n "$nat" ] || die "the guest has no IPv4 address on its default route (ssh ${SSH_ALIAS} ip -4 route)"
+saved=$(vm_ssh "f='$COMPOSE_LOCAL'; [ ! -e \"\$f\" ] || head -n1 \"\$f\" | grep -qxF '$COMPOSE_MARK' ||
+    { mv \"\$f\" \"\$f.b2b-saved\" && echo saved; }" 2>/dev/null | tr -d '\r')
+[ "$saved" != saved ] || warn "an existing srcs/docker-compose.local.yml was moved to docker-compose.local.yml.b2b-saved"
+vm_ssh "cat '$GUEST_DIR/srcs/docker-compose.yml'" | local_compose "$nat" | vm_ssh "cat >'$COMPOSE_LOCAL'" ||
+    die "could not write $COMPOSE_LOCAL"
+ok "published on 127.0.0.1 and ${nat} ($(vm_ssh "grep -c '127.0.0.1:' '$COMPOSE_LOCAL'" 2>/dev/null | tr -d '\r') port(s))"
+
 # ── 4. Guest-side domain resolution (the subject's own requirement) ─────────
 step "Ensuring ${DOMAIN} resolves inside the guest"
 if vm_ssh "grep -q '$DOMAIN' /etc/hosts" 2>/dev/null; then

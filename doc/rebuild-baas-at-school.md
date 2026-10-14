@@ -53,7 +53,7 @@ backup_dest  /mnt/storage/b2b-backups/baas   /sgoinfre/students/$USER/b2b-backup
    (`setup/host/tailnet.sh`).
 
 To keep the old baas running instead, clean its firewall: the profile no
-longer forwards the old Inception and dev-server ports, and
+longer forwards Inception's FTP or the old dev-server ports, and
 `make firewall B2B_CONFIG=profiles/server.toml` deletes the rules the guest
 still has for them. A fresh build does not need this, because first boot
 applies the profile's list.
