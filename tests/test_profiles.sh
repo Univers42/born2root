@@ -65,6 +65,9 @@ v=$(resolve server)
 check "server: nvim on" "$(printf '%s\n' "$v" | grep -c '^feature=nvim$')" 1
 check "server: nvim-extras on" "$(printf '%s\n' "$v" | grep -c '^feature=nvim-extras$')" 1
 check "server: docker on" "$(printf '%s\n' "$v" | grep -c '^feature=docker$')" 1
+# inception-data comes on with docker; the ISO build then wants Inception's
+# four forwards, which baas does not open.
+check "server: inception-data off" "$(printf '%s\n' "$v" | grep -c '^feature=inception-data$')" 0
 # The max tier's add-ons are on: server.toml runs max (package = "max") on
 # the baas host with ram_mb = 14336. On a 7.6 GB seat they stay off, since max
 # crash-looped mssql there and grobase puts it at 3128 MiB idle (2026-10-08).
@@ -94,7 +97,7 @@ check "server: REMOTE_ACCESS on (realtime and mailpit on the guest loopback, for
 check "server: the guest's firewall opens exactly what baas serves (ssh, the WAF)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_FIREWALL)" "ssh:4242 http:8880 https:8443"
 check "server: the tailnet name baas has (kong.yml, cert SANs, origins name it)" \
-    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_TAILNET_HOSTNAME)" dlesieur42-1
+    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_TAILNET_HOSTNAME)" baas
 check "server: the funnel opened, as on baas" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_FUNNEL)" true
 check "server: no CATALOG_MANAGEMENT (grobase main no longer reads it)" \
