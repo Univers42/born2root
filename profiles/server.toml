@@ -150,11 +150,9 @@ claude-code    = true
 playwright     = false
 # the machine
 docker         = true
-# No Inception on baas: inception-data comes on with docker, and it is what
-# makes a build Inception's -- create_custom_iso.sh then wants the https,
-# http, inception-static and inception-adminer forwards, and make all points
-# the host's browsers at <login>.42.fr. Released here, it does neither.
-inception-data = false
+# Inception rides along (inception-data comes on with docker): its nginx
+# binds the guest's 443 on loopback and the NAT address only, beside the
+# tailnet's own 443 (deploy_inception.sh), and gets the inception-* forwards.
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
 # The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
@@ -195,10 +193,11 @@ interval_min = 10
 # guest. On 2026-10-13 baas listened outside its loopback and tailscale0 on
 # 4242, 8880 and 8443 only (ss -ltnH); Kong 8000, the engines (3306, 6379,
 # 5432, 27017, ...), realtime and mailpit bind the guest's loopback, which a
-# hostfwd never reaches -- reach them over ssh. The Inception set (8090,
-# 8080, 21, 21000-21010), 5000, 3306, 6379, 5173, 3000 and 18200 were
-# removed then: nothing answered them where a hostfwd arrives, and each held
-# a host port. groot's frontends (website 4322, osionos 3001-3003, the
+# hostfwd never reaches -- reach them over ssh. 5000, 3306, 6379, 5173, 3000
+# and 18200 were removed then: nothing answered them where a hostfwd arrives,
+# and each held a host port. Inception's 443, 8090 and 8080 came back with
+# `make inception` (2026-10-14); its FTP (21, 21000-21010) did not, twelve
+# host ports for the subject's bonus. groot's frontends (website 4322, osionos 3001-3003, the
 # bridges 4000/4100/4200, auth-gateway 8787) run on the HOST against this
 # guest's grobase (groot: make link, over ssh), so they get no forward
 # either.
@@ -207,6 +206,10 @@ forwards = [
   # grobase's WAF, on the guest's 0.0.0.0:8880 and :8443.
   { name = "http",  guest = 8880, host = 8082 },
   { name = "https", guest = 8443, host = 8443 },
+  # Inception (make inception): nginx, the static site, Adminer.
+  { name = "inception-https",   guest = 443,  host = 8444 },
+  { name = "inception-static",  guest = 8090, host = 8090 },
+  { name = "inception-adminer", guest = 8080, host = 8081 },
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──

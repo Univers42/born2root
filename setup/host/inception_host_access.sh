@@ -62,7 +62,7 @@ DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
 # preference, used when the VM has no rule yet; an existing rule always wins,
 # so a port moved to dodge a clash is respected. create_custom_iso.sh refuses
 # an Inception build whose config lacks one of the four.
-read -r PREF_HTTPS_PORT GUEST_HTTPS <<<"$(b2b_forward https)"
+read -r PREF_HTTPS_PORT GUEST_HTTPS <<<"$(b2b_forward inception-https)"
 read -r PREF_STATIC_PORT GUEST_STATIC <<<"$(b2b_forward inception-static)"
 read -r PREF_HTTP_PORT GUEST_HTTP <<<"$(b2b_forward http)"
 # Bonus: Adminer, so it is reachable at http://<domain>:8081 like everything
@@ -740,12 +740,12 @@ if [ "$ACTION" = "undo" ]; then
 fi
 
 if [ -z "$GUEST_HTTPS" ] || [ -z "$GUEST_STATIC" ] || [ -z "$GUEST_HTTP" ] || [ -z "$GUEST_ADMINER" ]; then
-    printf "  Inception needs https, http, inception-static and inception-adminer in\n" >&2
+    printf "  Inception needs inception-https, http, inception-static and inception-adminer in\n" >&2
     printf "  [network] forwards (born2root.toml); the guest's firewall opens only those.\n" >&2
     exit 1
 fi
 if have_vm; then
-    P_HTTPS=$(ensure_forward https "$PREF_HTTPS_PORT" "$GUEST_HTTPS")
+    P_HTTPS=$(ensure_forward inception-https "$PREF_HTTPS_PORT" "$GUEST_HTTPS")
     P_STATIC=$(ensure_forward inception-static "$PREF_STATIC_PORT" "$GUEST_STATIC")
     P_HTTP=$(ensure_forward http "$PREF_HTTP_PORT" "$GUEST_HTTP")
     P_ADMINER=$(ensure_forward inception-adminer "$PREF_ADMINER_PORT" "$GUEST_ADMINER")
@@ -754,7 +754,7 @@ elif [ "$(vm_backend)" = "qemu" ]; then
     # A QEMU VM forwards with -netdev hostfwd=, decided when it was launched.
     # There is nothing to create here and nothing that could be changed now, so
     # just read the map qemu_vm.sh published and use it.
-    P_HTTPS=$(vm_forward_port https) || P_HTTPS="$PREF_HTTPS_PORT"
+    P_HTTPS=$(vm_forward_port inception-https) || P_HTTPS="$PREF_HTTPS_PORT"
     P_STATIC=$(vm_forward_port inception-static) || P_STATIC="$PREF_STATIC_PORT"
     P_HTTP=$(vm_forward_port http) || P_HTTP="$PREF_HTTP_PORT"
     P_ADMINER=$(vm_forward_port inception-adminer) || P_ADMINER="$PREF_ADMINER_PORT"
