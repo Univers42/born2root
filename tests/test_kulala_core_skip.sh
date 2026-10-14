@@ -109,9 +109,21 @@ awk -f "$TMP/cut.awk" "$REPO/$INSTALL" >"$TMP/nvim-verify.lua"
 }
 export XDG_CONFIG_HOME="$TMP/xdg/config" XDG_DATA_HOME="$TMP/xdg/data" \
     XDG_STATE_HOME="$TMP/xdg/state" XDG_CACHE_HOME="$TMP/xdg/cache"
-mkdir -p "$XDG_DATA_HOME/nvim/site/pack/core/opt/kulala.nvim"
+# A vim.pack plugin is a git checkout, and the fixture has to be one: Nvim
+# 0.12.6's vim.pack.get() repairs its lockfile with `git rev-parse HEAD` and
+# `git remote get-url origin` in every plugin directory, and a bare directory
+# made it raise, so the verify never reached its `qa` and this test hung
+# (2026-10-14). The user's git config is kept out (a commit.gpgsign = true
+# would prompt).
+kulala="$XDG_DATA_HOME/nvim/site/pack/core/opt/kulala.nvim"
+mkdir -p "$kulala/lua"
+fixture_git() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$kulala" "$@"; }
+fixture_git init -q
+fixture_git remote add origin https://github.com/mistweaverco/kulala.nvim
+fixture_git -c user.name=fixture -c user.email=fixture@invalid commit -q --allow-empty -m fixture
 export B2B_KULALA_SKIP_MARK="$TMP/verify.skipped"
-verify() { nvim --headless -u NONE -c "luafile $TMP/nvim-verify.lua" 2>&1 | tr -d '\r'; }
+# Bounded: a verify that cannot reach its `qa` is a failed check, not a hang.
+verify() { timeout 60 nvim --headless -u NONE -c "luafile $TMP/nvim-verify.lua" 2>&1 | tr -d '\r'; }
 
 rm -f "$B2B_KULALA_SKIP_MARK"
 check "no mark: kulala-core missing is a PROBLEM" "$(verify | grep -c 'PROBLEM kulala-core missing')" 1
@@ -120,5 +132,13 @@ out=$(verify)
 check "mark: not a PROBLEM" "$(printf '%s\n' "$out" | grep -c 'PROBLEM kulala-core')" 0
 check "mark: said as a NOTE, with the reason" \
     "$(printf '%s\n' "$out" | grep -c 'NOTE kulala-core skipped on purpose (v1.3.1: HTTP 404, license token)')" 1
+
+# vim.pack.get() raising (stubbed, so any Nvim version raises) is a named
+# PROBLEM in the verdict, never a verify left open until the caller's timeout.
+out=$(timeout 60 nvim --headless -u NONE \
+    -c 'lua vim.pack = { get = function() error("lock repair failed") end }' \
+    -c "luafile $TMP/nvim-verify.lua" 2>&1 | tr -d '\r')
+check "vim.pack.get() raising: a PROBLEM with its reason" \
+    "$(printf '%s\n' "$out" | grep -c 'PROBLEM vim.pack: .*lock repair failed')" 1
 
 exit "$fail"
