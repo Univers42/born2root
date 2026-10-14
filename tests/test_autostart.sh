@@ -157,11 +157,53 @@ rm -f "$HOLD"
 check "tick, /dev/kvm not ours (no seat session): nothing, never TCG" "$(KVM="$TMP/no-kvm" tick)" 0
 echo $$ >"$PIDFILE"
 check "tick, a pidfile naming some other process: make qemu_start" "$(tick)" 1
+# The guard's system bus: gdbus prints $TMP/signals and ends, and
+# systemd-inhibit refuses (as polkit does on the 42 seats) unless
+# $TMP/inhibit_ok exists, then runs its command like the real one.
+cat >"$TMP/tickbin/gdbus" <<EOF
+#!/bin/sh
+printf 'gdbus %s\n' "\$*" >>"$TMP/calls"
+cat "$TMP/signals" 2>/dev/null
+EOF
+cat >"$TMP/tickbin/systemd-inhibit" <<EOF
+#!/bin/sh
+[ -f "$TMP/inhibit_ok" ] || { echo 'Failed to inhibit: Interactive authentication required.' >&2; exit 1; }
+printf 'systemd-inhibit %s\n' "\$*" >>"$TMP/calls"
+while case "\$1" in --*) true ;; *) false ;; esac; do shift; done
+exec "\$@"
+EOF
+chmod +x "$TMP/tickbin/gdbus" "$TMP/tickbin/systemd-inhibit"
+GUARD_LOG="$TMP/vms/baas/shutdown-guard.log"
 "$TMP/fakeqemu" -pidfile "$PIDFILE" &
 echo $! >"$PIDFILE"
 check "tick, VM running: nothing" "$(tick)" 0
+# The tick detaches the guard; with no signal on the stub bus it ends at once.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q 'monitor ended' "$GUARD_LOG" 2>/dev/null && break
+    sleep 0.5
+done
+check "... and it keeps a shutdown guard running" "$(grep -c '^== .*guarding baas' "$GUARD_LOG" 2>/dev/null)" 1
+# The line gdbus 2.72 prints for the signal (captured from an emitted one on
+# the session bus, 2026-10-14).
+SHUTDOWN='/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForShutdown (true,)'
+echo "$SHUTDOWN" >"$TMP/signals"
+check "guard, host shutting down: make qemu_stop" "$(tick --guard)" 1
+check "... gracefully, with the unit's own grace" "$(grep '^make ' "$TMP/calls")" \
+    "make -C $ROOT --no-print-directory qemu_stop GRACEFUL=1 STOP_GRACE=120 B2B_CONFIG=profiles/server.toml VM_PATH=$TMP/vms VM_NAME=baas"
+check "... polkit refused the delay lock: watched anyway, and said so" \
+    "$(grep -c 'no delay lock' "$TMP/out")" 1
+touch "$TMP/inhibit_ok"
+check "guard, delay lock granted: make qemu_stop" "$(tick --guard)" 1
+check "... the monitor runs under a shutdown delay lock" \
+    "$(grep -c '^systemd-inhibit --what=shutdown --mode=delay .*gdbus monitor --system --dest org.freedesktop.login1' "$TMP/calls")" 1
+rm -f "$TMP/inhibit_ok"
+echo "${SHUTDOWN%(true,)}(false,)" >"$TMP/signals"
+check "guard, PrepareForShutdown(false) (a resume, a cancel): nothing" "$(tick --guard)" 0
 kill "$(cat "$PIDFILE")"
 rm -f "$PIDFILE"
+echo "$SHUTDOWN" >"$TMP/signals"
+check "guard, host shutting down, VM not running: nothing" "$(tick --guard)" 0
+rm -f "$TMP/signals"
 echo boot-1 >"$HOLD"
 check "handover, VM down: the hold released, make not run" "$(tick --handover)" 0
 check "... nothing held" "$([ -e "$HOLD" ] && echo held || echo free)" free
