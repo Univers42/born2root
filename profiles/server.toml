@@ -229,6 +229,8 @@ backup_dest = ["/mnt/storage/b2b-backups/baas", "/sgoinfre/students/$USER/b2b-ba
 # Named rather than left empty: a set path that is missing makes `make
 # backup` mint a new RESTIC_PASSWORD there instead of reading the old one.
 secrets_file = "$HOME/.config/born2root/b2b-secrets"
+# Those keys' team copy (make secrets_push / secrets_pull), as in born2root.toml.
+vault = "univers42/born2root/shared"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
