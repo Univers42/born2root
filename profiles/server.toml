@@ -86,7 +86,7 @@ backend = "qemu"
 # datacenter is ~16 GB the moment it boots and grows as the engines fill /var.
 # An existing VM is NOT moved by editing this -- disk_images/.vm_path.baas
 # wins so a built guest is never orphaned; `make all VM_PATH=…` relocates.
-path    = ["/mnt/storage/virtual_machines", "/goinfre/$USER/virtual_machines", "$HOME/virtual_machines"]
+path    = ["/sgoinfre/students/dlesieur/born2root", "$HOME/virtual_machines"]
 # Editing disk_gb does not resize an existing VM (the header says what does).
 disk_gb = 120
 ide_disk_gb = 40
@@ -134,8 +134,8 @@ apt = []
 
 [features]
 # workstation: no editor; node, the extra dev tools and Claude Code, as baas had
-nvim           = false
-nvim-extras    = false
+nvim           = true
+nvim-extras    = true
 webstack       = false
 nodejs         = true
 pytools        = false
@@ -199,6 +199,7 @@ forwards = [
   # grobase's WAF, on the guest's 0.0.0.0:8880 and :8443.
   { name = "http",  guest = 8880, host = 8082 },
   { name = "https", guest = 8443, host = 8443 },
+
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──
