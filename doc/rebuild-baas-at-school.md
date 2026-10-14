@@ -1,10 +1,11 @@
 # Rebuild baas at school from the profile
 
-baas is the server VM `profiles/server.toml` describes: grobase at a pinned
-commit, every engine, the tailnet name `dlesieur42-1`, Funnel, an hourly
-backup pull. This page rebuilds it on another seat from three inputs and two
-commands. It also says what stays manual, what does not come back, and which
-facts about a school seat nobody has checked yet.
+baas is the server VM `profiles/server.toml` describes: grobase following
+the newest commit of its main branch, every engine, the tailnet name
+`dlesieur42-1`, Funnel, an hourly backup pull. This page rebuilds it on
+another seat from three inputs and two commands. It also says what stays
+manual, what does not come back, and which facts about a school seat
+nobody has checked yet.
 
 `make all` pulls `origin main` before it builds, so the rebuild runs what is
 on main.
@@ -14,7 +15,7 @@ on main.
 | Input | Where it goes on the new seat | Check |
 | --- | --- | --- |
 | The profile | `profiles/server.toml`, in the clone | `B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --check` |
-| The secrets file | `$HOME/.b2b_secrets/.env`, mode 600 (`[dc] secrets_file`) | `ls -l ~/.b2b_secrets/.env` shows `-rw-------` |
+| The secrets file | `$HOME/.config/born2root/b2b-secrets`, mode 600 (`[dc] secrets_file`) | `ls -l ~/.config/born2root/b2b-secrets` shows `-rw-------` |
 | The restic repository | `<backup_dest>/repo` | `B2B_CONFIG=profiles/server.toml bash setup/host/backup_pull.sh --where` prints `<backup_dest>` |
 
 The secrets file must hold `RESTIC_PASSWORD`: without it the restore stops
@@ -28,8 +29,8 @@ that exists and is writable, else the first that can be created
 (`utils/host_path.py`):
 
 ```text
-vm.path      /mnt/storage/virtual_machines   /goinfre/$USER/virtual_machines   $HOME/virtual_machines
-backup_dest  /mnt/storage/b2b-backups/baas   /goinfre/$USER/b2b-backups/baas   $HOME/b2b-backups/baas
+vm.path      /sgoinfre/students/$USER/virtual_machines
+backup_dest  /mnt/storage/b2b-backups/baas   /sgoinfre/students/$USER/b2b-backups/baas
 ```
 
 ## Before you leave the seat that runs baas
@@ -75,8 +76,11 @@ make datacenter B2B_CONFIG=profiles/server.toml
 ```
 
 `make all` builds the VM. First boot installs dc-full and grobase at
-`[dc] grobase_ref`, with the keys in `[dc.grobase_env]` in
-`/opt/grobase/.env.local`. `make all` then ends with `make autostart`. If
+`[dc] grobase_ref` (`main`: its newest commit, recorded in
+`/etc/b2b/grobase.conf`; a full SHA there pins one instead; each
+`make grobase` takes main's newest commit again), with the keys in
+`[dc.grobase_env]` in `/opt/grobase/.env.local`. `make all` then ends with
+`make autostart`. If
 first boot is still running when the host side finishes, `make all` says so
 and exits 0. In that case run `make all` again later, then go on.
 
@@ -121,9 +125,16 @@ target uses. Change the password before it expires.
 
 ## Not verified on a school seat
 
+One 42 Madrid seat was checked on 2026-10-14 before a rebuild:
+`/sgoinfre` had 2675 GB free and the preflight passed, `/mnt/storage`
+was absent, the seat had 31 GB of RAM and 16 CPUs, `/dev/kvm` was
+writable through a per-login ACL (not the kvm group), the systemd user
+manager answered, linger was off, and host ports 4242, 8082 and 8443
+were free. Seats differ, so run the checks again on yours.
+
 | Fact | Why it matters | Check before `make all` |
 | --- | --- | --- |
-| `/goinfre/$USER` exists, is writable, and has room | Probably where `[vm] path` resolves. The build refuses to start when the filesystem cannot hold the 120 GB disk plus the 40 GB IDE disk (`utils/space_budget.sh --preflight`) | `df -h /goinfre` |
+| `/sgoinfre/students/$USER` is writable and has room | It is where `[vm] path` resolves; home has under 1 GB free and `/goinfre` is wiped. The build refuses to start when the filesystem cannot hold the 120 GB disk plus the 40 GB IDE disk (`utils/space_budget.sh --preflight`). A per-login sgoinfre quota, if any, is not visible to `df` | `df -h /sgoinfre` |
 | `/mnt/storage` is absent | If it exists and is writable, it wins both lists | `ls -d /mnt/storage` |
 | The seat's RAM is at least `ram_mb = 14336` | `qemu_vm.sh` refuses a VM larger than the host's RAM. A 16 GB seat passes and leaves the host under 2 GB (estimated: its MemTotal minus 14336) | `free -m`. If it is short, lower `ram_mb` in the profile, which the autostart unit reads too |
 | `/dev/kvm` is usable | Without it QEMU falls back to TCG emulation (`setup/host/qemu_vm.sh`); a running VirtualBox VM holds VT-x and makes QEMU refuse to start | `ls -l /dev/kvm`, `id -nG` |

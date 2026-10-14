@@ -74,9 +74,11 @@ check "B2B_SECRETS= still wins (dc_lib.sh)" "$(dc_secrets "$P" "$TMP/other")" "$
 check "B2B_SECRETS= still wins (Makefile)" "$(make_secrets "$P" "$TMP/other")" "$TMP/other"
 check "a relative secrets_file is refused at --check" \
     "$(env B2B_CONFIG="$(profile '"secrets/.env"')" "${SCRIPT_SH:-bash}" utils/b2b_config.sh --check >/dev/null 2>&1 && echo 0 || echo 1)" 1
-check "the server profile names ~/.b2b_secrets/.env" \
+# Since 2026-10-14 the profile names dc_lib.sh's own default: baas's keys
+# moved there, and ~/.b2b_secrets/.env exists on no seat any more.
+check "the server profile names ~/.config/born2root/b2b-secrets" \
     "$(env HOME="$TMP/home" B2B_CONFIG=profiles/server.toml "${SCRIPT_SH:-bash}" utils/b2b_config.sh get B2B_DC_SECRETS_FILE)" \
-    "$TMP/home/.b2b_secrets/.env"
+    "$TMP/home/.config/born2root/b2b-secrets"
 
 # ── backup_pull.sh never mints over an existing backup ──────────────────────
 SECRETS="$TMP/home/.b2b_secrets/.env"

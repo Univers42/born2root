@@ -547,9 +547,11 @@ fetch_ca_cert() {
     [ -n "$CA_FILE" ] && [ -s "$CA_FILE" ] && return 0
     local tmp
     tmp=$(mktemp) || return 1
-    if timeout 25 ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 b2b \
-        "$CA_FIND_CMD" >"$tmp" 2>/dev/null &&
+    # -n, -k 5 and no forwards: a key typed into the build's terminal stopped
+    # a probe like this one for good (fb_ssh in utils/first_boot.sh).
+    if timeout -k 5 25 ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=8 \
+        -o ClearAllForwardings=yes b2b "$CA_FIND_CMD" >"$tmp" 2>/dev/null &&
         [ -s "$tmp" ]; then
         CA_FILE="$tmp"
         return 0

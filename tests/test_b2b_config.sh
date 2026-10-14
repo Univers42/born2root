@@ -633,6 +633,23 @@ contains "  and reaches build.conf" "$(env B2B_CONFIG="$REF" "${CFG[@]}" --guest
     'B2B_DC_GROBASE_REF=dab5f43060aab2914183173c91dc7a39a7aab9f6'
 refuse "an abbreviated grobase_ref is refused (git fetch takes no abbreviation)" "dc.grobase_ref" \
     's|^package = "auto"|package = "auto"\ngrobase_ref = "dab5f43"|'
+BRANCH=$(variant genvbranch 's|^package = "auto"|package = "auto"\ngrobase_ref = "main"|')
+check "a branch grobase_ref passes --check (followed, not pinned)" "$(rc_of "$BRANCH" --check)" 0
+contains "  and reaches build.conf as the branch" "$(env B2B_CONFIG="$BRANCH" "${CFG[@]}" --guest)" \
+    'B2B_DC_GROBASE_REF=main'
+refuse "a grobase_ref with a space is refused" "dc.grobase_ref" \
+    's|^package = "auto"|package = "auto"\ngrobase_ref = "main branch"|'
+
+# ── [vm] path never holds the repo: make fclean empties VM_PATH ─────────────
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+refuse "vm.path naming the repo itself is refused" "vm.path" \
+    "s|^path    = \"\"|path    = \"$REPO_ROOT\"|"
+refuse "vm.path naming a directory that holds the repo is refused" "vm.path" \
+    "s|^path    = \"\"|path    = \"$(dirname "$REPO_ROOT")\"|"
+refuse "  also as one entry of a list" "vm.path[0]" \
+    "s|^path    = \"\"|path    = [\"$REPO_ROOT\", \"/tmp\"]|"
+SIBLING=$(variant vmsibling "s|^path    = \"\"|path    = \"$(dirname "$REPO_ROOT")/virtual_machines\"|")
+check "a sibling of the repo passes --check" "$(rc_of "$SIBLING" --check)" 0
 
 # ── [dc] tailnet_hostname and funnel ────────────────────────────────────────
 check "no tailnet_hostname: empty (the guest's own hostname)" "$(get_of "$DEFAULTS" B2B_DC_TAILNET_HOSTNAME)" ""

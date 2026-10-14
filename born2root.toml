@@ -309,7 +309,8 @@ backup_dest = ""
 # Not set here, each with its default (profiles/server.toml sets all three):
 #   secrets_file  the host's KEY=VALUE secrets, mode 600 ("" keeps
 #                 setup/host/dc_lib.sh's search; B2B_SECRETS= beats it)
-#   grobase_ref   the grobase commit to check out, full SHA ("" keeps
+#   grobase_ref   the grobase commit to check out, full SHA, or a branch
+#                 ("main") whose newest commit every install takes ("" keeps
 #                 install_grobase.sh's pin)
 #   [dc.grobase_env]  non-secret KEY = "value" lines kept in grobase's
 #                 .env.local; a table REPLACES the default one,

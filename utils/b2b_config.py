@@ -169,7 +169,8 @@ DEFAULTS = {
     # profile whose keys live somewhere else than the defaults dc_lib.sh tries.
     # "" keeps those defaults; B2B_SECRETS= beats it.
     # grobase_ref: the grobase commit install_grobase.sh checks out, by its
-    # full SHA; "" keeps the pin that script carries.
+    # full SHA, or a branch ("main") whose newest commit every run takes;
+    # "" keeps the pin that script carries.
     # grobase_env: NON-secret KEY = "value" lines kept in /opt/grobase/.env.local,
     # the layer grobase's `make env` appends last, so they survive every
     # re-assembly. A profile's table REPLACES this default one. The default is
@@ -599,6 +600,7 @@ class Validator:
         if vm["ai_mode"] not in ("off", "client", "local"):
             self.err("vm.ai_mode", "off, client or local")
         self._abs_path("vm.path", vm.get("path"))
+        self._vm_path_outside_repo(vm.get("path"))
 
     def ai(self):
         """[ai]: judged here, before `make all` downloads or starts anything."""
@@ -1007,11 +1009,14 @@ class Validator:
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
         self._abs_path("dc.secrets_file", self.c.dc.get("secrets_file"))
         ref = self.c.dc.get("grobase_ref")
-        if ref and not (isinstance(ref, str) and self.SHA_RE.match(ref)):
+        if ref and not (
+            isinstance(ref, str) and (self.SHA_RE.match(ref) or self.BRANCH_RE.match(ref))
+        ):
             self.err(
                 "dc.grobase_ref",
-                "%r is not a full commit SHA (40 hex digits: git fetch "
-                "origin <sha> takes no abbreviation)" % (ref,),
+                "%r is neither a full commit SHA (40 hex digits: git fetch "
+                "origin <sha> takes no abbreviation) nor a branch name like "
+                '"main"' % (ref,),
             )
         self._grobase_env(self.c.dc.get("grobase_env"))
         name = self.c.dc.get("tailnet_hostname")
@@ -1025,6 +1030,10 @@ class Validator:
             self.err("dc.funnel", "%r is not true or false" % (self.c.dc.get("funnel"),))
 
     SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+    # A branch is followed, not pinned (install_grobase.sh fetches its newest
+    # commit on every run). All-hex is refused so "dab5f43" stays an
+    # abbreviated SHA rather than turning into a branch nobody has.
+    BRANCH_RE = re.compile(r"^(?![0-9a-f]+$)[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
     DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
     ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
     # build.conf is sourced, each value inside double quotes: nothing that
@@ -1081,6 +1090,31 @@ class Validator:
             elif not host_path.expand(entry).startswith("/"):
                 why = "is not absolute (it must start with / or $HOME)"
                 self.err(name, "%r %s" % (entry, why))
+
+    def _vm_path_outside_repo(self, value):
+        """`make fclean` (so `make re`) empties VM_PATH, keeping only the
+        .vm_path.* registry. An entry that is this repo, or a directory that
+        holds it, would take the repo with it: on 2026-10-14 a profile named
+        the repo root itself, one `make re` away from losing .git.
+
+        Caveat: compares resolved paths, so the repo reached through a bind
+        mount under another name passes.
+        """
+        if value in (None, ""):
+            return
+        repo = os.path.realpath(os.path.dirname(HERE))
+        entries = value if isinstance(value, list) else [value]
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, str) or not entry:
+                continue
+            path = os.path.realpath(host_path.expand(entry))
+            if repo == path or repo.startswith(path.rstrip("/") + "/"):
+                name = "vm.path[%d]" % index if isinstance(value, list) else "vm.path"
+                self.err(
+                    name,
+                    "%r holds this repo, and make fclean empties VM_PATH; use a "
+                    "sibling such as %s" % (entry, os.path.join(os.path.dirname(repo), "virtual_machines")),
+                )
 
     # [network] forwards is the whole port list: every NAT rule both backends
     # create and every port the guest's firewall opens, so it must carry SSH.

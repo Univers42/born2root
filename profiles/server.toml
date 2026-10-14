@@ -5,9 +5,10 @@
 # Same schema as born2root.toml (utils/b2b_config.py reads both; the shipped
 # file's comments explain every key). What differs, and why:
 #
-#   [features]   No editor: nvim, its extras, webstack, pytools and
-#                playwright are off. nodejs, devtools-extra and claude-code
-#                stay on, as baas had them (2026-10-13 features.status).
+#   [features]   nvim and its extras are on, for the login too. webstack,
+#                pytools and playwright are off. nodejs, devtools-extra and
+#                claude-code stay on, as baas had them (2026-10-13
+#                features.status).
 #                dc-full is ON: Kong and the WAF, the identity plane, every
 #                dc-db-* engine, realtime, vault, object storage,
 #                observability, restic, Tailscale and cloudflared (the
@@ -17,9 +18,10 @@
 #                host and talk to the gateway.
 #
 #   [disk]       120 GB, and / and /home give up share, /var takes it. / is
-#                charged 2524 MB without the editor (5.5 GiB here), /home
-#                701 MB: the VS Code and Inception reservations (its volume
-#                says why the floor is 2 GB anyway). /var is the `rest`
+#                charged 3120 MB with the editor (5.5 GiB here), /home
+#                1153 MB: the editor, the VS Code and Inception
+#                reservations (its volume says why the floor is 2 GB
+#                anyway). /var is the `rest`
 #                volume, so every point of share they release lands where
 #                Docker, the engines and their data live: 94 GiB of 120,
 #                for the 16417 MB the dc rows are charged. Measured, both
@@ -81,12 +83,13 @@
 name    = "baas"
 backend = "qemu"
 # Tried in order, the first that exists and is writable wins (else the first
-# that can be created): the 1 TB disk of the seat that built baas, then a 42
-# seat's /goinfre, then home. Never the repo's own disk_images/: a max-tier
+# that can be created). /sgoinfre only: on the 42 Madrid seats home has
+# ~650 MB free and /goinfre is too small and wiped. A sibling of the repo,
+# never the repo itself: fclean empties VM_PATH. Never disk_images/: a max-tier
 # datacenter is ~16 GB the moment it boots and grows as the engines fill /var.
 # An existing VM is NOT moved by editing this -- disk_images/.vm_path.baas
 # wins so a built guest is never orphaned; `make all VM_PATH=…` relocates.
-path    = ["/sgoinfre/students/dlesieur/born2root", "$HOME/virtual_machines"]
+path    = ["/sgoinfre/students/$USER/virtual_machines"]
 # Editing disk_gb does not resize an existing VM (the header says what does).
 disk_gb = 120
 ide_disk_gb = 40
@@ -126,14 +129,14 @@ ssh_keys = [
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG+mTmZXgfPrUtf20VA/XqDO/4vAAIHwdTMauW6S8HDv dlesieur@dlesieur42",
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDpG2f3FkMoztyY5+MuqGPnJ3SwsTTJcNncEtPAuJH6x dlesieur@dlesieur",
 ]
-# No editor in this build (features.nvim = false), so none for the login.
-nvim     = false
+# The build has the editor (features.nvim = true), so the login gets it.
+nvim     = true
 
 [packages]
 apt = []
 
 [features]
-# workstation: no editor; node, the extra dev tools and Claude Code, as baas had
+# the editor, node, the extra dev tools and Claude Code
 nvim           = true
 nvim-extras    = true
 webstack       = false
@@ -199,7 +202,6 @@ forwards = [
   # grobase's WAF, on the guest's 0.0.0.0:8880 and :8443.
   { name = "http",  guest = 8880, host = 8082 },
   { name = "https", guest = 8443, host = 8443 },
-
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──
@@ -210,18 +212,23 @@ cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
 # backup_dest: where `make backup` copies the restic repository, tried in
 # order like vm.path. On the seat that built baas it is /mnt/storage, the disk
 # the guest lives on too, so the copy survives a broken guest, not a dead
-# disk: the next tier is a USB disk or a remote (backup_pull.sh). At school,
-# carry the repository in and put it at the first entry that exists there.
-backup_dest = ["/mnt/storage/b2b-backups/baas", "/goinfre/$USER/b2b-backups/baas", "$HOME/b2b-backups/baas"]
+# disk: the next tier is a USB disk or a remote (backup_pull.sh). At school
+# it is sgoinfre, which survives the /goinfre wipes and follows the login;
+# carry an older repository in there before `make datacenter` restores.
+backup_dest = ["/mnt/storage/b2b-backups/baas", "/sgoinfre/students/$USER/b2b-backups/baas"]
 # secrets_file: baas's keys (RESTIC_PASSWORD, TS_AUTHKEY, ...), mode 600, never
-# in the repo. Carry it to the new seat at this path before `make datacenter`.
-secrets_file = "$HOME/.b2b_secrets/.env"
+# in the repo: dc_lib.sh's own default, under $HOME so the wipes spare it.
+# Named rather than left empty: a set path that is missing makes `make
+# backup` mint a new RESTIC_PASSWORD there instead of reading the old one.
+secrets_file = "$HOME/.config/born2root/b2b-secrets"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
-# grobase's main as baas ran it on 2026-10-13 (git -C /opt/grobase rev-parse
-# HEAD), ahead of the pin install_grobase.sh carries for other profiles.
-grobase_ref = "dab5f43060aab2914183173c91dc7a39a7aab9f6"
+# Followed, not pinned: every install (first boot, each `make grobase`)
+# takes main's newest commit and records it in /etc/b2b/grobase.conf.
+# baas ran dab5f43060aab2914183173c91dc7a39a7aab9f6 on 2026-10-13; put a
+# full SHA back here to pin one.
+grobase_ref = "main"
 # baas's node name: dlesieur42-1.tail10f2ea.ts.net is in kong.yml, the cert
 # SANs and REALTIME_ALLOWED_ORIGINS below. The old node must be removed from
 # the tailnet before a rebuild takes the name, or this one gets a suffix
@@ -233,8 +240,13 @@ funnel = true
 
 # The grobase keys baas had set by hand (2026-10-13 audit), kept in
 # /opt/grobase/.env.local so `make env` and a restore keep them. This table
-# replaces the default one, so REMOTE_ACCESS and CATALOG_MANAGEMENT are not
-# written: baas has neither, and trino is healthy without it. Not here:
+# replaces the default one. CATALOG_MANAGEMENT is not written: grobase main
+# no longer reads it (8b9321a6, 2026-10-14). REMOTE_ACCESS is, although
+# baas lacked it: it composes docker-compose.remote-access.yml, realtime
+# 4000 and mailpit 1025 on the guest's LOOPBACK, which a frontend on
+# another machine reaches over an ssh LocalForward. Without it that
+# frontend's realtime events and auth mail go nowhere, silently (grobase's
+# own measurement, 2026-10-10). Nothing new is reachable off the guest. Not here:
 # GROBASE_PUBLIC_ADDRESSES (the tailnet name and address; grobase's `make
 # expose` writes it) and every secret (the secrets file and the snapshot's
 # .env.local carry those; --check refuses a secret-looking name).
@@ -252,6 +264,7 @@ ENVIRONMENTS_ENABLED            = "true"
 GROUPS_ENABLED                  = "true"
 INVITES_ENABLED                 = "true"
 USER_PUBKEYS_ENABLED            = "true"
+REMOTE_ACCESS                   = "1"
 
 # baas was a user service of the seat's login: up at boot, stopped gracefully
 # at shutdown, its backup pulled hourly. `make all` sets that up again (make
@@ -264,7 +277,7 @@ swap_mb = "auto"
 volumes = [
   { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
   # 2048, not 1024: share = 0 means the floor is all /home ever gets. It is
-  # charged 701 MB (make features), and baas, built with the editor on, used
+  # charged 1153 MB (make features), and baas, built with the editor on, used
   # 687 MB of its 1.9 GiB (2026-10-13, df).
   { name = "home",    mount = "/home",    floor_mb = 2048, share = 0,      cap_mb = 102400 },
   { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },
