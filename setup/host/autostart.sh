@@ -19,7 +19,9 @@
 #   Linger off: a block in the user's crontab, between
 #   "# b2b-autostart <vm> begin" and "# b2b-autostart <vm> end":
 #     every minute   autostart.sh --tick: make qemu_start when the VM is not
-#                    running, not held (below) and /dev/kvm is writable
+#                    running, not held (below) and /dev/kvm is writable; when
+#                    it runs, the shutdown guard (--guard, at guard()) is kept
+#                    running, its log in $VM_PATH/$VM_NAME/shutdown-guard.log
 #     hourly at :15  make backup, under flock and a 50-minute timeout
 #   Turning linger on needs root, and the 42 seats give none. Without linger
 #   the user's systemd manager, and every process under it, stops at logout:
@@ -40,8 +42,10 @@
 # under cron: a graceful stop, then the tick starts it again. `make
 # autostart_handover`. Expect a minute or two of downtime.
 #
-# Caveat: in cron mode nothing runs at host shutdown, so a reboot is a power
-# cut for the guest (a graceful stop needs a shutdown hook, which needs root).
+# Caveat: in cron mode a host shutdown gives the guest a head start, not a
+# graceful stop: the guard powers it off when logind announces the shutdown,
+# and whatever is still running at systemd-shutdown's final SIGTERM loses
+# power (a real shutdown hook needs root; guard() says what it covers).
 # /dev/kvm is the user's only while they have the seat's active session (a
 # uaccess ACL), so after a host reboot the VM starts within a minute of that
 # login, not at boot; the tick never starts it under TCG instead. A campus
@@ -87,6 +91,8 @@ VM_DIR="$VM_PATH/$VM_NAME"
 HOLD="$VM_DIR/.autostart-hold"
 LOCK="$VM_DIR/.autostart.lock"
 LOG="$VM_DIR/autostart.log"
+GUARD_LOCK="$VM_DIR/.shutdown-guard.lock"
+GUARD_LOG="$VM_DIR/shutdown-guard.log"
 CRON_BEGIN="# b2b-autostart $VM_NAME begin (make autostart writes this block)"
 CRON_END="# b2b-autostart $VM_NAME end"
 
@@ -108,7 +114,10 @@ tick() {
     if [ -n "$hold" ] && [ "$hold" = "$(cat "${B2B_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}" 2>/dev/null)" ]; then
         return 0
     fi
-    vm_pid >/dev/null && return 0
+    if vm_pid >/dev/null; then
+        start_guard
+        return 0
+    fi
     # Without the seat's session /dev/kvm is not ours, and qemu_vm.sh would
     # fall back to TCG: a guest some ten times slower. Wait for the login.
     [ -r "${B2B_KVM_DEV:-/dev/kvm}" ] && [ -w "${B2B_KVM_DEV:-/dev/kvm}" ] || return 0
@@ -157,9 +166,66 @@ handover() {
     esac
 }
 
+# A host shutdown, in cron mode. logind broadcasts PrepareForShutdown(true)
+# on the system bus before it stops anything, and any user may listen: the
+# guard asks the guest for an ACPI power-off then, while the host still stops
+# its own units. Without it QEMU lives on in cron's cgroup until
+# systemd-shutdown's final SIGTERM, which ends it without the guest knowing.
+# A delay lock would hold the shutdown up to logind's InhibitDelayMaxSec (5 s)
+# for that; the guard takes one wherever polkit grants it, but the 42 seats
+# want authentication for inhibit-delay-shutdown (a root-only .pkla, measured
+# 2026-10-14). A user unit's ExecStop would not do better there either:
+# user@.service gets TimeoutStopSec=5s on these seats.
+#
+# Caveat: the guest's head start is however long the host takes to stop its
+# units after the signal -- unmeasured (the system journal needs adm) -- and a
+# guest that needs longer still loses power mid-shutdown. reboot -f, a held
+# power button or a power cut sends no signal at all. The stop leaves the hold,
+# so a shutdown announced and then aborted keeps the guest down until the next
+# boot: make qemu_start.
+login1_signals() {
+    local who="born2root $VM_NAME"
+    local monitor=(gdbus monitor --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1)
+    if systemd-inhibit --what=shutdown --mode=delay --who="$who" --why=probe true 2>/dev/null; then
+        printf '   with a delay lock\n' >&2
+        exec systemd-inhibit --what=shutdown --mode=delay --who="$who" \
+            --why="powering the guest off before the host" "${monitor[@]}"
+    fi
+    printf '   no delay lock (polkit refused inhibit-delay-shutdown)\n' >&2
+    exec "${monitor[@]}"
+}
+
+guard() {
+    local line
+    printf '== %s: guarding %s against a host shutdown\n' "$(date '+%F %T')" "$VM_NAME"
+    login1_signals | while IFS= read -r line; do
+        case "$line" in
+        *"PrepareForShutdown (true"*)
+            vm_pid >/dev/null || continue
+            printf '== %s: the host is shutting down: make qemu_stop GRACEFUL=1\n' "$(date '+%F %T')"
+            "$MAKE_PATH" -C "$ROOT" --no-print-directory qemu_stop GRACEFUL=1 STOP_GRACE=120 "${MAKE_ARGS[@]}"
+            printf '== exit %s\n' "$?"
+            ;;
+        esac
+    done
+    printf '== %s: the system bus monitor ended; the next tick starts a guard\n' "$(date '+%F %T')"
+}
+
+# One guard per VM: the tick starts it, flock -n makes every later start a
+# no-op, and a guard whose monitor died is replaced within a minute.
+start_guard() {
+    command -v gdbus >/dev/null 2>&1 || return 0
+    setsid -f flock -n -o "$GUARD_LOCK" "$SH" "$ROOT/setup/host/autostart.sh" --guard \
+        </dev/null >>"$GUARD_LOG" 2>&1
+}
+
 case "${1:-}" in
 --tick)
     tick
+    exit 0
+    ;;
+--guard)
+    guard
     exit 0
     ;;
 --handover)
@@ -167,7 +233,7 @@ case "${1:-}" in
     exit
     ;;
 '') ;;
-*) die "usage: autostart.sh [--tick | --handover]" ;;
+*) die "usage: autostart.sh [--tick | --guard | --handover]" ;;
 esac
 
 changed=0
@@ -340,7 +406,7 @@ fi
 retire_units
 put_crontab "$(cron_block)" || exit 1
 ok "cron keeps $VM_NAME up (linger is off, and turning it on needs root): it starts within a minute of your login at this seat, outlives the logout, and make backup runs hourly at :15"
-printf '  a host shutdown cuts its power (no shutdown hook without root); make qemu_stop keeps it down until the next boot\n'
+printf '  a host shutdown asks the guest to power off first (a head start, not a full graceful stop, without root); make qemu_stop keeps it down until the next boot\n'
 pid=$(vm_pid) || pid=
 case "$(cat "/proc/$pid/cgroup" 2>/dev/null)" in
 */user@*)
