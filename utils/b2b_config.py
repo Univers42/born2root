@@ -875,11 +875,16 @@ class Validator:
                     "hellish is the shell of every account in every build, "
                     "not a feature: there is nothing to switch",
                 )
-            elif name in not_installed:
+            # A reservation can be released, never requested: false says
+            # nothing will be put there (baas has docker and no Inception,
+            # and inception-data is also what makes a build "Inception's",
+            # its ports required and the host's browsers configured).
+            elif name in not_installed and value is True:
                 self.err(
                     where,
                     "is space the disk check reserves for what you will put "
-                    "there yourself, not something the build installs",
+                    "there yourself, not something the build installs "
+                    "(false releases it)",
                 )
             elif name.startswith("ai-"):
                 self.err(where, "set vm.ai_mode to client or local instead")

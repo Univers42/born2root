@@ -165,6 +165,18 @@ api_ready() {
     [ "${TS_NO_API:-0}" = 1 ] && return 1
     local tok cid csec
     tok="${TS_API_TOKEN:-$(secret_get TS_API_TOKEN)}"
+    # An auth key or an OAuth client secret in TS_API_TOKEN answers 401 on
+    # every call, and the OAuth client beside it never got its turn: on
+    # 2026-10-14 a tskey-auth- pasted there took the whole automatic path down
+    # while TS_OAUTH_CLIENT_* minted tokens fine. API access tokens are
+    # tskey-api-; the two other kinds are set aside, named, never printed.
+    case "$tok" in
+    tskey-auth-* | tskey-client-*)
+        local kind="${tok#tskey-}"
+        warn "TS_API_TOKEN in $SECRETS_FILE holds a tskey-${kind%%-*}- key, not an API access token (tskey-api-): ignored"
+        tok=
+        ;;
+    esac
     if [ -z "$tok" ]; then
         cid="${TS_OAUTH_CLIENT_ID:-$(secret_get TS_OAUTH_CLIENT_ID)}"
         csec="${TS_OAUTH_CLIENT_SECRET:-$(secret_get TS_OAUTH_CLIENT_SECRET)}"

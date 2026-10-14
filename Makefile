@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all autostart firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all autostart autostart_handover firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -491,11 +491,16 @@ qemu_start:
 qemu_stop:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop
 
-# The VM as a user service of this login: up at boot, stopped gracefully at
-# shutdown, `make backup` hourly (setup/host/autostart.sh). `make all` ends
-# with it when the profile says [host] autostart = true.
+# The VM kept up as a service of this login and `make backup` hourly
+# (setup/host/autostart.sh): systemd user units when linger is on, else a
+# crontab block that needs no root. `make all` ends with it when the profile
+# says [host] autostart = true. autostart_handover moves a VM started from a
+# terminal, which dies at logout, under cron.
 autostart:
 	@B2B_CONFIG="$(B2B_CONFIG)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/autostart.sh
+
+autostart_handover:
+	@B2B_CONFIG="$(B2B_CONFIG)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/autostart.sh --handover
 
 qemu_status:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh status

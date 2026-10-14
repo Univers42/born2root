@@ -150,6 +150,11 @@ claude-code    = true
 playwright     = false
 # the machine
 docker         = true
+# No Inception on baas: inception-data comes on with docker, and it is what
+# makes a build Inception's -- create_custom_iso.sh then wants the https,
+# http, inception-static and inception-adminer forwards, and make all points
+# the host's browsers at <login>.42.fr. Released here, it does neither.
+inception-data = false
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
 # The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
@@ -229,11 +234,13 @@ package = "max"
 # baas ran dab5f43060aab2914183173c91dc7a39a7aab9f6 on 2026-10-13; put a
 # full SHA back here to pin one.
 grobase_ref = "main"
-# baas's node name: dlesieur42-1.tail10f2ea.ts.net is in kong.yml, the cert
-# SANs and REALTIME_ALLOWED_ORIGINS below. The old node must be removed from
-# the tailnet before a rebuild takes the name, or this one gets a suffix
-# (make tailnet stops and says so).
-tailnet_hostname = "dlesieur42-1"
+# The school's baas is baas.tail10f2ea.ts.net; dlesieur42-1 is the one at
+# home, a separate node since 2026-10-14 -- two machines asking for one name
+# leave the second with a suffix (make tailnet stops and says so). The name is
+# in REALTIME_ALLOWED_ORIGINS below; make tailnet puts it in kong.yml. A
+# rebuild must have the old node removed from the tailnet before it can take
+# the name back.
+tailnet_hostname = "baas"
 # baas serves its WAF on the open Internet through Tailscale Funnel; `make
 # datacenter` opens it again (funnel.sh: two console switches, once).
 funnel = true
@@ -257,7 +264,7 @@ DATA_PLANE_IMAGE_SUFFIX         = "-dynamodb"
 DYNAMODB_ENGINE_ENABLED         = "1"
 DATA_PLANE_PER_TABLE_ISOLATION  = "1"
 RUST_DATA_PLANE_FORWARD_ENGINES = "postgresql,cockroachdb,mongodb,mysql,mariadb,redis,sqlite,mssql,http,dynamodb"
-REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://dlesieur42-1.tail10f2ea.ts.net"
+REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://baas.tail10f2ea.ts.net"
 ORG_MODEL_ENABLED               = "true"
 RBAC_HIERARCHY_ENABLED          = "true"
 ENVIRONMENTS_ENABLED            = "true"

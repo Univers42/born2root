@@ -553,9 +553,8 @@ for n in $(names); do
     is_on "$req" && continue
     # A reservation (NOT_INSTALLED) whose feature is off is not a
     # contradiction, it is moot: npm-cache without nvim reserves space for a
-    # cache nothing will write. It follows its feature off, silently -- the
-    # toml refuses `npm-cache = false` as a feature, so -nvim could never be
-    # expressed otherwise.
+    # cache nothing will write. It follows its feature off, silently: -nvim
+    # alone is enough, without a second `npm-cache = false` beside it.
     case " $NOT_INSTALLED " in
     *" $n "*)
         set_state "$n" off

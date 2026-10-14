@@ -63,6 +63,31 @@ check "no literal key in the tree" "$(grep -rlE 'tskey-(auth|api)-[A-Za-z0-9]{6,
 # ── the guest half against a stub tailscale ────────────────────────────────
 stub=$(mktemp -d)
 trap 'rm -rf "$stub"' EXIT
+# api_ready, run (cut out of the script): on 2026-10-14 an auth key pasted
+# into TS_API_TOKEN made every API call a 401 while the OAuth client beside it
+# worked. It is now set aside, named, never printed.
+api_token_for() { # <TS_API_TOKEN in the file> -> the bearer token api_ready settled on
+    local d
+    d=$(mktemp -d)
+    awk '/^api_ready\(\) \{/,/^}/' $h >"$d/lifted.sh"
+    cat >>"$d/lifted.sh" <<'SH'
+SECRETS_FILE=/nonexistent TS_API=https://api.invalid CONSOLE=https://console.invalid
+secret_get() { case "$1" in TS_API_TOKEN) printf '%s' "$FAKE_API_TOKEN" ;; TS_OAUTH_CLIENT_*) echo fake ;; esac; }
+curl() { cat >/dev/null; printf '{"access_token":"from-oauth"}'; }
+json_get() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
+warn() { printf 'warn %s\n' "$*" >&2; }
+read_secret() { return 1; }
+API_TOKEN= TS_ASK_API=0
+api_ready && printf '%s' "$API_TOKEN"
+SH
+    env -u TS_API_TOKEN -u TS_OAUTH_CLIENT_ID -u TS_OAUTH_CLIENT_SECRET FAKE_API_TOKEN="$1" \
+        "$SH" "$d/lifted.sh" 2>"$stub/api_ready.err"
+    rm -rf "$d"
+}
+check "an auth key in TS_API_TOKEN gives way to OAuth" "$(api_token_for tskey-auth-x-not-a-key)" from-oauth
+check "  named in the warning, its value not printed" \
+    "$(grep -c 'holds a tskey-auth- key' "$stub/api_ready.err")/$(grep -c 'not-a-key' "$stub/api_ready.err")" 1/0
+check "an API token in TS_API_TOKEN is used as it is" "$(api_token_for tskey-api-x-not-a-key)" tskey-api-x-not-a-key
 mkdir -p "$stub/bin"
 # The stub answers `status --json` from STUB_STATE / STUB_CERTS, records
 # everything else in $stub/calls, and succeeds.

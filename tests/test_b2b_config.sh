@@ -320,8 +320,10 @@ refuse "an unknown feature" features.dcoker \
     's/^docker         = "auto"/dcoker = true/'
 refuse "an ai feature instead of vm.ai_mode" features.ai-local \
     's/^docker         = "auto"/ai-local = true/'
-refuse "a space reservation as a feature" features.vscode-remote \
-    's/^docker         = "auto"/vscode-remote = false/'
+refuse "a space reservation asked for as a feature" features.vscode-remote \
+    's/^docker         = "auto"/vscode-remote = true/'
+check "a space reservation released (false) is accepted" \
+    "$(rc_of "$(variant "release$$" 's/^docker         = "auto"/inception-data = false/')" --check)" 0
 refuse "a package name with a capital" packages.apt \
     's/^apt = \[\]/apt = ["Htop"]/'
 refuse "the same package twice" packages.apt \
