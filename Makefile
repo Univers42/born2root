@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all autostart autostart_handover seat_tailnet seat_tailnet_undo firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -509,6 +509,13 @@ seat_tailnet:
 
 seat_tailnet_undo:
 	@B2B_CONFIG="$(B2B_CONFIG)" $(SCRIPT_SH) setup/host/seat_tailnet.sh --undo
+
+# The team's copy of the secrets file in vault42 ([dc] vault), VAULT42_* aside.
+# A pull previews; APPLY=1 writes new keys, KEYS= names the ones to replace.
+secrets_push:
+	@B2B_CONFIG="$(B2B_CONFIG)" $(SCRIPT_SH) setup/host/team_vault.sh push $(KEYS)
+secrets_pull:
+	@B2B_CONFIG="$(B2B_CONFIG)" B2B_VAULT_APPLY="$(APPLY)" $(SCRIPT_SH) setup/host/team_vault.sh pull $(KEYS)
 
 qemu_status:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh status

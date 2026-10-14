@@ -183,6 +183,10 @@ DEFAULTS = {
     # (kong.yml, the cert SANs, the realtime origins) is the same after a
     # rebuild; "" keeps the guest's hostname. funnel: `make datacenter` opens
     # the public plane (make funnel_up) when true.
+    # vault: "org/project/env", the vault42 environment the team's copy of the
+    # secrets file lives in (setup/host/team_vault.sh); "" turns `make
+    # secrets_push` / `secrets_pull` off. Slugs, not secrets: the scope's
+    # key is what guards the values, and it never leaves 42ctl.
     "dc": {
         "cors_origins": [],
         "package": "auto",
@@ -192,6 +196,7 @@ DEFAULTS = {
         "grobase_env": {"CATALOG_MANAGEMENT": "static", "REMOTE_ACCESS": "1"},
         "tailnet_hostname": "",
         "funnel": False,
+        "vault": "",
     },
     # [host]: what the build sets up on the host itself. autostart: `make all`
     # ends with `make autostart` -- the VM as a user service of this login,
@@ -1033,6 +1038,13 @@ class Validator:
             )
         if not isinstance(self.c.dc.get("funnel"), bool):
             self.err("dc.funnel", "%r is not true or false" % (self.c.dc.get("funnel"),))
+        vault = self.c.dc.get("vault")
+        if vault and not (isinstance(vault, str) and self.VAULT_SCOPE_RE.match(vault)):
+            self.err(
+                "dc.vault",
+                '%r is not a vault42 scope: "org/project/env", three slugs '
+                '(42ctl project ls --org <org>, 42ctl env ls --project <p>)' % (vault,),
+            )
 
     SHA_RE = re.compile(r"^[0-9a-f]{40}$")
     # A branch is followed, not pinned (install_grobase.sh fetches its newest
@@ -1040,6 +1052,7 @@ class Validator:
     # abbreviated SHA rather than turning into a branch nobody has.
     BRANCH_RE = re.compile(r"^(?![0-9a-f]+$)[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
     DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+    VAULT_SCOPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){2}$")
     ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
     # build.conf is sourced, each value inside double quotes: nothing that
     # would end the quotes or expand there, and no control character.
@@ -1361,6 +1374,7 @@ LEGACY = {
     "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
     "B2B_DC_TAILNET_HOSTNAME": lambda c: c.dc.get("tailnet_hostname") or "",
     "B2B_DC_FUNNEL": lambda c: c.dc.get("funnel"),
+    "B2B_DC_VAULT": lambda c: c.dc.get("vault") or "",
     "B2B_HOST_AUTOSTART": lambda c: c.host.get("autostart"),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],

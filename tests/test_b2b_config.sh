@@ -665,6 +665,15 @@ refuse "a tailnet_hostname that is not a DNS label is refused" "dc.tailnet_hostn
 refuse "funnel must be true or false" "dc.funnel" \
     's|^package = "auto"|package = "auto"\nfunnel = "yes"|'
 
+# ── [dc] vault ──────────────────────────────────────────────────────────────
+check "no vault: empty (secrets_push / secrets_pull off)" "$(get_of "$DEFAULTS" B2B_DC_VAULT)" ""
+VLT=$(variant vault 's|^package = "auto"|package = "auto"\nvault = "univers42/born2root/shared"|')
+check "an org/project/env vault passes --check" "$(rc_of "$VLT" --check)" 0
+check "  and reaches B2B_DC_VAULT" "$(get_of "$VLT" B2B_DC_VAULT)" univers42/born2root/shared
+check "  but never the guest's build.conf" "$(env B2B_CONFIG="$VLT" "${CFG[@]}" --guest | grep -c VAULT)" 0
+refuse "a vault with two slugs is refused" "dc.vault" \
+    's|^package = "auto"|package = "auto"\nvault = "univers42/born2root"|'
+
 # ── [host] autostart ────────────────────────────────────────────────────────
 check "no [host]: autostart false (make all leaves the host's units alone)" \
     "$(get_of "$DEFAULTS" B2B_HOST_AUTOSTART)" false
