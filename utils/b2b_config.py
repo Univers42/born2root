@@ -169,7 +169,8 @@ DEFAULTS = {
     # profile whose keys live somewhere else than the defaults dc_lib.sh tries.
     # "" keeps those defaults; B2B_SECRETS= beats it.
     # grobase_ref: the grobase commit install_grobase.sh checks out, by its
-    # full SHA; "" keeps the pin that script carries.
+    # full SHA, or a branch ("main") whose newest commit every run takes;
+    # "" keeps the pin that script carries.
     # grobase_env: NON-secret KEY = "value" lines kept in /opt/grobase/.env.local,
     # the layer grobase's `make env` appends last, so they survive every
     # re-assembly. A profile's table REPLACES this default one. The default is
@@ -182,6 +183,10 @@ DEFAULTS = {
     # (kong.yml, the cert SANs, the realtime origins) is the same after a
     # rebuild; "" keeps the guest's hostname. funnel: `make datacenter` opens
     # the public plane (make funnel_up) when true.
+    # vault: "org/project/env", the vault42 environment the team's copy of the
+    # secrets file lives in (setup/host/team_vault.sh); "" turns `make
+    # secrets_push` / `secrets_pull` off. Slugs, not secrets: the scope's
+    # key is what guards the values, and it never leaves 42ctl.
     "dc": {
         "cors_origins": [],
         "package": "auto",
@@ -191,6 +196,7 @@ DEFAULTS = {
         "grobase_env": {"CATALOG_MANAGEMENT": "static", "REMOTE_ACCESS": "1"},
         "tailnet_hostname": "",
         "funnel": False,
+        "vault": "",
     },
     # [host]: what the build sets up on the host itself. autostart: `make all`
     # ends with `make autostart` -- the VM as a user service of this login,
@@ -599,6 +605,7 @@ class Validator:
         if vm["ai_mode"] not in ("off", "client", "local"):
             self.err("vm.ai_mode", "off, client or local")
         self._abs_path("vm.path", vm.get("path"))
+        self._vm_path_outside_repo(vm.get("path"))
 
     def ai(self):
         """[ai]: judged here, before `make all` downloads or starts anything."""
@@ -873,11 +880,16 @@ class Validator:
                     "hellish is the shell of every account in every build, "
                     "not a feature: there is nothing to switch",
                 )
-            elif name in not_installed:
+            # A reservation can be released, never requested: false says
+            # nothing will be put there (baas has docker and no Inception,
+            # and inception-data is also what makes a build "Inception's",
+            # its ports required and the host's browsers configured).
+            elif name in not_installed and value is True:
                 self.err(
                     where,
                     "is space the disk check reserves for what you will put "
-                    "there yourself, not something the build installs",
+                    "there yourself, not something the build installs "
+                    "(false releases it)",
                 )
             elif name.startswith("ai-"):
                 self.err(where, "set vm.ai_mode to client or local instead")
@@ -1007,11 +1019,14 @@ class Validator:
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
         self._abs_path("dc.secrets_file", self.c.dc.get("secrets_file"))
         ref = self.c.dc.get("grobase_ref")
-        if ref and not (isinstance(ref, str) and self.SHA_RE.match(ref)):
+        if ref and not (
+            isinstance(ref, str) and (self.SHA_RE.match(ref) or self.BRANCH_RE.match(ref))
+        ):
             self.err(
                 "dc.grobase_ref",
-                "%r is not a full commit SHA (40 hex digits: git fetch "
-                "origin <sha> takes no abbreviation)" % (ref,),
+                "%r is neither a full commit SHA (40 hex digits: git fetch "
+                "origin <sha> takes no abbreviation) nor a branch name like "
+                '"main"' % (ref,),
             )
         self._grobase_env(self.c.dc.get("grobase_env"))
         name = self.c.dc.get("tailnet_hostname")
@@ -1023,9 +1038,21 @@ class Validator:
             )
         if not isinstance(self.c.dc.get("funnel"), bool):
             self.err("dc.funnel", "%r is not true or false" % (self.c.dc.get("funnel"),))
+        vault = self.c.dc.get("vault")
+        if vault and not (isinstance(vault, str) and self.VAULT_SCOPE_RE.match(vault)):
+            self.err(
+                "dc.vault",
+                '%r is not a vault42 scope: "org/project/env", three slugs '
+                '(42ctl project ls --org <org>, 42ctl env ls --project <p>)' % (vault,),
+            )
 
     SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+    # A branch is followed, not pinned (install_grobase.sh fetches its newest
+    # commit on every run). All-hex is refused so "dab5f43" stays an
+    # abbreviated SHA rather than turning into a branch nobody has.
+    BRANCH_RE = re.compile(r"^(?![0-9a-f]+$)[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
     DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+    VAULT_SCOPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){2}$")
     ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
     # build.conf is sourced, each value inside double quotes: nothing that
     # would end the quotes or expand there, and no control character.
@@ -1081,6 +1108,31 @@ class Validator:
             elif not host_path.expand(entry).startswith("/"):
                 why = "is not absolute (it must start with / or $HOME)"
                 self.err(name, "%r %s" % (entry, why))
+
+    def _vm_path_outside_repo(self, value):
+        """`make fclean` (so `make re`) empties VM_PATH, keeping only the
+        .vm_path.* registry. An entry that is this repo, or a directory that
+        holds it, would take the repo with it: on 2026-10-14 a profile named
+        the repo root itself, one `make re` away from losing .git.
+
+        Caveat: compares resolved paths, so the repo reached through a bind
+        mount under another name passes.
+        """
+        if value in (None, ""):
+            return
+        repo = os.path.realpath(os.path.dirname(HERE))
+        entries = value if isinstance(value, list) else [value]
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, str) or not entry:
+                continue
+            path = os.path.realpath(host_path.expand(entry))
+            if repo == path or repo.startswith(path.rstrip("/") + "/"):
+                name = "vm.path[%d]" % index if isinstance(value, list) else "vm.path"
+                self.err(
+                    name,
+                    "%r holds this repo, and make fclean empties VM_PATH; use a "
+                    "sibling such as %s" % (entry, os.path.join(os.path.dirname(repo), "virtual_machines")),
+                )
 
     # [network] forwards is the whole port list: every NAT rule both backends
     # create and every port the guest's firewall opens, so it must carry SSH.
@@ -1322,6 +1374,7 @@ LEGACY = {
     "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
     "B2B_DC_TAILNET_HOSTNAME": lambda c: c.dc.get("tailnet_hostname") or "",
     "B2B_DC_FUNNEL": lambda c: c.dc.get("funnel"),
+    "B2B_DC_VAULT": lambda c: c.dc.get("vault") or "",
     "B2B_HOST_AUTOSTART": lambda c: c.host.get("autostart"),
     "B2B_PASS_MAX_DAYS": lambda c: c.policy["password"]["max_days"],
     "B2B_PASS_MIN_DAYS": lambda c: c.policy["password"]["min_days"],

@@ -132,6 +132,43 @@ check "the profile's ref" "$(ref_of 'B2B_DC_GROBASE_REF=dab5f43060aab2914183173c
 check "GROBASE_REF= beats the profile" \
     "$(ref_of 'B2B_DC_GROBASE_REF=dab5f43060aab2914183173c91dc7a39a7aab9f6' 0123456789abcdef0123456789abcdef01234567)" \
     0123456789abcdef0123456789abcdef01234567
+check "a branch reaches the script as the branch" "$(ref_of 'B2B_DC_GROBASE_REF=main')" main
+
+# ── install_grobase.sh: a branch is followed ────────────────────────────────
+# The block that turns a branch into its newest SHA, cut out by its
+# `case "$GROBASE_REF" in` .. `esac` lines and run against a local remote that
+# moves after the clone, as grobase's main does between two `make grobase`.
+FOLLOW=$(awk '/^case "\$GROBASE_REF" in$/,/^esac$/' "$SRC")
+check "the branch block is extractable" "$([ -n "$FOLLOW" ] && echo found)" found
+G() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=main "$@"; }
+G init -q --bare "$TMP/remote.git"
+G clone -q "$TMP/remote.git" "$TMP/work" 2>/dev/null
+G -C "$TMP/work" commit -q --allow-empty -m one
+G -C "$TMP/work" push -q origin HEAD:main HEAD:develop
+G clone -q --depth 100 "file://$TMP/remote.git" "$TMP/clone" 2>/dev/null
+G -C "$TMP/work" commit -q --allow-empty -m two
+G -C "$TMP/work" push -q origin HEAD:main
+NEWEST=$(G -C "$TMP/work" rev-parse HEAD)
+DEVELOP=$(G -C "$TMP/remote.git" rev-parse refs/heads/develop)
+follow() { # <GROBASE_REF> -> the ref after the block, or "died: …"
+    # shellcheck disable=SC2317,SC2329,SC2034 # log, die and the two dirs are read by the eval'd block
+    (
+        log() { :; }
+        die() {
+            echo "died: $*"
+            exit 1
+        }
+        GROBASE_DIR="$TMP/clone" GROBASE_REPO=test GROBASE_REF="$1"
+        eval "$FOLLOW"
+        echo "$GROBASE_REF"
+    )
+}
+check "main: the commit pushed after the clone" "$(follow main)" "$NEWEST"
+check "a branch the single-branch clone never tracked" "$(follow develop)" "$DEVELOP"
+check "a full SHA is left alone" "$(follow 0123456789abcdef0123456789abcdef01234567)" \
+    0123456789abcdef0123456789abcdef01234567
+check "a missing branch stops the install, naming it" "$(follow nope 2>/dev/null)" \
+    "died: branch nope not found in test"
 
 # ── install_grobase.sh: the order ───────────────────────────────────────────
 first_env=$(grep -n '^make --no-print-directory env' "$SRC" | head -n1 | cut -d: -f1)

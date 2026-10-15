@@ -72,7 +72,8 @@ GROBASE_REPO="${GROBASE_REPO:-https://github.com/Univers42/grobase.git}"
 # `git fetch origin <sha>` below takes no abbreviation). Moving it means
 # checking ghcr has sha-<new pin> images, the way realtime is tagged below.
 # A profile moves it for itself with [dc] grobase_ref (B2B_DC_GROBASE_REF in
-# build.conf); GROBASE_REF= in the environment beats both.
+# build.conf); GROBASE_REF= in the environment beats both. Either may name a
+# branch instead of a SHA: it is resolved after the clone, below.
 if [ -z "${GROBASE_REF:-}" ] && [ -f "$BUILD" ]; then
     GROBASE_REF=$(sed -n 's/^B2B_DC_GROBASE_REF=//p' "$BUILD" | head -n1 | tr -d '"')
 fi
@@ -141,6 +142,25 @@ else
     log "cloning $GROBASE_REPO"
     git clone -q --depth 100 "$GROBASE_REPO" "$GROBASE_DIR" || die "clone failed"
 fi
+
+# A branch (grobase_ref = "main") is followed, not pinned: first boot and
+# every `make grobase` fetch it and take its newest commit. GROBASE_REF
+# becomes that SHA, so the checkout below, grobase.conf and the realtime
+# image tag all name what actually runs. The explicit refspec reaches a
+# branch the --single-branch clone does not track.
+# Caveat: a commit pushed minutes before the run may have no sha-<commit>
+# images on ghcr yet; the realtime step below then keeps the pulled :latest.
+case "$GROBASE_REF" in
+*[!0-9a-f]*)
+    GROBASE_BRANCH=$GROBASE_REF
+    git -C "$GROBASE_DIR" fetch -q --depth 100 origin \
+        "+refs/heads/$GROBASE_BRANCH:refs/remotes/origin/$GROBASE_BRANCH" ||
+        die "branch $GROBASE_BRANCH not found in $GROBASE_REPO"
+    GROBASE_REF=$(git -C "$GROBASE_DIR" rev-parse "refs/remotes/origin/$GROBASE_BRANCH") ||
+        die "branch $GROBASE_BRANCH fetched but unresolvable"
+    log "following $GROBASE_BRANCH: $GROBASE_REF"
+    ;;
+esac
 # A pin that lives on a side branch is not in the clone at all: `git clone
 # --depth` implies --single-branch, so the refspec only ever names the default
 # branch and --unshallow just deepens that one. The 2026-09-21 build died here
@@ -182,11 +202,14 @@ fi
 # needs no edit here; gateway.yml is the single exception, since the WAF
 # (8880/8443) is deliberately the one door open off loopback.
 # Two spellings: a literal "9090:9090" and a defaulted "${LOKI_PORT:-3100}:3100".
+# The variable name may hold digits: grobase main's vault42.yml publishes
+# "${VAULT42_PORT:-18443}:8443", which a letters-only class let through both
+# the rewrite and the check below (2026-10-14, main 8b9321a6).
 for yml in orchestrators/compose/base/*.yml; do
     [ "$(basename "$yml")" = gateway.yml ] && continue
-    sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_]+:-[0-9]+\}:[0-9]+")/\1127.0.0.1:\2/' \
+    sed -i -E 's/^(\s+- ")([0-9]+:[0-9]+")/\1127.0.0.1:\2/; s/^(\s+- ")(\$\{[A-Za-z_][A-Za-z0-9_]*:-[0-9]+\}:[0-9]+")/\1127.0.0.1:\2/' \
         "$yml"
-    n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_]+:-[0-9]+\}):[0-9]+"' "$yml" || true)
+    n_open=$(grep -cE '^\s+- "([0-9]+|\$\{[A-Za-z_][A-Za-z0-9_]*:-[0-9]+\}):[0-9]+"' "$yml" || true)
     [ "${n_open:-0}" = 0 ] || die "$yml still publishes $n_open port(s) off loopback after the patch"
 done
 

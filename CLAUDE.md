@@ -42,6 +42,8 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | graph_render's motor: tunnel, key (kept across rebuilds), reinstall | `make graph_render`, `make graph_render_key`, `make graph_render_install` |
 | Grobase status (config + docker ps, read from the guest) | `make grobase_status` |
 | Prove the platform / mint a tenant key / seed / open the public plane | `make verify_platform`, `make tenant_key TENANT=…`, `make seed`, `make funnel_up` |
+| This seat on the tailnet at every login (userspace tailscaled, no root) | `make seat_tailnet`, `make seat_tailnet_undo` |
+| The team's copy of the secrets in vault42 (`[dc] vault`) | `make secrets_push`, `make secrets_pull` (`APPLY=1`, `KEYS=`) |
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
 | The private plane: MagicDNS name + certificate + serve -> WAF + CORS origin | `make tailnet`, `make tailnet_status`, `make tailnet_down` (`setup/host/tailnet.sh`) |
 | Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
@@ -128,7 +130,10 @@ credentials that must not enter the repo or the ISO:
 - `BAAS_API_KEY` — grobase tenant key; written by `make tenant_key`.
 - `CF_TUNNEL_TOKEN` — cloudflared tunnel token, only once a domain exists.
 
-Bootstrap:
+Bootstrap from the team's vault42 environment (`[dc] vault`, logged in
+with 42ctl): `make secrets_pull APPLY=1`. It writes keys the file lacks and
+keeps one that differs until named in `KEYS=`; `VAULT42_*` (a person's own
+vault42 login) is never pushed. Without a vault:
 
 ```bash
 cp .b2b-secrets.example ~/.config/born2root/b2b-secrets

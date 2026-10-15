@@ -37,7 +37,7 @@ VM="t-$$"
 mkdir -p disk_images "$TMP/vm/$VM"
 printf '%s\n' "$TMP/vm" >"disk_images/.vm_path.$VM"
 trap 'rm -f "disk_images/.vm_path.$VM"; rm -rf "$TMP"' EXIT
-printf 'https=8443\ninception-static=8090\n' >"$TMP/vm/$VM/ports.env"
+printf 'inception-https=8444\ninception-static=8090\n' >"$TMP/vm/$VM/ports.env"
 
 # 1. Every Inception recipe hands the RECORDED VM_PATH to its script, with
 #    nothing on the command line. The temp path is replaced by a fixed token
@@ -51,7 +51,7 @@ done
 export VM_NAME="$VM" VM_PATH="$TMP/vm"
 # shellcheck source=setup/host/vm_ports.sh
 . ./setup/host/vm_ports.sh
-check "vm_forward_port https" "$(vm_forward_port https)" 8443
+check "vm_forward_port inception-https" "$(vm_forward_port inception-https)" 8444
 check "vm_forward_port inception-static" "$(vm_forward_port inception-static)" 8090
 check "vm_backend" "$(vm_backend)" qemu
 

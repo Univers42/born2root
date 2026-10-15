@@ -22,10 +22,28 @@
 
 FB_SSH=(ssh b2b)
 
+# A probe never gets the build's terminal. timeout(1) puts ssh in a process
+# group of its own, a background job on that terminal: once anyone typed into
+# it (2026-10-14, a build at "first boot is provisioning the guest 0m15s"),
+# ssh read the pending keys, the kernel stopped it with SIGTTIN, and timeout's
+# SIGTERM never ended it -- ssh catches TERM, its restarted read stops it
+# again, and timeout without -k waits for good. The guest finished first boot
+# unwatched while the host showed nothing. Hence stdin from /dev/null when it
+# is a terminal (only then: the verdict feeds awk its program on stdin), and
+# -k 5 for anything else that outlives TERM. ClearAllForwardings: the b2b
+# block's LocalForward 8420/8421 and RemoteForward 9222 are the user's own
+# `ssh b2b`'s, and a probe every 15 s holding them takes them from it.
+# Caveat: 25 s bounds a probe, not the guest. A guest too loaded to answer in
+# time reads as an empty answer, i.e. "not finished, no progress": the wait
+# goes on and can only end late, never early.
 fb_ssh() {
-    timeout 25 "${FB_SSH[0]}" -o BatchMode=yes -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
-        "${FB_SSH[@]:1}" "$@" 2>/dev/null
+    if [ -t 0 ]; then
+        fb_ssh "$@" </dev/null
+    else
+        timeout -k 5 25 "${FB_SSH[0]}" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 \
+            -o ClearAllForwardings=yes "${FB_SSH[@]:1}" "$@" 2>/dev/null
+    fi
 }
 
 fb_wait_tick() { sleep 15; }

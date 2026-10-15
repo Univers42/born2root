@@ -117,8 +117,18 @@ vm_paths() {
     # past 1 GB minutes into an install, long before there is a system on it.
     PHASE="$VM_DIR/.phase"     # "installing" while d-i owns the disk
     STAMP="$VM_DIR/.installed" # written once B2B-INSTALL-COMPLETE arrived
+    HOLD="$VM_DIR/.autostart-hold"
 }
 vm_paths
+
+# The cron autostart (setup/host/autostart.sh --tick) starts this guest
+# whenever it is not running. A guest stopped on purpose, or a disk an install
+# owns, must stay as it is: stop, kill and install leave this boot's id in
+# $HOLD, the tick leaves a held guest alone until the host boots again, and
+# start clears the hold once a guest runs.
+hold_autostart() {
+    cat "${B2B_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}" >"$HOLD" 2>/dev/null || true
+}
 
 DISK_SIZE_MB="${DISK_SIZE_MB:-15360}"
 # A second disk for the IDE sandbox's dockerd (setup/install/dc/install_ide_disk.sh).
@@ -1086,6 +1096,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         ensure_vm_dir "$VM_PATH" "$VM_NAME" || exit 1
         printf 'installing\n' >"$PHASE"
         rm -f "$STAMP"
+        hold_autostart
         launch cdrom
         # shellcheck disable=SC2059
         printf "\n  ${C_BOLD}Unattended install running.${C_RESET} ${C_DIM}What follows is the installer's own log,\n"
@@ -1152,6 +1163,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         else
             launch disk
         fi
+        rm -f "$HOLD"
         # The LUKS prompt is drawn by the guest's initramfs, long before any
         # network exists, so the keyboard is the only channel that can answer
         # it -- exactly as unlock_vm.sh does with VirtualBox.
@@ -1243,6 +1255,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
     stop)
         need_running
         need_control qemu_stop
+        hold_autostart
         stop_guest "$(qemu_pid)"
         ;;
 
@@ -1258,6 +1271,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
     kill)
         need_running
         need_control qemu_kill
+        hold_autostart
         p=$(qemu_pid)
         kill "$p" 2>/dev/null
         sleep 2

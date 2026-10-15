@@ -9,15 +9,21 @@
 #   rebuild at school would have had neither.
 #
 # WHAT IS CHECKED
-#   autostart.sh writes the VM unit (ExecStart/ExecStop as the live one) and
-#   an hourly :15 backup timer, enables both, starts only the timer, rewrites
-#   nothing on a second run, PRINTS the linger command when linger is off and
-#   never runs sudo, and refuses a value systemd would split. `make -n all`
-#   runs it for a profile with [host] autostart = true and only then.
+#   With linger on, autostart.sh writes the VM unit (ExecStart/ExecStop as the
+#   live one) and an hourly :15 backup timer, enables both, starts only the
+#   timer, rewrites nothing on a second run, and refuses a value systemd would
+#   split. With linger off (the 42 seats, where nobody has root) it prints no
+#   sudo at all: it disables the units and writes a crontab block (a tick
+#   every minute, make backup at :15) beside the user's own lines, once. The
+#   tick starts the VM only when it is not running, not held for this boot by
+#   qemu_vm.sh stop/kill/install, and /dev/kvm is writable. `make -n all`
+#   runs autostart for a profile with [host] autostart = true and only then.
 #
 # HOW
-#   systemctl, loginctl and sudo are stubs on PATH that record their calls;
-#   the units land in a temp XDG_CONFIG_HOME.
+#   systemctl, loginctl, sudo and crontab are stubs on PATH that record their
+#   calls (the real crontab is never touched); the units land in a temp
+#   XDG_CONFIG_HOME; the tick gets a stub make, a stand-in /dev/kvm and boot
+#   id, and a fake QEMU whose command line carries the pidfile.
 set -e
 
 cd "$(dirname "$0")/.."
@@ -36,13 +42,16 @@ check() {
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP:?}"' EXIT
 mkdir -p "$TMP/bin"
-for c in systemctl loginctl sudo; do
+for c in systemctl loginctl sudo crontab; do
     cat >"$TMP/bin/$c" <<EOF
 #!/bin/sh
 printf '$c %s\n' "\$*" >>"$TMP/calls"
 case "$c \$*" in
 "loginctl show-user"*) cat "$TMP/linger" 2>/dev/null ;;
 "systemctl --user show-environment") [ ! -f "$TMP/no_user_bus" ] || exit 1 ;;
+"systemctl --user is-active"*) [ -f "$TMP/vm_active" ] || exit 3 ;;
+"crontab -l") cat "$TMP/crontab" 2>/dev/null || { echo "no crontab for you" >&2; exit 1; } ;;
+"crontab -") cat >"$TMP/crontab" ;;
 esac
 exit 0
 EOF
@@ -84,18 +93,129 @@ check "... nothing rewritten" "$(cmp -s "$TMP/unit.first" "$VM_UNIT" && echo sam
 check "... no daemon-reload" "$(grep -c 'daemon-reload' "$TMP/calls" || true)" 0
 check "... and says so" "$(grep -c 'unchanged' "$TMP/out")" 3
 
+# ── linger off: cron, and no root anywhere ─────────────────────────────────
 echo no >"$TMP/linger"
+printf '0 4 * * * echo mine\n' >"$TMP/crontab"
+check "linger off: exit 0" "$(run)" 0
+check "... no sudo printed, none run" "$(cat "$TMP/out" "$TMP/calls" | grep -c sudo || true)" 0
+check "... the timer disabled and stopped, the VM unit only disabled" \
+    "$(grep -c '^systemctl --user disable --now b2b-backup-baas.timer$\|^systemctl --user disable b2b-vm-baas.service$' "$TMP/calls")" 2
+check "... the tick every minute, under a lock, logged beside the VM" \
+    "$(grep -c "^\* \* \* \* \* cd $ROOT && flock -n -o /vm/store/baas/.autostart.lock env PATH=[^ ]* $ARGS [^ ]* setup/host/autostart.sh --tick >>/vm/store/baas/autostart.log 2>&1\$" "$TMP/crontab")" 1
+check "... make backup hourly at :15, under its own lock and a timeout" \
+    "$(grep -c "^15 \* \* \* \* cd $ROOT && flock -n -o /vm/store/baas/.backup.lock timeout 3000 env PATH=[^ ]* [^ ]*/make backup $ARGS >" "$TMP/crontab")" 1
+check "... the user's own line kept" "$(grep -cx '0 4 \* \* \* echo mine' "$TMP/crontab")" 1
+cp "$TMP/crontab" "$TMP/crontab.first"
+check "second run: exit 0" "$(run)" 0
+check "... the crontab not rewritten" "$(grep -c '^crontab -$' "$TMP/calls" || true)" 0
+check "... and says so" "$(grep -c 'crontab unchanged' "$TMP/out")" 1
+touch "$TMP/vm_active"
 run >/dev/null
-check "linger off: the command is printed" "$(grep -c "sudo loginctl enable-linger $(id -un)" "$TMP/out")" 1
-check "... and never run" "$(grep -c '^sudo' "$TMP/calls" || true)" 0
+check "VM unit active (its ExecStop would stop the VM): the handover is named" \
+    "$(grep -c 'make autostart_handover' "$TMP/out")" 1
+rm -f "$TMP/vm_active"
+echo yes >"$TMP/linger"
+run >/dev/null
+check "linger on again: the block removed, the user's line kept" "$(cat "$TMP/crontab")" "0 4 * * * echo mine"
 
 touch "$TMP/no_user_bus"
-check "no user systemd: exit 1" "$(run)" 1
+check "linger on, no user systemd: exit 1" "$(run)" 1
 check "... naming the commands to run" "$(grep -c 'systemctl --user enable --now b2b-backup-baas.timer' "$TMP/out")" 1
 rm -f "$TMP/no_user_bus"
 
 check "a VM_PATH with a space is refused (systemd would split it)" "$(run VM_PATH='/vm/my store')" 1
 check "a VM_PATH with % is refused (a systemd specifier)" "$(run VM_PATH='/vm/100%')" 1
+
+# ── the tick: one cron minute ───────────────────────────────────────────────
+mkdir -p "$TMP/tickbin" "$TMP/vms/baas"
+cat >"$TMP/tickbin/make" <<EOF
+#!/bin/sh
+printf 'make %s\n' "\$*" >>"$TMP/calls"
+EOF
+printf '#!/bin/sh\nwhile :; do sleep 1; done\n' >"$TMP/fakeqemu"
+chmod +x "$TMP/tickbin/make" "$TMP/fakeqemu"
+echo boot-1 >"$TMP/boot_id"
+: >"$TMP/kvm"
+PIDFILE="$TMP/vms/baas/qemu.pid"
+HOLD="$TMP/vms/baas/.autostart-hold"
+tick() { # [--handover] -> how many times make ran; output in $TMP/out
+    : >"$TMP/calls"
+    env PATH="$TMP/tickbin:$TMP/bin:$PATH" B2B_CONFIG=profiles/server.toml VM_PATH="$TMP/vms" VM_NAME=baas \
+        B2B_KVM_DEV="${KVM:-$TMP/kvm}" B2B_BOOT_ID_FILE="$TMP/boot_id" \
+        "${SCRIPT_SH:-bash}" setup/host/autostart.sh "${1:---tick}" >"$TMP/out" 2>&1
+    grep -c '^make ' "$TMP/calls" || true
+}
+check "tick, VM down: make qemu_start" "$(tick)" 1
+check "... from this checkout, for this VM" "$(cat "$TMP/calls")" \
+    "make -C $ROOT --no-print-directory qemu_start B2B_CONFIG=profiles/server.toml VM_PATH=$TMP/vms VM_NAME=baas"
+check "... its exit status logged" "$(tail -n1 "$TMP/out")" "== exit 0"
+echo boot-1 >"$HOLD"
+check "tick, held this boot (make qemu_stop): nothing" "$(tick)" 0
+echo boot-0 >"$HOLD"
+check "tick, held at an earlier boot: make qemu_start" "$(tick)" 1
+rm -f "$HOLD"
+check "tick, /dev/kvm not ours (no seat session): nothing, never TCG" "$(KVM="$TMP/no-kvm" tick)" 0
+echo $$ >"$PIDFILE"
+check "tick, a pidfile naming some other process: make qemu_start" "$(tick)" 1
+# The guard's system bus: gdbus prints $TMP/signals and ends, and
+# systemd-inhibit refuses (as polkit does on the 42 seats) unless
+# $TMP/inhibit_ok exists, then runs its command like the real one.
+cat >"$TMP/tickbin/gdbus" <<EOF
+#!/bin/sh
+printf 'gdbus %s\n' "\$*" >>"$TMP/calls"
+cat "$TMP/signals" 2>/dev/null
+EOF
+cat >"$TMP/tickbin/systemd-inhibit" <<EOF
+#!/bin/sh
+[ -f "$TMP/inhibit_ok" ] || { echo 'Failed to inhibit: Interactive authentication required.' >&2; exit 1; }
+printf 'systemd-inhibit %s\n' "\$*" >>"$TMP/calls"
+while case "\$1" in --*) true ;; *) false ;; esac; do shift; done
+exec "\$@"
+EOF
+chmod +x "$TMP/tickbin/gdbus" "$TMP/tickbin/systemd-inhibit"
+GUARD_LOG="$TMP/vms/baas/shutdown-guard.log"
+"$TMP/fakeqemu" -pidfile "$PIDFILE" &
+echo $! >"$PIDFILE"
+check "tick, VM running: nothing" "$(tick)" 0
+# The tick detaches the guard; with no signal on the stub bus it ends at once.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q 'monitor ended' "$GUARD_LOG" 2>/dev/null && break
+    sleep 0.5
+done
+check "... and it keeps a shutdown guard running" "$(grep -c '^== .*guarding baas' "$GUARD_LOG" 2>/dev/null)" 1
+# The line gdbus 2.72 prints for the signal (captured from an emitted one on
+# the session bus, 2026-10-14).
+SHUTDOWN='/org/freedesktop/login1: org.freedesktop.login1.Manager.PrepareForShutdown (true,)'
+echo "$SHUTDOWN" >"$TMP/signals"
+check "guard, host shutting down: make qemu_stop" "$(tick --guard)" 1
+check "... gracefully, with the unit's own grace" "$(grep '^make ' "$TMP/calls")" \
+    "make -C $ROOT --no-print-directory qemu_stop GRACEFUL=1 STOP_GRACE=120 B2B_CONFIG=profiles/server.toml VM_PATH=$TMP/vms VM_NAME=baas"
+check "... polkit refused the delay lock: watched anyway, and said so" \
+    "$(grep -c 'no delay lock' "$TMP/out")" 1
+touch "$TMP/inhibit_ok"
+check "guard, delay lock granted: make qemu_stop" "$(tick --guard)" 1
+check "... the monitor runs under a shutdown delay lock" \
+    "$(grep -c '^systemd-inhibit --what=shutdown --mode=delay .*gdbus monitor --system --dest org.freedesktop.login1' "$TMP/calls")" 1
+rm -f "$TMP/inhibit_ok"
+echo "${SHUTDOWN%(true,)}(false,)" >"$TMP/signals"
+check "guard, PrepareForShutdown(false) (a resume, a cancel): nothing" "$(tick --guard)" 0
+kill "$(cat "$PIDFILE")"
+rm -f "$PIDFILE"
+echo "$SHUTDOWN" >"$TMP/signals"
+check "guard, host shutting down, VM not running: nothing" "$(tick --guard)" 0
+rm -f "$TMP/signals"
+echo boot-1 >"$HOLD"
+check "handover, VM down: the hold released, make not run" "$(tick --handover)" 0
+check "... nothing held" "$([ -e "$HOLD" ] && echo held || echo free)" free
+
+# qemu_vm.sh leaves the hold wherever the guest stops on purpose and clears it
+# where one starts. case_holds ACTION: hold lines in that case of its dispatcher.
+case_holds() {
+    awk -v c="    $1)" '$0 == c { on = 1 } on && /hold_autostart|rm -f "\$HOLD"/ { n++ }
+        on && /^        ;;$/ { exit } END { print n + 0 }' setup/host/qemu_vm.sh
+}
+check "qemu_vm.sh stop, kill and install hold; start releases" \
+    "$(case_holds stop) $(case_holds kill) $(case_holds install) $(case_holds start)" "1 1 1 1"
 
 # ── make all runs it when the profile says so ───────────────────────────────
 all_plan() { env B2B_SECRETS="$TMP/secrets" make -n --no-print-directory all B2B_CONFIG="$1" 2>/dev/null; }

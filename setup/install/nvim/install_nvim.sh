@@ -966,7 +966,18 @@ end
 -- 1. Plugins: everything vim.pack knows about is on disk with code in it. A
 -- directory is not enough -- a repository whose default branch was emptied
 -- upstream clones perfectly and installs nothing (leap.nvim on GitHub).
-local plugins = (vim.pack and vim.pack.get) and vim.pack.get() or {}
+-- vim.pack.get() can raise: on Nvim 0.12.6 it repairs its lockfile with git
+-- in every plugin directory, and one that is not a checkout (a clone cut
+-- short) fails it. Raised here, the error stopped this file before its `qa`
+-- and left the headless Nvim open until run_as_user's timeout, reported as a
+-- timeout (2026-10-14). It is a problem with its reason instead.
+local pack_ok, plugins = pcall(function()
+  return (vim.pack and vim.pack.get) and vim.pack.get() or {}
+end)
+if not pack_ok then
+  problem('vim.pack: %s', oneline(plugins))
+  plugins = {}
+end
 local code_dirs = { 'lua', 'plugin', 'autoload', 'after', 'colors', 'ftplugin', 'syntax' }
 for _, p in ipairs(plugins) do
   if vim.fn.isdirectory(p.path) == 0 then

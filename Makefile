@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all autostart firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -491,11 +491,31 @@ qemu_start:
 qemu_stop:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh stop
 
-# The VM as a user service of this login: up at boot, stopped gracefully at
-# shutdown, `make backup` hourly (setup/host/autostart.sh). `make all` ends
-# with it when the profile says [host] autostart = true.
+# The VM kept up as a service of this login and `make backup` hourly
+# (setup/host/autostart.sh): systemd user units when linger is on, else a
+# crontab block that needs no root. `make all` ends with it when the profile
+# says [host] autostart = true. autostart_handover moves a VM started from a
+# terminal, which dies at logout, under cron.
 autostart:
 	@B2B_CONFIG="$(B2B_CONFIG)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/autostart.sh
+
+autostart_handover:
+	@B2B_CONFIG="$(B2B_CONFIG)" VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/autostart.sh --handover
+
+# This seat on the tailnet at every login (setup/host/seat_tailnet.sh): the
+# user's userspace tailscaled, ephemeral, its proxy on localhost:1055. No root.
+seat_tailnet:
+	@B2B_CONFIG="$(B2B_CONFIG)" $(SCRIPT_SH) setup/host/seat_tailnet.sh
+
+seat_tailnet_undo:
+	@B2B_CONFIG="$(B2B_CONFIG)" $(SCRIPT_SH) setup/host/seat_tailnet.sh --undo
+
+# The team's copy of the secrets file in vault42 ([dc] vault), VAULT42_* aside.
+# A pull previews; APPLY=1 writes new keys, KEYS= names the ones to replace.
+secrets_push:
+	@B2B_CONFIG="$(B2B_CONFIG)" $(SCRIPT_SH) setup/host/team_vault.sh push $(KEYS)
+secrets_pull:
+	@B2B_CONFIG="$(B2B_CONFIG)" B2B_VAULT_APPLY="$(APPLY)" $(SCRIPT_SH) setup/host/team_vault.sh pull $(KEYS)
 
 qemu_status:
 	@$(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh status

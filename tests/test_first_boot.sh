@@ -43,7 +43,7 @@ fb_ssh() {
 fb_wait_tick() { :; }
 # shellcheck disable=SC2317
 fb_progress() { :; }
-# shellcheck disable=SC2317 # called by the eval'd dc_fold
+# shellcheck disable=SC2317,SC2329 # called by the eval'd dc_fold
 feature_retry() { echo "make grobase"; }
 eval "$(awk '/^dc_fold\(\) \{/,/^}/' preseeds/first-boot-setup.sh | sed "s|/etc/b2b|$G/etc/b2b|g")"
 
