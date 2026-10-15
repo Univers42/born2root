@@ -151,7 +151,7 @@ G -C "$TMP/work" push -q origin HEAD:main
 NEWEST=$(G -C "$TMP/work" rev-parse HEAD)
 DEVELOP=$(G -C "$TMP/remote.git" rev-parse refs/heads/develop)
 follow() { # <GROBASE_REF> -> the ref after the block, or "died: …"
-    # shellcheck disable=SC2329,SC2034 # log, die and the two dirs are read by the eval'd block
+    # shellcheck disable=SC2317,SC2329,SC2034 # log, die and the two dirs are read by the eval'd block
     (
         log() { :; }
         die() {

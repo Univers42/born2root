@@ -35,16 +35,16 @@ trap 'rm -rf "$TMP"' EXIT
 
 # ── apply_firewall against a stub ufw ───────────────────────────────────────
 eval "$(awk '/^apply_firewall\(\) \{/,/^}/' preseeds/first-boot-setup.sh)"
-# shellcheck disable=SC2317 # the stubs are called by the eval'd apply_firewall
+# shellcheck disable=SC2317,SC2329 # the stubs are called by the eval'd apply_firewall
 ufw() {
     printf '%s\n' "$*" >>"$TMP/ufw.log"
     case "$1" in
     status) cat "$TMP/status" ;;
     esac
 }
-# shellcheck disable=SC2317 # called by the eval'd apply_firewall
+# shellcheck disable=SC2317,SC2329 # called by the eval'd apply_firewall
 systemctl() { :; }
-# shellcheck disable=SC2317 # called by the eval'd apply_firewall
+# shellcheck disable=SC2317,SC2329 # called by the eval'd apply_firewall
 feature_fail() { printf '%s %s\n' "$1" "$2" >>"$TMP/failed"; }
 
 # <B2B_FIREWALL> <what `ufw status` prints> -> apply_firewall's exit code
