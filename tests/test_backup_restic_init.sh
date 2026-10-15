@@ -12,7 +12,7 @@ block="$work/block.sh"
 awk '/^if ! snap_err=/{p=1} p{print} p && /^fi$/{exit}' setup/install/dc/install_backup.sh >"$block"
 fail=0
 # Stands in for the guest installer's verdict helper; only the extracted block calls it.
-# shellcheck disable=SC2317 # invoked from the sourced block, which shellcheck cannot see
+# shellcheck disable=SC2317,SC2329 # invoked from the sourced block, which shellcheck cannot see
 verdict() {
     printf 'verdict %s%s\n' "$1" "${2:-}"
 }

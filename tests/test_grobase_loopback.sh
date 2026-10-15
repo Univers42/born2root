@@ -66,7 +66,7 @@ services:
       - "${WAF_HTTPS_PORT:-8443}:443"
 YML
 
-# shellcheck disable=SC2329 # called by the eval'd loop
+# shellcheck disable=SC2317,SC2329 # called by the eval'd loop
 die() {
     echo "died: $*"
     return 1
