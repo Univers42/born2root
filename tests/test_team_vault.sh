@@ -88,6 +88,11 @@ check "... the index keeps the keys it did not push" "$(wc -l <"$SCOPE/index" | 
 : >"$TMP/mate"
 chmod 600 "$TMP/mate"
 check "a teammate's pull without a passphrase: refused" "$(run "$TMP/mate" pull </dev/null)" 1
+# 42ctl's own credentials file carries the passphrase: read, never sourced.
+mkdir -p "$TMP/home/.config/42ctl/secrets"
+printf 'FT_EMAIL=a@b.c\nFT_PASSPHRASE="pp-test"\n' >"$TMP/home/.config/42ctl/secrets/42admin.env"
+check "a pull, the passphrase in ~/.config/42ctl/secrets/*.env: found" "$(run "$TMP/mate" pull </dev/null)" 0
+rm -rf "$TMP/home/.config/42ctl"
 export FT_PASSPHRASE=pp-test
 check "a teammate's pull: a preview" "$(run "$TMP/mate" pull)" 0
 check "... lists the three as new" "$(grep -c ' new$' "$TMP/out")" 3
