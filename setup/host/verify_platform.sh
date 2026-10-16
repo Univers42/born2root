@@ -110,9 +110,16 @@ fi
 # resolve-ports.sh bumps a port that is busy when `make up` runs, and a
 # rerun found its own previous container holding 8443, so the new one took
 # 8444. A check that hardcoded 8443 would flag the door as an intruder.
+#
+# A guest port that [network] forwards declares is a door too: Inception's
+# nginx, static site and Adminer sit on the NAT address (10.0.2.15) because
+# that is the only place a forward lands, and on 2026-10-16 this check failed
+# on exactly those three. Anything else off loopback is still an intruder.
 waf_ports=$(vm_ssh "docker port mini-baas-waf 2>/dev/null | sed 's/.*://' | sort -u | tr '\n' '|' | sed 's/|\$//'" 2>/dev/null)
-hard "only sshd and the WAF (${waf_ports:-none}) listen off loopback (ss -ltn)" \
-    "ss -ltn 2>/dev/null | awk 'NR > 1 { print \$4 }' | grep -vE '^(127\\.|\\[::1\\]|100\\.|\\[fd7a:)' | grep -vE ':(4242${waf_ports:+|$waf_ports})\$' | wc -l | grep -x 0" 0
+declared_ports=$(b2b_get B2B_FIREWALL | tr ' ' '\n' | sed -n 's/^[^:]*://p' | sort -un | tr '\n' '|' | sed 's/|$//')
+doors="4242${waf_ports:+|$waf_ports}${declared_ports:+|$declared_ports}"
+hard "only sshd, the WAF and the declared forwards (${doors}) listen off loopback (ss -ltn)" \
+    "ss -ltn 2>/dev/null | awk 'NR > 1 { print \$4 }' | grep -vE '^(127\\.|\\[::1\\]|100\\.|\\[fd7a:)' | grep -vE ':(${doors})\$' | wc -l | grep -x 0" 0
 
 printf '\n'
 if [ "$fail" = 0 ]; then

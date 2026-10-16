@@ -7,7 +7,10 @@
 # nginx never started ("failed to bind host port 0.0.0.0:443/tcp: address
 # already in use"). deploy_inception.sh now writes
 # srcs/docker-compose.local.yml, which upstream's Makefile adds to every
-# compose call, doubling each port onto 127.0.0.1 and the NAT address.
+# compose call, putting each port on 127.0.0.1, and on the NAT address only
+# when [network] forwards declares it: the FTP set (21, 21000-21010) has no
+# forward, sat on 10.0.2.15 reachable by nothing, and failed verify_platform's
+# "nothing else off loopback" check (2026-10-16).
 #
 # local_compose() is cut out of the script and fed a compose file shaped like
 # upstream's; no VM, no docker.
@@ -62,7 +65,8 @@ volumes:
     driver: local
 YAML
 
-local_compose 10.0.2.15 <"$TMP/compose.yml" >"$TMP/local.yml"
+# The guest ports server.toml declares: ssh, the WAF, Inception's three.
+local_compose 10.0.2.15 "4242 8880 8443 443 8090 8080" <"$TMP/compose.yml" >"$TMP/local.yml"
 out=$(cat "$TMP/local.yml")
 entries() { awk -v s="  $1:" '$0 == s { on = 1; next } on && /^  [^ ]/ { on = 0 } on && /^ *- "/' "$TMP/local.yml" | tr -d ' ' | tr '\n' ' '; }
 
@@ -74,8 +78,8 @@ check "a trailing comment is not part of the port" \
     "$(entries staticsite)" '-"127.0.0.1:8090:8090" -"10.0.2.15:8090:8090" '
 check "an entry already on an address is kept as it is" \
     "$(entries adminer)" '-"127.0.0.1:9000:9000" -"127.0.0.1:8080:8080" -"10.0.2.15:8080:8080" '
-check "ftp: a range is doubled like a port" \
-    "$(entries ftp)" '-"127.0.0.1:21:21" -"10.0.2.15:21:21" -"127.0.0.1:21000-21010:21000-21010" -"10.0.2.15:21000-21010:21000-21010" '
+check "ftp: undeclared, so loopback only, range and all" \
+    "$(entries ftp)" '-"127.0.0.1:21:21" -"127.0.0.1:21000-21010:21000-21010" '
 check "every service with ports replaces them (!override)" \
     "$(grep -c '^    ports: !override$' "$TMP/local.yml")" 4
 check "a service without ports is left out" "$(printf '%s\n' "$out" | grep -c '^  mariadb:')" 0
