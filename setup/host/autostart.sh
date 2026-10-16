@@ -21,7 +21,9 @@
 #     every minute   autostart.sh --tick: make qemu_start when the VM is not
 #                    running, not held (below) and /dev/kvm is writable; when
 #                    it runs, the shutdown guard (--guard, at guard()) is kept
-#                    running, its log in $VM_PATH/$VM_NAME/shutdown-guard.log
+#                    running, its log in $VM_PATH/$VM_NAME/shutdown-guard.log,
+#                    and, for a disk on a sec=krb5 NFS mount, the ticket
+#                    keeper (utils/ticket_keeper.sh, ticket-keeper.log)
 #     hourly at :15  make backup, under flock and a 50-minute timeout
 #   A crontab lives in the seat's /var/spool/cron while the home follows the
 #   user from seat to seat: on 2026-10-16 c2r19s6 had no crontab at all, the
@@ -101,6 +103,7 @@ LOCK="$VM_DIR/.autostart.lock"
 LOG="$VM_DIR/autostart.log"
 GUARD_LOCK="$VM_DIR/.shutdown-guard.lock"
 GUARD_LOG="$VM_DIR/shutdown-guard.log"
+KEEPER_LOG="$VM_DIR/ticket-keeper.log"
 CRON_BEGIN="# b2b-autostart $VM_NAME begin (make autostart writes this block)"
 CRON_END="# b2b-autostart $VM_NAME end"
 LOGIN_ENTRY="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/b2b-autostart-$VM_NAME.desktop"
@@ -125,8 +128,10 @@ tick() {
     if [ -n "$hold" ] && [ "$hold" = "$(cat "${B2B_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}" 2>/dev/null)" ]; then
         return 0
     fi
-    if vm_pid >/dev/null; then
+    local pid
+    if pid=$(vm_pid); then
         start_guard
+        start_ticket_keeper "$pid"
         return 0
     fi
     # Without the seat's session /dev/kvm is not ours, and qemu_vm.sh would
@@ -214,7 +219,13 @@ guard() {
         *"PrepareForShutdown (true"*)
             vm_pid >/dev/null || continue
             printf '== %s: the host is shutting down: make qemu_stop GRACEFUL=1\n' "$(date '+%F %T')"
-            "$MAKE_PATH" -C "$ROOT" --no-print-directory qemu_stop GRACEFUL=1 STOP_GRACE=120 "${MAKE_ARGS[@]}"
+            # After a logout the home, and the repo in it, is gone: the
+            # monitor's power button is all that is left to press.
+            if [ -f "$ROOT/Makefile" ]; then
+                "$MAKE_PATH" -C "$ROOT" --no-print-directory qemu_stop GRACEFUL=1 STOP_GRACE=120 "${MAKE_ARGS[@]}"
+            else
+                printf 'system_powerdown\n' | socat - "UNIX-CONNECT:$VM_DIR/monitor.sock"
+            fi
             printf '== exit %s\n' "$?"
             ;;
         esac
@@ -223,11 +234,28 @@ guard() {
 }
 
 # One guard per VM: the tick starts it, flock -n makes every later start a
-# no-op, and a guard whose monitor died is replaced within a minute.
+# no-op, and a guard whose monitor died is replaced within a minute. Started
+# from /, like the keeper: cron runs the tick inside the repo, and a helper
+# left there holds the home that the logout unmounts.
 start_guard() {
     command -v gdbus >/dev/null 2>&1 || return 0
-    setsid -f flock -n -o "$GUARD_LOCK" "$SH" "$ROOT/setup/host/autostart.sh" --guard \
-        </dev/null >>"$GUARD_LOG" 2>&1
+    (cd / && setsid -f flock -n -o "$GUARD_LOCK" "$SH" "$ROOT/setup/host/autostart.sh" --guard \
+        </dev/null >>"$GUARD_LOG" 2>&1)
+}
+
+# A disk on a sec=krb5 NFS mount needs the login's ticket, which nothing
+# renews after the logout: utils/ticket_keeper.sh says why and what it does.
+# It runs from its text, under /bin/sh, so it needs nothing from the home.
+start_ticket_keeper() {
+    local keep
+    case "$(findmnt -no FSTYPE,OPTIONS -T "$VM_DIR" 2>/dev/null)" in
+    nfs*sec=krb5*) ;;
+    *) return 0 ;;
+    esac
+    command -v kinit >/dev/null 2>&1 && command -v klist >/dev/null 2>&1 || return 0
+    keep="${B2B_KEEPER_TMP:-/tmp}/krb5cc_$(id -u)_b2b-$VM_NAME"
+    (cd / && setsid -f flock -n -o "$keep.lock" /bin/sh -c "$(cat "$ROOT/utils/ticket_keeper.sh")" \
+        ticket_keeper "$keep" "$VM_DIR/monitor.sock" "$1" </dev/null >>"$KEEPER_LOG" 2>&1)
 }
 
 case "${1:-}" in
