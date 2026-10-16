@@ -42,7 +42,7 @@ check "make datacenter runs tailnet" "$(grep -c 'no-print-directory tailnet ' Ma
 # ── the console steps are named, and never silently skipped ────────────────
 h=setup/host/tailnet.sh
 check "names the DNS page (MagicDNS, HTTPS Certificates)" "$(grep -c 'CONSOLE}/dns' $h)" 2
-check "names the keys page (auth key, API token, 401 hint)" "$(grep -c 'CONSOLE}/settings/keys' $h)" 3
+check "names the keys page (auth key, API token)" "$(grep -c 'CONSOLE}/settings/keys' $h)" 2
 check "names the machine page (key expiry, an old node holding the name)" "$(grep -c 'CONSOLE}/machines' $h)" 2
 # shellcheck disable=SC2016 # the pattern is the literal source line, not an expansion
 check "TS_HOSTNAME falls back to the profile's [dc] tailnet_hostname" \
@@ -55,7 +55,10 @@ exposed=$(grep -n 'grobase_expose_guest.sh"' $h | head -n1 | cut -d: -f1)
 check "make expose runs after tailnet.env is written" \
     "$([ -n "$written" ] && [ -n "$exposed" ] && [ "$exposed" -gt "$written" ] && echo after)" after
 check "without a terminal a console step dies" "$(grep -c 'is_tty || die' $h)" 1
-check "the API credential travels on curl stdin (-K -)" "$(grep -c -- '-K - ' $h)" 2
+# The API itself is ts_api.sh, shared with seat_tailnet.sh.
+check "the API credential travels on curl stdin (-K -)" "$(grep -c -- '-K - ' setup/host/ts_api.sh)" 2
+# shellcheck disable=SC2016 # the pattern is the literal source line, not an expansion
+check "tailnet.sh speaks the API through ts_api.sh" "$(grep -c '^\. "$DC_ROOT/setup/host/ts_api.sh"$' $h)" 1
 check "no credential on an ssh command line" "$(grep -c 'vm_ssh.*TS_API_TOKEN\|vm_ssh.*AUTHKEY' $h)" 0
 check "the secrets example documents TS_API_TOKEN" "$(grep -c '^TS_API_TOKEN=' .b2b-secrets.example)" 1
 check "no literal key in the tree" "$(grep -rlE 'tskey-(auth|api)-[A-Za-z0-9]{6,}' setup tests Makefile .b2b-secrets.example 2>/dev/null | wc -l)" 0
@@ -63,22 +66,22 @@ check "no literal key in the tree" "$(grep -rlE 'tskey-(auth|api)-[A-Za-z0-9]{6,
 # ── the guest half against a stub tailscale ────────────────────────────────
 stub=$(mktemp -d)
 trap 'rm -rf "$stub"' EXIT
-# api_ready, run (cut out of the script): on 2026-10-14 an auth key pasted
+# ts_api_token, run (cut out of ts_api.sh): on 2026-10-14 an auth key pasted
 # into TS_API_TOKEN made every API call a 401 while the OAuth client beside it
 # worked. It is now set aside, named, never printed.
-api_token_for() { # <TS_API_TOKEN in the file> -> the bearer token api_ready settled on
+api_token_for() { # <TS_API_TOKEN in the file> -> the bearer token ts_api_token settled on
     local d
     d=$(mktemp -d)
-    awk '/^api_ready\(\) \{/,/^}/' $h >"$d/lifted.sh"
+    awk '/^ts_api_token\(\) \{/,/^}/' setup/host/ts_api.sh >"$d/lifted.sh"
     cat >>"$d/lifted.sh" <<'SH'
 SECRETS_FILE=/nonexistent TS_API=https://api.invalid CONSOLE=https://console.invalid
 secret_get() { case "$1" in TS_API_TOKEN) printf '%s' "$FAKE_API_TOKEN" ;; TS_OAUTH_CLIENT_*) echo fake ;; esac; }
 curl() { cat >/dev/null; printf '{"access_token":"from-oauth"}'; }
-json_get() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
+ts_json() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
 warn() { printf 'warn %s\n' "$*" >&2; }
 read_secret() { return 1; }
-API_TOKEN= TS_ASK_API=0
-api_ready && printf '%s' "$API_TOKEN"
+API_TOKEN=
+ts_api_token && printf '%s' "$API_TOKEN"
 SH
     env -u TS_API_TOKEN -u TS_OAUTH_CLIENT_ID -u TS_OAUTH_CLIENT_SECRET FAKE_API_TOKEN="$1" \
         "$SH" "$d/lifted.sh" 2>"$stub/api_ready.err"
@@ -86,7 +89,7 @@ SH
 }
 check "an auth key in TS_API_TOKEN gives way to OAuth" "$(api_token_for tskey-auth-x-not-a-key)" from-oauth
 check "  named in the warning, its value not printed" \
-    "$(grep -c 'holds a tskey-auth- key' "$stub/api_ready.err")/$(grep -c 'not-a-key' "$stub/api_ready.err")" 1/0
+    "$(grep -c 'is not an API access token' "$stub/api_ready.err")/$(grep -c 'not-a-key' "$stub/api_ready.err")" 1/0
 check "an API token in TS_API_TOKEN is used as it is" "$(api_token_for tskey-api-x-not-a-key)" tskey-api-x-not-a-key
 mkdir -p "$stub/bin"
 # The stub answers `status --json` from STUB_STATE / STUB_CERTS, records

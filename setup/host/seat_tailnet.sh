@@ -15,9 +15,10 @@
 #   started by the desktop session (GNOME runs ~/.config/autostart), so an ssh
 #   login does not start it.
 #
-# THE KEY never reaches argv or a log: secret_get (dc_lib.sh) reads it and it
-# is piped to `tailscale up --auth-key=file:/dev/stdin`. TS_AUTHKEY must be
-# reusable, since every login spends it again. Binaries: tailscale and
+# THE KEY never reaches argv or a log: ts_live_authkey (ts_api.sh) reads it and
+# it is piped to `tailscale up --auth-key=file:/dev/stdin`. TS_AUTHKEY must be
+# reusable, since every login spends it again; one the API says is gone is
+# replaced by a minted one when the secrets file holds an API credential. Binaries: tailscale and
 # tailscaled on PATH, else ~/.local/bin (GNOME's PATH may lack it).
 #
 # Caveat: the daemon gets 15 s to answer on its socket and `tailscale up` 60 s
@@ -29,6 +30,10 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 # shellcheck source=setup/host/dc_lib.sh
 . "$ROOT/setup/host/dc_lib.sh"
+# shellcheck source=setup/host/ts_api.sh
+. "$ROOT/setup/host/ts_api.sh"
+# shellcheck source=utils/login_entry.sh
+. "$ROOT/utils/login_entry.sh"
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tailscale"
 SOCK="$STATE_DIR/tailscaled.sock"
@@ -63,7 +68,7 @@ join() {
         ok "$(hostname -s) is on the tailnet (proxy $PROXY)"
         return 0
     fi
-    key=$(secret_get TS_AUTHKEY)
+    key=$(ts_live_authkey "born2root seat")
     [ -n "$key" ] || die "no TS_AUTHKEY in $SECRETS_FILE (a reusable key: .b2b-secrets.example)"
     printf '%s\n' "$key" | "$TS" --socket="$SOCK" up --auth-key=file:/dev/stdin \
         --hostname="$(hostname -s)" --timeout=60s ||
@@ -72,25 +77,13 @@ join() {
 }
 
 # The entry carries what this run resolved -- the shell, the checkout, the
-# profile and the secrets file -- so a login runs exactly this.
+# profile and the secrets file -- so a login runs exactly this, once the seat
+# has restored the home it lives in (utils/login_entry.sh says why it waits).
 write_entry() {
-    local value
-    for value in "$SH" "$ROOT" "$CONFIG" "$SECRETS_FILE"; do
-        case "$value" in
-        *[[:space:]%]*) die "'$value' holds a space or a %: a desktop entry's Exec cannot carry it as written; move it or rename it" ;;
-        esac
-    done
-    mkdir -p "$(dirname "$ENTRY")" || die "cannot create $(dirname "$ENTRY")"
-    cat >"$ENTRY" <<EOF
-[Desktop Entry]
-Type=Application
-Name=born2root seat tailnet
-Comment=This seat's userspace tailscaled, joined at login. Written by $ROOT/setup/host/seat_tailnet.sh (make seat_tailnet)
-Exec=env B2B_CONFIG=$CONFIG B2B_SECRETS=$SECRETS_FILE $SH $ROOT/setup/host/seat_tailnet.sh --login
-Terminal=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true
-EOF
+    login_entry_write "$ENTRY" "born2root seat tailnet" \
+        "This seat's userspace tailscaled, joined at login. Written by $ROOT/setup/host/seat_tailnet.sh (make seat_tailnet)" \
+        env "B2B_CONFIG=$CONFIG" "B2B_SECRETS=$SECRETS_FILE" "$SH" "$ROOT/setup/host/seat_tailnet.sh" --login ||
+        die "cannot write the login entry $ENTRY"
     ok "login entry written: $ENTRY"
 }
 
