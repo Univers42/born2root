@@ -60,21 +60,28 @@ same() { # same <label> <got> <expected>
         fail=1
     fi
 }
+# shellcheck disable=SC2317 # used by eval-loaded functions from setup/host/qemu_vm.sh
 die() { echo "die: $*"; }
+# shellcheck disable=SC2317 # used by eval-loaded functions from setup/host/qemu_vm.sh
 warn() { :; }
 for fn in fwd_bind build_hostfwd resolve_ports; do
     eval "$(awk -v f="$fn" '$0 ~ "^" f "\\(\\) \\{" { on = 1 } on { print } on && /^}/ { exit }' setup/host/qemu_vm.sh)"
 done
+# shellcheck disable=SC2034 # used by eval-loaded functions from setup/host/qemu_vm.sh
 PORTS_EXPOSED="http https"
 RESOLVED_SPEC="ssh:4242:4242 http:8082:8880 https:8443:8443"
 same "exposed forwards bind 0.0.0.0, ssh stays on loopback" "$(build_hostfwd)" \
     ",hostfwd=tcp:127.0.0.1:4242-:4242,hostfwd=tcp:0.0.0.0:8082-:8880,hostfwd=tcp:0.0.0.0:8443-:8443"
+# shellcheck disable=SC2034 # used by eval-loaded functions from setup/host/qemu_vm.sh
 PORTS_SPEC="ssh:4242:4242 https:8443:8443"
 LISTENERS="192.168.1.132:8443"
+# shellcheck disable=SC2034 # used by eval-loaded functions from setup/host/qemu_vm.sh
 RESERVED_HOST_PORTS=""
 resolve_ports
 same "exposed: a LAN-address listener is a conflict" "$RESOLVED_SPEC" "ssh:4242:4242 https:8444:8443"
+# shellcheck disable=SC2034 # used by eval-loaded functions from setup/host/qemu_vm.sh
 PORTS_EXPOSED=""
+# shellcheck disable=SC2034 # used by eval-loaded functions from setup/host/qemu_vm.sh
 RESERVED_HOST_PORTS=""
 resolve_ports
 same "loopback: the same listener is no conflict" "$RESOLVED_SPEC" "ssh:4242:4242 https:8443:8443"
