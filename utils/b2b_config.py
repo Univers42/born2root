@@ -235,7 +235,9 @@ USER_DEFAULTS = {
     "ssh_keys": [],
     "nvim": False,
 }
-FORWARD_KEYS = ("name", "guest", "host")
+# expose = true binds the host side on every interface (LAN, Wi-Fi) instead
+# of 127.0.0.1; meant for the WAF, the one door built to face a network.
+FORWARD_KEYS = ("name", "guest", "host", "expose")
 
 # What the subject fixes. A stricter value is welcome, a weaker one is not:
 # (key, "min"|"max", bound, what the rule is).
@@ -1177,6 +1179,8 @@ class Validator:
                 self.err(where + ".host", "%d is used twice on this machine" % host)
             if host is not None:
                 hosts.add(host)
+            if "expose" in forward:
+                self._bool(where + ".expose", forward["expose"])
         if forwards is not None and "ssh" not in names:
             self.err(
                 "network.forwards",
@@ -1364,6 +1368,10 @@ LEGACY = {
     # name:guest, what the guest's UFW opens (the name becomes the rule comment).
     "B2B_FIREWALL": lambda c: " ".join(
         "%s:%s" % (f.get("name"), f.get("guest")) for f in c.forwards()
+    ),
+    # The forwards whose host side binds every interface (expose = true).
+    "B2B_EXPOSED": lambda c: " ".join(
+        str(f.get("name")) for f in c.forwards() if f.get("expose") is True
     ),
     "B2B_DC_CORS_ORIGINS": lambda c: " ".join(
         o for o in c.dc.get("cors_origins") or [] if isinstance(o, str)

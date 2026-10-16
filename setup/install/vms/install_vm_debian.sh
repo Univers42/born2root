@@ -292,7 +292,7 @@ VBoxManage modifyvm "$VM_NAME" --nic1 nat || {
 NATPF_BIND="${NATPF_BIND:-127.0.0.1}"
 NATPF_HOST_PORTS=""
 add_natpf() {
-    local name="$1" host_port="$2" guest_port="$3"
+    local name="$1" host_port="$2" guest_port="$3" bind="${4:-$NATPF_BIND}"
 
     # Self-check: two rules on one host port is exactly what VirtualBox rejects
     # with "A NAT rule for this host port and this host IP already exists". Name
@@ -315,7 +315,7 @@ add_natpf() {
     local attempt out
     for attempt in 1 2 3 4 5 6; do
         if out=$(VBoxManage modifyvm "$VM_NAME" \
-            --natpf1 "${name},tcp,${NATPF_BIND},${host_port},,${guest_port}" 2>&1); then
+            --natpf1 "${name},tcp,${bind},${host_port},,${guest_port}" 2>&1); then
             return 0
         fi
         case "$out" in
@@ -340,14 +340,18 @@ add_natpf() {
 # against the next, so two rules never land on one host port.
 NATPF_RULES=""
 HOST_SSH_PORT=""
+B2B_EXPOSED=$(b2b_get B2B_EXPOSED)
 for B2B_FWD in $(b2b_get B2B_FORWARDS); do
     B2B_FWD_NAME=${B2B_FWD%%:*}
     B2B_FWD_GUEST=${B2B_FWD##*:}
     B2B_FWD_HOST=${B2B_FWD#*:}
     B2B_FWD_HOST=${B2B_FWD_HOST%%:*}
     resolve_host_port B2B_FWD_HOST_PORT "$B2B_FWD_HOST"
-    add_natpf "$B2B_FWD_NAME" "$B2B_FWD_HOST_PORT" "$B2B_FWD_GUEST"
-    NATPF_RULES="${NATPF_RULES}${B2B_FWD_NAME} ${B2B_FWD_HOST_PORT} ${B2B_FWD_GUEST}
+    # expose = true: every interface (VirtualBox reads an empty host IP so).
+    B2B_FWD_BIND=$NATPF_BIND
+    case " $B2B_EXPOSED " in *" $B2B_FWD_NAME "*) B2B_FWD_BIND= ;; esac
+    add_natpf "$B2B_FWD_NAME" "$B2B_FWD_HOST_PORT" "$B2B_FWD_GUEST" "$B2B_FWD_BIND"
+    NATPF_RULES="${NATPF_RULES}${B2B_FWD_NAME} ${B2B_FWD_HOST_PORT} ${B2B_FWD_GUEST} ${B2B_FWD_BIND:-0.0.0.0}
 "
     if [ "$B2B_FWD_NAME" = ssh ]; then
         HOST_SSH_PORT=$B2B_FWD_HOST_PORT
@@ -409,8 +413,8 @@ VBoxManage modifyvm "$VM_NAME" --nested-hw-virt on || true
 print_header "VM Setup Complete"
 echo ""
 echo "Port Forwarding Configuration ([network] forwards):"
-printf '%s' "$NATPF_RULES" | while read -r rule_name rule_host rule_guest; do
-    printf '  - %-26s Host %s:%s -> Guest :%s\n' "$rule_name" "$NATPF_BIND" "$rule_host" "$rule_guest"
+printf '%s' "$NATPF_RULES" | while read -r rule_name rule_host rule_guest rule_bind; do
+    printf '  - %-26s Host %s:%s -> Guest :%s\n' "$rule_name" "$rule_bind" "$rule_host" "$rule_guest"
 done
 echo ""
 echo "Next Steps:"
