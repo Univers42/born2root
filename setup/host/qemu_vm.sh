@@ -435,7 +435,13 @@ resolve_ports() {
         bind=$(fwd_bind "$name")
         [ "$bind" = 0.0.0.0 ] && bind=
         HOST_PORT_BIND="$bind" resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
-        [ "$actual" != "$hp" ] && warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
+        if [ "$actual" != "$hp" ] && [ -z "$bind" ]; then
+            # The home LAN edge (a socat on 192.168.1.132:8443 to 127.0.0.1:8443)
+            # keeps :8443 and forwards it to a port the guest no longer has.
+            warn "host port ${hp} (${name}) is exposed, but $(host_port_holder "$hp") holds it: LAN and Wi-Fi clients on :${hp} reach that, not the guest (now on ${actual}). expose = true replaces a LAN edge such as a socat to 127.0.0.1:${hp}: stop it, then make qemu_restart"
+        elif [ "$actual" != "$hp" ]; then
+            warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
+        fi
         out="${out} ${name}:${actual}:${gp}"
     done
     RESOLVED_SPEC="${out# }"

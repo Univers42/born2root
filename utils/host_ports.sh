@@ -73,6 +73,22 @@ is_host_port_free() {
     return 0
 }
 
+# host_port_holder <port>: who listens there, as "socat pid 4321 on
+# 192.168.1.132:8443" (comma-separated). ss names only this user's processes;
+# another user's is "a process of another user". Empty when ss is missing.
+host_port_holder() {
+    ss -H -ltnp 2>/dev/null | awk -v p="$1" '
+        $4 ~ ("[:.]" p "$") {
+            who = "a process of another user"
+            if (match($0, /users:\(\("[^"]+",pid=[0-9]+/)) {
+                split(substr($0, RSTART + 9, RLENGTH - 9), a, /",pid=/)
+                who = a[1] " pid " a[2]
+            }
+            out = out (out ? ", " : "") who " on " $4
+        }
+        END { if (out) print out }'
+}
+
 # resolve_host_port <varname> <preferred_port>
 #
 # Assign the first free host port at or above <preferred_port> to <varname> and

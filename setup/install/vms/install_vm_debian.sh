@@ -350,6 +350,9 @@ for B2B_FWD in $(b2b_get B2B_FORWARDS); do
     # expose = true: every interface (VirtualBox reads an empty host IP so).
     B2B_FWD_BIND=$NATPF_BIND
     case " $B2B_EXPOSED " in *" $B2B_FWD_NAME "*) B2B_FWD_BIND= ;; esac
+    if [ -z "$B2B_FWD_BIND" ] && [ "$B2B_FWD_HOST_PORT" != "$B2B_FWD_HOST" ]; then
+        echo "Warning: host port ${B2B_FWD_HOST} (${B2B_FWD_NAME}) is exposed, but $(host_port_holder "$B2B_FWD_HOST") holds it: LAN clients on :${B2B_FWD_HOST} reach that, not the guest (now on ${B2B_FWD_HOST_PORT}). Stop it, then rerun make all (orchestrate.sh repairs the rule)" >&2
+    fi
     add_natpf "$B2B_FWD_NAME" "$B2B_FWD_HOST_PORT" "$B2B_FWD_GUEST" "$B2B_FWD_BIND"
     NATPF_RULES="${NATPF_RULES}${B2B_FWD_NAME} ${B2B_FWD_HOST_PORT} ${B2B_FWD_GUEST} ${B2B_FWD_BIND:-0.0.0.0}
 "
