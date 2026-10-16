@@ -26,7 +26,8 @@
 # THE VALUES never reach argv, a log or the terminal: secret_get pipes each into
 #   `42ctl env secret set` on stdin, `get` writes into a pipe read by
 #   secret_set. The keystore passphrase is FT_PASSPHRASE: from the environment,
-#   else VAULT42_KEYSTORE_PASSPHRASE in the secrets file, else asked once on the
+#   else from 42ctl's own ~/.config/42ctl/secrets/*.env, else
+#   VAULT42_KEYSTORE_PASSPHRASE in the secrets file, else asked once on the
 #   terminal -- exported, never on a command line, so 42ctl does not ask per key.
 #
 # Caveat: the index is read before a push to keep the names a narrower push
@@ -47,9 +48,28 @@ v42() {
     "$V42" env secret "$1" --org "$ORG" --project "$PROJECT" --env "$ENV_NAME" "$PREFIX/$2"
 }
 
+# FT_PASSPHRASE from 42ctl's own credential files (~/.config/42ctl/secrets/
+# *.env, KEY=VALUE, where the 42ctl setup leaves it): read with sed, never
+# sourced -- the same files hold the vault42 password. On 2026-10-16 a push
+# without it exported failed on "could not unlock keystore" although the
+# passphrase sat right there.
+ctl_passphrase() {
+    local file value
+    for file in "${B2B_42CTL_SECRETS:-$HOME/.config/42ctl/secrets}"/*.env; do
+        [ -f "$file" ] || continue
+        value=$(sed -n 's/^\(export \)\{0,1\}FT_PASSPHRASE=//p' "$file" | tail -n1)
+        value=${value#[\"\']}
+        value=${value%[\"\']}
+        [ -n "$value" ] && printf '%s' "$value" && return 0
+    done
+    return 1
+}
+
 passphrase() {
     [ -n "${FT_PASSPHRASE:-}" ] && return 0
-    FT_PASSPHRASE=$(secret_get VAULT42_KEYSTORE_PASSPHRASE)
+    # 42ctl's file first: it is the one 42ctl's setup rewrites, and on
+    # 2026-10-16 the secrets file still carried an older passphrase.
+    FT_PASSPHRASE=$(ctl_passphrase) || FT_PASSPHRASE=$(secret_get VAULT42_KEYSTORE_PASSPHRASE)
     if [ -z "$FT_PASSPHRASE" ] && [ -t 0 ]; then
         printf 'vault42 keystore passphrase: ' >&2
         IFS= read -rs FT_PASSPHRASE
@@ -77,7 +97,7 @@ push() {
     old=$(v42 get index 2>/dev/null) || old=""
     for name in $names; do
         printf '%s' "$(secret_get "$name")" | v42 set "$name" >/dev/null ||
-            die "42ctl could not seal $name into $VAULT (logged in? 42ctl auth status; enrolled? 42ctl keys enroll --org $ORG)"
+            die "42ctl could not seal $name into $VAULT (keystore unlocked? FT_PASSPHRASE; logged in? 42ctl auth status; holding the key? 42ctl env keys ls --org $ORG --project $PROJECT --env $ENV_NAME)"
         ok "$name"
         pushed=$((pushed + 1))
     done
