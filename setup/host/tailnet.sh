@@ -156,70 +156,23 @@ read_secret() {
 }
 
 # ── the API ──────────────────────────────────────────────────────────────────
-API_TOKEN=
-API_CODE=000
-# api_ready: 0 when a credential resolved to a bearer token (asked for once,
-# interactively, when none is stored; TS_NO_API=1 skips the whole thing).
+# ts_api, ts_api_token and the auth key live in ts_api.sh, shared with
+# seat_tailnet.sh. api_ready adds what only this interactive script does: ask
+# once for an access token when the secrets file holds no credential.
+# shellcheck source=setup/host/ts_api.sh
+. "$DC_ROOT/setup/host/ts_api.sh"
 api_ready() {
-    [ -n "$API_TOKEN" ] && return 0
+    ts_api_token && return 0
     [ "${TS_NO_API:-0}" = 1 ] && return 1
-    local tok cid csec
-    tok="${TS_API_TOKEN:-$(secret_get TS_API_TOKEN)}"
-    # An auth key or an OAuth client secret in TS_API_TOKEN answers 401 on
-    # every call, and the OAuth client beside it never got its turn: on
-    # 2026-10-14 a tskey-auth- pasted there took the whole automatic path down
-    # while TS_OAUTH_CLIENT_* minted tokens fine. API access tokens are
-    # tskey-api-; the two other kinds are set aside, named, never printed.
-    case "$tok" in
-    tskey-auth-* | tskey-client-*)
-        local kind="${tok#tskey-}"
-        warn "TS_API_TOKEN in $SECRETS_FILE holds a tskey-${kind%%-*}- key, not an API access token (tskey-api-): ignored"
-        tok=
-        ;;
-    esac
-    if [ -z "$tok" ]; then
-        cid="${TS_OAUTH_CLIENT_ID:-$(secret_get TS_OAUTH_CLIENT_ID)}"
-        csec="${TS_OAUTH_CLIENT_SECRET:-$(secret_get TS_OAUTH_CLIENT_SECRET)}"
-        if [ -n "$cid" ] && [ -n "$csec" ]; then
-            tok=$(printf 'data-urlencode = "client_id=%s"\ndata-urlencode = "client_secret=%s"\n' "$cid" "$csec" |
-                curl -s --max-time 20 -K - "$TS_API/oauth/token" 2>/dev/null | json_get access_token)
-            [ -n "$tok" ] || warn "the OAuth client was refused by $TS_API/oauth/token (expired? wrong scopes?)"
-        fi
-    fi
-    if [ -z "$tok" ] && [ "${TS_ASK_API:-1}" = 1 ] && read_secret "  Tailscale API access token (optional, Enter to skip; ${CONSOLE}/settings/keys -> Generate access token): "; then
-        tok="$REPLY"
-        if [ -n "$tok" ]; then
-            secret_set TS_API_TOKEN "$tok"
-            ok "saved TS_API_TOKEN to $SECRETS_FILE (mode 600; tokens last 90 days at most)"
-        fi
+    if [ "${TS_ASK_API:-1}" = 1 ] && read_secret "  Tailscale API access token (optional, Enter to skip; ${CONSOLE}/settings/keys -> Generate access token): " && [ -n "$REPLY" ]; then
+        secret_set TS_API_TOKEN "$REPLY"
+        ok "saved TS_API_TOKEN to $SECRETS_FILE (mode 600; tokens last 90 days at most)"
+        TS_ASK_API=0
+        ts_api_token
+        return
     fi
     TS_ASK_API=0
-    [ -n "$tok" ] || return 1
-    API_TOKEN="$tok"
-}
-# json_get KEY: a top-level value out of the JSON on stdin (same helper).
-json_get() { python3 "$TMP/jget.py" "$1" 2>/dev/null; }
-# ts_api METHOD PATH [BODY]: the response body on stdout, HTTP code in API_CODE.
-ts_api() {
-    local method="$1" path="$2" body="${3:-}"
-    local args=(-s --max-time 30 -K - -X "$method" -H 'Content-Type: application/json'
-        -o "$TMP/api.out" -w '%{http_code}' "$TS_API/$path")
-    [ -n "$body" ] && args+=(--data "$body")
-    : >"$TMP/api.out"
-    API_CODE=$(printf 'user = "%s:"\n' "$API_TOKEN" | curl "${args[@]}" 2>/dev/null) || API_CODE=000
-    cat "$TMP/api.out"
-    case "$API_CODE" in 2??) return 0 ;; esac
-    [ "$API_CODE" = 401 ] && warn "the Tailscale API rejected the credential (401): TS_API_TOKEN expired? (${CONSOLE}/settings/keys)"
     return 1
-}
-# mint_authkey: a reusable + ephemeral + pre-authorized key (90 days) through
-# the API; printed, nothing else. TS_TAGS=tag:a,tag:b when the node is to be
-# tagged (OAuth clients can mint tagged keys only).
-mint_authkey() {
-    local tags body
-    tags=$(printf '%s' "${TS_TAGS:-}" | python3 -c 'import json,sys; print(json.dumps([t.strip() for t in sys.stdin.read().split(",") if t.strip()]))')
-    body=$(printf '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":%s}}},"expirySeconds":7776000,"description":"born2root %s"}' "$tags" "$VM_NAME")
-    ts_api POST tailnet/-/keys "$body" | json_get key
 }
 
 # ── the guest, as root ───────────────────────────────────────────────────────
@@ -311,15 +264,12 @@ AUTHKEY=
 if [ "$state" != Running ]; then
     info "node state: $state -- it needs to log in"
     if [ "$state" != Stopped ]; then
-        AUTHKEY="${TS_AUTHKEY:-$(secret_get TS_AUTHKEY)}"
-        if [ -z "$AUTHKEY" ] && api_ready; then
-            AUTHKEY=$(mint_authkey)
-            if [ -n "$AUTHKEY" ]; then
-                secret_set TS_AUTHKEY "$AUTHKEY"
-                ok "minted a reusable + ephemeral + pre-approved auth key through the API; saved as TS_AUTHKEY in $SECRETS_FILE"
-            else
-                warn "the API would not mint an auth key (HTTP $API_CODE); an OAuth client needs TS_TAGS=tag:... and the auth_keys scope"
-            fi
+        # A TS_AUTHKEY= on the command line is used as given; the stored one
+        # is checked against the API and replaced when it is gone (ts_api.sh).
+        AUTHKEY="${TS_AUTHKEY:-}"
+        if [ -z "$AUTHKEY" ]; then
+            api_ready || true
+            AUTHKEY=$(ts_live_authkey "born2root $VM_NAME")
         fi
         if [ -z "$AUTHKEY" ]; then
             console_step "Tailscale auth key" \

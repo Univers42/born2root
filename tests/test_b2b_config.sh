@@ -361,6 +361,21 @@ refuse "two forwards with the same name" network.forwards \
 refuse "an unknown key in a forward" network.forwards \
     "$(forwards ', { name = "x", guest = 9100, host = 9100, proto = "udp" }')"
 check "the shipped forwards pass --check" "$(rc_of "$DEFAULTS" --check)" 0
+# expose = true puts one forward's host side on every interface (the WAF on
+# the LAN and Wi-Fi); everything else stays on loopback.
+refuse "expose that is not true or false" network.forwards \
+    "$(forwards ', { name = "https", guest = 8443, host = 8443, expose = "yes" }')"
+EXP=$(variant expose "$(forwards ', { name = "https", guest = 8443, host = 8443, expose = true }, { name = "web", guest = 80, host = 8082, expose = false }')")
+check "expose = true passes --check" "$(rc_of "$EXP" --check)" 0
+check "  B2B_EXPOSED names only the exposed forward" "$(get_of "$EXP" B2B_EXPOSED)" https
+check "  B2B_FORWARDS keeps its name:host:guest form" "$(get_of "$EXP" B2B_FORWARDS)" \
+    "ssh:4242:4242 https:8443:8443 web:8082:80"
+check "  no forward exposed by default" "$(get_of "$DEFAULTS" B2B_EXPOSED)" ""
+check "  b2b_forward_bind: 0.0.0.0 for it, 127.0.0.1 for ssh" \
+    "$(env B2B_CONFIG="$EXP" bash -c '. utils/b2b_config.sh; b2b_forward_bind https; b2b_forward_bind ssh' | tr '\n' ' ')" \
+    "0.0.0.0 127.0.0.1 "
+check "  a host-side fact, never in --guest" \
+    "$(env B2B_CONFIG="$EXP" "${CFG[@]}" --guest | grep -c B2B_EXPOSED)" 0
 
 # ── Refusals: the volume table ──────────────────────────────────────────────
 refuse "no volume on /" disk.volumes 's|{ name = "root",    mount = "/",|{ name = "root",    mount = "/roo",|'

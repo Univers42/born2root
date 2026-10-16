@@ -23,6 +23,13 @@
 #                    it runs, the shutdown guard (--guard, at guard()) is kept
 #                    running, its log in $VM_PATH/$VM_NAME/shutdown-guard.log
 #     hourly at :15  make backup, under flock and a 50-minute timeout
+#   A crontab lives in the seat's /var/spool/cron while the home follows the
+#   user from seat to seat: on 2026-10-16 c2r19s6 had no crontab at all, the
+#   block having been written on c2r19s5, so nothing started baas there. Cron
+#   mode therefore also writes a login entry,
+#   ~/.config/autostart/b2b-autostart-<vm>.desktop, that reruns this script
+#   (it changes nothing where the block is already in place) at every
+#   desktop login, on whichever seat (utils/login_entry.sh).
 #   Turning linger on needs root, and the 42 seats give none. Without linger
 #   the user's systemd manager, and every process under it, stops at logout:
 #   a VM started from a terminal there dies with the session. cron runs its
@@ -56,6 +63,7 @@
 # Rollback: systemctl --user disable --now b2b-backup-<vm>.timer
 #           systemctl --user disable b2b-vm-<vm>.service
 #           crontab -e, then delete the b2b-autostart <vm> block
+#           rm ~/.config/autostart/b2b-autostart-<vm>.desktop
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
@@ -95,6 +103,9 @@ GUARD_LOCK="$VM_DIR/.shutdown-guard.lock"
 GUARD_LOG="$VM_DIR/shutdown-guard.log"
 CRON_BEGIN="# b2b-autostart $VM_NAME begin (make autostart writes this block)"
 CRON_END="# b2b-autostart $VM_NAME end"
+LOGIN_ENTRY="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/b2b-autostart-$VM_NAME.desktop"
+# shellcheck source=utils/login_entry.sh
+. "$ROOT/utils/login_entry.sh"
 
 # The pid of this VM's QEMU, the way qemu_vm.sh finds it: the pidfile, and a
 # live process that was given that very pidfile -- a pid the kernel reused
@@ -391,6 +402,7 @@ user=$(id -un)
 if [ "$(loginctl show-user "$user" -p Linger --value 2>/dev/null)" = yes ]; then
     install_units || status=1
     put_crontab "" || status=1
+    rm -f "$LOGIN_ENTRY"
     case " $(id -nG) " in
     *" kvm "*) ;;
     *)
@@ -405,6 +417,13 @@ fi
 
 retire_units
 put_crontab "$(cron_block)" || exit 1
+# A login runs from $HOME, not the checkout: the profile path goes absolute.
+case "$CONFIG" in /*) entry_config=$CONFIG ;; *) entry_config=$ROOT/$CONFIG ;; esac
+login_entry_write "$LOGIN_ENTRY" "born2root autostart $VM_NAME" \
+    "Puts the b2b-autostart $VM_NAME crontab block on this seat at login. Written by $ROOT/setup/host/autostart.sh (make autostart)" \
+    env "B2B_CONFIG=$entry_config" "VM_PATH=$VM_PATH" "VM_NAME=$VM_NAME" "$SH" "$ROOT/setup/host/autostart.sh" ||
+    die "cannot write the login entry $LOGIN_ENTRY"
+printf '  login entry: %s (every seat you log into gets the block)\n' "$LOGIN_ENTRY"
 ok "cron keeps $VM_NAME up (linger is off, and turning it on needs root): it starts within a minute of your login at this seat, outlives the logout, and make backup runs hourly at :15"
 printf '  a host shutdown asks the guest to power off first (a head start, not a full graceful stop, without root); make qemu_stop keeps it down until the next boot\n'
 pid=$(vm_pid) || pid=

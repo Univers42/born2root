@@ -45,7 +45,7 @@
 #   qemu_vm.sh create      create the qcow2 disk (no-op if it exists)
 #   qemu_vm.sh install     boot the preseed ISO and run the unattended install
 #   qemu_vm.sh start       boot from disk, headless, and unlock LUKS
-#   qemu_vm.sh restart     stop, then start
+#   qemu_vm.sh restart     a graceful stop (GRACEFUL= for the instant one), then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
 #                          GRACEFUL=1 STOP_ON_TIMEOUT=abort: never force it; exit 3 if still up
@@ -198,6 +198,16 @@ vm_sizing
 # ones -- see resolve_ports() below. Setting PORTS_SPEC replaces the list
 # (the tests do); qemu_pipeline.sh exports it to the qemu_vm.sh it runs.
 PORTS_SPEC="${PORTS_SPEC:-$(b2b_get B2B_FORWARDS)}"
+# The names whose hostfwd binds every interface ([network] forwards with
+# expose = true); PORTS_EXPOSED replaces it the way PORTS_SPEC does.
+PORTS_EXPOSED="${PORTS_EXPOSED-$(b2b_get B2B_EXPOSED)}"
+# fwd_bind NAME: 0.0.0.0 for an exposed forward, else 127.0.0.1.
+fwd_bind() {
+    case " $PORTS_EXPOSED " in
+    *" $1 "*) printf '0.0.0.0' ;;
+    *) printf '127.0.0.1' ;;
+    esac
+}
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -406,7 +416,7 @@ need_control() {
 # with EACH OTHER either.
 RESOLVED_SPEC=""
 resolve_ports() {
-    local spec name hp gp actual out=""
+    local spec name hp gp actual bind out=""
     # An unreadable born2root.toml answers an empty list, and a VM without
     # its ssh forward boots into a wait that can only time out.
     case " $PORTS_SPEC " in
@@ -418,9 +428,13 @@ resolve_ports() {
         hp="${spec#*:}"
         gp="${hp#*:}"
         hp="${hp%%:*}"
-        # Every hostfwd binds 127.0.0.1, so a listener on another address -- the LAN edge
-        # on 192.168.1.132:8443 -- is no conflict (tests/test_host_port_bind.sh).
-        HOST_PORT_BIND=127.0.0.1 resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
+        # A loopback hostfwd conflicts only with a listener on 127.0.0.1 or a
+        # wildcard, so the LAN edge on 192.168.1.132:8443 is no conflict
+        # (tests/test_host_port_bind.sh). An exposed one binds 0.0.0.0, where a
+        # listener on ANY address is a conflict: HOST_PORT_BIND empty.
+        bind=$(fwd_bind "$name")
+        [ "$bind" = 0.0.0.0 ] && bind=
+        HOST_PORT_BIND="$bind" resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
         [ "$actual" != "$hp" ] && warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
         out="${out} ${name}:${actual}:${gp}"
     done
@@ -541,7 +555,7 @@ build_hostfwd() {
         hp="${spec#*:}"
         gp="${hp#*:}"
         hp="${hp%%:*}"
-        out="${out},hostfwd=tcp:127.0.0.1:${hp}-:${gp}"
+        out="${out},hostfwd=tcp:$(fwd_bind "$name"):${hp}-:${gp}"
     done
     printf '%s' "$out"
 }
@@ -1283,10 +1297,14 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 
     restart)
         refuse_sudo_build "make qemu_restart VM_PATH=$VM_PATH" || exit 1
+        # Graceful unless GRACEFUL is set (empty = the old instant stop): a
+        # bare stop is `quit`, a plug-pull, and every `make qemu_restart` cost
+        # baas a crash recovery of its engines (2026-10-16). A settled baas
+        # powers off in 20 s, inside STOP_GRACE's 90.
         # stop may adopt another VM_PATH; start must follow it.
         is_running || adopt_other_guest
         case $? in
-        0) VM_PATH="$VM_PATH" "$0" stop || exit 1 ;;
+        0) VM_PATH="$VM_PATH" GRACEFUL="${GRACEFUL-1}" "$0" stop || exit 1 ;;
         2) exit 1 ;;
         esac
         exec env VM_PATH="$VM_PATH" "$0" start

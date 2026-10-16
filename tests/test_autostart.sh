@@ -106,9 +106,19 @@ check "... make backup hourly at :15, under its own lock and a timeout" \
     "$(grep -c "^15 \* \* \* \* cd $ROOT && flock -n -o /vm/store/baas/.backup.lock timeout 3000 env PATH=[^ ]* [^ ]*/make backup $ARGS >" "$TMP/crontab")" 1
 check "... the user's own line kept" "$(grep -cx '0 4 \* \* \* echo mine' "$TMP/crontab")" 1
 cp "$TMP/crontab" "$TMP/crontab.first"
+# The crontab is the seat's, the home is the user's: on 2026-10-16 c2r19s6
+# had no block (it was written on c2r19s5). The login entry reruns this at
+# every desktop login, on whichever seat, once the home is restored.
+LOGIN="$TMP/config/autostart/b2b-autostart-baas.desktop"
+SHP=$(command -v "${SCRIPT_SH:-bash}")
+check "... a login entry reruns autostart.sh, waiting for the home" \
+    "$(sed -n 's/^Exec=//p' "$LOGIN")" \
+    "timeout 1200 sh -c 'until [ -e $SHP ] && [ -e $ROOT/setup/host/autostart.sh ]; do sleep 2; done; exec env B2B_CONFIG=$ROOT/profiles/server.toml VM_PATH=/vm/store VM_NAME=baas $SHP $ROOT/setup/host/autostart.sh'"
+cp "$LOGIN" "$TMP/login.first"
 check "second run: exit 0" "$(run)" 0
 check "... the crontab not rewritten" "$(grep -c '^crontab -$' "$TMP/calls" || true)" 0
 check "... and says so" "$(grep -c 'crontab unchanged' "$TMP/out")" 1
+check "... the login entry left as it was" "$(cmp -s "$LOGIN" "$TMP/login.first" && echo same)" same
 touch "$TMP/vm_active"
 run >/dev/null
 check "VM unit active (its ExecStop would stop the VM): the handover is named" \
@@ -117,6 +127,7 @@ rm -f "$TMP/vm_active"
 echo yes >"$TMP/linger"
 run >/dev/null
 check "linger on again: the block removed, the user's line kept" "$(cat "$TMP/crontab")" "0 4 * * * echo mine"
+check "... and the login entry with it (units do that job)" "$([ -e "$LOGIN" ] && echo kept || echo gone)" gone
 
 touch "$TMP/no_user_bus"
 check "linger on, no user systemd: exit 1" "$(run)" 1

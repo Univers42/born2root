@@ -90,6 +90,16 @@ b2b_forward() {
     return 1
 }
 
+# b2b_forward_bind NAME: the host address the forward binds -- 0.0.0.0 for
+# one marked expose = true (the WAF, reached from the LAN and Wi-Fi), else
+# 127.0.0.1, the loopback every other forward keeps.
+b2b_forward_bind() {
+    case " $(b2b_get B2B_EXPOSED) " in
+    *" $1 "*) printf '0.0.0.0\n' ;;
+    *) printf '127.0.0.1\n' ;;
+    esac
+}
+
 # Extra accounts as the guest sees them: "name:groups" per line.
 b2b_extra_users() { b2b_get B2B_EXTRA_USERS | tr ' ' '\n' | grep -v '^$' || true; }
 

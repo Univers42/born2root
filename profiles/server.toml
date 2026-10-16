@@ -203,9 +203,12 @@ interval_min = 10
 # either.
 forwards = [
   { name = "ssh",   guest = 4242, host = 4242 },
-  # grobase's WAF, on the guest's 0.0.0.0:8880 and :8443.
-  { name = "http",  guest = 8880, host = 8082 },
-  { name = "https", guest = 8443, host = 8443 },
+  # grobase's WAF, on the guest's 0.0.0.0:8880 and :8443. expose = true: the
+  # host binds these two on every interface, so the LAN and Wi-Fi reach the
+  # WAF directly (the tailnet reaches it through tailscale serve); every other
+  # forward stays on 127.0.0.1.
+  { name = "http",  guest = 8880, host = 8082, expose = true },
+  { name = "https", guest = 8443, host = 8443, expose = true },
   # Inception (make inception): nginx, the static site, Adminer.
   { name = "inception-https",   guest = 443,  host = 8444 },
   { name = "inception-static",  guest = 8090, host = 8090 },

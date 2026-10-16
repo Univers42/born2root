@@ -325,7 +325,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all health autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -1260,6 +1260,10 @@ grobase_cors:
 
 verify_platform:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/verify_platform.sh
+# One verdict: verify_platform, then the guest's reach, every forward on the
+# host (an exposed one on each LAN / Wi-Fi address) and the tailnet both ways.
+health:
+	@$(DC_ENV) B2B_CONFIG="$(B2B_CONFIG)" $(SCRIPT_SH) setup/host/health.sh
 baas_access:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/baas_host_access.sh
 baas_access_status:

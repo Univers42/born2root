@@ -458,16 +458,23 @@ set_vm_nat_forward() {
     local name="$1"
     local host_port="$2"
     local guest_port="$3"
-    local state
+    local state bind
+    # An expose = true forward binds every interface (empty host IP).
+    bind=$(b2b_forward_bind "$name")
+    if [ "$bind" = 0.0.0.0 ]; then
+        bind=
+    else
+        bind="${NATPF_BIND:-127.0.0.1}"
+    fi
     state=$(VBoxManage showvminfo "${VM_NAME}" --machinereadable 2>/dev/null |
         grep "^VMState=" | cut -d'"' -f2)
 
     if [ "$state" = "running" ]; then
         VBoxManage controlvm "${VM_NAME}" natpf1 delete "$name" >/dev/null 2>&1 || true
-        VBoxManage controlvm "${VM_NAME}" natpf1 "$name,tcp,${NATPF_BIND:-127.0.0.1},${host_port},,${guest_port}" >/dev/null
+        VBoxManage controlvm "${VM_NAME}" natpf1 "$name,tcp,${bind},${host_port},,${guest_port}" >/dev/null
     else
         VBoxManage modifyvm "${VM_NAME}" --natpf1 delete "$name" >/dev/null 2>&1 || true
-        VBoxManage modifyvm "${VM_NAME}" --natpf1 "$name,tcp,${NATPF_BIND:-127.0.0.1},${host_port},,${guest_port}" >/dev/null
+        VBoxManage modifyvm "${VM_NAME}" --natpf1 "$name,tcp,${bind},${host_port},,${guest_port}" >/dev/null
     fi
 }
 
