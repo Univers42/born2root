@@ -213,4 +213,11 @@ check "a misspelt mode: refused (1)" "$(stop_case 1 abrot)" 1
 check "a misspelt mode: nothing sent" "$(cat "$TMP/mon.log" "$TMP/kill.log" | wc -l)" 0
 unset -f mon kill sleep is_running await_shutdown
 
+# `make qemu_restart` stops gracefully unless GRACEFUL is set: its bare stop
+# used to be `quit`, a plug-pull of every engine in the guest (2026-10-16).
+# The dispatch does not run when this file is sourced, so the line is read.
+# shellcheck disable=SC2016 # the pattern is the literal source line
+check "restart: a graceful stop by default, GRACEFUL= for the instant one" \
+    "$(awk '/^    restart\)$/ { on = 1 } on && /^        ;;$/ { exit } on' setup/host/qemu_vm.sh | grep -c 'GRACEFUL="${GRACEFUL-1}" "$0" stop')" 1
+
 exit "$fail"

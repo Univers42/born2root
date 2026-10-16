@@ -45,7 +45,7 @@
 #   qemu_vm.sh create      create the qcow2 disk (no-op if it exists)
 #   qemu_vm.sh install     boot the preseed ISO and run the unattended install
 #   qemu_vm.sh start       boot from disk, headless, and unlock LUKS
-#   qemu_vm.sh restart     stop, then start
+#   qemu_vm.sh restart     a graceful stop (GRACEFUL= for the instant one), then start
 #   qemu_vm.sh unlock      type the passphrase at a waiting LUKS prompt
 #   qemu_vm.sh stop        power off now (GRACEFUL=1 = orderly ACPI shutdown)
 #                          GRACEFUL=1 STOP_ON_TIMEOUT=abort: never force it; exit 3 if still up
@@ -1297,10 +1297,14 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 
     restart)
         refuse_sudo_build "make qemu_restart VM_PATH=$VM_PATH" || exit 1
+        # Graceful unless GRACEFUL is set (empty = the old instant stop): a
+        # bare stop is `quit`, a plug-pull, and every `make qemu_restart` cost
+        # baas a crash recovery of its engines (2026-10-16). A settled baas
+        # powers off in 20 s, inside STOP_GRACE's 90.
         # stop may adopt another VM_PATH; start must follow it.
         is_running || adopt_other_guest
         case $? in
-        0) VM_PATH="$VM_PATH" "$0" stop || exit 1 ;;
+        0) VM_PATH="$VM_PATH" GRACEFUL="${GRACEFUL-1}" "$0" stop || exit 1 ;;
         2) exit 1 ;;
         esac
         exec env VM_PATH="$VM_PATH" "$0" start
