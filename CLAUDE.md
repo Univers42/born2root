@@ -42,6 +42,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | graph_render's motor: tunnel, key (kept across rebuilds), reinstall | `make graph_render`, `make graph_render_key`, `make graph_render_install` |
 | Grobase status (config + docker ps, read from the guest) | `make grobase_status` |
 | Prove the platform / mint a tenant key / seed / open the public plane | `make verify_platform`, `make tenant_key TENANT=…`, `make seed`, `make funnel_up` |
+| One verdict: platform, guest reach, every forward on every LAN/Wi-Fi address, tailnet both ways | `make health` |
 | This seat on the tailnet at every login (userspace tailscaled, no root) | `make seat_tailnet`, `make seat_tailnet_undo` |
 | The team's copy of the secrets in vault42 (`[dc] vault`) | `make secrets_push`, `make secrets_pull` (`APPLY=1`, `KEYS=`) |
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
@@ -122,8 +123,13 @@ credentials that must not enter the repo or the ISO:
   (a one-off key is spent by the first VM; ephemeral removes the old tailnet
   node automatically on rebuild).
 - `TS_API_TOKEN` (or `TS_OAUTH_CLIENT_ID` + `TS_OAUTH_CLIENT_SECRET`) — Tailscale
-  API credential, optional; `make tailnet` then flips MagicDNS and key expiry
-  and mints `TS_AUTHKEY` itself instead of prompting for console clicks.
+  API credential, optional; `make tailnet` then flips MagicDNS and key expiry.
+  With one, `make tailnet` and `make seat_tailnet` check `TS_AUTHKEY` against
+  the API before using it and mint a new one when it is revoked
+  (`setup/host/ts_api.sh`: the API answers 200 with `"invalid": true` for a
+  revoked key, not 404). OAuth-minted keys carry `tag:b2b`, which the tailnet
+  policy gives to `autogroup:owner` and to `tag:osionos`, the OAuth client's
+  own tag (without it: 400 "requested tags are invalid or not permitted").
 - `RESTIC_PASSWORD` — restic backup repository password; `make backup` mints
   one when absent, but copy it to a password manager immediately — every
   snapshot on sgoinfre is unreadable without it.
@@ -218,6 +224,10 @@ read the one you are building before changing it. A profile names its own
   walk past busy ones. Scripts look ports up by name (`b2b_forward NAME` in
   `utils/b2b_config.sh`), so renaming an entry loses its tool the port.
   `tests/test_firewall_forwards.sh` refuses a literal list coming back.
+  A forward with `expose = true` binds the host side on every interface
+  (`B2B_EXPOSED`, `b2b_forward_bind`) so the LAN and Wi-Fi reach it; every
+  other forward stays on `127.0.0.1`. `profiles/server.toml` exposes only the
+  WAF (`http`, `https`). A running QEMU keeps its binds: `make qemu_restart`.
 - Feature names are scraped from the scripts (the `MANIFEST`), never copied:
   rename one and the validator follows.
 - A literal `dlesieur`, `temp*123`, `vm_pass.txt` or `born2root.conf` in
@@ -530,6 +540,22 @@ is wired to a `make <name>` / `make <name>_undo` pair (`groot`,
 `baas_access`, `drawnosaurus`). Adding such a port to `[network] forwards`
 anyway does not just fail silently: the NAT/natpf rule it creates squats the
 host port forever, so even a correct tunnel can no longer bind it.
+
+The reverse holds in the guest: `deploy_inception.sh` publishes an Inception
+port on the NAT address only when `[network] forwards` declares it, and on
+loopback otherwise (the FTP set stays on `127.0.0.1`), and `verify_platform`
+counts any other listener off loopback as an intruder.
+
+### Seats: the home moves, the crontab does not
+
+On the 42 seats the home is a per-login iSCSI disk that follows the user,
+restored *after* GNOME has read `~/.config/autostart`, while a crontab lives
+in the seat's own `/var/spool/cron`. Two consequences, both handled through
+`utils/login_entry.sh`: every login entry waits (up to 20 min) for the files
+it names before running, and cron-mode `make autostart` writes a second entry
+that puts the crontab block on whichever seat you log into. A VM started
+from a terminal dies at logout; `make autostart_handover` moves it under
+cron.
 
 ### A host whose Tor tool runs in global mode
 
