@@ -311,8 +311,8 @@ package = "auto"
 backup_dest = ""
 # The vault42 environment holding the team's copy of the secrets file: make
 # secrets_push seals it there, a teammate's make secrets_pull APPLY=1 gets it.
-# Readable by whoever the org admin grants born2root/shared; "" turns it off.
-vault = "univers42/born2root/shared"
+# Readable by whoever the org admin grants born2root/team; "" turns it off.
+vault = "univers42/born2root/team"
 # Not set here, each with its default (profiles/server.toml sets all three):
 #   secrets_file  the host's KEY=VALUE secrets, mode 600 ("" keeps
 #                 setup/host/dc_lib.sh's search; B2B_SECRETS= beats it)
