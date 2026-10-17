@@ -45,9 +45,9 @@ chmod +x "$TMP/bin/ss" "$TMP/bin/docker"
 # Read by hard() and the wall block, both run through eval below.
 # shellcheck disable=SC2034
 C_R='' C_RED='' C_DIM=''
-# shellcheck disable=SC2329
+# shellcheck disable=SC2329,SC2317
 ok() { printf 'PASS %s\n' "$*"; }
-# shellcheck disable=SC2329
+# shellcheck disable=SC2329,SC2317
 vm_ssh() { PATH="$TMP/bin:$PATH" bash -c "$1"; }
 eval "$(awk '/^hard\(\) \{/,/^}/' "$SCRIPT")"
 WALL=$(awk '/^# ── the wall/ { on = 1 } on && /^printf .\\n.$/ { exit } on' "$SCRIPT")
