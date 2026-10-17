@@ -245,7 +245,8 @@ start_guard() {
 
 # A disk on a sec=krb5 NFS mount needs the login's ticket, which nothing
 # renews after the logout: utils/ticket_keeper.sh says why and what it does.
-# It runs from its text, under /bin/sh, so it needs nothing from the home.
+# It runs from its text, under /bin/sh, so it needs nothing from the home;
+# its lock lives beside the VM, as the logout deletes the user's /tmp files.
 start_ticket_keeper() {
     local keep
     case "$(findmnt -no FSTYPE,OPTIONS -T "$VM_DIR" 2>/dev/null)" in
@@ -254,7 +255,7 @@ start_ticket_keeper() {
     esac
     command -v kinit >/dev/null 2>&1 && command -v klist >/dev/null 2>&1 || return 0
     keep="${B2B_KEEPER_TMP:-/tmp}/krb5cc_$(id -u)_b2b-$VM_NAME"
-    (cd / && setsid -f flock -n -o "$keep.lock" /bin/sh -c "$(cat "$ROOT/utils/ticket_keeper.sh")" \
+    (cd / && setsid -f flock -n -o "$VM_DIR/.ticket-keeper.lock" /bin/sh -c "$(cat "$ROOT/utils/ticket_keeper.sh")" \
         ticket_keeper "$keep" "$VM_DIR/monitor.sock" "$1" </dev/null >>"$KEEPER_LOG" 2>&1)
 }
 

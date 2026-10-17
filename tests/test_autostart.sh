@@ -235,7 +235,7 @@ echo 'nfs4 rw,vers=4.2,soft,proto=tcp,sec=krb5' >"$TMP/fstype"
 tick >/dev/null
 check "tick, VM on sec=krb5 NFS: the ticket keeper, from /, from its own text" \
     "$(grep '^keeper ' "$TMP/calls")" \
-    "keeper / $KC.lock /bin/sh same $KC $TMP/vms/baas/monitor.sock $(cat "$PIDFILE")"
+    "keeper / $TMP/vms/baas/.ticket-keeper.lock /bin/sh same $KC $TMP/vms/baas/monitor.sock $(cat "$PIDFILE")"
 echo 'ext4 rw,relatime' >"$TMP/fstype"
 tick >/dev/null
 check "tick, VM on a local disk: no keeper" "$(grep -c '^keeper ' "$TMP/calls")" 0
