@@ -12,7 +12,8 @@
 #
 # HOW: klist, kinit and socat are stubs on PATH; a fake ccache holds its renew
 # limit as text ("expired" for one klist -s refuses). One pass per run
-# (B2B_KEEPER_ONCE=1), under /bin/sh as autostart.sh runs it.
+# (B2B_KEEPER_PASSES=1), under /bin/sh as autostart.sh runs it; sleep is a
+# stub too, deleting KEEP between passes the way the logout did.
 set -u
 
 cd "$(dirname "$0")/.." || exit 1
@@ -48,7 +49,11 @@ cat >"$TMP/bin/socat" <<STUB
 #!/bin/sh
 printf 'socat %s %s\n' "\$*" "\$(cat)" >>"$TMP/calls"
 STUB
-chmod +x "$TMP/bin/klist" "$TMP/bin/kinit" "$TMP/bin/socat"
+cat >"$TMP/bin/sleep" <<STUB
+#!/bin/sh
+rm -f "$TMP/cc/krb5cc_$(id -u)_b2b-baas"
+STUB
+chmod +x "$TMP/bin/klist" "$TMP/bin/kinit" "$TMP/bin/socat" "$TMP/bin/sleep"
 
 U=$(id -u)
 KEEP="$TMP/cc/krb5cc_${U}_b2b-baas"
@@ -57,7 +62,7 @@ sleep 600 &
 QEMU=$!
 keeper() { # -> the keeper's output in $TMP/out, its calls in $TMP/calls
     : >"$TMP/calls"
-    env PATH="$TMP/bin:$PATH" B2B_KEEPER_TMP="$TMP/cc" B2B_KEEPER_ONCE=1 \
+    env PATH="$TMP/bin:$PATH" B2B_KEEPER_TMP="$TMP/cc" B2B_KEEPER_PASSES="${PASSES:-1}" \
         /bin/sh utils/ticket_keeper.sh "$KEEP" "$TMP/monitor.sock" "${1:-$QEMU}" >"$TMP/out" 2>&1
 }
 
@@ -74,6 +79,14 @@ check "... said once" "$(grep -c "kept the login ticket $TMP/cc/krb5cc_${U}_logi
 
 keeper
 check "the same ticket next pass: not copied again" "$(grep -c 'kept the login' "$TMP/out")" 0
+
+# The bug of 2026-10-17: the logout deleted KEEP, and nothing put it back.
+rm -f "$TMP/cc/krb5cc_${U}_login"*
+before=$(cat "$KEEP")
+PASSES=2 keeper
+check "KEEP deleted between passes: put back from memory" "$(cat "$KEEP" 2>/dev/null)" "$before"
+check "... said so" "$(grep -c 'put back from memory' "$TMP/out")" 1
+check "... and renewed on both passes" "$(grep -c '^kinit -R' "$TMP/calls")" 2
 
 in_hours 23 >"$TMP/cc/krb5cc_${U}_login2"
 in_hours 5 >"$TMP/cc/krb5cc_${U}_login0"
