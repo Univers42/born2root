@@ -97,6 +97,8 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 . "$REPO_ROOT/utils/b2b_config.sh"
 # shellcheck source=utils/fast_lane.sh
 . "$REPO_ROOT/utils/fast_lane.sh"
+# shellcheck source=utils/nfs_link.sh
+. "$REPO_ROOT/utils/nfs_link.sh"
 LUKS="${LUKS:-ON}"
 
 VM_NAME="${VM_NAME:-debian}"
@@ -435,7 +437,13 @@ resolve_ports() {
         bind=$(fwd_bind "$name")
         [ "$bind" = 0.0.0.0 ] && bind=
         HOST_PORT_BIND="$bind" resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
-        [ "$actual" != "$hp" ] && warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
+        if [ "$actual" != "$hp" ] && [ -z "$bind" ]; then
+            # The home LAN edge (a socat on 192.168.1.132:8443 to 127.0.0.1:8443)
+            # keeps :8443 and forwards it to a port the guest no longer has.
+            warn "host port ${hp} (${name}) is exposed, but $(host_port_holder "$hp") holds it: LAN and Wi-Fi clients on :${hp} reach that, not the guest (now on ${actual}). expose = true replaces a LAN edge such as a socat to 127.0.0.1:${hp}: stop it, then make qemu_restart"
+        elif [ "$actual" != "$hp" ]; then
+            warn "host port ${hp} (${name}) is already in use -- using ${actual} instead"
+        fi
         out="${out} ${name}:${actual}:${gp}"
     done
     RESOLVED_SPEC="${out# }"
@@ -662,7 +670,14 @@ launch() {
     # the installer must see exactly one disk, because partman's recipe names
     # /dev/sda. It is found in the guest by its serial, never booted from, and
     # mounted nofail, so a boot without it costs the sandbox and not the boot.
-    local disk_args=() net_args=() ide_args=()
+    local disk_args=() net_args=() ide_args=() throttle="" bps
+    # A disk on NFS shares the seat's link with its home: half of it, for
+    # every drive together (utils/nfs_link.sh says why).
+    bps=$(nfs_disk_budget "$VM_DIR")
+    if [ -n "$bps" ]; then
+        throttle=",throttling.group=b2bdisk,throttling.bps-total=${bps}"
+        info "disk capped at $((bps / 1000000)) MB/s: half the link to its NFS server (B2B_DISK_MBPS= to change, 0 for none)"
+    fi
     if [ "$boot" = disk ] && [ "$B2B_VM_IDE_DISK_GB" -gt 0 ]; then
         if [ ! -f "$IDE_DISK" ]; then
             warn "vm.ide_disk_gb is ${B2B_VM_IDE_DISK_GB} but $IDE_DISK is missing — booting without it (stop, then: $0 ide-disk-create)"
@@ -670,7 +685,7 @@ launch() {
             warn "B2B_QEMU_LEGACY_HW=1: booting without the IDE disk (it hangs off virtio-scsi)"
         else
             ide_args=(
-                -drive "file=${IDE_DISK},if=none,id=hd1,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring"
+                -drive "file=${IDE_DISK},if=none,id=hd1,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring${throttle}"
                 -device "scsi-hd,drive=hd1,bus=scsi0.0,scsi-id=1,serial=b2bide0001"
             )
         fi
@@ -684,7 +699,7 @@ launch() {
     if [ "${B2B_QEMU_LEGACY_HW:-0}" = "1" ]; then
         disk_args=(
             -device "ich9-ahci,id=ahci"
-            -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap"
+            -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap${throttle}"
             -device "ide-hd,drive=hd0,bus=ahci.0,bootindex=${hd_index}"
         )
         net_args=(-device "e1000,netdev=net0")
@@ -694,7 +709,7 @@ launch() {
         disk_args=(
             -object "iothread,id=iothread0"
             -device "virtio-scsi-pci,id=scsi0,addr=0x3,iothread=iothread0"
-            -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring"
+            -drive "file=${DISK},if=none,id=hd0,format=qcow2,cache=writeback,discard=unmap,detect-zeroes=unmap,aio=io_uring${throttle}"
             -device "scsi-hd,drive=hd0,bus=scsi0.0,bootindex=${hd_index}"
             "${ide_args[@]}"
         )

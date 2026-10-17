@@ -210,6 +210,36 @@ check "... the monitor runs under a shutdown delay lock" \
 rm -f "$TMP/inhibit_ok"
 echo "${SHUTDOWN%(true,)}(false,)" >"$TMP/signals"
 check "guard, PrepareForShutdown(false) (a resume, a cancel): nothing" "$(tick --guard)" 0
+# The ticket keeper (utils/ticket_keeper.sh; its own test pins what it does):
+# started for a disk on a sec=krb5 NFS mount only, from /, from the keeper's
+# own text, so nothing of it is read from the home once it runs.
+cat >"$TMP/tickbin/findmnt" <<EOF
+#!/bin/sh
+cat "$TMP/fstype"
+EOF
+cat >"$TMP/tickbin/setsid" <<EOF
+#!/bin/sh
+cwd=\$PWD
+shift
+[ "\$8" = ticket_keeper ] || exit 0
+same=differs
+[ "\$7" = "\$(cat "$ROOT/utils/ticket_keeper.sh")" ] && same=same
+printf 'keeper %s %s %s %s %s %s %s\n' "\$cwd" "\$4" "\$5" "\$same" "\$9" "\${10}" "\${11}" >>"$TMP/calls"
+EOF
+printf '#!/bin/sh\nexit 0\n' >"$TMP/tickbin/kinit"
+cp "$TMP/tickbin/kinit" "$TMP/tickbin/klist"
+chmod +x "$TMP/tickbin/findmnt" "$TMP/tickbin/setsid" "$TMP/tickbin/kinit" "$TMP/tickbin/klist"
+export B2B_KEEPER_TMP="$TMP/kc"
+KC="$TMP/kc/krb5cc_$(id -u)_b2b-baas"
+echo 'nfs4 rw,vers=4.2,soft,proto=tcp,sec=krb5' >"$TMP/fstype"
+tick >/dev/null
+check "tick, VM on sec=krb5 NFS: the ticket keeper, from /, from its own text" \
+    "$(grep '^keeper ' "$TMP/calls")" \
+    "keeper / $TMP/vms/baas/.ticket-keeper.lock /bin/sh same $KC $TMP/vms/baas/monitor.sock $(cat "$PIDFILE")"
+echo 'ext4 rw,relatime' >"$TMP/fstype"
+tick >/dev/null
+check "tick, VM on a local disk: no keeper" "$(grep -c '^keeper ' "$TMP/calls")" 0
+rm -f "$TMP/tickbin/findmnt" "$TMP/tickbin/setsid" "$TMP/tickbin/kinit" "$TMP/tickbin/klist"
 kill "$(cat "$PIDFILE")"
 rm -f "$PIDFILE"
 echo "$SHUTDOWN" >"$TMP/signals"

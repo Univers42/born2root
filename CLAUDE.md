@@ -557,6 +557,21 @@ that puts the crontab block on whichever seat you log into. A VM started
 from a terminal dies at logout; `make autostart_handover` moves it under
 cron.
 
+A VM under cron outlives the logout, but its disk does not, on its own:
+`/sgoinfre` is nfs4 `sec=krb5`, the seat's ticket lasts 10 h (renewable to
+24 h after the password), and once it expires the guest hangs on its qcow2
+with QEMU still alive (baas, 2026-10-16 04:41). The tick therefore runs
+`utils/ticket_keeper.sh` for a disk on such a mount: from its own text under
+`/bin/sh`, from `/` (the home is unmounted at logout), it keeps and renews a
+copy of the login ticket in `/tmp/krb5cc_<uid>_b2b-<vm>` and powers the guest
+off before the renew limit. Its log is `ticket-keeper.log` beside the VM.
+
+The same link carries the home (iSCSI) and `/sgoinfre` (the qcow2), and on
+c2r19s6 it negotiated 100 Mb/s: a boot or a backup filled it and the desktop
+crawled (home disk 57.6 ms a request, 2 ms idle). QEMU therefore caps its
+drives at half the link to the NFS server and the backup's rsync takes the
+same budget (`utils/nfs_link.sh`; `B2B_DISK_MBPS=` overrides, `0` disables).
+
 ### A host whose Tor tool runs in global mode
 
 On a host running hide (`/usr/local/bin/hide`) with `GLOBAL=on`, every TCP

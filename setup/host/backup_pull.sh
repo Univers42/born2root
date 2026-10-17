@@ -32,6 +32,19 @@ set -u
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
+# shellcheck source=utils/nfs_link.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../utils/nfs_link.sh"
+
+# rsync's share of the link to an NFS destination, the budget QEMU's disk
+# takes too (utils/nfs_link.sh): --bwlimit is in KiB/s. An array, because
+# hellish does not split an unquoted expansion into words.
+RSYNC_CAP=()
+rsync_cap() {
+    local bps
+    bps=$(nfs_disk_budget "$1")
+    RSYNC_CAP=()
+    [ -z "$bps" ] || RSYNC_CAP=("--bwlimit=$((bps / 1024))")
+}
 
 # BACKUP_DEST= beats [dc] backup_dest beats the campus default. The default
 # lives here and only here: /sgoinfre/students/<login>, like every other
@@ -101,7 +114,8 @@ if [ "$RESTORE" = 1 ]; then
     restore_from="/tmp/.b2b-repo.$$"
     info "pushing $DEST/repo ($(find "$DEST/repo/snapshots" -type f | wc -l) snapshot(s)) into the guest"
     if command -v rsync >/dev/null 2>&1; then
-        rsync -a -e "ssh $SSH_OPTS_STR" "$DEST/repo/" "${VM_USER}@127.0.0.1:$restore_from/" || die "push failed"
+        rsync_cap "$DEST"
+        rsync -a "${RSYNC_CAP[@]}" -e "ssh $SSH_OPTS_STR" "$DEST/repo/" "${VM_USER}@127.0.0.1:$restore_from/" || die "push failed"
     else
         scp -r -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -P "$SSH_PORT" \
             "$DEST/repo" "${VM_USER}@127.0.0.1:$restore_from" || die "push failed"
@@ -135,7 +149,8 @@ fi
 info "pulling the repository to $DEST"
 mkdir -p "$DEST" || die "cannot create $DEST"
 if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete -e "ssh $SSH_OPTS_STR" "${VM_USER}@127.0.0.1:/var/backups/b2b/repo/" "$DEST/repo/" ||
+    rsync_cap "$DEST"
+    rsync -a --delete "${RSYNC_CAP[@]}" -e "ssh $SSH_OPTS_STR" "${VM_USER}@127.0.0.1:/var/backups/b2b/repo/" "$DEST/repo/" ||
         die "rsync of the repository failed"
 else
     rm -rf "$DEST/repo.new"
