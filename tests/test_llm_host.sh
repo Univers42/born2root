@@ -231,6 +231,12 @@ check "preflight over budget refused" "$(pre B2B_LLM_ENABLE=true FAKE_TREE="$BIG
 check "  ...naming ai.models" "$(grep -c 'ai.models need' "$TMP/pre.out")" 1
 check "preflight over RAM refused" "$(pre B2B_LLM_ENABLE=true FAKE_TREE="$HUGE" B2B_LLM_BUDGET_GB=1000 B2B_LLM_MODELS=org/Model-GGUF:UD-Q3_K_XL)" 1
 check "  ...naming memory" "$(grep -c 'beside the VM' "$TMP/pre.out")" 1
+# `up` (make llm_host) used to skip the RAM check and start the model anyway.
+setsid -w env B2B_LLM_ENABLE=true FAKE_TREE="$HUGE" B2B_LLM_BUDGET_GB=1000 \
+    B2B_LLM_MODELS=org/Model-GGUF:UD-Q3_K_XL "$SH" setup/host/llm_host.sh up >"$TMP/up.out" 2>&1 </dev/null
+check "up over RAM refused" "$?" 1
+check "  ...before anything is downloaded" \
+    "$(grep -c 'beside the VM' "$TMP/up.out"):$(find "$TMP/store" -name '*UD-Q3_K_XL*' 2>/dev/null | wc -l | tr -d ' ')" 1:0
 check "preflight unknown quant refused" "$(pre B2B_LLM_ENABLE=true B2B_LLM_MODELS=org/Model-GGUF:Q9_9)" 1
 : >"$TMP/ack"
 check "no terminal, no answer: refused" "$(pre B2B_LLM_ENABLE=true B2B_LLM_MODELS=org/Model-GGUF:UD-Q3_K_XL)" 1

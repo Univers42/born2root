@@ -1381,7 +1381,7 @@ ai:
 # session can see one), models on sgoinfre within [ai] budget_gb, and opencode
 # in the VM pointed at it (10.0.2.2). Settings: [ai] in born2root.toml.
 llm_host:
-	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" $(SCRIPT_SH) setup/host/llm_host.sh up
+	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" VM_RAM_MB="$(VM_RAM_MB)" $(SCRIPT_SH) setup/host/llm_host.sh up
 
 # Choose the folder, budget, context, GPU mode and models from Hugging Face's
 # list; writes [ai] in born2root.toml.

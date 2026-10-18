@@ -511,8 +511,34 @@ ack_key() {
 # ── Actions ─────────────────────────────────────────────────────────────────
 # Everything that can refuse, refused before the 20-minute install rather than
 # after it: prices, budget, free space, memory, and whether the release runs.
+# The budget, the store's free space and the RAM beside the VM, from what
+# price_models found. `up` runs it too: it used to be preflight's alone, so
+# `make llm_host` would start a model the seat could not hold beside the VM
+# (a 13 GB quant beside the 14 GB baas guest on a 30 GB seat, 2026-10-18).
+# Caveat: the KV term is kv_mem_mb's ~100 MB per 1k tokens, right for the
+# Qwen3-Coder-30B-A3B class and low for denser KV (Qwen3-4B: ~147), and the
+# desktop's own few GB are not counted, so a pass is a floor, not a promise.
+check_room() {
+    local used free mem_mb vm_mb kv_mb need
+    used=$(store_used_mb)
+    if [ $((used + MISSING_MB + RELEASE_MB)) -gt $((B2B_LLM_BUDGET_GB * 1024)) ]; then
+        die "ai.models need $((MISSING_MB + RELEASE_MB)) MB more; $B2B_LLM_DIR holds ${used} MB of its ${B2B_LLM_BUDGET_GB} GB budget. Drop a model from ai.models, pick a smaller quant, or raise ai.budget_gb"
+    fi
+    free=$(store_free_mb)
+    if [ -n "$free" ] && [ $((MISSING_MB + RELEASE_MB)) -ge "$free" ]; then
+        die "ai.models need $((MISSING_MB + RELEASE_MB)) MB and $B2B_LLM_DIR has ${free} MB free"
+    fi
+    mem_mb=$(host_mem_mb)
+    vm_mb=$(vm_mem_mb)
+    kv_mb=$(kv_mem_mb "$B2B_LLM_CONTEXT")
+    need=$((LARGEST * 6 / 5 + kv_mb + vm_mb))
+    if [ -n "$mem_mb" ] && [ "$need" -gt "$mem_mb" ]; then
+        die "the largest of ai.models needs ~$((LARGEST * 6 / 5 + kv_mb)) MB with a ${B2B_LLM_CONTEXT}-token context, beside the VM's ${vm_mb} MB, and this host has ${mem_mb} MB. Pick a smaller quant or lower ai.context"
+    fi
+}
+
 do_preflight() {
-    local used free mem_mb vm_mb kv_mb need key answer
+    local key answer
     enabled || return 0
     # Settings nobody has confirmed yet are a choice still to make, and the
     # picker is where it is made: offered here, before anything is priced,
@@ -538,21 +564,7 @@ do_preflight() {
     command -v python3 >/dev/null 2>&1 || die "ai.host_models needs python3 on this host"
     mkdir -p "$B2B_LLM_RUN" 2>/dev/null
     price_models
-    used=$(store_used_mb)
-    if [ $((used + MISSING_MB + RELEASE_MB)) -gt $((B2B_LLM_BUDGET_GB * 1024)) ]; then
-        die "ai.models need $((MISSING_MB + RELEASE_MB)) MB more; $B2B_LLM_DIR holds ${used} MB of its ${B2B_LLM_BUDGET_GB} GB budget. Drop a model from ai.models, pick a smaller quant, or raise ai.budget_gb"
-    fi
-    free=$(store_free_mb)
-    if [ -n "$free" ] && [ $((MISSING_MB + RELEASE_MB)) -ge "$free" ]; then
-        die "ai.models need $((MISSING_MB + RELEASE_MB)) MB and $B2B_LLM_DIR has ${free} MB free"
-    fi
-    mem_mb=$(host_mem_mb)
-    vm_mb=$(vm_mem_mb)
-    kv_mb=$(kv_mem_mb "$B2B_LLM_CONTEXT")
-    need=$((LARGEST * 6 / 5 + kv_mb + vm_mb))
-    if [ -n "$mem_mb" ] && [ "$need" -gt "$mem_mb" ]; then
-        die "the largest of ai.models needs ~$((LARGEST * 6 / 5 + kv_mb)) MB with a ${B2B_LLM_CONTEXT}-token context, beside the VM's ${vm_mb} MB, and this host has ${mem_mb} MB. Pick a smaller quant or lower ai.context"
-    fi
+    check_room
 
     print_notice
     key=$(ack_key)
@@ -779,6 +791,7 @@ do_up() {
     check_bind "$B2B_LLM_HOST"
     mkdir -p "$B2B_LLM_RUN" 2>/dev/null
     price_models
+    check_room
     print_notice
     do_install
     do_pull
