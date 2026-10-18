@@ -100,7 +100,11 @@ ai_mode = "off"
 
 [ai]
 host_models = false
-models      = ["unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL"]
+# Not the default's Qwen3-Coder-30B-A3B: beside this profile's 14 GB VM a
+# 30 GB seat had 11.7 GB available (2026-10-18), and that model's smallest
+# usable quant plus a 32k f16 KV cache needs ~16 GB. This one: 2.7 GB on
+# disk, ~3.3 GB loaded, ~4.5 GB of KV at 32k (36 layers x 8 KV heads x 128).
+models      = ["unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q5_K_XL"]
 models_dir  = "/sgoinfre/students/$USER/llm"
 budget_gb   = 15
 llama_cpp   = "b10970"
