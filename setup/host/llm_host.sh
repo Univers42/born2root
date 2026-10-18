@@ -660,8 +660,13 @@ do_serve() {
     # and 12.0 without (31 either way on an empty context).
     fa=auto
     [ "$DEVICE" = none ] && fa=off
+    # nice 19: on the CPU it shares the cores with the VM it serves. Its
+    # first 14k-token prompt (2026-10-18, beside the 8-vCPU baas guest) took
+    # the guest to a load of 19.5 for 13 min; ten containers' healthchecks
+    # timed out, b2b-autoheal restarted them all, and a backup's mongo dump
+    # failed. The VM keeps priority; the model takes what is left.
     info "starting llama-server on $B2B_LLM_HOST, $DEVICE_SAY"
-    env LD_LIBRARY_PATH="$BIN_DIR" nohup "$BIN_DIR/llama-server" \
+    env LD_LIBRARY_PATH="$BIN_DIR" nohup nice -n 19 "$BIN_DIR/llama-server" \
         --models-dir "$MODELS_DIR" --models-max 1 \
         --host "$(bind_addr)" --port "$(bind_port)" --api-key-file "$KEY_FILE" \
         --device "$DEVICE" -fa "$fa" -c "$B2B_LLM_CONTEXT" -np 1 --jinja \
