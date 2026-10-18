@@ -528,7 +528,13 @@ fi
 
 if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
     log "password present; timer armed and a run follows"
-    /usr/local/sbin/b2b-backup || die "the backup run failed"
+    # The verdict waits until the permissions below are set. The install -d
+    # at the top re-locks /var/backups/b2b to 0700 on every upload, and a run
+    # that failed one dump still snapshotted the rest: left locked, the pull
+    # counted 0 snapshots and refused the off-site copy, telling the user to
+    # restore (mongo's dump, 2026-10-18 14:15).
+    run_rc=0
+    /usr/local/sbin/b2b-backup || run_rc=$?
     # The login pulls the repository off the guest (backup_pull.sh): group-
     # readable is enough, and the files are encrypted at rest.
     if [ -n "${BACKUP_PULL_USER:-}" ] && id "$BACKUP_PULL_USER" >/dev/null 2>&1; then
@@ -541,6 +547,7 @@ if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
         chgrp "$BACKUP_PULL_USER" /var/backups/b2b 2>/dev/null || true
         chmod 710 /var/backups/b2b 2>/dev/null || true
     fi
+    [ "$run_rc" = 0 ] || die "the backup run failed"
     if [ "${BACKUP_VERIFY:-0}" = 1 ]; then
         if RESTIC_PASSWORD_FILE=/etc/b2b/restic.pass RESTIC_REPOSITORY=/var/backups/b2b/repo \
             restic check --read-data-subset=10% >/dev/null 2>&1; then
