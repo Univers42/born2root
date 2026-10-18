@@ -260,9 +260,19 @@ if [ -n "$SRC" ]; then
     fi
 else
     step "Cloning ${REPO_URL} (branch ${BRANCH}) into the guest"
+    # A directory without .git is the rescue case: the tree was deleted under
+    # a running stack and secrets/ put back from the containers (2026-10-18),
+    # and `git clone` refuses a non-empty destination. The clone lands beside
+    # it without a checkout, its .git moves in, and reset --hard writes the
+    # tracked files: secrets/ and srcs/.env are untracked, so they stay.
     vm_ssh "set -e
         if [ -d '$GUEST_DIR/.git' ]; then
             cd '$GUEST_DIR' && git fetch --all -q && git checkout -q '$BRANCH' && git pull -q --ff-only
+        elif [ -d '$GUEST_DIR' ]; then
+            tmp='$GUEST_DIR.clone.'\$\$
+            git clone -q --no-checkout --branch '$BRANCH' '$REPO_URL' \"\$tmp\"
+            mv \"\$tmp/.git\" '$GUEST_DIR/.git' && rmdir \"\$tmp\"
+            cd '$GUEST_DIR' && git reset -q --hard
         else
             mkdir -p \"\$(dirname '$GUEST_DIR')\"
             git clone -q --branch '$BRANCH' '$REPO_URL' '$GUEST_DIR'
