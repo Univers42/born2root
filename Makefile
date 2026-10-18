@@ -1365,7 +1365,8 @@ claude_code:
 # The guest's Claude, unattended in /opt/grobase: bypass mode, the
 # checkout's ask rules removed (and kept out of commits), RE and tracing
 # tools on / and in a privileged toolbox image (b2b-debug), the playwright
-# and radare2 MCP servers, a debugging skill. Header of the script: why each.
+# and radare2 MCP servers, a debugging skill, the devil plugin, and opencode
+# with the same permissions and servers. Header of the script: why each.
 #   make claude_debug CLAUDE_DEBUG_TOOLBOX=0   skip the ~1 GB toolbox image
 claude_debug:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" claude-debug

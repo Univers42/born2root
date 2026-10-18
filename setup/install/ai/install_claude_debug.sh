@@ -22,6 +22,9 @@
 #   .env.local, which in /opt/grobase holds GitHub and Docker Hub tokens.
 #   Caveat: it stops the Read tool only; `cat` through Bash still reads the
 #   file. The real fix is the tokens not living in that checkout.
+#   The devil plugin itself is installed (step 7), and opencode gets the
+#   same permissions and MCP servers in the checkout, the heavy ones off
+#   (step 8).
 #
 # WHY THE EDIT CANNOT BE COMMITTED
 #   The checkout's settings.json now differs from grobase's, and a session
@@ -301,6 +304,100 @@ and deepwiki for library docs.
   unattended session). Never commit it; the pre-commit hook refuses.
 - `/opt/grobase/.env.local` holds GitHub and Docker Hub tokens: never print
   them, never push or publish from this VM.
+- `.opencode/` is this VM's opencode config (same permissions and MCP
+  servers as here; grafana, playwright-docker and radare2 off for its small
+  local model), kept out of git by `.git/info/exclude`.
 SKILLEOF
 chown "$LOGIN:$GROUP" "$HOME_DIR/.claude/skills/b2b-debug/SKILL.md"
-log "done: restart any running claude session to pick it up"
+
+# ── 7. the devil plugin ──────────────────────────────────────────────────────
+# grobase's settings enable devil@univers42 (the /devil:* commands and the
+# hooks DEVIL_AUTONOMY speaks to), and nothing installed it: a project's
+# extraKnownMarketplaces is only offered, in an interactive session. Both
+# commands are no-ops once done (measured 2026-10-18, 2.1.292). They clone
+# and launch no server, so the `claude mcp add` hang does not apply; output
+# still goes to a file and stdin to /dev/null, so nothing holds a terminal.
+PLUGIN_LOG=/var/log/b2b-claude-plugin.log
+claude_as_login() {
+    (cd "$HOME_DIR" && timeout 300 runuser -u "$LOGIN" -- env HOME="$HOME_DIR" claude "$@") \
+        </dev/null >"$PLUGIN_LOG" 2>&1 || die "claude $* failed: $(tail -n1 "$PLUGIN_LOG")"
+}
+claude_as_login plugin marketplace add Univers42/claude-deal-with-the-devil
+claude_as_login plugin install devil@univers42
+log "devil plugin: installed for $LOGIN"
+
+# ── 8. opencode, the same switches ───────────────────────────────────────────
+# In the checkout's .opencode/opencode.json, not ~/.config/opencode: make
+# devtools and make ai rewrite that file whole while it is their baseline.
+# Measured with opencode 1.19.0 (`opencode debug agent build`): its defaults
+# allow everything but ask on doom_loop, external_directory and reading
+# *.env*; user rules are appended and the last match wins, so allowing those
+# and denying *.env.local mirrors the Claude setup above. The MCP servers are
+# read from Claude's config (.mcp.json minus disabledMcpjsonServers, plus the
+# local scope written in step 5), so the two agents cannot drift. Skills need
+# nothing: 1.19 reads .claude/skills itself. The kit's OpenCode bridge,
+# agents and commands target V2 (its tools/lib/opencode-README.md) and are
+# not wired here.
+# Not the same load as Claude, though: Claude defers MCP tool schemas, and
+# opencode puts every tool in every prompt, for a model that is often the
+# host's llama.cpp with a 32k context reading ~35 tokens/s on a CPU shared
+# with the VM (make llm_host, 2026-10-18). With all six servers and the
+# rules as instructions, the first prompt was ~28k tokens: 14 min before a
+# word. Measured tools/list sizes: grafana 65 tools ~20k tokens, playwright-
+# docker ~5.3k, radare2 ~3.6k; context7, deepwiki and postgres ~2.9k
+# together. So those three heavy ones are declared but off, a later
+# `"enabled": true` is kept across reruns, and the rules stay out: AGENTS.md,
+# which opencode reads, already carries their binding summary.
+python3 - "$GROBASE_DIR/.opencode/opencode.json" "$GROBASE_DIR" "$HOME_DIR/.claude.json" <<'OPENCODEPY' || die "$GROBASE_DIR/.opencode/opencode.json is not valid JSON; left as it was"
+import json, os, sys
+cfg_path, d, claude_json = sys.argv[1:4]
+
+def load(p):
+    return json.load(open(p)) if os.path.exists(p) and os.path.getsize(p) else {}
+
+off = set(load(os.path.join(d, ".claude", "settings.local.json")).get("disabledMcpjsonServers", []))
+servers = {n: s for n, s in load(os.path.join(d, ".mcp.json")).get("mcpServers", {}).items() if n not in off}
+servers.update(load(claude_json).get("projects", {}).get(d, {}).get("mcpServers", {}))
+
+# V1 has no working directory per server, and Claude starts them in the
+# checkout: an argument naming a checkout file becomes its absolute path.
+# Caveat: a plain word that happens to match a file at the checkout's root
+# (`Makefile`) would be rewritten too; no server in .mcp.json passes one.
+def to_opencode(s, enabled):
+    if "url" in s:
+        return {"type": "remote", "url": s["url"], "enabled": enabled}
+    args = [os.path.join(d, a) if os.path.isfile(os.path.join(d, a)) else a for a in s.get("args", [])]
+    out = {"type": "local", "command": [s["command"]] + args, "enabled": enabled}
+    if s.get("env"):
+        out["environment"] = s["env"]
+    return out
+
+HEAVY = {"grafana", "playwright-docker", "radare2"}
+cfg = load(cfg_path)
+cfg.setdefault("$schema", "https://opencode.ai/config.json")
+cfg["permission"] = {"*": "allow", "external_directory": "allow", "doom_loop": "allow",
+                     "read": {"*": "allow", "*.env.local": "deny"}}
+mcp = cfg.setdefault("mcp", {})
+for n, s in servers.items():
+    mcp[n] = to_opencode(s, mcp.get(n, {}).get("enabled", n not in HEAVY))
+# An earlier version listed the rules here; take exactly that entry back out.
+rules = os.path.join(d, ".claude", "rules", "*.md")
+cfg["instructions"] = [i for i in cfg.get("instructions", []) if i != rules]
+if not cfg["instructions"]:
+    del cfg["instructions"]
+os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+tmp = cfg_path + ".b2b"
+with open(tmp, "w") as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.replace(tmp, cfg_path)
+print(" ".join(n + ("" if m.get("enabled", True) else " (off)") for n, m in sorted(mcp.items())))
+OPENCODEPY
+chown -R "$LOGIN:$GROUP" "$GROBASE_DIR/.opencode"
+if [ -d "$GROBASE_DIR/.git" ]; then
+    install -d -m 0755 "$GROBASE_DIR/.git/info"
+    grep -qx '/.opencode/' "$GROBASE_DIR/.git/info/exclude" 2>/dev/null ||
+        printf '/.opencode/\n' >>"$GROBASE_DIR/.git/info/exclude"
+fi
+log "opencode: $GROBASE_DIR/.opencode/opencode.json"
+log "done: restart any running claude or opencode session to pick it up"

@@ -15,6 +15,9 @@
 #   - The login's settings and ~/.claude.json are merged, never replaced:
 #     theme, other env vars and other projects survive, and invalid JSON is
 #     left as it was rather than overwritten.
+#   - opencode's config is read from Claude's, never a second list: the
+#     project's servers minus the disabled ones plus the local scope, in V1
+#     shape, a checkout-relative script made absolute (V1 has no cwd).
 #
 # HOW
 #   The helper and the two Python merges are cut out of the installer by
@@ -44,7 +47,8 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 heredoc "<<'BYPASSEOF'" BYPASSEOF >"$TMP/bypass"
 heredoc "<<'USERPY'" USERPY >"$TMP/user.py"
 heredoc "<<'MCPPY'" MCPPY >"$TMP/mcp.py"
-for f in bypass user.py mcp.py; do
+heredoc "<<'OPENCODEPY'" OPENCODEPY >"$TMP/opencode.py"
+for f in bypass user.py mcp.py opencode.py; do
     check "heredoc $f extracted" "$([ -s "$TMP/$f" ] && echo yes)" yes
 done
 
@@ -120,6 +124,45 @@ check "playwright pinned" "$(json "$C" 'd["projects"]["/opt/grobase"]["mcpServer
 check "no toolbox, no radare2" "$(json "$C" '"radare2" in d["projects"]["/opt/grobase"]["mcpServers"]')" False
 python3 - "$C" /opt/grobase "mcr.example/pw@sha256:abc" "b2b-debug-toolbox:0123" <"$TMP/mcp.py"
 check "radare2 with the toolbox" "$(json "$C" 'd["projects"]["/opt/grobase"]["mcpServers"]["radare2"]["args"][-2:]')" "['b2b-debug-toolbox:0123', 'r2mcp']"
+
+# ── opencode's config, read from Claude's ────────────────────────────────────
+D="$TMP/grobase"
+mkdir -p "$D/.claude" "$D/.opencode" "$D/scripts/ops"
+: >"$D/scripts/ops/mcp-server.sh"
+cat >"$D/.mcp.json" <<'JSON'
+{"mcpServers": {
+  "context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp@latest"]},
+  "postgres": {"command": "bash", "args": ["scripts/ops/mcp-server.sh", "postgres"]},
+  "supermemory": {"command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.supermemory.ai/mcp"]}
+}}
+JSON
+printf '{"disabledMcpjsonServers": ["supermemory"]}\n' >"$D/.claude/settings.local.json"
+printf '{"projects": {"%s": {"mcpServers": {"radare2": {"type": "stdio", "command": "docker", "args": ["run", "tb", "r2mcp"]}}}}}\n' \
+    "$D" >"$TMP/oc-claude.json"
+O="$D/.opencode/opencode.json"
+printf '{"model": "x/y", "mcp": {"mine": {"type": "local", "command": ["true"]}}, "instructions": ["AGENTS.md", "%s"]}\n' \
+    "$D/.claude/rules/*.md" >"$O"
+python3 - "$O" "$D" "$TMP/oc-claude.json" <"$TMP/opencode.py" >/dev/null
+check "opencode: project servers minus disabled, plus local scope, own kept" \
+    "$(json "$O" 'sorted(d["mcp"])')" "['context7', 'mine', 'postgres', 'radare2']"
+check "opencode: V1 local shape" "$(json "$O" 'd["mcp"]["context7"]["type"], d["mcp"]["context7"]["command"]')" \
+    "('local', ['npx', '-y', '@upstash/context7-mcp@latest'])"
+check "opencode: checkout path made absolute" "$(json "$O" 'd["mcp"]["postgres"]["command"]')" \
+    "['bash', '$D/scripts/ops/mcp-server.sh', 'postgres']"
+check "opencode: allow all, deny .env.local" \
+    "$(json "$O" 'd["permission"]["*"], d["permission"]["external_directory"], d["permission"]["doom_loop"], d["permission"]["read"]["*.env.local"]')" \
+    "('allow', 'allow', 'allow', 'deny')"
+check "opencode: other keys kept" "$(json "$O" 'd["model"]')" x/y
+check "opencode: light servers on, heavy ones off" \
+    "$(json "$O" 'd["mcp"]["context7"]["enabled"], d["mcp"]["postgres"]["enabled"], d["mcp"]["radare2"]["enabled"]')" \
+    "(True, True, False)"
+check "opencode: the old rules glob removed, other instructions kept" "$(json "$O" 'd["instructions"]')" "['AGENTS.md']"
+python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); d["mcp"]["radare2"]["enabled"] = True; json.dump(d, open(sys.argv[1], "w"))' "$O"
+python3 - "$O" "$D" "$TMP/oc-claude.json" <"$TMP/opencode.py" >/dev/null
+check "opencode: a server switched on stays on across a rerun" "$(json "$O" 'd["mcp"]["radare2"]["enabled"]')" True
+printf '{"model": ' >"$O"
+check "opencode: invalid JSON refused" \
+    "$(python3 - "$O" "$D" "$TMP/oc-claude.json" <"$TMP/opencode.py" 2>/dev/null && echo written || echo refused)" refused
 
 # ── install_grobase.sh reapplies it after the forced checkout ────────────────
 G=setup/install/dc/install_grobase.sh
