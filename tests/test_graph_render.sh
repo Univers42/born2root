@@ -13,6 +13,9 @@
 #     rewritten file never reaches SIGHUP. The directory is what is mounted.
 #   - A rerun with the same key appends nothing and, the container being up
 #     with the same spec, reloads instead of recreating it.
+#   - On docker's default bridge the container lost its port on 2026-10-20:
+#     the IDE plane's second dockerd (--bridge=none) deletes docker0 when it
+#     starts. It runs on its own network, created once.
 #
 # HOW
 #   The installer runs as is against stubs on PATH that record their
@@ -52,6 +55,12 @@ inspect)
     esac
     ;;
 logs) echo "graph-server: some log line" ;;
+network)
+    case "$2" in
+    inspect) [ -f "$STUB_DIR/net" ] || exit 1 ;;
+    create) : >"$STUB_DIR/net" ;;
+    esac
+    ;;
 esac
 exit 0
 EOF
@@ -123,13 +132,15 @@ check "the key line is in the file once" "$(grep -cx "ops $SHA" "$TMP/etc/keys")
 runline=$(printf '%s\n' "$log" | grep '^run ')
 wants=('--read-only' '--cap-drop ALL' '--security-opt no-new-privileges'
     '--memory 8g --memory-swap 8g' '-p 127.0.0.1:8095:8080' '--group-add 997'
-    '--restart unless-stopped' "-v $TMP/etc:/run/graph:ro" '-e GRAPH_API_KEYS_FILE=/run/graph/keys')
+    '--restart unless-stopped' "-v $TMP/etc:/run/graph:ro" '-e GRAPH_API_KEYS_FILE=/run/graph/keys'
+    '--network graph-render')
 for want in "${wants[@]}"; do
     case "$runline" in
     *"$want"*) check "run carries $want" 1 1 ;;
     *) check "run carries $want" "$runline" "$want" ;;
     esac
 done
+check "its own network is created once" "$(count '^network create graph-render$')" 1
 check "never publishes off the loopback" "$(printf '%s\n' "$runline" | grep -cE -- '-p [0-9]+:' || true)" 0
 
 # --- the same key again, container up with the same spec: reload --------------
@@ -143,6 +154,7 @@ check "rerun: SIGHUP, not a new container" "$(count '^kill -s HUP graph-render$'
 # --- a different port is a new container, not a reload ------------------------
 run GRAPH_RENDER_PORT=8096
 check "new port: recreated" "$(count '^rm -f graph-render$')$(count '^run ')" 11
+check "... on the network that exists, not a second one" "$(count '^network create ')" 0
 
 # --- never healthy: fail with the logs ------------------------------------------
 rm -f "$TMP/running"
