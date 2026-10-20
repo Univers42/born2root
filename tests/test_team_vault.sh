@@ -8,10 +8,14 @@
 # the keys shared (VAULT42_* never), the values never reaching argv or the
 # output, the index a narrower push keeps whole, the passphrase handed over as
 # FT_PASSPHRASE, and a pull that writes new keys but keeps a differing one
-# until it is named.
+# until it is named. On 2026-10-20 an expired 42ctl session answered HTTP 401
+# and the pull said "nothing to read at .../index": the session is now renewed
+# once from 42ctl's credential file, the password never in argv.
 #
 # HOW: 42ctl is a stub on PATH that keeps the vault as files under $TMP/vault
-# and refuses any passphrase but the test's. HOME points into a temp directory.
+# and refuses any passphrase but the test's; with $TMP/expired present its env
+# verbs answer HTTP 401 until `auth login` with the test's password. HOME
+# points into a temp directory.
 set -u
 
 cd "$(dirname "$0")/.." || exit 1
@@ -32,13 +36,19 @@ mkdir -p "$TMP/bin" "$TMP/home"
 cat >"$TMP/bin/42ctl" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >>"$TMP/calls"
+if [ "\$1" = auth ]; then
+    [ "\$2" = login ] && [ "\${FT_PASSWORD:-}" = pw-test ] && rm -f "$TMP/expired" && exit 0
+    exit 1
+fi
 [ "\${FT_PASSPHRASE:-}" = pp-test ] || { echo "error: could not unlock keystore" >&2; exit 1; }
 verb=\$3 org=\$5 project=\$7 env=\$9
 shift 9
 f="$TMP/vault/\$org/\$project/\$env/\$1"
 case "\$verb" in
 set) mkdir -p "\$(dirname "\$f")" && cat >"\$f" ;;
-get) [ -f "\$f" ] || { echo "error: no secret at \$1" >&2; exit 1; }; cat "\$f" ;;
+get)
+    [ ! -f "$TMP/expired" ] || { echo "error: /v1/orgs/univers42/projects failed: HTTP 401" >&2; exit 1; }
+    [ -f "\$f" ] || { echo "error: no secret at \$1" >&2; exit 1; }; cat "\$f" ;;
 esac
 EOF
 chmod +x "$TMP/bin/42ctl"
@@ -93,6 +103,21 @@ mkdir -p "$TMP/home/.config/42ctl/secrets"
 printf 'FT_EMAIL=a@b.c\nFT_PASSPHRASE="pp-test"\n' >"$TMP/home/.config/42ctl/secrets/42admin.env"
 check "a pull, the passphrase in ~/.config/42ctl/secrets/*.env: found" "$(run "$TMP/mate" pull </dev/null)" 0
 rm -rf "$TMP/home/.config/42ctl"
+# The datacenter seat keeps one file beside that directory instead.
+mkdir -p "$TMP/home/.config/42ctl"
+printf 'FT_EMAIL=a@b.c\nFT_TENANT=t1\nFT_PASSWORD=pw-test\nFT_PASSPHRASE=pp-test\n' >"$TMP/home/.config/42ctl/secrets.env"
+check "a pull, the passphrase in ~/.config/42ctl/secrets.env: found" "$(run "$TMP/mate" pull </dev/null)" 0
+: >"$TMP/expired"
+: >"$TMP/calls"
+check "an expired session (HTTP 401): renewed, then the pull runs" "$(run "$TMP/mate" pull </dev/null)" 0
+check "... one login, from the credential file" "$(grep -c '^auth login --password --email a@b.c --tenant t1$' "$TMP/calls")" 1
+check "... the password in no argv" "$(grep -c pw-test "$TMP/calls")" 0
+check "... and says so" "$(grep -c 'session expired: renewed' "$TMP/out")" 1
+sed -i '/^FT_PASSWORD=/d' "$TMP/home/.config/42ctl/secrets.env"
+: >"$TMP/expired"
+check "expired, no password to renew it: refused" "$(run "$TMP/mate" pull </dev/null)" 1
+check "... naming the login, not a missing index" "$(grep -c '42ctl auth login' "$TMP/out")$(grep -c 'nothing to read' "$TMP/out")" 10
+rm -rf "$TMP/home/.config/42ctl" "$TMP/expired"
 export FT_PASSPHRASE=pp-test
 check "a teammate's pull: a preview" "$(run "$TMP/mate" pull)" 0
 check "... lists the three as new" "$(grep -c ' new$' "$TMP/out")" 3
