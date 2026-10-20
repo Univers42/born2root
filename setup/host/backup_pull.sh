@@ -27,6 +27,7 @@
 #   make backup            password → backup in the guest → pull the repo
 #   make backup_verify     … and `restic check` the pulled copy (needs restic here)
 #   make restore           push the copy back into a (rebuilt) guest and load the newest snapshot
+#   make restore SNAPSHOT=<id>   ... and load that snapshot instead
 #   backup_pull.sh --where print where the copy is (what `make datacenter` checks)
 set -u
 

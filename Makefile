@@ -1299,8 +1299,10 @@ firewall:
 	@ROOTSH_FIREWALL="$(call b2b_conf,B2B_FIREWALL)" ROOT_SH=setup/host/firewall_guest.sh VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" root-sh
 # The rebuild path: push the copy on BACKUP_DEST back into a fresh guest and
 # load the newest snapshot into the engines -- tenants, keys and rows return.
+# SNAPSHOT=<id> loads that one instead (after a restore picked the wrong one,
+# the newest is the backup taken from the wrong state).
 restore:
-	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --restore
+	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" BACKUP_RESTORE_SNAPSHOT="$(SNAPSHOT)" $(SCRIPT_SH) setup/host/backup_pull.sh --restore
 # Everything a rebuilt guest needs after `make all`/`make re`, in the order
 # that keeps the backup copy safe: restore BEFORE the first backup (a fresh
 # repo must never overwrite the older copy), tenant_key after (it answers

@@ -10,9 +10,17 @@
 #   mongo-api, analytics-service and ai-service crash-looped, the next
 #   b2b-backup printed "mongo dump failed" and still "5 dump(s) snapshotted",
 #   and verify_platform said "platform verified".
+#   2026-10-20, `make datacenter` after a rebuild: the newest snapshot
+#   (85fcb9b4, 11:46) also held the DynamoDB volume and an SQL Server dump, so
+#   its path set differed from the 11:35 one. `restic snapshots --latest 1`
+#   keeps one snapshot per host+paths group, `head -n1` took the first group,
+#   and the restore loaded 239b50e2: eleven minutes, DynamoDB and SQL Server
+#   lost while the output said "the newest snapshot".
 #
 # WHAT IS CHECKED
-#   b2b-restore keeps the guest's value for the engine keys whose volume it
+#   b2b-restore loads the newest snapshot of all (or the id it is given, and
+#   refuses one that is not hex), gives the .env it re-assembles as root back
+#   to /opt/grobase's owner, keeps the guest's value for the engine keys whose volume it
 #   does not reload, takes everything else from the snapshot, and exits 1
 #   when b2b-stack-health fails or is missing; b2b-backup exits 1 naming an
 #   engine that runs and was not dumped, and leaves that verdict in a
@@ -91,9 +99,13 @@ exit 0
 EOF
 cat >"$TMP/bin/restic" <<'EOF'
 #!/bin/sh
+# Two snapshots in two host+paths groups, oldest first, as restic lists them.
 case "$1" in
-snapshots) echo '[{"short_id":"abcd1234"}]' ;;
-restore) cp -a "$STUB_DIR"/snap/. "$4"/ ;;
+snapshots) echo '[{"time":"2026-10-20T11:35:36","paths":["/d"],"short_id":"239b50e2"},{"time":"2026-10-20T11:46:02","paths":["/d","/v"],"short_id":"85fcb9b4"}]' ;;
+restore)
+    printf '%s\n' "$2" >"$STUB_DIR/restored.id"
+    cp -a "$STUB_DIR"/snap/. "$4"/
+    ;;
 backup) printf '%s\n' "$@" >"$STUB_DIR/backup.args" ;;
 esac
 exit 0
@@ -129,7 +141,15 @@ cat >"$TMP/bin/make" <<'EOF'
 #!/bin/sh
 printf 'make %s\n' "$*" >>"$STUB_DIR/order.log"
 case " $* " in *" certs "*) cat certs/ca.key >"$STUB_DIR/ca.at.certs" 2>/dev/null ;; esac
+case " $* " in *" env "*) : >>.env ;; esac
 exit 0
+EOF
+# chown logged, then done for real: no root here, so the owner cannot be
+# read back, only the call that sets it.
+cat >"$TMP/bin/chown" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STUB_DIR/chown.log"
+exec /bin/chown "$@"
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/sleep"
 # install_grobase.sh's helper: the profile's [dc.grobase_env] into .env.local.
@@ -171,7 +191,7 @@ EOF
 value() { sed -n "s/^$1=//p" "$TMP/opt/grobase/.env.secrets"; }
 restore() {
     rc=0
-    out=$("$TMP/b2b-restore" 2>&1) || rc=$?
+    out=$("$TMP/b2b-restore" "$@" 2>&1) || rc=$?
 }
 
 # --- the merge -----------------------------------------------------------------
@@ -179,6 +199,9 @@ guest_secrets
 echo 0 >"$TMP/health"
 restore
 check "restore, healthy stack: exit 0" "$rc" 0
+check "the newest snapshot of all is loaded, not the first group's" "$(cat "$TMP/restored.id")" 85fcb9b4
+check "the .env make env rewrote goes back to /opt/grobase's owner" \
+    "$(grep -c "^--reference=$TMP/opt/grobase $TMP/opt/grobase/.env\$" "$TMP/chown.log")" 1
 check "Mongo keeps this guest's password (its volume is not reloaded)" "$(value MONGO_INITDB_ROOT_PASSWORD)" guest-mongo
 check "Postgres takes the snapshot's (its cluster is rebuilt from the dump)" "$(value POSTGRES_PASSWORD)" snap-pg
 check "MySQL takes the snapshot's (its volume is rebuilt from the dump too)" "$(value MYSQL_ROOT_PASSWORD)" snap-mysql
@@ -198,6 +221,14 @@ echo "MONGO_INITDB_ROOT_PASSWORD=snap-mongo" >>"$TMP/snap/grobase.env.secrets"
 : >"$TMP/opt/grobase/.env.secrets"
 restore
 check "a guest with no secrets yet takes the snapshot's whole" "$(value MONGO_INITDB_ROOT_PASSWORD)" snap-mongo
+
+# --- which snapshot ----------------------------------------------------------------
+guest_secrets
+restore 239b50e2
+check "an id given on the command line wins over the newest" "$rc $(cat "$TMP/restored.id")" "0 239b50e2"
+rm -f "$TMP/restored.id"
+restore '85fcb9b4;x'
+check "an id that is not hex: exit 1, nothing restored" "$rc $([ -e "$TMP/restored.id" ] && echo restored || echo none)" "1 none"
 
 # --- the verdict -----------------------------------------------------------------
 guest_secrets
