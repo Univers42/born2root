@@ -197,7 +197,8 @@ export RESTIC_PASSWORD_FILE="$PASS" RESTIC_REPOSITORY="$REPO"
 umask 077
 work=$(mktemp -d /var/tmp/b2b-drill.XXXXXX) || exit 1
 trap 'rm -rf "$work"; docker rm -f b2b-drill-pg >/dev/null 2>&1' EXIT
-snap=$(restic snapshots --json --latest 1 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | head -n1 | cut -d'"' -f4)
+# The newest of all, as b2b-restore picks it (not `--latest 1`: one per group).
+snap=$(restic snapshots --json 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | tail -n1 | cut -d'"' -f4)
 [ -n "$snap" ] || { echo "restore-drill: no snapshot in $REPO"; exit 1; }
 restic restore "$snap" --target "$work" >/dev/null 2>&1 || { echo "restore-drill: restic restore of $snap FAILED"; exit 1; }
 dump=$(find "$work" -name 'postgres-*.sql' | head -n1)
@@ -244,7 +245,7 @@ chmod 755 /usr/local/sbin/b2b-restore-drill
 # non-zero fails it, whatever the cause.
 cat >/usr/local/sbin/b2b-restore <<'RESTOREEOF'
 #!/bin/sh
-# b2b-restore — load the newest snapshot into the running engines. Installed
+# b2b-restore [ID] — load the newest snapshot (or ID) into the running engines. Installed
 # by setup/install/dc/install_backup.sh (born2root). Read its header first.
 set -u
 ENGINE_KEYS_KEPT="MONGO_INITDB_ROOT_PASSWORD MSSQL_SA_PASSWORD MARIADB_ROOT_PASSWORD MARIADB_PASSWORD"
@@ -313,8 +314,15 @@ export RESTIC_PASSWORD_FILE="$PASS" RESTIC_REPOSITORY="$REPO"
 umask 077
 work=$(mktemp -d /var/tmp/b2b-restore.XXXXXX) || exit 1
 trap 'rm -rf "$work"' EXIT
-snap=$(restic snapshots --json --latest 1 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | head -n1 | cut -d'"' -f4)
-[ -n "$snap" ] || { echo "restore: no snapshot in $REPO"; exit 1; }
+# The snapshot: $1 when given (make restore SNAPSHOT=<id>), else the newest
+# of all. Not `--latest 1`: restic keeps one snapshot per host+paths group
+# there, and on 2026-10-20 the newest (85fcb9b4) carried the DynamoDB volume
+# the 11:35 one lacked, so `head -n1` took the older group and the rebuild
+# lost DynamoDB, SQL Server and eleven minutes. The list is oldest first.
+snap=${1:-$(restic snapshots --json 2>/dev/null | grep -o '"short_id":"[a-f0-9]*"' | tail -n1 | cut -d'"' -f4)}
+case "$snap" in
+'' | *[!0-9a-f]*) echo "restore: '${snap}' is not a snapshot id, or $REPO holds none"; exit 1 ;;
+esac
 restic restore "$snap" --target "$work" >/dev/null 2>&1 || { echo "restore: restic restore of $snap FAILED"; exit 1; }
 reconcile=0
 pg=$(find "$work" -name 'postgres-*.sql' | head -n1)
@@ -523,7 +531,7 @@ if [ -n "${BACKUP_RESTORE_FROM:-}" ] && [ -d "$BACKUP_RESTORE_FROM/snapshots" ];
 fi
 if [ "${BACKUP_RESTORE:-0}" = 1 ]; then
     [ -s /etc/b2b/restic.pass ] || die "cannot restore without /etc/b2b/restic.pass"
-    /usr/local/sbin/b2b-restore || die "the restore failed"
+    /usr/local/sbin/b2b-restore "${BACKUP_RESTORE_SNAPSHOT:-}" || die "the restore failed"
 fi
 
 if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
