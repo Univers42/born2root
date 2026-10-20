@@ -8,8 +8,9 @@
 #                a container; the host's own LAN address, through the NAT
 #   host in      every forward answers on the host; an exposed one ([network]
 #                forwards, expose = true) also on each LAN / Wi-Fi address
-#   tailnet      the guest's node is Running, and this seat reaches the WAF
-#                and sshd through its userspace tailscaled (make seat_tailnet)
+#   tailnet      the guest's node is Running, and this host reaches the WAF
+#                and sshd over the tailnet: through its own tailscaled when it
+#                runs one, else a seat's userspace one (make seat_tailnet)
 #
 # WHY ONE COMMAND: on 2026-10-16 "is it all working" took a stack check, a
 # platform check, a seat check and a dozen curls by hand, and the seat being
@@ -56,6 +57,19 @@ scheme_of() {
     esac
 }
 
+# tailnet_proxy: the SOCKS5 proxy the tailnet probes go through, or nothing
+# when this host runs a logged-in tailscaled of its own. A 42 seat has none
+# and reaches the tailnet through its userspace one on localhost:1055; on
+# 2026-10-20 the datacenter host reached baas directly while both probes went
+# to a :1055 nobody ran there, and failed.
+tailnet_proxy() {
+    if tailscale status --json 2>/dev/null | python3 -c 'import json, sys
+sys.exit(json.load(sys.stdin).get("BackendState") != "Running")' 2>/dev/null; then
+        return 0
+    fi
+    printf 'socks5h://%s\n' "$SOCKS"
+}
+
 probe_forward() { # NAME HOST_PORT ADDRESS -> pass or flunk
     local name="$1" port="$2" addr="$3" scheme code
     scheme=$(scheme_of "$name")
@@ -78,7 +92,7 @@ probe_forward() { # NAME HOST_PORT ADDRESS -> pass or flunk
 section() { printf "\n  ${C_B}%s${C_R}\n" "$1"; }
 
 main() {
-    local name port lan exposed iface addr state dns code
+    local name port lan exposed iface addr state dns code proxy via fix
     section "platform (make verify_platform)"
     if "${SCRIPT_SH:-bash}" "$DC_ROOT/setup/host/verify_platform.sh"; then
         :
@@ -135,16 +149,23 @@ except Exception:
     state=${state%% *}
     if [ "$state" = Running ] && [ -n "$dns" ]; then
         pass "the guest is on the tailnet as $dns"
-        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 -x "socks5h://$SOCKS" "https://$dns/" 2>/dev/null)
-        if answered "${code:-000}"; then
-            pass "this seat -> https://$dns/ (the WAF, through tailscale serve; HTTP $code)"
-        else
-            flunk "this seat cannot reach https://$dns/ through $SOCKS" "make seat_tailnet (this seat's userspace tailscaled; it mints a new key when the old one is revoked)"
+        proxy=$(tailnet_proxy)
+        via="through this host's tailscaled"
+        fix="tailscale status on this host: its own tailscaled is the way in"
+        if [ -n "$proxy" ]; then
+            via="through the seat's tailscaled ($SOCKS)"
+            fix="make seat_tailnet (this seat's userspace tailscaled; it mints a new key when the old one is revoked)"
         fi
-        if timeout 20 curl -s --max-time 15 -x "socks5h://$SOCKS" "telnet://$dns:4242" </dev/null 2>/dev/null | head -c 7 | grep -q '^SSH-2.0'; then
-            pass "this seat -> $dns:4242 (sshd over the tailnet)"
+        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 ${proxy:+-x "$proxy"} "https://$dns/" 2>/dev/null)
+        if answered "${code:-000}"; then
+            pass "this host -> https://$dns/ $via (the WAF, through tailscale serve; HTTP $code)"
         else
-            flunk "this seat gets no SSH banner from $dns:4242 over the tailnet" "make seat_tailnet"
+            flunk "this host cannot reach https://$dns/ $via" "$fix"
+        fi
+        if timeout 20 curl -s --max-time 15 ${proxy:+-x "$proxy"} "telnet://$dns:4242" </dev/null 2>/dev/null | head -c 7 | grep -q '^SSH-2.0'; then
+            pass "this host -> $dns:4242 $via (sshd over the tailnet)"
+        else
+            flunk "this host gets no SSH banner from $dns:4242 $via" "$fix"
         fi
     else
         flunk "the guest is not on the tailnet (${state:-no answer})" "make tailnet"

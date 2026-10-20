@@ -26,9 +26,15 @@
 # THE VALUES never reach argv, a log or the terminal: secret_get pipes each into
 #   `42ctl env secret set` on stdin, `get` writes into a pipe read by
 #   secret_set. The keystore passphrase is FT_PASSPHRASE: from the environment,
-#   else from 42ctl's own ~/.config/42ctl/secrets/*.env, else
+#   else from 42ctl's own ~/.config/42ctl/secrets/*.env or secrets.env, else
 #   VAULT42_KEYSTORE_PASSPHRASE in the secrets file, else asked once on the
 #   terminal -- exported, never on a command line, so 42ctl does not ask per key.
+#
+# AN EXPIRED SESSION IS RENEWED, NOT MISREAD: `42ctl auth status` still says
+#   "logged in" when the session has expired, and every env verb then fails
+#   on HTTP 401 -- which a pull on 2026-10-20 reported as "nothing to read at
+#   .../index". On a 401 the login is redone once from the same credential
+#   files (FT_EMAIL, FT_TENANT, and FT_PASSWORD through the environment).
 #
 # Caveat: the index is read before a push to keep the names a narrower push
 # (KEYS=) did not touch; when that read fails for a reason other than "nothing
@@ -48,16 +54,17 @@ v42() {
     "$V42" env secret "$1" --org "$ORG" --project "$PROJECT" --env "$ENV_NAME" "$PREFIX/$2"
 }
 
-# FT_PASSPHRASE from 42ctl's own credential files (~/.config/42ctl/secrets/
-# *.env, KEY=VALUE, where the 42ctl setup leaves it): read with sed, never
+# ctl_value KEY: KEY from 42ctl's own credential files, where its setup leaves
+# them: ~/.config/42ctl/secrets/*.env, or the single secrets.env beside that
+# directory (the datacenter seat, 2026-10-20). KEY=VALUE, read with sed, never
 # sourced -- the same files hold the vault42 password. On 2026-10-16 a push
-# without it exported failed on "could not unlock keystore" although the
-# passphrase sat right there.
-ctl_passphrase() {
-    local file value
-    for file in "${B2B_42CTL_SECRETS:-$HOME/.config/42ctl/secrets}"/*.env; do
+# without FT_PASSPHRASE exported failed on "could not unlock keystore"
+# although the passphrase sat right there.
+ctl_value() {
+    local base="${B2B_42CTL_SECRETS:-$HOME/.config/42ctl/secrets}" file value
+    for file in "$base"/*.env "$base.env"; do
         [ -f "$file" ] || continue
-        value=$(sed -n 's/^\(export \)\{0,1\}FT_PASSPHRASE=//p' "$file" | tail -n1)
+        value=$(sed -n "s/^\(export \)\{0,1\}$1=//p" "$file" | tail -n1)
         value=${value#[\"\']}
         value=${value%[\"\']}
         [ -n "$value" ] && printf '%s' "$value" && return 0
@@ -69,7 +76,7 @@ passphrase() {
     [ -n "${FT_PASSPHRASE:-}" ] && return 0
     # 42ctl's file first: it is the one 42ctl's setup rewrites, and on
     # 2026-10-16 the secrets file still carried an older passphrase.
-    FT_PASSPHRASE=$(ctl_passphrase) || FT_PASSPHRASE=$(secret_get VAULT42_KEYSTORE_PASSPHRASE)
+    FT_PASSPHRASE=$(ctl_value FT_PASSPHRASE) || FT_PASSPHRASE=$(secret_get VAULT42_KEYSTORE_PASSPHRASE)
     if [ -z "$FT_PASSPHRASE" ] && [ -t 0 ]; then
         printf 'vault42 keystore passphrase: ' >&2
         IFS= read -rs FT_PASSPHRASE
@@ -77,6 +84,21 @@ passphrase() {
     fi
     [ -n "$FT_PASSPHRASE" ] || die "no keystore passphrase: export FT_PASSPHRASE, or run from a terminal"
     export FT_PASSPHRASE
+}
+
+# session: renew an expired 42ctl session (HTTP 401) once, from ctl_value.
+session() {
+    local err email tenant
+    err=$(v42 get index 2>&1 >/dev/null) && return 0
+    case "$err" in *"HTTP 401"*) ;; *) return 0 ;; esac
+    if ! email=$(ctl_value FT_EMAIL) || ! tenant=$(ctl_value FT_TENANT) || ! FT_PASSWORD=$(ctl_value FT_PASSWORD); then
+        die "the 42ctl session expired (HTTP 401): 42ctl auth login --password --email <you> --tenant <tenant>"
+    fi
+    export FT_PASSWORD
+    "$V42" auth login --password --email "$email" --tenant "$tenant" </dev/null >/dev/null 2>&1 ||
+        die "the 42ctl session expired and the login was refused: 42ctl auth login --password --email <you> --tenant $tenant"
+    unset FT_PASSWORD
+    info "42ctl session expired: renewed"
 }
 
 # shared_names [KEY...]: the names given, else every KEY of the secrets file;
@@ -155,10 +177,12 @@ action="${1:-}"
 case "$action" in
 push)
     passphrase
+    session
     push "$@"
     ;;
 pull)
     passphrase
+    session
     pull "$@"
     ;;
 *) die "usage: team_vault.sh push|pull [KEY...]" ;;

@@ -61,7 +61,10 @@ DOMAIN="${INCEPTION_DOMAIN:-$(b2b_get B2B_LOGIN).42.fr}"
 # made up here would forward into a closed port. The host port is only a
 # preference, used when the VM has no rule yet; an existing rule always wins,
 # so a port moved to dodge a clash is respected. create_custom_iso.sh refuses
-# an Inception build whose config lacks one of the four.
+# an Inception build whose config lacks one of the three. `http` (grobase's
+# plaintext WAF, mapped as the domain's port 80) is optional: profiles/
+# server.toml has none, since grobase binds 8880 to the guest's loopback when
+# remote access is on (2026-10-19) and a forward there answered nothing.
 read -r PREF_HTTPS_PORT GUEST_HTTPS <<<"$(b2b_forward inception-https)"
 read -r PREF_STATIC_PORT GUEST_STATIC <<<"$(b2b_forward inception-static)"
 read -r PREF_HTTP_PORT GUEST_HTTP <<<"$(b2b_forward http)"
@@ -202,7 +205,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/bin/env python3 ${PROXY_BIN} --port ${PROXY_PORT} --domain ${DOMAIN} \
-    --map 443:${https_port} --map 80:${http_port} \
+    --map 443:${https_port}${http_port:+ --map 80:${http_port}} \
     --map ${P_ADMINER:-8081}:${P_ADMINER:-8081} \
     --map ${static_port}:${static_port} --map ${https_port}:${https_port}
 Restart=always
@@ -243,7 +246,7 @@ UNITEOF
         sleep 0.5
     fi
     nohup /usr/bin/env python3 "$PROXY_BIN" --port "$PROXY_PORT" --domain "$DOMAIN" \
-        --map "443:${https_port}" --map "80:${http_port}" \
+        --map "443:${https_port}" ${http_port:+--map "80:${http_port}"} \
         --map "${P_ADMINER:-8081}:${P_ADMINER:-8081}" \
         --map "${static_port}:${static_port}" --map "${https_port}:${https_port}" \
         >"$PROXY_DIR/inception-proxy.log" 2>&1 </dev/null &
@@ -647,7 +650,7 @@ configure_chromium() {
     # the browser believes it is talking to :443 and the connection lands on the
     # forwarded host port instead.
     rules="MAP ${DOMAIN}:443 127.0.0.1:${https_port}"
-    rules="${rules},MAP ${DOMAIN}:80 127.0.0.1:${http_port}"
+    [ -z "$http_port" ] || rules="${rules},MAP ${DOMAIN}:80 127.0.0.1:${http_port}"
     rules="${rules},MAP ${DOMAIN}:${static_port} 127.0.0.1:${static_port}"
     [ -n "${P_ADMINER:-}" ] && rules="${rules},MAP ${DOMAIN}:${P_ADMINER} 127.0.0.1:${P_ADMINER}"
 
@@ -718,7 +721,7 @@ exec curl \\
     --resolve "${DOMAIN}:${static_port}:127.0.0.1" \\
     --resolve "${DOMAIN}:80:127.0.0.1" \\
     --connect-to "${DOMAIN}:443:127.0.0.1:${https_port}" \\
-    --connect-to "${DOMAIN}:80:127.0.0.1:${http_port}" \\
+    --connect-to "${DOMAIN}:80:127.0.0.1:${http_port:-80}" \\
     "\$@"
 CURLEOF
     chmod +x "$CURL_WRAPPER"
@@ -739,15 +742,16 @@ if [ "$ACTION" = "undo" ]; then
     exit 0
 fi
 
-if [ -z "$GUEST_HTTPS" ] || [ -z "$GUEST_STATIC" ] || [ -z "$GUEST_HTTP" ] || [ -z "$GUEST_ADMINER" ]; then
-    printf "  Inception needs inception-https, http, inception-static and inception-adminer in\n" >&2
+if [ -z "$GUEST_HTTPS" ] || [ -z "$GUEST_STATIC" ] || [ -z "$GUEST_ADMINER" ]; then
+    printf "  Inception needs inception-https, inception-static and inception-adminer in\n" >&2
     printf "  [network] forwards (born2root.toml); the guest's firewall opens only those.\n" >&2
     exit 1
 fi
 if have_vm; then
     P_HTTPS=$(ensure_forward inception-https "$PREF_HTTPS_PORT" "$GUEST_HTTPS")
     P_STATIC=$(ensure_forward inception-static "$PREF_STATIC_PORT" "$GUEST_STATIC")
-    P_HTTP=$(ensure_forward http "$PREF_HTTP_PORT" "$GUEST_HTTP")
+    P_HTTP=""
+    [ -z "$GUEST_HTTP" ] || P_HTTP=$(ensure_forward http "$PREF_HTTP_PORT" "$GUEST_HTTP")
     P_ADMINER=$(ensure_forward inception-adminer "$PREF_ADMINER_PORT" "$GUEST_ADMINER")
     ok "NAT forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}  adminer→${P_ADMINER}"
 elif [ "$(vm_backend)" = "qemu" ]; then
@@ -756,13 +760,13 @@ elif [ "$(vm_backend)" = "qemu" ]; then
     # just read the map qemu_vm.sh published and use it.
     P_HTTPS=$(vm_forward_port inception-https) || P_HTTPS="$PREF_HTTPS_PORT"
     P_STATIC=$(vm_forward_port inception-static) || P_STATIC="$PREF_STATIC_PORT"
-    P_HTTP=$(vm_forward_port http) || P_HTTP="$PREF_HTTP_PORT"
+    P_HTTP=$(vm_forward_port http) || P_HTTP="${PREF_HTTP_PORT:-}"
     P_ADMINER=$(vm_forward_port inception-adminer) || P_ADMINER="$PREF_ADMINER_PORT"
     ok "QEMU forwards: https→${P_HTTPS}  static→${P_STATIC}  http→${P_HTTP}  adminer→${P_ADMINER}"
 else
     P_HTTPS="$PREF_HTTPS_PORT"
     P_STATIC="$PREF_STATIC_PORT"
-    P_HTTP="$PREF_HTTP_PORT"
+    P_HTTP="${PREF_HTTP_PORT:-}"
     warn "no VM found for '$VM_NAME' (neither VirtualBox nor QEMU) — assuming default ports"
 fi
 
