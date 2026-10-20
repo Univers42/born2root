@@ -430,12 +430,13 @@ feature_env --conf >"$ISO_DIR/features.conf" ||
 feature_env --resolve | sed 's/^/    /'
 echo "  ✓ features.conf staged — $(grep -c '=on$' "$ISO_DIR/features.conf") feature(s) on"
 
-# Inception's host access (run at the very end of `make all`) reads its four
+# Inception's host access (run at the very end of `make all`) reads its three
 # ports from [network] forwards, the list the guest's firewall opens; without
 # them the browser side would point at ports UFW keeps closed. Refuse here,
-# before the install, rather than 20 minutes in.
+# before the install, rather than 20 minutes in. `http` is optional
+# (inception_host_access.sh says why).
 if feature_env --has inception-data; then
-    for INCEPTION_FWD in inception-https http inception-static inception-adminer; do
+    for INCEPTION_FWD in inception-https inception-static inception-adminer; do
         if ! b2b_forward "$INCEPTION_FWD" >/dev/null; then
             echo "Error: Inception is in this build but [network] forwards has no '$INCEPTION_FWD'" >&2
             echo "       (born2root.toml, or the B2B_CONFIG profile). Nothing was built." >&2

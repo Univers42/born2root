@@ -66,4 +66,22 @@ out=$(
     echo "fail=$fail"
 )
 check "probe: nothing on the port flunks" "$(printf '%s' "$out" | grep -c -e 'nothing answers on http://10.12.19.6:8082' -e '^fail=1$')" 2
+
+# The tailnet path: this host's own tailscaled when it is logged in (the
+# datacenter host, 2026-10-20), else the seat's SOCKS5 proxy.
+cat >"$TMP/bin/tailscale" <<'EOF'
+#!/bin/sh
+echo "{\"BackendState\": \"$TS_STATE\"}"
+EOF
+chmod +x "$TMP/bin/tailscale"
+export TS_STATE=Running
+check "tailnet: this host logged in -> direct, no proxy" "$(tailnet_proxy)" ""
+TS_STATE=NeedsLogin
+check "tailnet: this host logged out -> the seat's proxy" "$(tailnet_proxy)" "socks5h://localhost:1055"
+cat >"$TMP/bin/tailscale" <<'EOF'
+#!/bin/sh
+echo "failed to connect to local tailscaled" >&2
+exit 1
+EOF
+check "tailnet: a CLI but no daemon here -> the seat's proxy" "$(tailnet_proxy)" "socks5h://localhost:1055"
 exit "$fail"
