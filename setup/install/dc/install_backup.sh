@@ -375,6 +375,12 @@ if [ -d /opt/grobase ]; then
     else
         echo "restore: WARN make env failed"
     fi
+    # make env ran as root and left .env root:root 600, while install_grobase.sh
+    # gives the tree to the login, whose tools read it: on 2026-10-20 groot's
+    # `make link` failed "cat: /opt/grobase/.env: Permission denied" after a restore.
+    for f in /opt/grobase/.env /opt/grobase/.env.prev; do
+        [ ! -e "$f" ] || chown --reference=/opt/grobase "$f" || echo "restore: WARN $f stays root's: the login cannot read it"
+    done
     sed 's/^/restore:   /' "$work/make-env.err"
     (cd /opt/grobase && make --no-print-directory certs >/dev/null 2>&1) && echo "restore: certs re-issued from the restored CA" || echo "restore: WARN make certs failed"
 fi

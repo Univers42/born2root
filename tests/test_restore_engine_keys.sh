@@ -19,7 +19,8 @@
 #
 # WHAT IS CHECKED
 #   b2b-restore loads the newest snapshot of all (or the id it is given, and
-#   refuses one that is not hex), keeps the guest's value for the engine keys whose volume it
+#   refuses one that is not hex), gives the .env it re-assembles as root back
+#   to /opt/grobase's owner, keeps the guest's value for the engine keys whose volume it
 #   does not reload, takes everything else from the snapshot, and exits 1
 #   when b2b-stack-health fails or is missing; b2b-backup exits 1 naming an
 #   engine that runs and was not dumped, and leaves that verdict in a
@@ -140,7 +141,15 @@ cat >"$TMP/bin/make" <<'EOF'
 #!/bin/sh
 printf 'make %s\n' "$*" >>"$STUB_DIR/order.log"
 case " $* " in *" certs "*) cat certs/ca.key >"$STUB_DIR/ca.at.certs" 2>/dev/null ;; esac
+case " $* " in *" env "*) : >>.env ;; esac
 exit 0
+EOF
+# chown logged, then done for real: no root here, so the owner cannot be
+# read back, only the call that sets it.
+cat >"$TMP/bin/chown" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STUB_DIR/chown.log"
+exec /bin/chown "$@"
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/sleep"
 # install_grobase.sh's helper: the profile's [dc.grobase_env] into .env.local.
@@ -191,6 +200,8 @@ echo 0 >"$TMP/health"
 restore
 check "restore, healthy stack: exit 0" "$rc" 0
 check "the newest snapshot of all is loaded, not the first group's" "$(cat "$TMP/restored.id")" 85fcb9b4
+check "the .env make env rewrote goes back to /opt/grobase's owner" \
+    "$(grep -c "^--reference=$TMP/opt/grobase $TMP/opt/grobase/.env\$" "$TMP/chown.log")" 1
 check "Mongo keeps this guest's password (its volume is not reloaded)" "$(value MONGO_INITDB_ROOT_PASSWORD)" guest-mongo
 check "Postgres takes the snapshot's (its cluster is rebuilt from the dump)" "$(value POSTGRES_PASSWORD)" snap-pg
 check "MySQL takes the snapshot's (its volume is rebuilt from the dump too)" "$(value MYSQL_ROOT_PASSWORD)" snap-mysql
