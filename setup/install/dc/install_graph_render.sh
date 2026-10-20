@@ -35,6 +35,14 @@
 #   afterwards can still take the slot's memory back; the container is then
 #   killed mid-render and restarted, which b2b-stack-health reports.
 #
+# WHY ITS OWN NETWORK, NOT DOCKER'S DEFAULT BRIDGE
+#   A second dockerd in the guest started with --bridge=none (the osionos IDE
+#   plane's docker-ide) deletes any interface named docker0 when it starts,
+#   and the main daemon never recreates it. On 2026-10-20 that left
+#   graph-render "healthy" (its HEALTHCHECK runs inside the container) while
+#   every connection to 127.0.0.1:8095 was reset. A user-defined network is a
+#   br-<id> bridge that no other daemon touches.
+#
 # USAGE
 #   sudo ./install_graph_render.sh            pull; start or reload if a key exists
 #   sudo GRAPH_RENDER_KEY_LINE='ops <sha256>' ./install_graph_render.sh
@@ -49,6 +57,7 @@ DIR="${GRAPH_RENDER_DIR:-/etc/graph-render}"
 MEMINFO="${GRAPH_RENDER_MEMINFO:-/proc/meminfo}"
 LINE="${GRAPH_RENDER_KEY_LINE:-}"
 NAME=graph-render
+NET=graph-render
 # PER_SLOT_BYTES + BASE_BYTES from graph-server's src/config/slots.rs, in kB.
 SLOT_KB=$(((4635677069 + 11534336) / 1024))
 KEY_RE='^[A-Za-z0-9._-]+ [0-9a-f]{64}$'
@@ -97,7 +106,7 @@ fi
 
 # A label records what the container was started with: the same spec and
 # running means a reload is enough, anything else is a new container.
-spec="$IMAGE $PORT $MEM"
+spec="$IMAGE $NET $PORT $MEM"
 have=$(docker inspect -f '{{index .Config.Labels "b2b.spec"}} {{.State.Running}}' "$NAME" 2>/dev/null || true)
 if [ "$have" = "$spec true" ]; then
     docker kill -s HUP "$NAME" >/dev/null || die "cannot signal $NAME"
@@ -108,7 +117,9 @@ else
         die "$((${avail:-0} / 1024)) MiB available, one render slot needs $((SLOT_KB / 1024)) MiB: raise vm.ram_mb in the build's profile, then make qemu_restart"
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
-    docker run -d --name "$NAME" --restart unless-stopped --label "b2b.spec=$spec" \
+    docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null ||
+        die "cannot create the docker network $NET"
+    docker run -d --name "$NAME" --network "$NET" --restart unless-stopped --label "b2b.spec=$spec" \
         --memory "$MEM" --memory-swap "$MEM" --read-only --cap-drop ALL \
         --security-opt no-new-privileges --group-add "$GID" \
         -v "$DIR:/run/graph:ro" -e GRAPH_API_KEYS_FILE=/run/graph/keys \
