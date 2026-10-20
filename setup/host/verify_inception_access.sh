@@ -61,8 +61,12 @@ if [ -n "$P_STATIC" ]; then
 else
     fail "no 'inception-static' NAT rule"
 fi
-: "${P_HTTPS:=8444}"
-: "${P_STATIC:=8090}"
+# No rule yet: keep probing the configured preference, never a literal that
+# drifts from born2root.toml.
+read -r PREF_HTTPS _ <<<"$(b2b_forward inception-https)"
+read -r PREF_STATIC _ <<<"$(b2b_forward inception-static)"
+: "${P_HTTPS:=$PREF_HTTPS}"
+: "${P_STATIC:=$PREF_STATIC}"
 
 # ── 2/3. The domain over HTTPS, as the browser will ask for it ──────────────
 head_ "Serving the real domain to the host"
