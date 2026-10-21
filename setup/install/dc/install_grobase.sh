@@ -230,6 +230,24 @@ if ! grep -q 'ALLOWED_METHODS' "$GATEWAY_YML"; then
 fi
 grep -q 'ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"' "$GATEWAY_YML" || die "gateway.yml: the WAF method patch did not land"
 
+# ── third local patch: the WAF's TLS port on loopback and the NAT address ───
+# grobase publishes "${WAF_HTTPS_PORT:-8443}:443" on 0.0.0.0. groot's public
+# plane funnels its app on the same port number (tailscale funnel
+# --https=8443), and tailscaled listens on <tailnet IP>:8443 before dockerd
+# restores its containers at boot: the wildcard bind then fails with
+# "address already in use" and the WAF is left attached to no network, so
+# every API call of the public app failed after baas came back from an OOM
+# kill (2026-10-21). The WAF is dialled on the guest loopback (Funnel and
+# serve :443, in-guest tools) and on the NAT address (the host's `https`
+# forward), nowhere else, so it binds exactly those two.
+# Caveat: 10.0.2.15 is the guest address of QEMU's slirp and VirtualBox's
+# NAT by default; a guest on another NAT network loses the host forward.
+for yml in orchestrators/compose/base/gateway.yml orchestrators/compose/docker-compose.*.yml; do
+    [ -f "$yml" ] || continue
+    sed -i -E 's/^(\s+- ")(\$\{WAF_HTTPS_PORT(:-[0-9]+)?\}:443")$/\1127.0.0.1:\2\n\110.0.2.15:\2/' "$yml"
+    ! grep -qE '^\s+- "\$\{WAF_HTTPS_PORT[^}]*\}:443"' "$yml" || die "$yml still publishes the WAF's TLS port on 0.0.0.0 after the patch"
+done
+
 # ── extra CORS origins, from [dc] cors_origins in the profile ───────────────
 # kong.yml renders one FRONTEND origin from .env at container start. A test
 # lab or a teammate's frontend on another port needs its own list item, and

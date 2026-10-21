@@ -207,7 +207,7 @@ interval_min = 10
 # either.
 forwards = [
   { name = "ssh",   guest = 4242, host = 4242 },
-  # grobase's WAF, on the guest's 0.0.0.0:8443. expose = true: the host binds
+  # grobase's WAF, on the guest's 10.0.2.15:8443. expose = true: the host binds
   # it on every interface, so the LAN and Wi-Fi reach the WAF directly (the
   # tailnet reaches it through tailscale serve); every other forward stays on
   # 127.0.0.1. No `http`: with remote access on, grobase binds the WAF's

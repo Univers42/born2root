@@ -63,8 +63,9 @@ if on dc-gateway; then
         "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8000/ | grep -E '^[1-5][0-9][0-9]\$'"
     # The security property of the whole design: nothing but loopback, with
     # ONE named exception. grobase's WAF is the door -- TLS, rules, then
-    # Kong -- and publishes 8880/8443 on every interface by design; that is
-    # what a tailnet peer is meant to reach. Kong itself, every engine and
+    # Kong -- and publishes its TLS port on the guest loopback and the NAT
+    # address (install_grobase.sh's third patch), which the host forward and
+    # tailscale serve dial. Kong itself, every engine and
     # the observability stack stay on 127.0.0.1. A published 0.0.0.0:PORT
     # on any other container is a hole in the wall.
     hard "no container but the WAF publishes a port off loopback" \
