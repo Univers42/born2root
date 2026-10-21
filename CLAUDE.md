@@ -48,6 +48,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
 | The private plane: MagicDNS name + certificate + serve -> WAF + CORS origin | `make tailnet`, `make tailnet_status`, `make tailnet_down` (`setup/host/tailnet.sh`) |
 | Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
+| Apply groot's `models/` in the guest (`CHECK=1` reports only) | `make osionos_models GROOT_DIR=…` |
 | Mint a realtime publish JWT / apply CORS origins | `make realtime_token`, `make grobase_cors` |
 | Provision/re-run a datacenter component in the guest | `make grobase`, `make edge`, `make backup_install` |
 

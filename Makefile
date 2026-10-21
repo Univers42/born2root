@@ -334,7 +334,7 @@ C_CYAN   := \033[36m
         graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code claude_debug ai \
         var_gc edge grobase backup_install grow_root ide_disk verify_platform baas_access baas_access_status baas_access_undo \
-        tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status \
+        tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status osionos_models \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
         qemu_create qemu_grow_disk qemu_ide_disk_create qemu_kill qemu_restart qemu_reset qemu_pause qemu_resume qemu_unlock \
@@ -1258,6 +1258,11 @@ realtime_token:
 grobase_cors:
 	@$(MAKE_BIN) --no-print-directory qemu_ssh CMD='bash -s -- $(call b2b_conf,B2B_DC_CORS_ORIGINS)' < setup/host/grobase_cors_guest.sh
 
+# groot's models runner, shipped to the guest and run there (see the header
+# of setup/host/osionos_models.sh). GROOT_DIR defaults to ../groot.
+osionos_models:
+	@$(DC_ENV) GROOT_DIR="$(GROOT_DIR)" $(SCRIPT_SH) setup/host/osionos_models.sh $(if $(CHECK),--check)
+
 verify_platform:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/verify_platform.sh
 # One verdict: verify_platform, then the guest's reach, every forward on the
@@ -1311,8 +1316,9 @@ restore:
 # on a guest without dc-graph-render). Tailscale needs a REUSABLE key in
 # .b2b-secrets; without one that step warns and goes on. tailnet then puts
 # the private URL back (serve, CORS, grobase's address list); it runs AFTER
-# the restore, whose .env.local still names the old node. realtime_token
-# re-mints the socket token under the restored JWT secret; funnel_up opens
+# the restore, whose .env.local still names the old node. osionos_models
+# lays groot's tables over whatever the restore brought (a first build has
+# none; the bridge answers 503 without them). realtime_token re-mints the socket token under the restored JWT secret; funnel_up opens
 # the public plane when the profile says [dc] funnel = true. A pending
 # console switch in any of the three warns and the rest continues.
 datacenter:
@@ -1325,6 +1331,8 @@ datacenter:
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
 	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
+	@$(MAKE_BIN) --no-print-directory osionos_models B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! osionos_models did not finish (no groot checkout? GROOT_DIR=) -- the rest continues; rerun make osionos_models\n'
 	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
 	@$(MAKE_BIN) --no-print-directory realtime_token B2B_CONFIG="$(B2B_CONFIG)" || \
