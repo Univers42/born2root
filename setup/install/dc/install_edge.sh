@@ -74,6 +74,50 @@ if [ "$NETMESH" = 1 ]; then
         apt-get install -y -qq tailscale || die "apt could not install tailscale"
     fi
     systemctl enable --now tailscaled >/dev/null 2>&1 || die "tailscaled did not start"
+    # A node control has dropped stays dropped: on 2026-10-21 a network blip
+    # left baas's DERP link back but its control long-poll stuck ("map
+    # response long-poll timed out!" every 2 min), the node `offline` to
+    # itself, and Funnel resetting every visitor's TLS for 10 minutes until
+    # tailscaled was restarted by hand (back in 2 s). A minute timer does that
+    # restart; tests/test_tailscale_watchdog.sh cuts the script out by its
+    # marker, so keep the `cat >` line and WDEOF as they are.
+    cat >/usr/local/sbin/b2b-tailscale-watchdog <<'WDEOF'
+#!/bin/sh
+# b2b-tailscale-watchdog -- written by install_edge.sh, run every minute by
+# b2b-tailscale-watchdog.timer: restart tailscaled once the node has reported
+# itself `offline` for 3 checks in a row while the network is up.
+# Caveat: `offline` is the node's own view of control. A Funnel ingress that
+# fails while control is healthy is not caught (under-reports); a control
+# reconnect slower than 3 minutes gets a restart it did not need (over-reports,
+# ~2 s without tailnet). At most one restart per 10 minutes.
+state=${B2B_TSWD_STATE:-/run/b2b-tailscale-watchdog}
+mkdir -p "$state"
+case "$(tailscale status --peers=false 2>/dev/null | head -n 1)" in
+*" offline"*) count=$(($(cat "$state/count" 2>/dev/null || echo 0) + 1)) ;;
+*)
+    echo 0 >"$state/count"
+    exit 0
+    ;;
+esac
+echo "$count" >"$state/count"
+[ "$count" -ge 3 ] || exit 0
+# The network itself down: a restart cannot help, and would only add noise.
+curl -s -m 10 -o /dev/null 'https://controlplane.tailscale.com/key?v=1' || exit 0
+now=$(date +%s)
+[ $((now - $(cat "$state/last" 2>/dev/null || echo 0))) -ge 600 ] || exit 0
+echo "$now" >"$state/last"
+echo 0 >"$state/count"
+logger -t b2b-tailscale-watchdog "offline for $count checks with the network up: restarting tailscaled"
+systemctl restart tailscaled
+WDEOF
+    chmod 0755 /usr/local/sbin/b2b-tailscale-watchdog
+    printf '[Unit]\nDescription=Restart tailscaled when control has dropped this node\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/b2b-tailscale-watchdog\n' \
+        >/etc/systemd/system/b2b-tailscale-watchdog.service
+    printf '[Unit]\nDescription=b2b-tailscale-watchdog every minute\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=1min\n[Install]\nWantedBy=timers.target\n' \
+        >/etc/systemd/system/b2b-tailscale-watchdog.timer
+    systemctl daemon-reload
+    systemctl enable --now b2b-tailscale-watchdog.timer >/dev/null 2>&1 ||
+        log "the tailscaled watchdog timer did not start"
     ufw allow in on tailscale0 comment 'tailnet' >/dev/null 2>&1 || log "ufw rule for tailscale0 not applied (ufw absent?)"
     if [ -n "${EDGE_TS_AUTHKEY:-}" ]; then
         # The key is passed on the command line to tailscale only, in this

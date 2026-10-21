@@ -9,8 +9,9 @@
 # hellish, which does not keep `\(` inside double quotes the way sed needs
 # it ("unterminated `s' command" was the whole error). The sed program is
 # single-quoted here for the same reason, the origin spliced in between.
+# GROBASE_DIR exists for tests/test_grobase_cors_guest.sh.
 set -eu
-cd /opt/grobase
+cd "${GROBASE_DIR:-/opt/grobase}"
 f=infra/docker/services/kong/conf/kong.yml
 for origin in "$@"; do
     if ! grep -qF -- "- ${origin}" "$f"; then
@@ -26,19 +27,24 @@ grep -nE '^\s+- (http|__KONG)' "$f"
 # opened for any website that asked (found by the Laboratory bench's stranger
 # origin, 2026-09-20). grobase reads REALTIME_ALLOWED_ORIGINS from .env;
 # EMPTY there means "check nothing", which is the old behaviour.
-origins=$(sed -n 's/^KONG_CORS_ORIGIN_[A-Z]*=//p' .env | grep . | tr '\n' ',')
-for origin in "$@"; do
-    case ",${origins}" in
-    *",${origin},"*) ;;
-    *) origins="${origins}${origin}," ;;
-    esac
-done
+# The list already in place is kept and added to, never rebuilt: rebuilding it
+# from Kong's origins dropped what the profile and `make tailnet` had added,
+# and groot's public app got a 403 handshake (2026-10-21). .env.local (the
+# profile's copy, which `make env` assembles .env from) is kept in step.
+origins=$({
+    sed -n 's/^REALTIME_ALLOWED_ORIGINS=//p' .env.local .env 2>/dev/null | tr ',' '\n'
+    sed -n 's/^KONG_CORS_ORIGIN_[A-Z]*=//p' .env
+    printf '%s\n' "$@"
+} | grep . | awk '!seen[$0]++' | tr '\n' ',')
 origins=${origins%,}
-if grep -q '^REALTIME_ALLOWED_ORIGINS=' .env; then
-    sed -i 's|^REALTIME_ALLOWED_ORIGINS=.*|REALTIME_ALLOWED_ORIGINS='"${origins}"'|' .env
-else
-    printf 'REALTIME_ALLOWED_ORIGINS=%s\n' "$origins" >>.env
-fi
+for envfile in .env .env.local; do
+    [ -f "$envfile" ] || continue
+    if grep -q '^REALTIME_ALLOWED_ORIGINS=' "$envfile"; then
+        sed -i 's|^REALTIME_ALLOWED_ORIGINS=.*|REALTIME_ALLOWED_ORIGINS='"${origins}"'|' "$envfile"
+    elif [ "$envfile" = .env ]; then
+        printf 'REALTIME_ALLOWED_ORIGINS=%s\n' "$origins" >>.env
+    fi
+done
 printf '[grobase] realtime: sockets allowed from %s\n' "$origins"
 
 # Recreate that one service with the exact compose invocation it was created

@@ -271,6 +271,14 @@ funnel = true
 # GROBASE_PUBLIC_ADDRESSES (the tailnet name and address; grobase's `make
 # expose` writes it) and every secret (the secrets file and the snapshot's
 # .env.local carry those; --check refuses a secret-looking name).
+# REALTIME_ALLOWED_ORIGINS also names the two origins groot's public osionos
+# app is served from (Funnel :8443, and its Cloudflare Pages project): a
+# browser handshake from any other origin is refused with 403, and the app
+# fell back to polling in a reconnect loop (2026-10-21). A curl without an
+# Origin header still gets 101, so only a browser shows it.
+# REALTIME_NAMESPACE_FALLBACK=deny: under SECURITY_MODE=baseline a token with
+# no `namespaces` claim is otherwise granted every topic; every token the
+# bridge mints names its topics, so deny costs nothing and closes that door.
 [dc.grobase_env]
 DATA_PLANE_ADMIN_BYPASS         = "1"
 DATA_PLANE_FEATURES             = "--features dynamodb"
@@ -278,7 +286,8 @@ DATA_PLANE_IMAGE_SUFFIX         = "-dynamodb"
 DYNAMODB_ENGINE_ENABLED         = "1"
 DATA_PLANE_PER_TABLE_ISOLATION  = "1"
 RUST_DATA_PLANE_FORWARD_ENGINES = "postgresql,cockroachdb,mongodb,mysql,mariadb,redis,sqlite,mssql,http,dynamodb"
-REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://baas.tail10f2ea.ts.net"
+REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://baas.tail10f2ea.ts.net,https://baas.tail10f2ea.ts.net:8443,https://osionos.pages.dev"
+REALTIME_NAMESPACE_FALLBACK     = "deny"
 ORG_MODEL_ENABLED               = "true"
 RBAC_HIERARCHY_ENABLED          = "true"
 ENVIRONMENTS_ENABLED            = "true"
