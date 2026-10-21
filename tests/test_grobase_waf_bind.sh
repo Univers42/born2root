@@ -51,8 +51,7 @@ services:
       - "127.0.0.1:${WAF_HTTP_PORT:-8880}:80"
       - "${WAF_HTTPS_PORT:-8443}:443"
 YML
-want='      - "127.0.0.1:${WAF_HTTPS_PORT:-8443}:443"
-      - "10.0.2.15:${WAF_HTTPS_PORT:-8443}:443"'
+want=$(printf '      - "%s:${WAF_HTTPS_PORT:-8443}:443"\n' 127.0.0.1 10.0.2.15)
 
 # shellcheck disable=SC2317,SC2329 # called by the eval'd loop
 die() {
