@@ -13,12 +13,19 @@
 # PRE-AUTHORIZED in the admin console: the node vanishes from the tailnet
 # when the guest is rebuilt, and nothing has to be approved by hand.
 #
+# The stored key is checked against the API first, as make tailnet does
+# (ts_api.sh): the VM unit runs this after every start, with no terminal to
+# ask for a key on, so an expired or revoked TS_AUTHKEY must be replaced by a
+# minted one rather than leave the node logged out.
+#
 #   make tailscale                  log in (idempotent: an up node stays up)
 #   make tailscale TS_AUTHKEY=...   one-shot key, not saved
 set -u
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
+# shellcheck source=setup/host/ts_api.sh
+. "$DC_ROOT/setup/host/ts_api.sh"
 
 dc_connect
 
@@ -33,7 +40,7 @@ Running)
     ;;
 esac
 
-key="${TS_AUTHKEY:-$(secret_get TS_AUTHKEY)}"
+key="${TS_AUTHKEY:-$(ts_live_authkey "born2root $VM_NAME")}"
 if [ -z "$key" ]; then
     if [ -t 0 ] && [ -t 1 ]; then
         printf "\n  Tailscale auth key (ephemeral, pre-authorized; from https://login.tailscale.com/admin/settings/keys)\n  key: "
