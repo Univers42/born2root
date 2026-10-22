@@ -7,10 +7,20 @@
 #   Linger on: systemd user units, in ~/.config/systemd/user (or
 #   $XDG_CONFIG_HOME/systemd/user):
 #     b2b-vm-<vm>.service      make qemu_start / make qemu_stop GRACEFUL=1, with
-#                              this checkout's B2B_CONFIG, VM_PATH and VM_NAME.
-#                              The unit baas ran by hand until 2026-10-13. It
-#                              never creates a VM, and a running VM is left
-#                              alone (qemu_vm.sh start says "already running").
+#                              this checkout's B2B_CONFIG, VM_PATH and VM_NAME
+#                              (and B2B_SECRETS when it is set: systemd never
+#                              reads the login shell's rc). The unit baas ran
+#                              by hand until 2026-10-13. It never creates a VM,
+#                              and a running VM is left alone (qemu_vm.sh start
+#                              says "already running"). It follows QEMU through
+#                              its pidfile and starts it again a minute after
+#                              it dies (the cron tick's job in the other mode):
+#                              baas was OOM-killed at 03:52 on 2026-10-22 and
+#                              stayed down until someone noticed, 9 h later,
+#                              long enough for the tailnet to drop its
+#                              ephemeral node. A VM with a tailnet.env (written
+#                              by make tailnet) runs make tailscale after each
+#                              start, which logs a dropped node back in.
 #     b2b-backup-<vm>.service  make backup, the same three values
 #     b2b-backup-<vm>.timer    hourly at :15; the guest's own snapshot runs at :03
 #   The VM unit is enabled, not started: starting it now would boot a stopped
@@ -93,6 +103,12 @@ for value in "$ROOT" "$CONFIG" "$VM_PATH" "$VM_NAME" "$MAKE_PATH" "$SH"; do
     esac
 done
 MAKE_ARGS=("B2B_CONFIG=$CONFIG" "VM_PATH=$VM_PATH" "VM_NAME=$VM_NAME")
+if [ -n "${B2B_SECRETS:-}" ]; then
+    case "$B2B_SECRETS" in
+    *[[:space:]%]*) die "'$B2B_SECRETS' holds a space or a %: a systemd unit or a crontab line cannot carry it as written; move it or rename it" ;;
+    esac
+    MAKE_ARGS+=("B2B_SECRETS=$B2B_SECRETS")
+fi
 ARGS="${MAKE_ARGS[*]}"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 VM_UNIT="b2b-vm-$VM_NAME.service"
@@ -325,20 +341,30 @@ install_units() {
     # with room to spare, and TimeoutStopSec=200 is STOP_GRACE=120 plus
     # qemu_vm.sh's own wait. A guest slower than that is killed by systemd: at
     # start the VM is left half-booted, at stop the engines lose power. Raise
-    # both here, together with STOP_GRACE, for a slower guest.
+    # both here, together with STOP_GRACE, for a slower guest. Restart gives up
+    # after three failed starts in an hour (a wrong LUKS passphrase must not
+    # loop), and a guest that powers itself off exits 0 and stays off.
+    local relogin=''
+    [ ! -f "$VM_DIR/tailnet.env" ] || relogin="ExecStartPost=-$MAKE_PATH tailscale $ARGS"
     put_unit "$VM_UNIT" <<EOF
-# $VM_UNIT -- the born2root VM "$VM_NAME", started when this host boots and
-# stopped gracefully when it shuts down. Written by setup/host/autostart.sh
-# (make autostart); edit the profile and rerun it rather than this file.
+# $VM_UNIT -- the born2root VM "$VM_NAME", started when this host boots,
+# started again when QEMU dies, and stopped gracefully when the host shuts
+# down. Written by setup/host/autostart.sh (make autostart); edit the profile
+# and rerun it rather than this file.
 [Unit]
 Description=born2root VM $VM_NAME
+StartLimitIntervalSec=3600
+StartLimitBurst=3
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=forking
+PIDFile=$VM_DIR/qemu.pid
 WorkingDirectory=$ROOT
 ExecStart=$MAKE_PATH qemu_start $ARGS
+$relogin
 ExecStop=$MAKE_PATH qemu_stop GRACEFUL=1 STOP_GRACE=120 $ARGS
+Restart=on-failure
+RestartSec=60
 TimeoutStartSec=900
 TimeoutStopSec=200
 

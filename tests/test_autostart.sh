@@ -60,7 +60,7 @@ chmod +x "$TMP"/bin/*
 UNITS="$TMP/config/systemd/user"
 run() { # [env...] -> exit code; output in $TMP/out
     : >"$TMP/calls"
-    env PATH="$TMP/bin:$PATH" XDG_CONFIG_HOME="$TMP/config" \
+    env PATH="$TMP/bin:$PATH" XDG_CONFIG_HOME="$TMP/config" B2B_SECRETS= \
         B2B_CONFIG=profiles/server.toml VM_PATH=/vm/store VM_NAME=baas "$@" \
         "${SCRIPT_SH:-bash}" setup/host/autostart.sh >"$TMP/out" 2>&1 && echo 0 || echo $?
 }
@@ -75,8 +75,12 @@ check "the VM unit starts the VM as the live one did" \
 check "... and stops it gracefully (GRACEFUL=1 STOP_GRACE=120)" \
     "$(sed -n 's/^ExecStop=//p' "$VM_UNIT")" "$MAKE_PATH qemu_stop GRACEFUL=1 STOP_GRACE=120 $ARGS"
 check "... from this checkout" "$(sed -n 's/^WorkingDirectory=//p' "$VM_UNIT")" "$ROOT"
-check "... oneshot, kept active, wanted at login/boot" \
-    "$(grep -cx 'Type=oneshot\|RemainAfterExit=yes\|WantedBy=default.target' "$VM_UNIT")" 3
+check "... follows QEMU by its pidfile, restarts it when it dies, wanted at login/boot" \
+    "$(grep -cx 'Type=forking\|PIDFile=/vm/store/baas/qemu.pid\|Restart=on-failure\|WantedBy=default.target' "$VM_UNIT")" 4
+check "... and gives up after three failed starts in an hour" \
+    "$(grep -cx 'StartLimitIntervalSec=3600\|StartLimitBurst=3' "$VM_UNIT")" 2
+check "... no tailnet relogin for a VM that was never on the tailnet" \
+    "$(grep -c '^ExecStartPost=' "$VM_UNIT" || true)" 0
 check "the backup timer fires hourly at :15 (the guest's own runs at :03)" \
     "$(sed -n 's/^OnCalendar=//p' "$UNITS/b2b-backup-baas.timer")" "*-*-* *:15:00"
 check "... running make backup for this VM" \
@@ -92,6 +96,18 @@ check "second run: exit 0" "$(run)" 0
 check "... nothing rewritten" "$(cmp -s "$TMP/unit.first" "$VM_UNIT" && echo same)" same
 check "... no daemon-reload" "$(grep -c 'daemon-reload' "$TMP/calls" || true)" 0
 check "... and says so" "$(grep -c 'unchanged' "$TMP/out")" 3
+
+# baas was OOM-killed on 2026-10-22 and down 9 h: the tailnet dropped its
+# ephemeral node. A VM that has a tailnet.env logs back in after each start,
+# with the secrets file the shell named (systemd never reads its rc).
+mkdir -p "$TMP/vms/baas" && : >"$TMP/vms/baas/tailnet.env"
+check "tailnet VM: exit 0" "$(run VM_PATH="$TMP/vms" B2B_SECRETS=/s/b2b-secrets)" 0
+check "... make tailscale after each start, failure tolerated, secrets carried" \
+    "$(sed -n 's/^ExecStartPost=//p' "$TMP/vms/../config/systemd/user/b2b-vm-baas.service")" \
+    "-$MAKE_PATH tailscale B2B_CONFIG=profiles/server.toml VM_PATH=$TMP/vms VM_NAME=baas B2B_SECRETS=/s/b2b-secrets"
+check "a secrets path with a space is refused" "$(run B2B_SECRETS='/s/my secrets')" 1
+cp "$TMP/unit.first" "$VM_UNIT"
+run >/dev/null
 
 # ── linger off: cron, and no root anywhere ─────────────────────────────────
 echo no >"$TMP/linger"
@@ -151,7 +167,7 @@ PIDFILE="$TMP/vms/baas/qemu.pid"
 HOLD="$TMP/vms/baas/.autostart-hold"
 tick() { # [--handover] -> how many times make ran; output in $TMP/out
     : >"$TMP/calls"
-    env PATH="$TMP/tickbin:$TMP/bin:$PATH" B2B_CONFIG=profiles/server.toml VM_PATH="$TMP/vms" VM_NAME=baas \
+    env PATH="$TMP/tickbin:$TMP/bin:$PATH" B2B_SECRETS= B2B_CONFIG=profiles/server.toml VM_PATH="$TMP/vms" VM_NAME=baas \
         B2B_KVM_DEV="${KVM:-$TMP/kvm}" B2B_BOOT_ID_FILE="$TMP/boot_id" \
         "${SCRIPT_SH:-bash}" setup/host/autostart.sh "${1:---tick}" >"$TMP/out" 2>&1
     grep -c '^make ' "$TMP/calls" || true
