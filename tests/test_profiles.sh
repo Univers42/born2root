@@ -69,7 +69,7 @@ check "server: docker on" "$(printf '%s\n' "$v" | grep -c '^feature=docker$')" 1
 # three forwards, which baas opens (inception-https beside the WAF's https).
 check "server: inception-data on" "$(printf '%s\n' "$v" | grep -c '^feature=inception-data$')" 1
 # The max tier's add-ons are on: server.toml runs max (package = "max") on
-# the baas host with ram_mb = 14336. On a 7.6 GB seat they stay off, since max
+# the baas host with ram_mb = 10240. On a 7.6 GB seat they stay off, since max
 # crash-looped mssql there and grobase puts it at 3128 MiB idle (2026-10-08).
 max_addons="dc-db-cockroach dc-db-mssql dc-observability"
 dc_rows=$(awk "/^MANIFEST='/,/^'\$/" generate/feature_profile.sh | grep -c '^dc-')
@@ -80,7 +80,8 @@ for f in $max_addons; do
 done
 check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^feature=var-gc$')" 1
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
-check "server: ram_mb 14336" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_RAM_MB)" 14336
+check "server: ram_mb 10240" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_RAM_MB)" 10240
+check "server: 4 vCPUs" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_CPUS)" 4
 check "server: an IDE disk of 40 GB" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_IDE_DISK_GB)" 40
 check "server: both authorized keys, from the profile alone" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --ssh-keys | grep -c '^dlesieur ssh-ed25519 ')" 2

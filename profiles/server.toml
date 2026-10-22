@@ -43,17 +43,22 @@
 #                seat. A profile that is meant to be reproducible does not
 #                leave that to a prompt.
 #
-#   [vm] ram_mb 14336, not "auto". auto is 25% of the host clamped to
-#                8192 MB, sized for a desktop guest: on this 31.9 GB seat
-#                it gave 7982 MB, grobase's stack used 5500 of it
-#                (2026-10-07, `free -m` in the guest) and 2238 MB was
-#                left, while one graph_render worker slot is 4.32 GiB
-#                inside its 8g container cap (graph_render
-#                scripts/service.sh). 14 GiB holds both; a fully touched
-#                guest still leaves this host 17593 MB (31929 - 14336, before
-#                QEMU's own overhead). qemu_vm.sh refuses a value above the
-#                host's RAM: a smaller seat lowers it here. A school seat's
-#                RAM is not measured yet (doc/rebuild-baas-at-school.md).
+#   [vm] ram_mb 10240 and cpus 4, not "auto". auto is 25% of the host
+#                clamped to 8192 MB, sized for a desktop guest: on this
+#                31.9 GB seat it gave 7982 MB, and grobase's stack used 5500
+#                of it (2026-10-07, `free -m` in the guest). 14336 MB / 8
+#                vCPU (until 2026-10-22) also held one graph_render render
+#                slot (4.32 GiB), but the guest fills whatever it is given
+#                with page cache: 10 min after a boot it had touched all 14
+#                GiB, 6.6 GB of it swapped out by a host that had 11 GiB
+#                left. Measured that day, everything up: containers 7.8 GB
+#                (grobase 4.75, the eval stack 2.45), guest `used` 8.3 GB,
+#                QEMU 0.76 of a core averaged over 20 s. 10 GiB holds that
+#                with room for cache; a render slot no longer fits beside it,
+#                and the motor refuses a render rather than crash
+#                (tests/test_graph_render.sh). qemu_vm.sh refuses a value
+#                above the host's RAM: a smaller seat lowers it here. A school
+#                seat's RAM is not measured yet (doc/rebuild-baas-at-school.md).
 #
 #   [vm] ide_disk_gb 40, not 0: the osionos IDE sandbox's own disk. First
 #                boot makes it ide_crypt, XFS with prjquota at
@@ -93,8 +98,8 @@ path    = ["/sgoinfre/students/$USER/virtual_machines"]
 # Editing disk_gb does not resize an existing VM (the header says what does).
 disk_gb = 120
 ide_disk_gb = 40
-ram_mb  = 14336
-cpus    = "auto"
+ram_mb  = 10240
+cpus    = 4
 profile = "auto"
 ai_mode = "off"
 
@@ -162,7 +167,8 @@ dc-full        = true
 # The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
 # observability: loki, prometheus, grafana). dc-full already holds all three;
 # they are named so the cost stays in sight: grobase measures max at 3128 MiB
-# idle and asks 6 GB / 8 vCPU; ram_mb above covers the 6 GB.
+# idle and asks 6 GB / 8 vCPU; ram_mb above covers the 6 GB, and cpus gives it
+# 4 of the 8 vCPUs (0.76 of a core used at rest, 2026-10-22).
 dc-db-cockroach  = true
 dc-db-mssql      = true
 dc-observability = true
