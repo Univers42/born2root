@@ -478,6 +478,16 @@ net.ipv4.tcp_keepalive_probes=5
 EOF
 sysctl --system >/dev/null 2>&1 || true
 
+# ── the NIC is up before anything waits for the network ────────────────────
+# The installer writes `allow-hotplug ens4`, which networking.service does not
+# wait for: network-online.target was reached before the DHCP lease, and
+# dockerd, which waits for it, restored the containers published on the NAT
+# address (10.0.2.15, the WAF and Inception's) before that address existed.
+# Their binds failed ("cannot assign requested address") and docker does not
+# retry that: after the 2026-10-22 restart Inception's nginx and adminer stayed
+# down. `auto` makes ifup -a, and so network-online.target, wait for the lease.
+sed -i -E 's/^allow-hotplug (en[a-z0-9]+)$/auto \1/' /etc/network/interfaces
+
 # ── NAT keepalive service ──────────────────────────────────────────────────
 # Periodically ping the gateway to keep VirtualBox NAT engine's connection
 # tracking table active. This prevents NAT from silently dropping SSH mappings.
