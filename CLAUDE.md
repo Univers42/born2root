@@ -136,6 +136,11 @@ credentials that must not enter the repo or the ISO:
   snapshot on sgoinfre is unreadable without it.
 - `BAAS_API_KEY` — grobase tenant key; written by `make tenant_key`.
 - `CF_TUNNEL_TOKEN` — cloudflared tunnel token, only once a domain exists.
+- `INCEPTION_ADMIN_EMAIL`, `INCEPTION_ADMIN_PASSWORD` — the WordPress
+  administrator of `make inception` (both or neither). `deploy_inception.sh`
+  runs the guest's `make setup`, then writes them over ssh stdin into
+  `secrets/credentials.txt` line 1 and `WP_ADMIN_EMAIL` in `srcs/.env`; the
+  entrypoint re-applies both on every boot.
 
 Bootstrap from the team's vault42 environment (`[dc] vault`, logged in
 with 42ctl): `make secrets_pull APPLY=1`. It writes keys the file lacks and

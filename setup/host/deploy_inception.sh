@@ -239,10 +239,14 @@ if [ -n "$SRC" ]; then
     # `make inception` clones non-recursively, so it is an empty gitlink there
     # and never scanned -- inlining its files would only feed the compliance
     # suite's credential scan third-party Python, so it does not travel.
+    # node_modules/ is what a host-side `npm run dev` of the landing or
+    # `make wiki` leaves behind: the images install their own from the
+    # lockfile, and B03's grep for PHP under bonus/ would read every file of it.
     rsync -az --delete \
         --exclude '.git/index.lock' \
         --exclude '/secrets/' --exclude '/srcs/.env' \
         --exclude '/vendor/' \
+        --exclude 'node_modules/' \
         ${rsync_extra[@]+"${rsync_extra[@]}"} \
         -e "ssh ${SSH_OPTS[*]}" \
         "${SRC%/}/" "${SSH_ALIAS}:${GUEST_DIR}/" ||
@@ -419,6 +423,65 @@ else
     else
         warn "could not write /etc/hosts non-interactively — inception's own sudo line will handle it"
     fi
+fi
+
+# ── 4a. Port 80 stays closed ────────────────────────────────────────────────
+# The eval sheet tries http://<login>.42.fr and expects no connection at all.
+# Inception never listens on 80, but born2root's `webstack` feature (the
+# Born2beRoot bonus: lighttpd + its own WordPress) does, in this same guest, so
+# an evaluator's test would connect, and to the wrong WordPress. The deploy
+# stops and disables it; `sudo systemctl enable --now lighttpd` brings it back
+# for a Born2beRoot defence. Anything else on 80 is named, never killed.
+step "Keeping port 80 closed inside the guest"
+if ! vm_ssh "ss -ltnH 'sport = :80' | grep -q ." 2>/dev/null; then
+    ok "nothing listens on port 80"
+elif vm_ssh "systemctl is-active --quiet lighttpd" 2>/dev/null; then
+    pass=$(resolve_pass) || die "no guest password (set GUEST_PASS, or check $PRESEED_FILE)"
+    printf '%s\n' "$pass" |
+        ssh "${SSH_OPTS[@]}" -tt "$SSH_ALIAS" "sudo -S -p '' systemctl disable --now lighttpd" \
+            >/dev/null 2>&1
+    if vm_ssh "ss -ltnH 'sport = :80' | grep -q ." 2>/dev/null; then
+        warn "lighttpd is stopped, yet port 80 still answers: ssh ${SSH_ALIAS} sudo ss -ltnp 'sport = :80'"
+    else
+        ok "stopped and disabled lighttpd (born2root's webstack); 'sudo systemctl enable --now lighttpd' restores it"
+    fi
+else
+    warn "something other than lighttpd listens on port 80, and an evaluator's http:// test would connect: ssh ${SSH_ALIAS} sudo ss -ltnp 'sport = :80'"
+fi
+
+# ── 4b. The administrator ───────────────────────────────────────────────────
+# Inception's `make setup` mints a random admin password once and keeps it.
+# The account a person signs in with lives in the secrets file instead
+# (INCEPTION_ADMIN_EMAIL, INCEPTION_ADMIN_PASSWORD), so a rebuilt guest gets the
+# same one back: setup runs first so both files exist, then line 1 of
+# secrets/credentials.txt and WP_ADMIN_EMAIL in srcs/.env are rewritten. The
+# values travel on ssh's stdin, never in a command line `ps` could show, and
+# the WordPress entrypoint applies both on every boot. dc_lib.sh is the one
+# reader of the secrets file; the subshell keeps its helpers out of this one.
+admin=$(. "$HERE/dc_lib.sh" >/dev/null 2>&1 &&
+    printf '%s\n%s\n' "$(secret_get INCEPTION_ADMIN_EMAIL)" "$(secret_get INCEPTION_ADMIN_PASSWORD)") || admin=""
+admin_email=$(printf '%s\n' "$admin" | sed -n 1p)
+admin_pass=$(printf '%s\n' "$admin" | sed -n 2p)
+if [ -n "$admin_email" ] && [ -n "$admin_pass" ]; then
+    step "Setting the WordPress administrator from the secrets file"
+    # The address ends up in a sed replacement and in the guest's .env: a
+    # plain one only, so no '|', '&', quote or space can reach either.
+    case "$admin_email" in
+    ?*@?*.?*) ;;
+    *) die "INCEPTION_ADMIN_EMAIL is not an email address" ;;
+    esac
+    case "$admin_email" in
+    *[!A-Za-z0-9._%+@-]* | *@*@*) die "INCEPTION_ADMIN_EMAIL has characters a plain address does not" ;;
+    esac
+    printf '%s\n%s\n' "$admin_email" "$admin_pass" | vm_ssh "cd '$GUEST_DIR' && make setup </dev/null >/dev/null 2>&1 \
+        && IFS= read -r email && IFS= read -r pass \
+        && umask 077 && { printf '%s\n' \"\$pass\"; sed -n 2p secrets/credentials.txt; } > secrets/.credentials.new \
+        && mv secrets/.credentials.new secrets/credentials.txt \
+        && sed -i \"s|^WP_ADMIN_EMAIL=.*|WP_ADMIN_EMAIL=\$email|\" srcs/.env" ||
+        die "could not write the administrator into the guest's secrets"
+    ok "administrator: ${admin_email} (password from the secrets file)"
+elif [ -n "$admin_email$admin_pass" ]; then
+    warn "INCEPTION_ADMIN_EMAIL and INCEPTION_ADMIN_PASSWORD go together; one alone is ignored"
 fi
 
 # ── 5. Build ────────────────────────────────────────────────────────────────
