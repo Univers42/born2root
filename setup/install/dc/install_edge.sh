@@ -81,37 +81,78 @@ if [ "$NETMESH" = 1 ]; then
     # tailscaled was restarted by hand (back in 2 s). A minute timer does that
     # restart; tests/test_tailscale_watchdog.sh cuts the script out by its
     # marker, so keep the `cat >` line and WDEOF as they are.
+    #
+    # The same restart cures a second failure the node cannot see: on
+    # 2026-10-22, after a re-login with a new auth key, tailscaled kept the
+    # serve config and its Funnel on, but never told control that ingress was
+    # on. Control published no public record, so baas.<tailnet>.ts.net was
+    # NXDOMAIN and the website's /api/auth answered 502 for over an hour. The
+    # node looked online the whole time. The log line
+    # "Hostinfo.IngressEnabled changed to true" came only with a restart, and
+    # the name resolved a minute later.
     cat >/usr/local/sbin/b2b-tailscale-watchdog <<'WDEOF'
 #!/bin/sh
 # b2b-tailscale-watchdog -- written by install_edge.sh, run every minute by
-# b2b-tailscale-watchdog.timer: restart tailscaled once the node has reported
-# itself `offline` for 3 checks in a row while the network is up.
-# Caveat: `offline` is the node's own view of control. A Funnel ingress that
-# fails while control is healthy is not caught (under-reports); a control
-# reconnect slower than 3 minutes gets a restart it did not need (over-reports,
-# ~2 s without tailnet). At most one restart per 10 minutes.
+# b2b-tailscale-watchdog.timer: restart tailscaled once, for 3 checks in a row
+# with the network up, the node has reported itself `offline` or its Funnel
+# has been dead from the public side.
+# Caveat: the Funnel probe is one relay and one URL, the way a visitor
+# arrives: the name from public DNS over DoH (MagicDNS would answer the
+# tailnet address), then TLS through that relay. Any HTTP status passes, so a
+# dead backend behind serve is not this script's business. A DoH query that
+# fails is not a strike, so 1.1.1.1 unreachable hides a dead Funnel
+# (under-reports). A TCP-only Funnel is not probed. A failure a restart cannot
+# fix, such as an ACL without the funnel attribute or a relay outage, gets a
+# restart every 10 minutes, ~2 s without tailnet each time (over-reports). The
+# same goes for a control reconnect slower than 3 minutes. At most one restart
+# per 10 minutes.
 state=${B2B_TSWD_STATE:-/run/b2b-tailscale-watchdog}
 mkdir -p "$state"
+# strike NAME FAILED: consecutive failures of one signal, kept in $state/NAME.
+strike() {
+    n=0
+    [ "$2" = 0 ] || n=$(($(cat "$state/$1" 2>/dev/null || echo 0) + 1))
+    echo "$n" >"$state/$1"
+    echo "$n"
+}
+offline=0
 case "$(tailscale status --peers=false 2>/dev/null | head -n 1)" in
-*" offline"*) count=$(($(cat "$state/count" 2>/dev/null || echo 0) + 1)) ;;
-*)
-    echo 0 >"$state/count"
-    exit 0
-    ;;
+*" offline"*) offline=1 ;;
 esac
-echo "$count" >"$state/count"
-[ "$count" -ge 3 ] || exit 0
+funnel=0
+url=$(tailscale funnel status 2>/dev/null | sed -n 's|^\(https://[^ ]*\) (Funnel on)$|\1|p' | head -n 1)
+if [ -n "$url" ]; then
+    host=${url#https://}
+    port=443
+    case "$host" in *:*)
+        port=${host#*:}
+        host=${host%%:*}
+        ;;
+    esac
+    if doh=$(curl -sf -m 10 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$host&type=A"); then
+        ip=$(printf '%s' "$doh" | sed -n 's/.*"data":"\([0-9.]*\)".*/\1/p' | head -n 1)
+        code=000
+        [ -z "$ip" ] || code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' --resolve "$host:$port:$ip" "$url/")
+        [ "$code" != 000 ] || funnel=1
+    fi
+fi
+count=$(strike count "$offline")
+dead=$(strike funnel "$funnel")
+[ "$count" -ge 3 ] || [ "$dead" -ge 3 ] || exit 0
 # The network itself down: a restart cannot help, and would only add noise.
 curl -s -m 10 -o /dev/null 'https://controlplane.tailscale.com/key?v=1' || exit 0
 now=$(date +%s)
 [ $((now - $(cat "$state/last" 2>/dev/null || echo 0))) -ge 600 ] || exit 0
 echo "$now" >"$state/last"
 echo 0 >"$state/count"
-logger -t b2b-tailscale-watchdog "offline for $count checks with the network up: restarting tailscaled"
+echo 0 >"$state/funnel"
+why="offline for $count checks"
+[ "$dead" -lt 3 ] || why="Funnel dead from the public side for $dead checks"
+logger -t b2b-tailscale-watchdog "$why with the network up: restarting tailscaled"
 systemctl restart tailscaled
 WDEOF
     chmod 0755 /usr/local/sbin/b2b-tailscale-watchdog
-    printf '[Unit]\nDescription=Restart tailscaled when control has dropped this node\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/b2b-tailscale-watchdog\n' \
+    printf '[Unit]\nDescription=Restart tailscaled when control has dropped this node or its Funnel\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/b2b-tailscale-watchdog\n' \
         >/etc/systemd/system/b2b-tailscale-watchdog.service
     printf '[Unit]\nDescription=b2b-tailscale-watchdog every minute\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=1min\n[Install]\nWantedBy=timers.target\n' \
         >/etc/systemd/system/b2b-tailscale-watchdog.timer

@@ -50,6 +50,11 @@ check "TS_HOSTNAME falls back to the profile's [dc] tailnet_hostname" \
 # shellcheck disable=SC2016 # the pattern is the literal source line, not an expansion
 check "the first login takes that name too (make tailscale)" \
     "$(grep -c 'EDGE_TS_HOSTNAME="$(b2b_get B2B_DC_TAILNET_HOSTNAME)"' setup/host/tailscale_up.sh)" 1
+# The VM unit runs make tailscale after every start, with no terminal: a
+# revoked or expired stored key has to be replaced, not asked for.
+# shellcheck disable=SC2016 # the pattern is the literal source line, not an expansion
+check "make tailscale joins with the API-checked key, as make tailnet does" \
+    "$(grep -c 'key="${TS_AUTHKEY:-$(ts_live_authkey "born2root $VM_NAME")}"' setup/host/tailscale_up.sh)" 1
 written=$(grep -n 'tailnet.env"$' $h | head -n1 | cut -d: -f1)
 exposed=$(grep -n 'grobase_expose_guest.sh"' $h | head -n1 | cut -d: -f1)
 check "make expose runs after tailnet.env is written" \
