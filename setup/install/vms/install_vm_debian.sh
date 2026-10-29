@@ -85,7 +85,9 @@ auto_size_vm() {
     # (setup/install/ai/install_ai.sh picks a model from this number, and on the
     # 2048 floor it correctly refuses to pull one at all), or several editors
     # with language servers at once. Raising it starves the host, so it is a
-    # deliberate opt-in rather than a bigger default.
+    # deliberate opt-in rather than a bigger default. A number larger than this
+    # host gets the automatic share, as in qemu_vm.sh's vm_sizing: the tracked
+    # born2root.toml carries the 30.5 GB seat's 20480 to every machine.
     VM_MEMORY=$((host_ram_mb / 4))
     [ "$VM_MEMORY" -lt 2048 ] && VM_MEMORY=2048
     [ "$VM_MEMORY" -gt 8192 ] && VM_MEMORY=8192
@@ -97,11 +99,10 @@ auto_size_vm() {
         *)
             if [ "$VM_RAM_MB" -lt 1024 ]; then
                 echo "Warning: VM_RAM_MB=${VM_RAM_MB} is below 1024 — using ${VM_MEMORY}MB" >&2
+            elif [ "$VM_RAM_MB" -gt "$host_ram_mb" ]; then
+                echo "Warning: VM_RAM_MB=${VM_RAM_MB} exceeds the host's ${host_ram_mb}MB — using ${VM_MEMORY}MB" >&2
             else
                 VM_MEMORY="$VM_RAM_MB"
-                if [ "$VM_MEMORY" -gt "$host_ram_mb" ]; then
-                    echo "Warning: VM_RAM_MB=${VM_MEMORY} exceeds the host's ${host_ram_mb}MB" >&2
-                fi
             fi
             ;;
         esac
@@ -113,7 +114,13 @@ auto_size_vm() {
     [ "$VM_CPUS" -gt 8 ] && VM_CPUS=8
     case "${B2B_VM_CPUS:-}" in
     '' | 0 | *[!0-9]*) ;;
-    *) VM_CPUS="$B2B_VM_CPUS" ;;
+    *)
+        if [ "$B2B_VM_CPUS" -gt "$host_cpus" ]; then
+            echo "Warning: B2B_VM_CPUS=${B2B_VM_CPUS} exceeds the host's ${host_cpus} cores — using ${VM_CPUS}" >&2
+        else
+            VM_CPUS="$B2B_VM_CPUS"
+        fi
+        ;;
     esac
 
     VM_VRAM=128

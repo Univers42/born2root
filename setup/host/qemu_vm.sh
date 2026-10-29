@@ -149,45 +149,52 @@ esac
 # born2root.toml "auto" was a quarter of the host only on VirtualBox; on a
 # 30 GB, 16-core seat the QEMU guest swapped under nvim and its language
 # servers while the host sat idle.
+#
+# A number larger than this host falls back to that share instead of stopping
+# the build: born2root.toml is tracked, and the same file builds on the 30.5 GB,
+# 16-core seat (ram_mb = 20480, cpus = 12) and on a 7 GB, 8-thread laptop, where
+# it used to exit here, after the ISO was built (2026-10-28).
 vm_sizing() {
-    local host_ram_mb host_cpus
+    local host_ram_mb host_cpus auto_ram_mb auto_cpus
     host_ram_mb=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null)
     host_cpus=$(nproc 2>/dev/null)
+    auto_ram_mb=$((${host_ram_mb:-8192} / 4))
+    if [ "$auto_ram_mb" -lt 2048 ]; then
+        auto_ram_mb=2048
+    fi
+    if [ "$auto_ram_mb" -gt 8192 ]; then
+        auto_ram_mb=8192
+    fi
+    auto_cpus=$((${host_cpus:-4} / 2))
+    if [ "$auto_cpus" -lt 2 ]; then
+        auto_cpus=2
+    fi
+    if [ "$auto_cpus" -gt 8 ]; then
+        auto_cpus=8
+    fi
     case "${VM_RAM_MB:-}" in
-    '')
-        VM_RAM_MB=$((${host_ram_mb:-8192} / 4))
-        if [ "$VM_RAM_MB" -lt 2048 ]; then
-            VM_RAM_MB=2048
-        fi
-        if [ "$VM_RAM_MB" -gt 8192 ]; then
-            VM_RAM_MB=8192
-        fi
-        ;;
+    '') VM_RAM_MB=$auto_ram_mb ;;
     *[!0-9]*)
         echo "VM_RAM_MB='$VM_RAM_MB' is not a number of MB (born2root.toml vm.ram_mb)" >&2
         exit 1
         ;;
     esac
     if [ -n "$host_ram_mb" ] && [ "$VM_RAM_MB" -gt "$host_ram_mb" ]; then
-        echo "VM_RAM_MB=${VM_RAM_MB} exceeds the host's ${host_ram_mb} MB" >&2
-        exit 1
+        echo "  · VM_RAM_MB=${VM_RAM_MB} exceeds the host's ${host_ram_mb} MB — using ${auto_ram_mb} MB (\"auto\")" >&2
+        VM_RAM_MB=$auto_ram_mb
     fi
     case "${B2B_VM_CPUS:-}" in
-    '')
-        VM_CPUS=$((${host_cpus:-4} / 2))
-        if [ "$VM_CPUS" -lt 2 ]; then
-            VM_CPUS=2
-        fi
-        if [ "$VM_CPUS" -gt 8 ]; then
-            VM_CPUS=8
-        fi
-        ;;
+    '') VM_CPUS=$auto_cpus ;;
     *[!0-9]* | 0)
         echo "B2B_VM_CPUS='$B2B_VM_CPUS' is not a core count (born2root.toml vm.cpus)" >&2
         exit 1
         ;;
     *) VM_CPUS="$B2B_VM_CPUS" ;;
     esac
+    if [ -n "$host_cpus" ] && [ "$VM_CPUS" -gt "$host_cpus" ]; then
+        echo "  · B2B_VM_CPUS=${VM_CPUS} exceeds the host's ${host_cpus} cores — using ${auto_cpus} (\"auto\")" >&2
+        VM_CPUS=$auto_cpus
+    fi
 }
 vm_sizing
 

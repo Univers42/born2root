@@ -102,18 +102,26 @@ fi
 # port in the Host header that sends the browser to https://<domain>/ on port
 # 443, where nothing is listening on the host — the exact dead end that made
 # this look unfixable before. wp-config.php has to echo the requested host back.
+#
+# Inception's / is WordPress's front page (the eval sheet opens it expecting
+# WordPress); its landing moved to /dream/. A tree from before that still opens
+# the domain on the landing, with WordPress at /blog/: ask WordPress wherever it
+# is, or this would grade the landing and find no WordPress assets in it.
 head_ "WordPress host handling (the redirect trap)"
+wp_path=/
+curl -ks --max-time 15 --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" "https://${DOMAIN}:${P_HTTPS}/" |
+    grep -q '/_dream/' && wp_path=/blog/
 hdrs=$(curl -ks -D - -o /dev/null --max-time 15 \
-    --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" "https://${DOMAIN}:${P_HTTPS}/")
+    --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" "https://${DOMAIN}:${P_HTTPS}${wp_path}")
 status=$(printf '%s' "$hdrs" | awk 'NR==1{print $2}')
 location=$(printf '%s' "$hdrs" | awk 'BEGIN{IGNORECASE=1}/^location:/{print $2}' | tr -d '\r')
 if [ "$status" = "200" ]; then
-    pass "no redirect away from ${DOMAIN}:${P_HTTPS} (status 200)"
+    pass "no redirect away from ${DOMAIN}:${P_HTTPS}${wp_path} (status 200)"
 else
     fail "got ${status} → ${location:-?} — wp-config.php is not honouring the request Host"
 fi
 
-body=$(curl -ks --max-time 15 --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" "https://${DOMAIN}:${P_HTTPS}/")
+body=$(curl -ks --max-time 15 --resolve "${DOMAIN}:${P_HTTPS}:127.0.0.1" "https://${DOMAIN}:${P_HTTPS}${wp_path}")
 if printf '%s' "$body" | grep -q "https://${DOMAIN}:${P_HTTPS}/"; then
     pass "page assets are scoped to ${DOMAIN}:${P_HTTPS} (CSS/JS will load)"
 elif printf '%s' "$body" | grep -q "https://${DOMAIN}/"; then
