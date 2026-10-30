@@ -185,11 +185,12 @@ done <<USERSEOF
 $b2b_users_list
 USERSEOF
 # Every other `nvim = true` account runs the editor from the login's shared
-# plugins (first-boot-setup.sh, share_editor_setup): its plugin directory is a
-# link to /home/.b2b-editor, not a second 400 MB copy.
+# config and plugins (install_home_shared.sh): both are links to
+# /home/.b2b-editor, not a second 400 MB copy.
 for name in $(b2b_get B2B_NVIM_USERS); do
     [ "$name" != "$B2B_LOGIN" ] || continue
     row "$name editor" "$(groot "readlink /home/$name/.local/share/nvim/site")" "/home/.b2b-editor/site"
+    row "$name editor config" "$(groot "readlink /home/$name/.config/nvim")" "/home/.b2b-editor/config"
 done
 # An account born2root.toml gave no password is locked (passwd -S says L)
 # until someone sets one in the guest. Asked per name, so no password is

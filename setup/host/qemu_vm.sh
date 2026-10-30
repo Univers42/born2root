@@ -643,7 +643,7 @@ die_qemu_start() {
 # ── Launch ──────────────────────────────────────────────────────────────────
 # $1 = "cdrom" to boot the installer, "disk" to boot the installed system.
 launch() {
-    local boot="$1" iso cd_args=() cpu_args=() hd_index=1 cd_index=2
+    local boot="$1" iso ssh_hp cd_args=() cpu_args=() hd_index=1 cd_index=2
     local start_err="$VM_DIR/qemu-start.err"
     # Same array idiom as cd_args: an empty array expands to nothing, where an
     # empty string would hand QEMU a bogus "" argument under TCG.
@@ -671,6 +671,25 @@ launch() {
     fi
 
     resolve_ports
+
+    # A VM shared with colleagues (make share_wall) is walled off this host by
+    # an nft table keyed to the unit's cgroup (vm_wall.sh), reloaded here for
+    # each life of the unit. Fail closed: a walled VM never boots unwalled.
+    # That cgroup is also this script's and the unit's ExecStartPost: the
+    # banner probe and `make tailscale` reach the guest through the ssh
+    # forward on 127.0.0.1, so its host port stays open. It is QEMU's own
+    # listener; from the guest it leads back into the guest. Without it,
+    # 2026-10-27, the unit typed the passphrase four times into an unlocked
+    # guest and was killed at TimeoutStartSec, twice. The port is read before
+    # xargs, not piped in with the file: hellish 3.2.0 loses the output of a
+    # pipeline inside `{ cat f && a | b; } | xargs`.
+    if [ -f "$VM_DIR/wall" ]; then
+        grep -q "/b2b-vm-$VM_NAME.service\$" /proc/self/cgroup ||
+            die "$VM_NAME is walled off the host and starts only in its unit: systemctl --user start b2b-vm-$VM_NAME.service"
+        ssh_hp=$(printf '%s\n' "$RESOLVED_SPEC" | tr ' ' '\n' | awk -F: '$1=="ssh"{print $2}')
+        xargs sudo -n /usr/local/sbin/b2b-vm-wall apply "$VM_NAME" "$ssh_hp" <"$VM_DIR/wall" ||
+            die "the wall for $VM_NAME did not load (sudo bash setup/host/vm_wall.sh install)"
+    fi
 
     if [ "$boot" = "cdrom" ]; then
         iso=$(find_iso)
@@ -1498,9 +1517,13 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
         touch "$HOME/.ssh/config"
         chmod 600 "$HOME/.ssh/config"
         marker="# Born2beRoot VM (auto-generated, qemu)"
-        python3 - "$HOME/.ssh/config" "$marker" "$ssh_port" "$VM_USER" <<'PYEOF'
+        shared=0
+        for f in "$VM_DIR"/guests/*.email; do
+            [ -f "$f" ] && shared=1
+        done
+        python3 - "$HOME/.ssh/config" "$marker" "$ssh_port" "$VM_USER" "$shared" <<'PYEOF'
 import sys
-path, marker, port, user = sys.argv[1:5]
+path, marker, port, user, shared = sys.argv[1:6]
 lines = open(path).read().split("\n")
 out, skip = [], False
 for ln in lines:
@@ -1536,9 +1559,10 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          # the host's Chrome is the one with a logged-in profile, so the guest's
          # localhost:9222 is forwarded BACK to the host's. Costs nothing when
          # nothing is listening there: a forward that is never used binds
-         # nothing in the guest but the one loopback port.
-         "    RemoteForward 9222 localhost:9222", ""]
-text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(block)
+         # nothing in the guest but the one loopback port. Left out while the
+         # VM is shared (make share_invite): any guest root could drive it.
+         None if shared == "1" else "    RemoteForward 9222 localhost:9222", ""]
+text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(l for l in block if l is not None)
 open(path, "w").write(text)
 print("wrote the b2b block for port " + port)
 PYEOF

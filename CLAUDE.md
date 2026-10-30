@@ -51,6 +51,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Carry the sealed keystore in the credentials file, so that file alone rebuilds | `make seeds_bundle` |
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
 | The private plane: MagicDNS name + certificate + serve -> WAF + CORS origin | `make tailnet`, `make tailnet_status`, `make tailnet_down` (`setup/host/tailnet.sh`) |
+| Share the VM: colleague over the tailnet in group dev, VM walled off the host | `make share_wall`, `make share_policy`, `make share_invite GUEST= EMAIL= [KEY=]`, `make share_key GUEST= KEY=`, `make share_kit GUEST=`, `make share_revoke GUEST=`, `make share_list`, `make share` |
 | Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
 | Apply groot's `models/` in the guest (`CHECK=1` reports only) | `make osionos_models GROOT_DIR=…` |
 | Mint a realtime publish JWT / apply CORS origins | `make realtime_token`, `make grobase_cors` |

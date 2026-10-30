@@ -15,6 +15,7 @@
 #
 # USAGE
 #   setup/host/provision_vm.sh <vm-name> nvim          # kickstart + extras + excalidraw
+#   SHARE_USERS=bob setup/host/provision_vm.sh <vm-name> home-shared  # the login's editor and shell, linked, for bob
 #   setup/host/provision_vm.sh <vm-name> excalidraw    # just the Excalidraw editor
 #   setup/host/provision_vm.sh <vm-name> devtools      # herdr + opencode
 #   setup/host/provision_vm.sh <vm-name> claude-code   # Claude Code, beside it
@@ -373,6 +374,12 @@ nvim-extras)
         install_nvim_extras.sh NVIM_ "the Neovim extras layer"
     ok "Neovim extras provisioning finished"
     ;;
+home-shared)
+    # SHARE_USERS names the accounts; the login's editor and shell are linked, not copied.
+    run_provisioner setup/install/tools/install_home_shared.sh \
+        install_home_shared.sh SHARE_ "the login's editor and shell for other accounts"
+    ok "shared home provisioning finished"
+    ;;
 hellish)
     run_provisioner setup/install/hellish/install_hellish_plugins.sh \
         install_hellish_plugins.sh HELLISH_ "hellishrc plugin framework"
@@ -538,6 +545,6 @@ all)
     ok "provisioning finished"
     ;;
 *)
-    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | grow-root | ide-disk | root-sh | restore-drill | all)"
+    die "unknown action '$ACTION' (expected: nvim | nvim-base | nvim-extras | home-shared | excalidraw | hellish | shell | global | devtools | claude-code | claude-debug | ai | health | var-gc | edge | grobase | backup | graph-render | grow-root | ide-disk | root-sh | restore-drill | all)"
     ;;
 esac

@@ -2365,7 +2365,10 @@ setup_user() {
     write_pack_lua "$cfg"
     write_plugins_lua "$cfg"
     write_keymaps_lua "$cfg"
-    write_sessions_lua "$cfg" "$sessdir"
+    # '~/', not $home: the config is shared by every editor account
+    # (install_home_shared.sh links it), and expand() gives each their own.
+    local lua_home='~'
+    write_sessions_lua "$cfg" "$lua_home/${NVIM_SESSION_DIR_NAME}"
     write_startup_lua "$cfg"
     write_markdown_lua "$cfg" "$NVIM_MKDP_PORT"
     write_mermaid_lua "$cfg"

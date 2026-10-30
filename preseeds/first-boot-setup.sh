@@ -587,80 +587,27 @@ else
 fi
 
 ### ─── The editor for the other `nvim = true` accounts ──────────────────────
-# A full install per account measured 404 MB of /home each (2026-09-13): 226
-# MB of plugins and parsers, 103 MB of kulala's binaries, 32 MB of mason's
-# language servers -- identical bytes in every home. So the login's copy moves
-# to /home/.b2b-editor (same volume: a rename, no copy, no extra space), owned
-# by the login so its :lua vim.pack.update() and :Mason keep working, readable
-# by everyone, and every editor account links to it. The login's own home
-# stays 0700. What is personal stays personal: config, state, cache, sessions.
-# Another account cannot update the shared plugins; that is the price, and it
-# is the login's machine.
-#
-# Each account is then proven the way install_nvim.sh proves the login: the
-# plugin verifier runs headless AS that account, and a failure is a base
-# feature failure like any other.
-B2B_EDITOR_SHARED=/home/.b2b-editor
-share_editor_setup() {
-    local owner="$1" user="$2" owner_home home dir
-    owner_home=$(getent passwd "$owner" | cut -d: -f6)
-    home=$(getent passwd "$user" | cut -d: -f6)
-    [ -d "$owner_home/.config/nvim" ] || {
-        feature_fail nvim-shared "$user: $owner has no Neovim config to share"
-        return 1
-    }
-    if [ -z "$home" ] || [ ! -d "$home" ]; then
-        feature_fail nvim-shared "$user: no home directory"
-        return 1
-    fi
-    mkdir -p "$B2B_EDITOR_SHARED"
-    chown "$owner:$owner" "$B2B_EDITOR_SHARED"
-    chmod 755 "$B2B_EDITOR_SHARED"
-    for dir in site mason kulala.nvim; do
-        if [ -d "$owner_home/.local/share/nvim/$dir" ] && [ ! -L "$owner_home/.local/share/nvim/$dir" ]; then
-            rm -rf "${B2B_EDITOR_SHARED:?}/$dir"
-            mv "$owner_home/.local/share/nvim/$dir" "$B2B_EDITOR_SHARED/$dir"
-            ln -s "$B2B_EDITOR_SHARED/$dir" "$owner_home/.local/share/nvim/$dir"
-            chown -h "$owner:$owner" "$owner_home/.local/share/nvim/$dir"
-        fi
-    done
-    chmod -R a+rX "$B2B_EDITOR_SHARED"
-    mkdir -p "$home/.config" "$home/.local/share/nvim" "$home/.local/state/nvim" "$home/.cache"
-    rm -rf "$home/.config/nvim"
-    cp -a "$owner_home/.config/nvim" "$home/.config/nvim"
-    # The extras write the login's home into the config as a literal (the
-    # sessions directory, for one): re-point it, or bob's sessions land in a
-    # directory bob cannot write.
-    grep -rlFZ "$owner_home/" "$home/.config/nvim" 2>/dev/null |
-        xargs -0 -r sed -i "s#$owner_home/#$home/#g"
-    mkdir -p "$home/.nvim-sessions"
-    for dir in site mason kulala.nvim; do
-        [ -e "$B2B_EDITOR_SHARED/$dir" ] || continue
-        rm -rf "${home:?}/.local/share/nvim/$dir"
-        ln -s "$B2B_EDITOR_SHARED/$dir" "$home/.local/share/nvim/$dir"
-    done
-    [ -f "$home/.tmux.conf" ] || { [ -f "$owner_home/.tmux.conf" ] && cp "$owner_home/.tmux.conf" "$home/.tmux.conf"; }
-    chown -R "$user:$user" "$home/.config" "$home/.local" "$home/.cache" "$home/.nvim-sessions"
-    [ -f "$home/.tmux.conf" ] && chown "$user:$user" "$home/.tmux.conf"
-    if timeout 300 runuser -u "$user" -- env HOME="$home" USER="$user" LOGNAME="$user" \
-        /usr/local/bin/nvim --headless -c 'lua vim.g.b2b_verify_mode = "plugins"' \
-        -c "luafile /usr/local/lib/b2b/nvim-verify.lua" >>/var/log/b2b-nvim-install.log 2>&1; then
-        echo "[OK] $user: Neovim shares $owner's plugins ($(du -xsm "$home/.config" "$home/.local" "$home/.cache" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }') MB of its own)"
-    else
-        feature_fail nvim-shared "$user: the plugin verifier failed as $user — see /var/log/b2b-nvim-install.log"
-        return 1
-    fi
-}
+# install_home_shared.sh links each other `nvim = true` account to the
+# login's config and plugins, one copy beside the homes, and proves it with
+# the verifier run as that account (its header has the measurement and the
+# why). It is a provisioner, not a function here, because an account made
+# after first boot (make share_invite) needs the same step, through
+# provision_vm.sh home-shared.
 EDITOR_OTHERS=$(printf '%s' "${B2B_NVIM_USERS:-}" | tr ' ' '\n' | grep -vx "$B2B_LOGIN" | grep . || true)
 # Nothing to share on a guest built without nvim.
 feature_on nvim || EDITOR_OTHERS=""
 if [ -n "$EDITOR_OTHERS" ]; then
     feature_begin nvim-shared /home
-    NVIM_SHARED_STATUS=ok
-    for u in $EDITOR_OTHERS; do
-        share_editor_setup "$B2B_LOGIN" "$u" || NVIM_SHARED_STATUS=failed
-    done
-    feature_end nvim-shared "$NVIM_SHARED_STATUS"
+    if [ ! -f /root/install_home_shared.sh ]; then
+        feature_fail nvim-shared "/root/install_home_shared.sh is not in the ISO"
+        feature_end nvim-shared failed
+    elif run_logged /var/log/b2b-nvim-install.log env SHARE_OWNER="$B2B_LOGIN" SHARE_PARTS=editor \
+        SHARE_USERS="$(printf '%s' "$EDITOR_OTHERS" | tr '\n' ' ')" "$B2B_SH" /root/install_home_shared.sh; then
+        feature_end nvim-shared ok
+    else
+        feature_fail nvim-shared "an account's editor is not set up — the FAIL lines above name it"
+        feature_end nvim-shared failed
+    fi
 fi
 feature_begin hellish /home
 ### ─── The login shell, from upstream, and its configuration for everyone ────
@@ -692,31 +639,30 @@ else
     echo "[WARN] upstream hellish — /root/install_hellish_upstream.sh is not in the ISO"
 fi
 
-# hellish's own configuration (~/.hellishrc and the plugin framework) for
-# every account born2root.toml named that does not have it yet: the extra
-# users always, the login user when the upstream install above did not bring
-# it. A shell without its configuration is half of what this VM promises.
-HELLISH_MISSING=""
-while read -r u; do
-    home=$(getent passwd "$u" 2>/dev/null | cut -d: -f6)
-    [ -n "$home" ] || continue
-    [ -f "$home/.hellishrc" ] || HELLISH_MISSING="${HELLISH_MISSING}${HELLISH_MISSING:+ }$u"
-done <<ACCOUNTSEOF
-$(b2b_accounts)
-ACCOUNTSEOF
-if [ -z "$HELLISH_MISSING" ]; then
-    echo "[OK] every account already has its hellish configuration"
+# hellish's own configuration (~/.hellishrc and the plugin framework): the
+# login gets it installed when the upstream install above did not bring it,
+# every other account born2root.toml names is linked to the login's
+# (install_home_shared.sh: one copy, each keeping its own hellish.conf and
+# state/). A shell without its configuration is half of what this VM promises.
+B2B_HOME="$(getent passwd "$B2B_LOGIN" 2>/dev/null | cut -d: -f6)"
+if [ -f "$B2B_HOME/.hellishrc" ]; then
+    echo "[OK] $B2B_LOGIN already has its hellish configuration"
 elif [ -f /root/install_hellish_plugins.sh ]; then
-    echo "--- Installing the hellishrc plugin framework for: $HELLISH_MISSING ---"
-    chmod +x /root/install_hellish_plugins.sh 2>/dev/null || true
+    echo "--- Installing the hellishrc plugin framework for: $B2B_LOGIN ---"
     if run_logged /var/log/b2b-hellish-install.log \
-        env HELLISH_USERS="$HELLISH_MISSING" "$B2B_SH" /root/install_hellish_plugins.sh; then
-        echo "[OK] hellishrc plugins installed for $HELLISH_MISSING"
+        env HELLISH_USERS="$B2B_LOGIN" "$B2B_SH" /root/install_hellish_plugins.sh; then
+        echo "[OK] hellishrc plugins installed for $B2B_LOGIN"
     else
         echo "[WARN] hellishrc plugin install reported errors — see /var/log/b2b-hellish-install.log"
     fi
 else
     echo "[WARN] hellishrc plugins — /root/install_hellish_plugins.sh is not in the ISO"
+fi
+HELLISH_OTHERS=$(b2b_accounts | grep -vx "$B2B_LOGIN" | tr '\n' ' ')
+if [ -n "${HELLISH_OTHERS// /}" ] && [ -f /root/install_home_shared.sh ]; then
+    run_logged /var/log/b2b-hellish-install.log env SHARE_OWNER="$B2B_LOGIN" SHARE_PARTS=shell \
+        SHARE_USERS="$HELLISH_OTHERS" "$B2B_SH" /root/install_home_shared.sh ||
+        echo "[WARN] the shared hellish configuration — see /var/log/b2b-hellish-install.log"
 fi
 
 # The verdict. hellish itself is mandatory: no executable /usr/bin/hellish

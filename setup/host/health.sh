@@ -6,6 +6,7 @@
 #                the backup, the wall (nothing off loopback but the doors)
 #   guest out    DNS and HTTPS to the internet, from the guest and from inside
 #                a container; the host's own LAN address, through the NAT
+#                (not run on a VM walled off this host: make share_wall)
 #   host in      every forward answers on the host; an exposed one ([network]
 #                forwards, expose = true) also on each LAN / Wi-Fi address
 #   tailnet      the guest's node is Running, and this host reaches the WAF
@@ -70,6 +71,25 @@ sys.exit(json.load(sys.stdin).get("BackendState") != "Running")' 2>/dev/null; th
     printf 'socks5h://%s\n' "$SOCKS"
 }
 
+# probe_hairpin NAME HOST_PORT ADDRESS: the guest goes out through the NAT and
+# back in on the host's own LAN address, the same path a machine beside this
+# one takes. A VM walled off this host (make share_wall, vm_wall.sh) refuses
+# exactly that path by design, so there it is reported as not run: on
+# 2026-10-27 it was the one ✗ on a baas whose 53 containers were healthy.
+probe_hairpin() {
+    local name="$1" port="$2" addr="$3" code
+    if [ -f "$VM_PATH/$VM_NAME/wall" ]; then
+        printf '    %s\n' "not run: $name back on $addr:$port from the guest -- $VM_NAME is walled off this host (make share_wall)"
+        return 0
+    fi
+    code=$(vm_ssh "curl -sk -o /dev/null -w '%{http_code}' --max-time 8 $(scheme_of "$name")://$addr:$port/" 2>/dev/null)
+    if answered "${code:-000}"; then
+        pass "$name: the guest reaches it back on the host's LAN address $addr:$port"
+    else
+        flunk "$name: not reachable on $addr:$port from the guest's side of the NAT"
+    fi
+}
+
 probe_forward() { # NAME HOST_PORT ADDRESS -> pass or flunk
     local name="$1" port="$2" addr="$3" scheme code
     scheme=$(scheme_of "$name")
@@ -129,13 +149,8 @@ main() {
         done <<EOF
 $lan
 EOF
-        # The guest goes out through the NAT and back in on the host's own LAN
-        # address: the same path a machine beside this one takes.
         addr=$(printf '%s\n' "$lan" | awk 'NR == 1 { print $2 }')
-        if [ -n "$addr" ]; then
-            code=$(vm_ssh "curl -sk -o /dev/null -w '%{http_code}' --max-time 8 $(scheme_of "$name")://$addr:$port/" 2>/dev/null)
-            if answered "${code:-000}"; then pass "$name: the guest reaches it back on the host's LAN address $addr:$port"; else flunk "$name: not reachable on $addr:$port from the guest's side of the NAT"; fi
-        fi
+        [ -z "$addr" ] || probe_hairpin "$name" "$port" "$addr"
     done
 
     if [ "$(b2b_get features.dc-netmesh)" = false ]; then

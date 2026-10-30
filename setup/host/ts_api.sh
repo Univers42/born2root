@@ -81,8 +81,20 @@ ts_api() {
     cat "$out"
     rm -f "$out"
     case "$API_CODE" in 2??) return 0 ;; esac
-    [ "$API_CODE" = 401 ] && warn "the Tailscale API rejected the credential (401)" >&2
+    [ "$API_CODE" = 401 ] && warn "$(ts_api_refusal 401)" >&2
     return 1
+}
+
+# ts_api_refusal CODE: a refused call in words, with the next step. A bare
+# "(401)" stopped make share_invite on 2026-10-29 with no hint that the
+# token had simply outlived its 90 days.
+ts_api_refusal() {
+    case "$1" in
+    401) printf 'the Tailscale API rejected the credential (401): TS_API_TOKEN expires after 90 days at most, or was revoked; make one at https://login.tailscale.com/admin/settings/keys and set TS_API_TOKEN in %s' "$SECRETS_FILE" ;;
+    403) printf 'the Tailscale API refused the call (403): the credential lacks the scope, or the account is not an admin of the tailnet' ;;
+    000) printf 'no answer from %s (network, or hide'"'"'s Tor lane)' "$TS_API" ;;
+    *) printf 'the Tailscale API answered %s' "$1" ;;
+    esac
 }
 
 # ts_mint_authkey DESCRIPTION: a new reusable + ephemeral + pre-approved key,

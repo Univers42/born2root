@@ -348,6 +348,7 @@ C_CYAN   := \033[36m
         graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
         nvim excalidraw hellish_plugins shell_vm provision nvim_health global_scope devtools claude_code claude_debug ai \
         var_gc edge grobase backup_install grow_root ide_disk verify_platform baas_access baas_access_status baas_access_undo \
+        share share_wall share_wall_off share_policy share_invite share_key share_revoke share_list share_kit \
         tailscale tailnet tailnet_status tailnet_down backup backup_verify restore_drill restore datacenter funnel_up funnel_status funnel_down tenant_key seed loadtest grobase_status osionos_models \
         llm_host llm_select llm_status llm_stop \
         qemu_install qemu_start qemu_stop qemu_status qemu_console qemu_watch verify_guest \
@@ -1247,6 +1248,7 @@ ide_disk:
 #   make baas_access         host :8000 -> Kong, :8443 -> WAF, over SSH (loopback-bound in the guest)
 #   make tailscale           log the guest into the tailnet (TS_AUTHKEY from the secrets file, or asked once)
 #   make tailnet             the private plane end to end: login, MagicDNS, certificate, serve -> WAF, CORS origin
+#   make share_invite GUEST= EMAIL= KEY=   a colleague in the VM over the tailnet, group dev (setup/host/vm_share.sh)
 #   make sql FILE=x.sql      pipe a SQL file into the guest's Postgres (an app's schema)
 #   make realtime_token      mint a publish-capable realtime token (NS="pg lab" DAYS=30) into the secrets file
 #   make grobase_cors        re-apply [dc] cors_origins to a live VM and restart Kong
@@ -1319,6 +1321,41 @@ tailnet_status:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/tailnet.sh --status
 tailnet_down:
 	@$(DC_ENV) $(SCRIPT_SH) setup/host/tailnet.sh --down
+
+# Sharing the VM with colleagues (setup/host/vm_share.sh, its header has the
+# why): an invite by email through Tailscale device sharing, an account of
+# their own in the guest in group dev (grobase's tree, a short sudo list),
+# and the VM walled off this host.
+#   make share_wall PORTS="3001 8787 4000"   once: host ports the VM may still open
+#   make share_policy                        once: the tailnet grants sharing needs
+#   make share_invite GUEST=ana EMAIL=ana@x.org KEY=~/ana.pub [DOCKER=0]
+#   make share_invite GUEST=ana EMAIL=ana@x.org   no key yet: their kit makes one
+#   make share_key GUEST=ana KEY=~/ana.pub   register it afterwards
+#   make share_kit GUEST=ana                 their connect scripts (sh + PowerShell)
+#   make share_revoke GUEST=ana | make share_list | make share (after a rebuild)
+share:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/vm_share.sh apply; \
+	rc=$$?; $(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config; exit $$rc
+share_wall:
+	@$(DC_ENV) PORTS="$(PORTS)" $(SCRIPT_SH) setup/host/vm_share.sh wall
+share_wall_off:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/vm_share.sh wall-off
+share_policy:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/vm_share.sh policy
+# ssh-config runs whatever the share did: an account can exist (and must
+# lose ssh b2b's Chrome forward) even when its invite was refused.
+share_invite:
+	@$(DC_ENV) GUEST="$(GUEST)" EMAIL="$(EMAIL)" KEY="$(KEY)" DOCKER="$(DOCKER)" $(SCRIPT_SH) setup/host/vm_share.sh invite; \
+	rc=$$?; $(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config; exit $$rc
+share_revoke:
+	@$(DC_ENV) GUEST="$(GUEST)" $(SCRIPT_SH) setup/host/vm_share.sh revoke; \
+	rc=$$?; $(QEMU_ENV) $(SCRIPT_SH) setup/host/qemu_vm.sh ssh-config; exit $$rc
+share_list:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/vm_share.sh list
+share_kit:
+	@$(DC_ENV) GUEST="$(GUEST)" $(SCRIPT_SH) setup/host/vm_share.sh kit
+share_key:
+	@$(DC_ENV) GUEST="$(GUEST)" KEY="$(KEY)" $(SCRIPT_SH) setup/host/vm_share.sh key
 backup:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh
 backup_verify:

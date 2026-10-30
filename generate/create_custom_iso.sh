@@ -523,6 +523,7 @@ for PROVISIONER in \
     setup/install/ai/install_claude_code.sh \
     setup/install/nvim/install_nvim.sh \
     setup/install/nvim/install_nvim_extras.sh \
+    setup/install/tools/install_home_shared.sh \
     setup/install/nvim/install_excalidraw.sh \
     setup/install/hellish/install_hellish_plugins.sh \
     setup/install/hellish/install_hellish_upstream.sh \

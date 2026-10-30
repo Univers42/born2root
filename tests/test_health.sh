@@ -49,6 +49,7 @@ esac
 EOF
 chmod +x "$TMP/bin/ip" "$TMP/bin/curl"
 PATH="$TMP/bin:$PATH"
+# shellcheck disable=SC2034 # read by the sourced health.sh
 B2B_HEALTH_LIB=1
 . setup/host/health.sh
 
@@ -66,6 +67,26 @@ out=$(
     echo "fail=$fail"
 )
 check "probe: nothing on the port flunks" "$(printf '%s' "$out" | grep -c -e 'nothing answers on http://10.12.19.6:8082' -e '^fail=1$')" 2
+
+# The hairpin: the guest back in on the host's LAN address. A walled VM
+# refuses that path by design (vm_wall.sh), so it is not run there.
+# shellcheck disable=SC2034,SC2317 # read and invoked by the sourced probe_hairpin
+{
+    vm_ssh() { printf 404; }
+    VM_PATH="$TMP" VM_NAME=walled
+}
+mkdir -p "$TMP/walled"
+out=$(
+    probe_hairpin https 8445 192.168.1.132
+    echo "fail=$fail"
+)
+check "hairpin: a VM that is not walled is probed" "$(printf '%s' "$out" | grep -c -e 'reaches it back on the host.s LAN address 192.168.1.132:8445' -e '^fail=0$')" 2
+: >"$TMP/walled/wall"
+out=$(
+    probe_hairpin https 8445 192.168.1.132
+    echo "fail=$fail"
+)
+check "hairpin: a walled VM says why it is not run, and does not flunk" "$(printf '%s' "$out" | grep -c -e 'not run: https back on 192.168.1.132:8445.*walled off' -e '^fail=0$')" 2
 
 # The tailnet path: this host's own tailscaled when it is logged in (the
 # datacenter host, 2026-10-20), else the seat's SOCKS5 proxy.

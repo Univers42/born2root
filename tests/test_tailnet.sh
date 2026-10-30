@@ -96,6 +96,17 @@ check "an auth key in TS_API_TOKEN gives way to OAuth" "$(api_token_for tskey-au
 check "  named in the warning, its value not printed" \
     "$(grep -c 'is not an API access token' "$stub/api_ready.err")/$(grep -c 'not-a-key' "$stub/api_ready.err")" 1/0
 check "an API token in TS_API_TOKEN is used as it is" "$(api_token_for tskey-api-x-not-a-key)" tskey-api-x-not-a-key
+# An expired TS_API_TOKEN stopped make share_invite with a bare "(401)" on
+# 2026-10-29: the refusal must name the token, the 90 days and the page.
+refusal=$(
+    export SECRETS_FILE=/x/secrets
+    eval "$(awk '/^ts_api_refusal\(\) \{/,/^}/' setup/host/ts_api.sh)"
+    ts_api_refusal 401
+)
+check "a 401 names TS_API_TOKEN, its 90 days, the keys page and the file" \
+    "$(printf '%s' "$refusal" | grep -c 'TS_API_TOKEN expires after 90 days.*settings/keys.*/x/secrets')" 1
+check "vm_share.sh's policy read explains its refusal the same way" \
+    "$(grep -c 'tailnet policy: .(ts_api_refusal' setup/host/vm_share.sh)" 1
 mkdir -p "$stub/bin"
 # The stub answers `status --json` from STUB_STATE / STUB_CERTS, records
 # everything else in $stub/calls, and succeeds.
