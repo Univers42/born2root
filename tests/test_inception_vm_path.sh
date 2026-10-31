@@ -47,6 +47,16 @@ for t in inception verify_access host_access host_access_undo; do
     check "make $t exports the recorded VM_PATH" "${got//"$TMP"/TMP}" 'VM_PATH="TMP/vm"'
 done
 
+# 1b. The fifth caller: the end of `make all` (_build) runs host access too,
+#     and without VM_PATH it printed "no VM found for 'inception' -- assuming
+#     default ports" on a QEMU guest under /sgoinfre (2026-10-31): right only
+#     while no host port had walked. _build cannot be rendered with make -n
+#     without running the pipeline, so every recipe line that calls the
+#     script is read from the Makefile instead.
+passes_vm_path="VM_PATH=\"\$(VM_PATH)\""
+missing=$(grep -n 'setup/host/inception_host_access.sh' Makefile | grep -vF "$passes_vm_path" || true)
+check "every inception_host_access.sh call passes VM_PATH" "${missing:-none}" none
+
 # 2. With that in the environment, the resolver finds QEMU's forwards.
 export VM_NAME="$VM" VM_PATH="$TMP/vm"
 # shellcheck source=setup/host/vm_ports.sh
