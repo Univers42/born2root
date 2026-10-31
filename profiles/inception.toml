@@ -1,0 +1,125 @@
+# born2root — the INCEPTION profile: a 15 GB guest that runs the Inception
+# stack (github.com/Univers42/Inception) and is reached from the host browser.
+#
+#   make all B2B_CONFIG=profiles/inception.toml
+#   make inception B2B_CONFIG=profiles/inception.toml
+#
+# Same schema as born2root.toml; see that file for what every key means.
+# What differs, and why:
+#
+#   [vm] name    "inception": its disk lives beside debian/ and baas/, never
+#                on top of them, under vm.path on /sgoinfre (the home is a
+#                4.7 GB disk; /goinfre is wiped).
+#
+#   [vm] ram_mb  2048: the stack is meant to run on as little as possible.
+#                Read at every start (qemu_vm.sh), so `make qemu_restart`
+#                applies a change without a reinstall.
+#
+#   [disk] swap_mb 1024, not "auto": auto follows RAM, and at 4096 MB of
+#                RAM it took 3709 MB of the 15 GB, which left /var 3099 MB
+#                for docker's 3300 (the ISO build refused). Pinned, the
+#                layout no longer moves with ram_mb: / 3449, /var 4019,
+#                /home 1356 MB usable.
+#
+#   [vm] ide_disk_gb 0: the second disk is the osionos IDE sandbox's, which
+#                this machine does not run.
+#
+#   [features]   docker on (inception-data rides on it), no dc-*. Fits at
+#                15 GB: `make features SIZE_B2B=15 B2B_CONFIG=...` -- / 2920 of
+#                3449 MB, /var 3300 of 4019, /home 1153 of 1356.
+#                b2b-var-gc (base) cleans /var and /var/log at 90%.
+#
+#   [network]    the three forwards inception_host_access.sh and
+#                create_custom_iso.sh look up by name -- inception-https,
+#                inception-static, inception-adminer -- and nothing else.
+#                inception-https is exposed: the LAN reaches the site on the
+#                host's 8445. Inception's FTP set stays on the guest loopback.
+
+[vm]
+name    = "inception"
+backend = "qemu"
+path    = ["/sgoinfre/students/$USER/virtual_machines"]
+disk_gb = 15
+ide_disk_gb = 0
+ram_mb = 2048
+cpus = 4
+profile = "auto"
+ai_mode = "off"
+
+[system]
+hostname        = ""
+locale          = "en_US.UTF-8"
+keymap          = "es"
+timezone        = "Europe/Madrid"
+mirror          = "deb.debian.org"
+root_password   = "temproot123"
+luks_passphrase = "tempencrypt123"
+
+[users.dlesieur]
+password    = "tempuser123"
+fullname    = ""
+sudo        = true
+groups      = ["docker"]
+ssh_keys    = [
+    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCkePhKJWmZiDuVZVtm0B/NC5/UrgENq6EFo4cRKrAHR1/zVpq+VNNR12d2Gn3h9KNt5Qaw3j20xJsIDaWcR7u34I3CZeY+s+jpiQbDyLl4tYHnd5wji2DyMvmqj7ATHf4JOMcyvz7a0p7fElXuQTy4ZDtdMP4EzNfWarT8w8KHielqQ3I410Qi0uo7yalAvjcmAm7YJFle2F3CpciqWvYXOkYhQt3lWUy17yvgHl6EQQd0QUW6pD5sshZPnjw+AZvZy4QAaSPPDyGZPiNgV6G48nCPi+ldE4WUR7ULJtWHVtt/GQHrzANKKcNvYKS7zsGuYWy5X+GHBN2thEoqXiLbF3adPwDNDq5kH9isDuoWVNidWaC/peFTjAqvngP+4rR96EmokKzE0SrxTyEMqdJ/pBt+UIrDTlY2FSK4BHL/kI56T62VrriYw6aUzaCs7HiR5LELQzfuuvcEiY14GlHRtLM9RSenEHm87orNMrI4/Z97wVFM2BjlOZsLK+zkS0M= dlesieur@c1r4s6.42madrid.com"
+]
+nvim    = true
+
+[packages]
+apt = []
+
+[features]
+nvim                = true
+nvim-extras         = true
+webstack            = false
+nodejs              = true
+pytools             = false
+devtools-extra      = true
+claude-code         = true
+playwright          = false
+docker              = true
+
+[policy.password]
+max_days    = 30
+min_days    = 2
+warn_days   = 7
+min_length  = 10
+min_upper   = 1
+min_lower   = 1
+min_digit   = 1
+max_repeat  = 3
+min_changed = 7
+
+[policy.sudo]
+tries           = 3
+badpass_message = "Wrong password. Access denied!"
+log_dir         = "/var/log/sudo"
+
+[policy.ssh]
+password_login = true
+
+[policy.monitoring]
+interval_min = 10
+
+[network]
+forwards = [
+  { name = "ssh",   guest = 4242, host = 4242 },
+  { name = "inception-https",   guest = 443,  host = 8445, expose = true },
+  { name = "inception-static",  guest = 8090, host = 8090 },
+  { name = "inception-adminer", guest = 8080, host = 8081 },
+]
+
+[host]
+autostart = true
+
+[disk]
+swap_mb = 1024
+volumes = [
+  { name = "root",    mount = "/",        floor_mb = 2816, share = 25,     cap_mb = 30720  },
+  { name = "home",    mount = "/home",    floor_mb = 512,  share = 18,     cap_mb = 102400 },
+  { name = "opt",     mount = "/opt",     floor_mb = 256,  share = 5,      cap_mb = 20480  },
+  { name = "srv",     mount = "/srv",     floor_mb = 256,  share = 0,      cap_mb = 10240  },
+  { name = "tmp",     mount = "/tmp",     floor_mb = 256,  share = 3,      cap_mb = 10240  },
+  { name = "var-log", mount = "/var/log", floor_mb = 384,  share = 3,      cap_mb = 20480  },
+  { name = "var",     mount = "/var",     floor_mb = 2048, share = "rest"                  },
+]
