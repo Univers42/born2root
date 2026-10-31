@@ -17,6 +17,8 @@ dist/
 
 # generate/feature_select.sh: which features you ticked, for which disk.
 .b2b-features
+# make use: the profile make reads when B2B_CONFIG= is not given.
+.b2b-config
 .b2b-llm-ack
 
 # Python byte-code from utils/b2b_config.py, and the apt index cache it

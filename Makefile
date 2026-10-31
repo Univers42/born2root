@@ -82,6 +82,20 @@ SHELL := $(SCRIPT_SH)
 # each $(or) is what applies when the file does not answer -- a copy of the
 # Makefile alone, as tests/test_make_pull.sh makes, has no file at all.
 # B2B_CONFIG=path points every read, here and in the scripts, at another file.
+# With neither naming one, the profile `make use B2B_CONFIG=...` recorded in
+# the git-ignored .b2b-config applies: one forgotten B2B_CONFIG= on a
+# profile's VM used to point make at born2root.toml and the `debian` VM.
+# Exported, because a value read here, unlike a command-line one, would not
+# reach the scripts' environment.
+ifeq ($(origin B2B_CONFIG),undefined)
+B2B_CONFIG := $(strip $(file < $(CURDIR)/.b2b-config))
+ifneq ($(B2B_CONFIG),)
+ifeq ($(wildcard $(B2B_CONFIG)),)
+$(error .b2b-config names $(B2B_CONFIG), which does not exist: make use B2B_CONFIG=<profile>, or make use B2B_CONFIG= for born2root.toml)
+endif
+export B2B_CONFIG
+endif
+endif
 # env, not a bare assignment: make 4.3 does not hand command-line variables to
 # $(shell).
 B2B_CONFIG_ENV := $(if $(B2B_CONFIG),env B2B_CONFIG=$(B2B_CONFIG) ,)
@@ -325,7 +339,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all health autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help \
+.PHONY: all health autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help use \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception verify_access verif_access fresh \
@@ -1407,3 +1421,18 @@ llm_stop:
 # =========@@ Help @@==========================================================
 help:
 	@$(SCRIPT_SH) generate/help.sh
+
+# Record the profile every later make reads without B2B_CONFIG= (.b2b-config,
+# above); `make use B2B_CONFIG=` goes back to born2root.toml, `make use` alone
+# says which one applies.
+use:
+	@if [ -z "$(B2B_CONFIG)" ]; then \
+		rm -f .b2b-config; \
+		printf "profile: born2root.toml (no .b2b-config)\n"; \
+	elif [ -f "$(B2B_CONFIG)" ]; then \
+		printf '%s\n' "$(B2B_CONFIG)" >.b2b-config; \
+		printf "profile: $(C_BOLD)%s$(C_RESET), VM %s (recorded in .b2b-config; make use B2B_CONFIG= to undo)\n" "$(B2B_CONFIG)" "$(VM_NAME)"; \
+	else \
+		printf "no such profile: %s\n" "$(B2B_CONFIG)" >&2; \
+		exit 1; \
+	fi

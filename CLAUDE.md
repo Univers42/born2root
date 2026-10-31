@@ -36,6 +36,7 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | Re-run a provisioner inside a built VM over SSH | `make nvim`, `make excalidraw`, `make devtools`, `make claude_code`, `make claude_debug`, `make hellish_plugins`, `make provision`, `make shell_vm` |
 | Run the hellish release binary in a Debian trixie container | `make -C docker shell` |
 | Build with a preset config (school eval or server profile) | `make all B2B_CONFIG=profiles/school.toml` |
+| Remember a profile for every later make (`B2B_CONFIG=` undoes) | `make use B2B_CONFIG=profiles/inception.toml` |
 | Full datacenter setup after a rebuild (restore → tailscale → backup) | `make datacenter` |
 | Expose grobase API/WAF on the host over SSH tunnels | `make baas_access`, `make baas_access_undo` |
 | Reach a guest-loopback-bound app (groot, drawnosaurus) over SSH tunnels | `make groot`, `make drawnosaurus`, `make drawnosaurus_undo` |
@@ -200,7 +201,11 @@ root file: `profiles/school.toml` and `profiles/server.toml` (the backend-only
 release). Their headers explain every departure from the shipped defaults, so
 read the one you are building before changing it. A profile names its own
 `[vm] name`, so its disk lives beside — not on top of — the workstation's.
-`tests/test_profiles.sh` pins them.
+`tests/test_profiles.sh` pins them. `make use B2B_CONFIG=<profile>` records
+the choice in the git-ignored `.b2b-config`, which make reads (and exports)
+whenever neither the command line nor the environment names one: a forgotten
+`B2B_CONFIG=` used to land on born2root.toml's `debian` VM.
+`tests/test_make_use.sh` pins it.
 
 - `utils/b2b_config.py` is the only reader, and with `--set-ai KEY JSON` the
   only writer: it replaces one `[ai]` line in place, keeps every comment, and

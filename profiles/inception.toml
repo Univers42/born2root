@@ -8,8 +8,10 @@
 # What differs, and why:
 #
 #   [vm] name    "inception": its disk lives beside debian/ and baas/, never
-#                on top of them, under vm.path on /sgoinfre (the home is a
-#                4.7 GB disk; /goinfre is wiped).
+#                on top of them, under vm.path: /sgoinfre on a 42 seat (the
+#                home there is a 4.7 GB disk; /goinfre is wiped), and
+#                $HOME/virtual_machines on a machine without /sgoinfre --
+#                the first usable entry wins (utils/host_path.py).
 #
 #   [vm] ram_mb  2048: the stack is meant to run on as little as possible.
 #                Read at every start (qemu_vm.sh), so `make qemu_restart`
@@ -38,7 +40,7 @@
 [vm]
 name    = "inception"
 backend = "qemu"
-path    = ["/sgoinfre/students/$USER/virtual_machines"]
+path    = ["/sgoinfre/students/$USER/virtual_machines", "$HOME/virtual_machines"]
 disk_gb = 15
 ide_disk_gb = 0
 ram_mb = 2048
