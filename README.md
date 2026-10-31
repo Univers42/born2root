@@ -8,6 +8,19 @@ infrastructure framework. If you are tired of manually installing Debian,
 configuring SSH, or fighting with connection timeouts, this tool automates the
 entire process.
 
+## Documentation
+
+**From now on, the project's documentation lives in [our own documentation
+space][docs]**: how born2root builds the VM, how Inception runs inside it,
+and the guides that explain both projects to newcomers. This README keeps the
+commands to build and run things; the explanations go there.
+
+The space is served by our own platform on the `baas` machine and published
+through Tailscale Funnel, so anyone can open it, no account or VPN needed. It
+is down whenever `baas` is.
+
+[docs]: https://baas.tail10f2ea.ts.net:8443/#source=adapter&view=my-pages-home-dashboard
+
 ## Why use this project?
 
 - **100% Automated & Headless:** ISO download, LUKS/LVM partitioning, preseeded
