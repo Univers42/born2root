@@ -33,6 +33,7 @@ awk "/b2b-backup <<'BKEOF'\$/ { on = 1; next } /^BKEOF\$/ { on = 0 } on" \
     setup/install/dc/install_backup.sh |
     sed -e "s#^PASS=.*#PASS=$TMP/pass#" -e "s#^REPO=.*#REPO=$TMP/repo#" \
         -e "s#^DUMPS=.*#DUMPS=$TMP/dumps#" -e "s#^STATUS=.*#STATUS=$TMP/status/backup.last#" \
+        -e "s#/run/lock/b2b-backup.lock#$TMP/lock#" \
         >"$TMP/b2b-backup"
 check "the job was cut out of the installer" "$(grep -c '^verdict ok$' "$TMP/b2b-backup")" 1
 
@@ -67,5 +68,18 @@ check "... and the output says why" "$(grep -c 'mini-baas-postgres is not runnin
 check "platform up: the snapshot is taken" "$(run_job up)" 0
 check "... once" "$(grep -c '^backup$' "$TMP/restic.calls")" 1
 check "... and the verdict is ok" "$(cut -d' ' -f1 "$TMP/status/backup.last")" ok
+
+# A second run must wait: each one starts by emptying $DUMPS, so overlapping the timer's
+# run used to delete its dumps mid-write and snapshot what was left, with exit 0.
+flock "$TMP/lock" sleep 2 &
+holder=$!
+python3 -c 'import time; time.sleep(0.4)'
+started=$(date +%s%N)
+check "a second run still succeeds" "$(run_job up)" 0
+waited_ms=$((($(date +%s%N) - started) / 1000000))
+wait "$holder"
+check "... after waiting for the first" "$([ "$waited_ms" -ge 1000 ] && echo waited || echo "raced after ${waited_ms} ms")" waited
+check "the lock is taken before the dumps are emptied" \
+    "$(awk '/^flock -w/{l=NR} /^rm -f "\$DUMPS"\/\*/ && !r {r=NR} END{print (l && r && l<r) ? "yes" : "no"}' "$TMP/b2b-backup")" yes
 
 exit "$fail"

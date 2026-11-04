@@ -69,6 +69,11 @@ DUMPS=/var/backups/b2b/dumps
 [ -s "$PASS" ] || { echo "b2b-backup: no $PASS yet (make backup, from the host)"; exit 0; }
 export RESTIC_PASSWORD_FILE="$PASS" RESTIC_REPOSITORY="$REPO"
 umask 077
+# One at a time: each run starts by emptying $DUMPS, so a `make backup` landing on the
+# timer's run deleted its dumps mid-write, and that snapshot went in short with exit 0.
+# Caveat: a run stuck past 10 minutes makes the next one exit 1 rather than wait on.
+exec 9>/run/lock/b2b-backup.lock
+flock -w 600 9 || { echo "b2b-backup: another run has held the lock for 10 minutes: no snapshot"; exit 1; }
 mkdir -p "$DUMPS"
 rm -f "$DUMPS"/*
 have() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
