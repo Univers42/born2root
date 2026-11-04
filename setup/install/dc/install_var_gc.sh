@@ -89,8 +89,8 @@ fi
 # no "dns" key yet.
 # Caveat: with Tailscale stopped, every lookup first waits out 100.100.100.100
 # (about 5 s) before the fallback answers.
-if [ -s "$DJ" ] && command -v python3 >/dev/null 2>&1; then
-    if python3 - "$DJ" <<'PYEOF'
+merge_fallback_dns() {
+    python3 - "$DJ" <<'PYEOF'
 import json, re, sys
 path = sys.argv[1]
 try:
@@ -106,7 +106,9 @@ if "10.0.2.3" not in servers:
 conf["dns"] = servers
 json.dump(conf, open(path + ".new", "w"), indent=2)
 PYEOF
-    then
+}
+if [ -s "$DJ" ] && command -v python3 >/dev/null 2>&1; then
+    if merge_fallback_dns; then
         mv "$DJ.new" "$DJ"
         log "daemon.json: containers resolve through $(python3 -c 'import json;print(" then ".join(json.load(open("/etc/docker/daemon.json"))["dns"]))')"
         if systemctl is-active --quiet docker 2>/dev/null; then

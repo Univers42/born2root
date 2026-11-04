@@ -110,6 +110,10 @@ CI's `actions/checkout` fetches no submodules, so it never sees `.claude/`.
 Locally the kit is there, and its 51 scripts all fail `shfmt -i 4`: prune it,
 or the diff drowns the repo's own findings.
 
+CI's shfmt is the snap's 3.12.0. It and 3.14 rewrite a heredoc in an `if`
+condition into each other's form, so neither passes both: put the heredoc in a
+function and test the function.
+
 Shell scripts are indented with 4 spaces (CI's `shfmt -i 4` wins over the tab
 setting in `.editorconfig`, and any flag on the command line makes shfmt
 ignore that file's `-bn -ci -sr` too); the Makefile uses tabs. `.shellcheckrc`
