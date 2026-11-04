@@ -6,7 +6,7 @@
 #   born2root builds a capable machine; grobase says what runs on it. This
 #   script installs MACHINE concerns (a clone at a pinned ref, the env and
 #   certs grobase mints for itself, ownership) and then hands over to
-#   grobase's own Makefile: `make pull`, `make up PACKAGE=…`, `make health`.
+#   grobase's own Makefile: `make pull`, `make up PACKAGE=…`.
 #   It never names an engine version. Bumping Postgres is a grobase commit;
 #   nothing here changes and no ISO is rebuilt.
 #
@@ -606,10 +606,30 @@ fi
 make --no-print-directory up PACKAGE="$GROBASE_PACKAGE" ADDONS="$GROBASE_ADDONS" || die "make up failed"
 
 # Readiness is the gateway answering, not `up` returning: Kong starts before
-# the services behind it. The health target probes 127.0.0.1:8000.
+# the services behind it. An anon request to /auth/v1/health crosses Kong and
+# reaches gotrue, so a 200 is both of them.
+#
+# This used to be grobase's `make health`, which has since grown into an audit
+# of the whole stack, and its TCP audit reads host:port out of environment text
+# (scripts/ops/stack-health-edges.awk). MONGO_URI=mongodb://mongo:4x...@mongo:27017
+# is an edge to port 4: a minted password that opens with a digit, 10 in 62
+# (gen_alnum), makes five healthy services "UNREACHABLE: mongo:4", and the whole
+# of dc-full was filed as failed with Mongo answering ping (baas, 2026-11-04,
+# grobase dca1de9). The end of this file judges the containers instead.
+#
+# One step per line, on purpose. First boot runs this file under hellish and `make
+# grobase` under bash, and hellish 3.2.0 leaves `$(cmd "a$(… '"' …)")` unexpanded,
+# the text itself and cmd never run, while `hellish -n` passes it. The same check
+# written on one line failed every first boot and passed every retry.
+gateway_answers() {
+    local key code
+    key=$(sed -n 's/^ANON_KEY=//p' .env | head -n1 | tr -d '"')
+    code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' -H "apikey: $key" http://127.0.0.1:8000/auth/v1/health)
+    [ "$code" = 200 ]
+}
 ready=0
 for _ in $(seq 1 60); do
-    if make --no-print-directory health >/dev/null 2>&1; then
+    if gateway_answers; then
         ready=1
         break
     fi
@@ -681,6 +701,17 @@ if [ -n "$LOGIN" ] && id "$LOGIN" >/dev/null 2>&1; then
         chmod 640 "$GROBASE_DIR/certs/localhost-key.pem"
         docker restart mini-baas-waf >/dev/null 2>&1 || true
     fi
+fi
+
+# The verdict: after the settle pass, because that is what heals the casualties
+# of a cold start. Crash loops, unhealthy containers and non-zero exits, read from
+# docker, so a false edge cannot fail it and a gateway over a dead engine cannot
+# pass it.
+if [ "$ready" = 1 ] && [ -x /usr/local/sbin/b2b-stack-health ]; then
+    /usr/local/sbin/b2b-stack-health 300 || {
+        log "the gateway answers, but the stack is not healthy (the lines above)"
+        ready=0
+    }
 fi
 
 log "grobase $GROBASE_PACKAGE is up: gateway on 127.0.0.1:8000 in the guest ($(docker ps --format '{{.Names}}' | grep -c '^mini-baas') containers)"

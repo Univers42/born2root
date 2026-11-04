@@ -106,10 +106,11 @@ first_boot_wait() {
 # first-boot-setup.sh) and stops the build. One nvim-extras failure on
 # 2026-10-04 used to fail a build whose first boot had otherwise finished in
 # six minutes.
-# shellcheck disable=SC2034 # FB_SUMMARY is the caller's to print
+# shellcheck disable=SC2034 # FB_SUMMARY and FB_MISSED are the caller's to read
 first_boot_verdict() {
     local failed warned bad fatal name status
     FB_SUMMARY=""
+    FB_MISSED=0
     if failed=$(fb_ssh 'cat /etc/b2b/PROVISION_FAILED 2>/dev/null') && [ -n "$failed" ]; then
         printf '\n  ✗ provisioning failed inside the guest (/etc/b2b/PROVISION_FAILED):\n' >&2
         printf '%s\n' "$failed" | sed 's/^/      /' >&2
@@ -156,7 +157,15 @@ AWK
     fi
     status=$(fb_ssh 'cat /etc/b2b/features.status 2>/dev/null' || true)
     if [ -n "$status" ]; then
-        FB_SUMMARY="every feature installed: $(printf '%s\n' "$status" | grep -c ' ok ') ok, $(printf '%s\n' "$status" | grep -c ' off ') off by profile"
+        # An optional feature that failed still returns 0, so this line is what
+        # the build ends on: it read "every feature installed: 18 ok" right under
+        # thirteen dc-* failures (baas, 2026-11-04).
+        FB_MISSED=$(printf '%s\n' "$status" | grep -cE ' (failed|no-space) ')
+        if [ "$FB_MISSED" -gt 0 ]; then
+            FB_SUMMARY="$FB_MISSED optional feature(s) did NOT install (listed above), $(printf '%s\n' "$status" | grep -c ' ok ') ok, $(printf '%s\n' "$status" | grep -c ' off ') off by profile"
+        else
+            FB_SUMMARY="every feature installed: $(printf '%s\n' "$status" | grep -c ' ok ') ok, $(printf '%s\n' "$status" | grep -c ' off ') off by profile"
+        fi
     else
         FB_SUMMARY="no /etc/b2b/features.status on this guest (built before feature accounting), nothing to verify"
     fi

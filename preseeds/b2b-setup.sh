@@ -188,7 +188,7 @@ if [ -f "$CUSTOM_SHELL_BIN" ] && [ -f "$CUSTOM_SHELL_DEST_FILE" ]; then
         # /usr/bin/hellish.real: the binary can be refreshed (first boot installs
         # the published release over it) without the passwd entry ever naming a
         # file that is mid-replacement, and `command -v hellish.real` keeps
-        # naming the ELF for the tools that need one (Inception's Makefile copies
+        # naming the ELF for the tools that need one (a project's Makefile copies
         # it into the containers). Earlier builds put a bash script here that
         # sent every non-interactive ssh command to bash; that made
         # `ssh b2b '<cmd>'`, scp's server side and the whole host-driven pipeline
@@ -482,9 +482,9 @@ sysctl --system >/dev/null 2>&1 || true
 # The installer writes `allow-hotplug ens4`, which networking.service does not
 # wait for: network-online.target was reached before the DHCP lease, and
 # dockerd, which waits for it, restored the containers published on the NAT
-# address (10.0.2.15, the WAF and Inception's) before that address existed.
+# address (10.0.2.15, the WAF's) before that address existed.
 # Their binds failed ("cannot assign requested address") and docker does not
-# retry that: after the 2026-10-22 restart Inception's nginx and adminer stayed
+# retry that: after the 2026-10-22 restart a project's nginx and adminer stayed
 # down. `auto` makes ifup -a, and so network-online.target, wait for the lease.
 sed -i -E 's/^allow-hotplug (en[a-z0-9]+)$/auto \1/' /etc/network/interfaces
 

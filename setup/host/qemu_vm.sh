@@ -202,7 +202,7 @@ vm_sizing
 # both backends and the guest's firewall are built from ("name:host:guest").
 # It used to be a literal here, a second one in install_vm_debian.sh and a
 # third in orchestrate.sh, and they drifted: QEMU carried no FTP passive range
-# and VirtualBox's installer no inception-* rules, while the guest's UFW opened
+# and VirtualBox's installer no project rules, while the guest's UFW opened
 # a fourth list of its own. These are PREFERRED host ports, not guaranteed
 # ones -- see resolve_ports() below. Setting PORTS_SPEC replaces the list
 # (the tests do); qemu_pipeline.sh exports it to the qemu_vm.sh it runs.
@@ -277,6 +277,17 @@ find_iso() {
 
 # The passphrase the preseed was rendered with: VM_PASS, else born2root.toml.
 vm_pass() { b2b_luks_passphrase 2>/dev/null; }
+
+# A `secret:` passphrase lives under $HOME, and on a seat the home disk is
+# mounted after the session that lets cron use /dev/kvm: the tick can get here
+# with no file to read. Booting anyway parks the guest at a LUKS prompt nobody
+# answers, and the tick, seeing QEMU alive, never tries again. So: stop here,
+# and the next minute's tick starts it properly.
+require_passphrase() {
+    [ -z "$(vm_pass)" ] || return 0
+    b2b_secret_refs 2>/dev/null | grep -q ' luks$' || return 0
+    die "no LUKS passphrase: the profile keeps it in the secrets file, which cannot be read yet (home not mounted?) or lost the line"
+}
 
 # Alive? /proc, not `kill -0`: kill -0 answers EPERM for a process owned by
 # someone else, which read as "not running" for a guest root had started.
@@ -630,7 +641,7 @@ launch() {
     rm -f "$MONITOR"
 
     # Publish the forwards. A QEMU hostfwd= lives only on the command line, so
-    # without this the Inception host-access scripts -- which ask VBoxManage
+    # without this the host-access scripts -- which ask VBoxManage
     # for a named NAT rule -- would conclude nothing is forwarded, and report
     # "no 'https' NAT rule" about a port that works. See vm_ports.sh.
     : >"$VM_DIR/ports.env"
@@ -1176,6 +1187,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
 
     start)
         refuse_sudo_build "make qemu_start VM_PATH=$VM_PATH" || exit 1
+        require_passphrase
         # A running QEMU is not necessarily the installed system booting: it
         # may still be d-i owning the disk, and typing a LUKS passphrase at
         # the installer is 45 seconds of nothing followed by a wrong diagnosis.
@@ -1447,6 +1459,10 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          # Neovim's markdown preview (8420) and the Excalidraw editor (8421)
          # listen on the guest's loopback only; carrying them over the ssh
          # session makes the URLs Neovim prints work in the host's browser.
+         # The agent lends the host's key to the guest for this session, so a
+         # private remote (Vogsphere) clones from `ssh b2b` and no key ever
+         # lands on the guest's disk.
+         "    ForwardAgent yes",
          "    LocalForward 8420 127.0.0.1:8420",
          "    LocalForward 8421 127.0.0.1:8421",
          # The other way round: Chrome's DevTools protocol on the HOST, at
@@ -1459,10 +1475,6 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          # nothing in the guest but the one loopback port.
          "    RemoteForward 9222 localhost:9222", ""]
 text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(block)
-         # The agent lends the host's key to the guest for this session, so a
-         # private remote (Vogsphere) clones from `ssh b2b` and no key ever
-         # lands on the guest's disk.
-         "    ForwardAgent yes",
 open(path, "w").write(text)
 print("wrote the b2b block for port " + port)
 PYEOF

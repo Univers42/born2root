@@ -66,6 +66,13 @@ check "clean guest: passes" "$(verdict)" 0
 first_boot_verdict 2>/dev/null
 check "  and says what it counted" "$FB_SUMMARY" "every feature installed: 1 ok, 1 off by profile"
 
+guest "nvim ok / 300
+dc-gateway failed /var 0" "dc-gateway failed -- see the log"
+check "an optional failure still passes" "$(verdict)" 0
+first_boot_verdict 2>/dev/null
+check "  but never reads as everything installed" "$FB_SUMMARY" "1 optional feature(s) did NOT install (listed above), 1 ok, 0 off by profile"
+check "  and the caller can tell" "$FB_MISSED" 1
+
 guest "hellish failed / 0" "" "hellish: the login shell did not install"
 check "PROVISION_FAILED: fails" "$(verdict)" 1
 

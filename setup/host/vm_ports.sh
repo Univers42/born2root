@@ -75,6 +75,22 @@ vm_forward_port() {
     return 1
 }
 
+# vm_stale_ports: true when a QEMU guest's ports.env is left over, its VM not
+# running. The pid must be alive AND have been given this very pidfile: after a
+# crash the kernel reuses pids, and a reused one is not the VM.
+# Caveat: QEMU only. A VirtualBox VM answers its forwards from VBoxSVC, so with
+# one configured this says false and the caller finds out by connecting.
+vm_stale_ports() {
+    local ports pidfile pid
+    ports=$(_vm_ports_file)
+    [ -r "$ports" ] || return 1
+    pidfile="${ports%/*}/qemu.pid"
+    pid=$(head -n1 "$pidfile" 2>/dev/null) || return 0
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
+    tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "$pidfile" && return 1
+    return 0
+}
+
 # Which backend is actually providing the forwards right now.
 vm_backend() {
     if command -v VBoxManage >/dev/null 2>&1 &&

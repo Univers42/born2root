@@ -1256,9 +1256,16 @@ dc_fold() { # <feature> <its row> <mount>
         printf '%s %s (retry: %s)\n' "$1" "failed with $2" "$(feature_retry "$1")" >>/etc/b2b/FEATURE_WARNINGS
     fi
 }
+# One script serves both rows, measured under whichever is on: a profile that
+# keeps Tailscale off (server.toml) has no dc-netmesh row to fold dc-tunnel onto,
+# and cloudflared used to be skipped and filed as "failed with dc-netmesh".
 if feature_on dc-netmesh || feature_on dc-tunnel; then
     dc_run dc-netmesh install_edge.sh / || true
-    if feature_on dc-tunnel; then dc_fold dc-tunnel dc-netmesh /; fi
+    if ! feature_on dc-netmesh; then
+        dc_run dc-tunnel install_edge.sh / || true
+    elif feature_on dc-tunnel; then
+        dc_fold dc-tunnel dc-netmesh /
+    fi
 fi
 if feature_on dc-gateway; then
     dc_run dc-gateway install_grobase.sh /var /opt || true

@@ -41,7 +41,7 @@ AUTO_MB=$((HOST_MB / 4))
 # qemu RAM CPUS -> "VM_RAM_MB VM_CPUS", or "exit N" when vm_sizing exits.
 # nproc is a stub the eval'd function calls, and the two variables are its
 # inputs: shellcheck cannot see through the eval.
-# shellcheck disable=SC2317,SC2034
+# shellcheck disable=SC2317,SC2034,SC2329
 qemu() {
     (
         nproc() { echo 8; }
@@ -51,7 +51,7 @@ qemu() {
         echo "$VM_RAM_MB $VM_CPUS"
     ) || echo "exit $?"
 }
-# shellcheck disable=SC2317,SC2034
+# shellcheck disable=SC2317,SC2034,SC2329
 vbox() {
     (
         nproc() { echo 8; }

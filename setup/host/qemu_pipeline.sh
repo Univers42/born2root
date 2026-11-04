@@ -52,6 +52,7 @@ if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
 fi
 phase() { printf "\n${C_BLUE}▶${C_RESET} ${C_BOLD}%s${C_RESET}\n" "$*"; }
 ok() { printf "  ${C_GREEN}✓${C_RESET} %s\n" "$*"; }
+warn() { printf "  ! %s\n" "$*"; }
 die() {
     printf "\n  ${C_RED}✗${C_RESET} %s\n\n" "$*" >&2
     exit 1
@@ -156,7 +157,11 @@ case "$fb_rc" in
     ;;
 esac
 first_boot_verdict || die "$FB_SUMMARY"
-ok "$FB_SUMMARY"
+if [ "${FB_MISSED:-0}" -gt 0 ]; then
+    warn "$FB_SUMMARY"
+else
+    ok "$FB_SUMMARY"
+fi
 
 # shellcheck disable=SC2059
 printf "\n${C_GREEN}${C_BOLD}  QEMU build finished.${C_RESET}\n\n"
@@ -164,4 +169,3 @@ printf "    ssh b2b                 log in\n"
 printf "    make qemu_console       the serial console\n"
 printf "    make qemu_status        pid, ports, disk\n"
 printf "    make qemu_stop          shut it down\n"
-printf "    make inception          deploy the site inside it\n\n"
