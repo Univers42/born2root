@@ -308,7 +308,7 @@ The framework includes AI assistants to help with development inside the VM.
 ## Troubleshooting & Deep Dives
 
 If you encounter issues, the project includes detailed documentation in the
-`doc/` directory to help you debug common edge cases without cluttering the
+`wiki/` directory to help you debug common edge cases without cluttering the
 main README.
 
 ### Specific Guides
@@ -317,19 +317,19 @@ main README.
   after ~15 minutes of idle time while a standard terminal SSH remains stable,
   this is a known VirtualBox NAT issue interacting with VS Code's SOCKS proxy.
   The full explanation and the `settings.json` fix are detailed in
-  `doc/SSH_VSCODE_FIX.md`.
+  `wiki/SSH_VSCODE_FIX.md`.
 - **Inaccessible App Ports:** If you are running Docker apps inside the VM
   (like the osionos or ft_transcendence stacks) but cannot reach them from your
   host browser, you might be missing NAT port forwarding rules. See
-  `doc/VM_APP_PORT_FORWARDING.md` for the diagnosis and the fix.
+  `wiki/VM_APP_PORT_FORWARDING.md` for the diagnosis and the fix.
 - **Host SSL/TLS Certificate Errors:** If your browser shows a
   `SEC_ERROR_UNKNOWN_ISSUER` or `ERR_CERT_AUTHORITY_INVALID` warning when
   accessing your local Inception domain, your host does not trust the VM's
-  generated Certificate Authority. Follow `doc/HTTPS_FROM_HOST_STEP_BY_STEP.md`
+  generated Certificate Authority. Follow `wiki/HTTPS_FROM_HOST_STEP_BY_STEP.md`
   to properly import the CA into your browser's trust store.
 - **Rebuilding the server VM on another seat:** `profiles/server.toml`, the
   secrets file and the carried restic repository rebuild baas with
-  `make all` and `make datacenter`. `doc/rebuild-baas-at-school.md` lists the
+  `make all` and `make datacenter`. `wiki/rebuild-baas-at-school.md` lists the
   commands, the manual steps and what is still unverified at school.
 
 ### Disk Space Management

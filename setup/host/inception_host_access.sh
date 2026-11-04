@@ -26,7 +26,7 @@
 #   The traffic itself then rides the VirtualBox NAT port-forward, which is the
 #   same mechanism `ssh b2b` already uses — nothing to keep alive, nothing to
 #   go stale. This is deliberately NOT the `ssh -D` SOCKS approach that
-#   doc/SSH_VSCODE_FIX.md documents going silently dead after ~15 min idle.
+#   wiki/SSH_VSCODE_FIX.md documents going silently dead after ~15 min idle.
 #
 # RESULT
 #   Chromium/Chrome   https://<domain>              (exact subject URL)
