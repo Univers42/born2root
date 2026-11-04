@@ -22,7 +22,7 @@ bar, the SNI name and the ``Host`` header all keep saying the real domain and
 port 443, so WordPress and the TLS certificate both see exactly what they expect
 -- only the TCP destination changes.
 
-This is deliberately not the ``ssh -D`` SOCKS tunnel that doc/SSH_VSCODE_FIX.md
+This is deliberately not the ``ssh -D`` SOCKS tunnel that wiki/SSH_VSCODE_FIX.md
 records going stale after ~15 minutes idle. There is no tunnel here and no
 long-lived multiplexed channel: every request opens a fresh TCP connection to
 the VirtualBox NAT forward, the same path curl uses.
@@ -185,7 +185,12 @@ class Handler(socketserver.StreamRequestHandler):
             line = self.rfile.readline(65536)
             if not line or line in (b"\r\n", b"\n"):
                 break
-            headers.append(line)
+            # This connection is piped to ONE port from here on, and a browser
+            # reuses a proxy connection across ports: Firefox's request for
+            # :8081 reached the site on :8090. One request per connection.
+            if line.lower().split(b":")[0] not in (b"connection", b"proxy-connection"):
+                headers.append(line)
+        headers.append(b"Connection: close\r\n")
 
         try:
             remote = socket.create_connection(upstream, CONNECT_TIMEOUT)

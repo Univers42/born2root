@@ -31,11 +31,11 @@
 #                3449 MB, /var 3300 of 4019, /home 1153 of 1356.
 #                b2b-var-gc (base) cleans /var and /var/log at 90%.
 #
-#   [network]    the three forwards inception_host_access.sh and
+#   [network]    the forwards inception_host_access.sh and
 #                create_custom_iso.sh look up by name -- inception-https,
 #                inception-static, inception-adminer -- and nothing else.
 #                inception-https is exposed: the LAN reaches the site on the
-#                host's 8445. Inception's FTP set stays on the guest loopback.
+#                host's 8445. FTP reaches the host on 2121 and 21000-21010.
 
 [vm]
 name    = "inception"
@@ -109,6 +109,18 @@ forwards = [
   { name = "inception-https",   guest = 443,  host = 8445, expose = true },
   { name = "inception-static",  guest = 8090, host = 8090 },
   { name = "inception-adminer", guest = 8080, host = 8081 },
+  { name = "inception-ftp",     guest = 21,   host = 2121 },
+  { name = "inception-ftp-pasv-00", guest = 21000, host = 21000 },
+  { name = "inception-ftp-pasv-01", guest = 21001, host = 21001 },
+  { name = "inception-ftp-pasv-02", guest = 21002, host = 21002 },
+  { name = "inception-ftp-pasv-03", guest = 21003, host = 21003 },
+  { name = "inception-ftp-pasv-04", guest = 21004, host = 21004 },
+  { name = "inception-ftp-pasv-05", guest = 21005, host = 21005 },
+  { name = "inception-ftp-pasv-06", guest = 21006, host = 21006 },
+  { name = "inception-ftp-pasv-07", guest = 21007, host = 21007 },
+  { name = "inception-ftp-pasv-08", guest = 21008, host = 21008 },
+  { name = "inception-ftp-pasv-09", guest = 21009, host = 21009 },
+  { name = "inception-ftp-pasv-10", guest = 21010, host = 21010 },
 ]
 
 [host]

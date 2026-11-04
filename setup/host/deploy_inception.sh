@@ -8,6 +8,8 @@
 #
 #   make inception                     clone from GitHub, build, verify
 #   make inception SRC=/path/to/repo   push a local copy up instead
+#   make inception INCEPTION_REPO=git@host:path   clone a private remote, with
+#                                      the host's key lent through ssh-agent
 #
 # Why a source override exists: work done inside the VM that was never committed
 # is invisible to `git clone`. Pointing SRC at a host-side copy (a backup, or a
@@ -43,7 +45,7 @@ SSH_ALIAS="${SSH_ALIAS:-b2b}"
 # "Address already in use / Could not request local forwarding" each -- 25 lines
 # of what reads as failure in one `make inception`, over forwards none of these
 # command connections use.
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+SSH_OPTS=(-o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
     -o LogLevel=ERROR -o ClearAllForwardings=yes)
 
 C_RESET=$'\033[0m'
@@ -264,12 +266,20 @@ if [ -n "$SRC" ]; then
     fi
 else
     step "Cloning ${REPO_URL} (branch ${BRANCH}) into the guest"
+    # A private remote such as Vogsphere answers only to the host's key, and that
+    # key must never be copied into a guest: the agent lends it for this one
+    # session. An https remote needs neither, so the agent stays home.
+    clone_ssh=(vm_ssh)
+    case "$REPO_URL" in
+    git@* | ssh://*) clone_ssh=(ssh -A "${SSH_OPTS[@]}" "$SSH_ALIAS") ;;
+    esac
     # A directory without .git is the rescue case: the tree was deleted under
     # a running stack and secrets/ put back from the containers (2026-10-18),
     # and `git clone` refuses a non-empty destination. The clone lands beside
     # it without a checkout, its .git moves in, and reset --hard writes the
     # tracked files: secrets/ and srcs/.env are untracked, so they stay.
-    vm_ssh "set -e
+    "${clone_ssh[@]}" "set -e
+        export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes'
         if [ -d '$GUEST_DIR/.git' ]; then
             cd '$GUEST_DIR' && git fetch --all -q && git checkout -q '$BRANCH' && git pull -q --ff-only
         elif [ -d '$GUEST_DIR' ]; then

@@ -80,6 +80,43 @@ else
     log "WARN: $DJ exists without log-opts -- add max-size/max-file yourself; not merging into a hand-edited file"
 fi
 
+# ── a DNS fallback for containers ───────────────────────────────────────────
+# Containers inherit the guest's resolv.conf, and with Tailscale up that is one
+# server, 100.100.100.100: a single slow answer from it failed a build
+# on `wget: bad address 'wordpress.org'` (2026-11-02, after a cleared cache). The
+# NAT's own resolver, 10.0.2.3 under QEMU and VirtualBox alike, is added after
+# the guest's IPv4 servers. Merged only into a daemon.json that parses and has
+# no "dns" key yet.
+# Caveat: with Tailscale stopped, every lookup first waits out 100.100.100.100
+# (about 5 s) before the fallback answers.
+if [ -s "$DJ" ] && command -v python3 >/dev/null 2>&1; then
+    if python3 - "$DJ" <<'PYEOF'
+import json, re, sys
+path = sys.argv[1]
+try:
+    conf = json.load(open(path))
+except ValueError:
+    sys.exit(1)
+if "dns" in conf:
+    sys.exit(1)
+servers = re.findall(r"^nameserver\s+(\d+\.\d+\.\d+\.\d+)", open("/etc/resolv.conf").read(), re.M)
+servers = [s for s in servers if not s.startswith("127.")]
+if "10.0.2.3" not in servers:
+    servers.append("10.0.2.3")
+conf["dns"] = servers
+json.dump(conf, open(path + ".new", "w"), indent=2)
+PYEOF
+    then
+        mv "$DJ.new" "$DJ"
+        log "daemon.json: containers resolve through $(python3 -c 'import json;print(" then ".join(json.load(open("/etc/docker/daemon.json"))["dns"]))')"
+        if systemctl is-active --quiet docker 2>/dev/null; then
+            systemctl restart docker || log "docker did not restart cleanly; the DNS applies from the next start"
+        fi
+    else
+        rm -f "$DJ.new"
+    fi
+fi
+
 # ── the cleaner ─────────────────────────────────────────────────────────────
 cat >/usr/local/sbin/b2b-var-gc <<'GCEOF'
 #!/bin/sh

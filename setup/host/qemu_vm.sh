@@ -1459,6 +1459,10 @@ block = [marker, "Host b2b vm born2beroot", "    HostName 127.0.0.1",
          # nothing in the guest but the one loopback port.
          "    RemoteForward 9222 localhost:9222", ""]
 text = "\n".join([l for l in out if l is not None]).rstrip("\n") + "\n\n" + "\n".join(block)
+         # The agent lends the host's key to the guest for this session, so a
+         # private remote (Vogsphere) clones from `ssh b2b` and no key ever
+         # lands on the guest's disk.
+         "    ForwardAgent yes",
 open(path, "w").write(text)
 print("wrote the b2b block for port " + port)
 PYEOF

@@ -342,7 +342,7 @@ C_CYAN   := \033[36m
 .PHONY: all health autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help use \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
-        host_access host_access_undo inception verify_access verif_access fresh \
+        host_access host_access_undo inception inception_save inception_restore inception_docs verify_access verif_access fresh \
         groot groot_map groot_undo \
         drawnosaurus drawnosaurus_status drawnosaurus_undo \
         graph_render graph_render_status graph_render_undo graph_render_install graph_render_key \
@@ -1130,6 +1130,23 @@ graph_render_undo:
 #   make inception                    clone github.com/Univers42/inception
 #   make inception SRC=/path/to/repo  push a local working tree up instead
 inception:
+# Inception's volumes and secrets, as one raw archive on the host and never in
+# Git: they hold credentials, which the subject fails a project for.
+#   make inception_save
+#   make inception_restore INCEPTION_REPO=git@host:path   (FORCE=1 replaces data)
+inception_save:
+	@$(SCRIPT_SH) setup/host/inception_data.sh save
+
+inception_restore:
+	@$(SCRIPT_SH) setup/host/inception_data.sh restore
+
+# USER_DOC.md and DEV_DOC.md, read from the VM, as pages in the osionos workspace.
+# OSIONOS_EMAIL and OSIONOS_PASSWORD come from the secrets file, never from Git.
+inception_docs:
+	@OSIONOS_EMAIL="$$(sed -n 's/^OSIONOS_EMAIL=//p' "$(B2B_SECRETS)")" \
+		OSIONOS_PASSWORD="$$(sed -n 's/^OSIONOS_PASSWORD=//p' "$(B2B_SECRETS)")" \
+		node setup/host/inception_docs.mjs
+
 	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
 		$(SCRIPT_SH) setup/host/deploy_inception.sh
 

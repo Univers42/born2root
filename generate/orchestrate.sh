@@ -1172,6 +1172,7 @@ ${alias_line}
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
     LogLevel ERROR
+    ForwardAgent yes
     LocalForward 8420 127.0.0.1:8420
     LocalForward 8421 127.0.0.1:8421
 
