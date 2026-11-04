@@ -432,13 +432,19 @@ edge)
     run_provisioner setup/install/dc/install_edge.sh \
         install_edge.sh EDGE_ "Tailscale + cloudflared"
     ;;
+# Not run_provisioner either: groot drives this target and `make all` leans on
+# it, and its warn returned 0 over a failed install.
 grobase)
-    run_provisioner setup/install/dc/install_grobase.sh \
-        install_grobase.sh GROBASE_ "grobase"
+    guest_script setup/install/dc/install_grobase.sh install_grobase.sh GROBASE_ "grobase"
+    exit $?
     ;;
+# Not run_provisioner: its warn returns 0, so `make restore` printed "restored"
+# over a restore that had failed and `make datacenter` carried on, and a
+# repository that failed `restic check` passed `make backup_verify`.
+# backup_pull.sh reads this status (install_backup.sh's header says what 3 is).
 backup)
-    run_provisioner setup/install/dc/install_backup.sh \
-        install_backup.sh BACKUP_ "restic + the dump job"
+    guest_script setup/install/dc/install_backup.sh install_backup.sh BACKUP_ "restic + the dump job"
+    exit $?
     ;;
 graph-render)
     run_provisioner setup/install/dc/install_graph_render.sh \
@@ -452,6 +458,17 @@ grow-root)
 ide-disk)
     guest_script setup/install/dc/install_ide_disk.sh install_ide_disk.sh IDE_DISK_ "install_ide_disk.sh" ||
         die "install_ide_disk.sh exited $? -- read its output above"
+    ;;
+# Not run_provisioner either: set_seeds.sh reads this status, and 4 means the
+# platform held data and nothing was changed.
+seeds)
+    guest_script setup/host/set_seeds_guest.sh set_seeds_guest.sh SEEDS_ "the seeds"
+    exit $?
+    ;;
+# setup_sudo already proved the password or stopped: rotate_password.sh asks
+# only that, of a value it has just set.
+sudo-check)
+    ok "sudo took the password"
     ;;
 # The restore drill needs root (the repository and its password are root's)
 # and nothing uploaded: the script is already in the guest.
