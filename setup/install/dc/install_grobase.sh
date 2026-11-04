@@ -27,7 +27,7 @@
 # WHAT IS NEVER STARTED
 #   studio and playground are compose PROFILES in grobase (studio.yml,
 #   playground.yml), off unless asked for by name; so are the tenant apps
-#   (gourmand, hypertube, surfind, vault42 …). A tier never enables them.
+#   (hypertube, surfind, vault42 …). A tier never enables them.
 #   That is the backend-only split: the frontends live on the host or on a
 #   collaborator's laptop and talk to the gateway.
 #

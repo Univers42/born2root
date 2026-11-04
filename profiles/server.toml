@@ -274,11 +274,12 @@ vault = "univers42/born2root/team"
 package = "max"
 # Pinned, not followed: a data center runs the commit that was tested, and groot
 # pins this repository in turn. `make grobase` reads this, so moving it moves a built
-# guest too. Measured in the VM (2026-11-04): on 29d36723 a fresh clone with `make all`
-# healthy with the seeds loaded, clean, re and fclean each healthy, and all 13 offers
-# healthy; on this commit, which adds the restore, seed and migrate-mongo fixes, a forced
-# reseed with all 7 seeded mounts open. Move it by repeating that, not by hand.
-grobase_ref = "6f533a18674d916867ebefa781c9a73fceda9f3a"
+# guest too. Measured in the VM (2026-11-04): on 2ed2f154 a fresh clone with `make all`
+# healthy with the seeds loaded, clean, re and fclean each healthy, and every offer healthy;
+# on a9b0f6ca fclean then `make all` and three forced reseeds, all mounts open; on this
+# commit, which adds the Gourmand removal and the sqlite row check, a forced reseed with
+# 12 mounts, 7 of them opened by the seed. Move it by repeating that, not by hand.
+grobase_ref = "a773734413fec6f67ab207a6aef97ddd8fcc846b"
 # No tailnet (dc-netmesh is off), so no node name and no Funnel.
 tailnet_hostname = ""
 funnel = false

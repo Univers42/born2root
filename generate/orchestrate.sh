@@ -1425,7 +1425,7 @@ row "    ${DIM}Split H:${RST} ${BLD}Ctrl+B |${RST}     ${DIM}Split V:${RST}   ${
 row "    ${DIM}New win:${RST} ${BLD}Ctrl+B c${RST}     ${DIM}List:${RST}      ${BLD}tmux ls${RST}"
 blank
 mid
-row "  ${BLD}${WHT}▸ Vite Gourmand (Dev Servers)${RST}"
+row "  ${BLD}${WHT}▸ Dev Servers${RST}"
 row "    ${DIM}Frontend${RST}   ${BLD}http://127.0.0.1:${P_FRONTEND}${RST}"
 row "    ${DIM}Backend${RST}    ${BLD}http://127.0.0.1:${P_BACKEND}/api${RST}"
 row "    ${DIM}API Docs${RST}   ${BLD}http://127.0.0.1:${P_BACKEND}/api/docs${RST}"

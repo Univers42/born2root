@@ -241,7 +241,7 @@ vault = "univers42/born2root/team"
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
 # Pinned, as in server.toml, whose comment says how this commit was measured.
-grobase_ref = "6f533a18674d916867ebefa781c9a73fceda9f3a"
+grobase_ref = "a773734413fec6f67ab207a6aef97ddd8fcc846b"
 # The school's baas is baas.tail10f2ea.ts.net; dlesieur42-1 is the one at
 # home, a separate node since 2026-10-14 -- two machines asking for one name
 # leave the second with a suffix (make tailnet stops and says so). The name is
