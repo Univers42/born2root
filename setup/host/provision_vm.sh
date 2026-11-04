@@ -435,6 +435,11 @@ edge)
 # Not run_provisioner either: groot drives this target and `make all` leans on
 # it, and its warn returned 0 over a failed install.
 grobase)
+    # A built guest's build.conf keeps the pin of its ISO: baas was built on "main" and
+    # would have followed it past profiles/server.toml's tested commit (2026-11-04).
+    # The profile names the commit; GROBASE_REF= on the command line beats it.
+    GROBASE_REF="${GROBASE_REF:-$(bash "$REPO_ROOT/utils/b2b_config.sh" get B2B_DC_GROBASE_REF)}"
+    export GROBASE_REF
     guest_script setup/install/dc/install_grobase.sh install_grobase.sh GROBASE_ "grobase"
     exit $?
     ;;

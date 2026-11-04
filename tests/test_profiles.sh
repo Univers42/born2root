@@ -104,6 +104,9 @@ check "server: the login is the editor user (the build has the editor)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_NVIM_USERS)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_LOGIN)"
 SERVER_GUEST=$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --guest)
+# shellcheck disable=SC2016 # an awk program, not an expansion
+check "a built guest takes the profile's pin, not its ISO's" \
+    "$(awk '/^grobase\)$/{p=1} p&&/;;/{exit} p' setup/host/provision_vm.sh | grep -c 'get B2B_DC_GROBASE_REF')" 1
 check "server: grobase is a pinned, tested commit" \
     "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_REF=//p' | tr -d '"' | grep -cE '^[0-9a-f]{40}$')" 1
 check "server: baas's hand-set grobase keys, DynamoDB data plane included" \

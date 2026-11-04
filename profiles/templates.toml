@@ -240,11 +240,8 @@ vault = "univers42/born2root/team"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
-# Followed, not pinned: every install (first boot, each `make grobase`)
-# takes main's newest commit and records it in /etc/b2b/grobase.conf.
-# baas ran dab5f43060aab2914183173c91dc7a39a7aab9f6 on 2026-10-13; put a
-# full SHA back here to pin one.
-grobase_ref = "main"
+# Pinned, as in server.toml, whose comment says how this commit was measured.
+grobase_ref = "6f533a18674d916867ebefa781c9a73fceda9f3a"
 # The school's baas is baas.tail10f2ea.ts.net; dlesieur42-1 is the one at
 # home, a separate node since 2026-10-14 -- two machines asking for one name
 # leave the second with a suffix (make tailnet stops and says so). The name is

@@ -273,11 +273,12 @@ vault = "univers42/born2root/team"
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
 # Pinned, not followed: a data center runs the commit that was tested, and groot
-# pins this repository in turn. Measured on this commit (2026-11-04), in the VM: a
-# fresh clone with `make all` healthy with the seeds loaded, clean, re and fclean
-# each healthy with the data where it should be, and all 13 offers healthy. Move
-# it by repeating that, not by hand.
-grobase_ref = "29d36723dfdd62e4a88857ceab68358f1d30ae23"
+# pins this repository in turn. `make grobase` reads this, so moving it moves a built
+# guest too. Measured in the VM (2026-11-04): on 29d36723 a fresh clone with `make all`
+# healthy with the seeds loaded, clean, re and fclean each healthy, and all 13 offers
+# healthy; on this commit, which adds the restore, seed and migrate-mongo fixes, a forced
+# reseed with all 7 seeded mounts open. Move it by repeating that, not by hand.
+grobase_ref = "6f533a18674d916867ebefa781c9a73fceda9f3a"
 # No tailnet (dc-netmesh is off), so no node name and no Funnel.
 tailnet_hostname = ""
 funnel = false
