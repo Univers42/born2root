@@ -327,6 +327,8 @@ for shell in bash dist/hellish; do
     env PATH="$T/bin:$PATH" STUB_MOUNTS_RC=1 "$shell" "$T/mounts/run.sh" >/dev/null 2>&1
     check "... a dead mount fails the seed" "$?" 1
 done
+check "the sqlite tar is neither fetched nor unpacked" \
+    "$(cat setup/host/set_seeds.sh setup/host/set_seeds_guest.sh | grep -c 'sqlite-data.tar.gz.*do$\|tar .*sqlite-data')" 0
 # shellcheck disable=SC2016 # an awk program, not an expansion
 check "the mounts are proved before the seed is recorded" \
     "$(awk '/AFTER_RESTORE=1/{m=NR} /^printf .seeded_at=/{r=NR} END{print (m && r && m<r) ? "yes" : "no"}' "$g")" yes

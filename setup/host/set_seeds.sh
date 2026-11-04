@@ -199,7 +199,7 @@ export FT_S3_KEY FT_S3_SECRET
 # projects' archives, and `42ctl pull` is a personal tree a fresh identity may not have.
 only=(--only apps/grobase/.env.secrets --only .env.local)
 for f in MANIFEST.json SHA256SUMS postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz \
-    redis.rdb mssql-all.tar.gz dynamodb-all.tar.gz sqlite-data.tar.gz grobase-certs.tar.gz; do
+    redis.rdb mssql-all.tar.gz dynamodb-all.tar.gz grobase-certs.tar.gz; do
     only+=(--only "secrets/$f")
 done
 pull_seeds() { (cd "$work" && "$CTL" env pull --org univers42 --project "$PROJECT" --env prod "${only[@]}" --apply) >"$work/pull.log" 2>&1; }

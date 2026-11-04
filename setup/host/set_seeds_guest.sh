@@ -30,7 +30,10 @@
 #   7. Open the mounts, with the app key the host sent. A healthy stack says nothing
 #      about them: on 2026-11-04 all of the above passed with every mount on a platform
 #      engine answering 502. This also loads the sqlite demo, whose tables are in no
-#      seed: the vault's sqlite-data.tar.gz is a 4 KiB file with none.
+#      seed. The vault's sqlite-data.tar.gz is a 4 KiB file with none, so it is not
+#      unpacked: laid over a live database it left the old -wal and -shm behind, sqlite
+#      replayed them onto a different file, and every insert answered "database disk
+#      image is malformed" (2026-11-04). grobase's own restore never touched that volume.
 #
 # On success /etc/b2b/seeds.last, world-readable, holds seeded_at, vintage, project and rows:
 # the record that this platform's rows came from a seed.
@@ -144,15 +147,6 @@ for f in .env .env.prev; do
     [ ! -e "$f" ] || chown "$owner:$owner" "$f"
 done
 make --no-print-directory certs >/dev/null || die "make certs failed"
-
-sqlite_vol=$(docker volume ls -q | grep -m1 -- 'sqlite-data$')
-if [ -n "$sqlite_vol" ] && [ -f "$SEEDS/secrets/sqlite-data.tar.gz" ]; then
-    tar -xzf "$SEEDS/secrets/sqlite-data.tar.gz" -C "/var/lib/docker/volumes/$sqlite_vol/_data" || die "could not unpack sqlite-data"
-    # tar keeps the seed's owner, and the router runs as a distroless `nonroot` with no name
-    # to chown to here: the file opened and every write failed "attempt to write a readonly
-    # database" (2026-11-04). The volume is mounted in that one container.
-    chmod -R a+rwX "/var/lib/docker/volumes/$sqlite_vol/_data" || die "could not open sqlite-data to the router"
-fi
 
 up SERVICE="$ENGINES_RUN" || die "the engines did not start"
 log "engines up; loading the seeds"
