@@ -21,7 +21,7 @@
 #   0   every running engine is in the snapshot
 #   3   a snapshot exists, one engine's dump is missing from it. The rest are
 #       still worth keeping off the guest, so backup_pull.sh pulls, then fails.
-#   1   no snapshot was taken
+#   1   no snapshot was taken: restic failed, or the platform is not running
 #   4   (this script) refused: the host holds this VM's repository and the guest
 #       has none, so a run here would start a second one the copy can never take.
 #
@@ -87,6 +87,18 @@ verdict() {
     chmod 644 "$STATUS"
 }
 failed=""
+# A stopped platform is not an empty backup. Every `have` below is false, so this
+# used to snapshot two env files and record "ok": on 2026-11-04 the 16:01 run
+# stored 13.5 KiB as the newest snapshot over a wiped stack. b2b-restore refuses a
+# snapshot with no Postgres dump, and an outage's worth of them would fill the
+# hourly, daily and weekly slots of the forget below and push the real ones out.
+# Caveat: this sees a stopped platform, not an emptied one. A running stack with
+# no rows still snapshots, and that one becomes the newest.
+if ! have mini-baas-postgres; then
+    echo "b2b-backup: mini-baas-postgres is not running: no snapshot, the last good one stays the newest"
+    verdict failed " platform-down"
+    exit 1
+fi
 # The timer is Persistent=true, so a run right after every boot: containers up,
 # engines still starting. pg_dumpall failed and the snapshot had no Postgres, with
 # the same dump fine a minute later (26 MB, 2026-11-04). `have` only says running.
