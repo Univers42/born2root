@@ -22,7 +22,7 @@
 #   refuses one that is not hex), gives the .env it re-assembles as root back
 #   to /opt/grobase's owner, keeps the guest's value for the engine keys whose volume it
 #   does not reload, takes everything else from the snapshot, and exits 1
-#   when b2b-stack-health fails or is missing; b2b-backup exits 1 naming an
+#   when b2b-stack-health fails or is missing; b2b-backup exits 3 naming an
 #   engine that runs and was not dumped, and leaves that verdict in a
 #   world-readable file for verify_platform.
 #   The rebuild set: b2b-backup snapshots the TLS certs (the CA clients
@@ -261,7 +261,7 @@ check "... readable by the login user (verify_platform reads it)" "$(stat -c %a 
 check "... in a directory the login user can enter, despite umask 077" "$(stat -c %a "$TMP/lib")" 755
 touch "$TMP/mongo_fails"
 backup
-check "backup, Mongo running and its dump refused: exit 1" "$rc" 1
+check "backup, Mongo running and its dump refused: exit 3 (a snapshot exists without it)" "$rc" 3
 check "... naming mongo" "$(printf '%s\n' "$out" | grep -c 'FAILED: mongo')" 1
 check "... after snapshotting what it has" "$(printf '%s\n' "$out" | grep -c 'dump(s) snapshotted')" 1
 check "... and the verdict file names it" "$(cut -d' ' -f1,3 "$TMP/lib/backup.last")" "failed mongo"
@@ -303,7 +303,7 @@ check "... says so" "$(printf '%s\n' "$out" | grep -c 'mssql: no user database')
 rm "$TMP/mssql_empty"
 touch "$TMP/mssql_fails"
 backup
-check "SQL Server's dump failing: exit 1 naming mssql" "$rc $(printf '%s\n' "$out" | grep -c 'FAILED: mssql')" "1 1"
+check "SQL Server's dump failing: exit 3 naming mssql" "$rc $(printf '%s\n' "$out" | grep -c 'FAILED: mssql')" "3 1"
 rm "$TMP/mssql_fails"
 
 # --- the rebuild set: what b2b-restore puts back, and in which order ---------------

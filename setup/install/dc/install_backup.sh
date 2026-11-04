@@ -5,13 +5,25 @@
 #
 # WHAT IS BACKED UP
 #   Logical dumps of every engine that is running, taken through the
-#   container so no port needs opening: pg_dumpall, mysqldump, mongodump,
-#   Redis's RDB after a SAVE, and SQL Server through grobase's own
-#   scripts/ops/engine-backup.sh. MinIO's and DynamoDB-local's volumes, which
-#   have no dump. And what a rebuilt guest cannot mint again: grobase's
-#   secrets and .env.local, its TLS certs (the CA every client trusts),
-#   vault42's admin env, the 42ctl project and the login's 42ctl identity.
-#   CockroachDB is skipped with a note.
+#   container so no port needs opening: pg_dumpall, mysqldump, mariadb-dump,
+#   mongodump, Redis's RDB after a SAVE, and SQL Server and CockroachDB through
+#   grobase's own scripts/ops/engine-backup.sh. The volumes that have no dump:
+#   MinIO, DynamoDB-local, the functions, the SQLite data plane and Vault. And
+#   what a rebuilt guest cannot mint again: grobase's secrets and .env.local,
+#   its TLS certs (the CA every client trusts), vault42's admin env, the 42ctl
+#   project and the login's 42ctl identity.
+#
+#   server.toml has run MariaDB, CockroachDB and those three volumes since the
+#   max tier, with none of them in a snapshot: a restore came back without
+#   them and said so nowhere but a wiki table.
+#
+# EXIT STATUS (b2b-backup, and this script when it runs one)
+#   0   every running engine is in the snapshot
+#   3   a snapshot exists, one engine's dump is missing from it. The rest are
+#       still worth keeping off the guest, so backup_pull.sh pulls, then fails.
+#   1   no snapshot was taken
+#   4   (this script) refused: the host holds this VM's repository and the guest
+#       has none, so a run here would start a second one the copy can never take.
 #
 # WHAT IS NOT
 #   The VM disk, the ISO, the images: all derived, all rebuilt by `make re`.
@@ -75,6 +87,21 @@ verdict() {
     chmod 644 "$STATUS"
 }
 failed=""
+# The timer is Persistent=true, so a run right after every boot: containers up,
+# engines still starting. pg_dumpall failed and the snapshot had no Postgres, with
+# the same dump fine a minute later (26 MB, 2026-11-04). `have` only says running.
+# Caveat: gives each engine 2 min, so an engine that never turns healthy costs that
+# much and then fails its own dump below, by name; one with no healthcheck is not
+# waited for.
+for c in mini-baas-postgres mini-baas-mysql mini-baas-mariadb mini-baas-mongo mini-baas-redis mini-baas-mssql mini-baas-cockroach; do
+    have "$c" || continue
+    for _ in $(seq 1 60); do
+        case "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "$c" 2>/dev/null)" in
+        healthy) break ;;
+        esac
+        sleep 2
+    done
+done
 if have mini-baas-postgres; then
     docker exec mini-baas-postgres pg_dumpall -U postgres --clean >"$DUMPS/postgres-$stamp.sql" && n=$((n + 1)) ||
         { echo "b2b-backup: postgres dump failed"; failed="$failed postgres"; }
@@ -84,15 +111,17 @@ if have mini-baas-mysql; then
         { echo "b2b-backup: mysql dump failed"; failed="$failed mysql"; }
 fi
 if have mini-baas-mongo; then
-    # grobase's mongo image (d74aa97) ships mongosh but not the database
-    # tools, so mongodump is not there to run. Said plainly rather than
-    # filed as a generic failure; the fix belongs in grobase's image or its
-    # vault-restore, which round-trips mongo already.
+    # grobase's mongo image ships the database tools since its Dockerfile
+    # added mongodb-database-tools; d74aa97's had mongosh alone. An image
+    # without them leaves a running engine out of the snapshot, which is what
+    # "failed" means here, so it counts as one (it used to print a note and
+    # exit 0).
     if docker exec mini-baas-mongo sh -c 'command -v mongodump' >/dev/null 2>&1; then
         docker exec mini-baas-mongo sh -c 'mongodump --archive -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin' >"$DUMPS/mongo-$stamp.archive" && n=$((n + 1)) ||
             { echo "b2b-backup: mongo dump failed"; failed="$failed mongo"; }
     else
         echo "b2b-backup: mongo not dumped: no mongodump in the mini-baas-mongo image"
+        failed="$failed mongo"
     fi
 fi
 if have mini-baas-redis; then
@@ -100,29 +129,48 @@ if have mini-baas-redis; then
     docker cp mini-baas-redis:/data/dump.rdb "$DUMPS/redis-$stamp.rdb" 2>/dev/null && n=$((n + 1)) ||
         { echo "b2b-backup: redis dump failed"; failed="$failed redis"; }
 fi
-if have mini-baas-mssql; then
-    # grobase's dumper: native .bak files WITH COPY_ONLY, tarred, the format
-    # its restore reads back (b2b-restore).
-    # Ponytail: "has no user database" is engine-backup.sh's wording (grobase
-    # d180542..dab5f43); reworded, an empty SQL Server reads as a failed dump.
-    if ms_err=$(bash /opt/grobase/scripts/ops/engine-backup.sh dump mssql "$DUMPS/mssql-$stamp.tar" 2>&1 >/dev/null); then
+if have mini-baas-mariadb; then
+    # Named databases, never --all-databases: that dump carries mysql.user, and
+    # b2b-restore keeps this guest's MARIADB_* (the volume is not replaced), so
+    # the load would swap the root password under the running engine.
+    md_dbs=$(docker exec mini-baas-mariadb sh -c 'mariadb -N -uroot -p"$MARIADB_ROOT_PASSWORD" -e "SHOW DATABASES"' 2>/dev/null |
+        grep -vxE 'information_schema|performance_schema|mysql|sys' | tr '\n' ' ')
+    if [ -z "$md_dbs" ]; then
+        echo "b2b-backup: mariadb: no user database to back up"
+    elif docker exec mini-baas-mariadb sh -c "mariadb-dump -uroot -p\"\$MARIADB_ROOT_PASSWORD\" --single-transaction --databases $md_dbs" >"$DUMPS/mariadb-$stamp.sql"; then
         n=$((n + 1))
     else
-        case "$ms_err" in
-        *"has no user database"*) echo "b2b-backup: mssql: no user database to back up" ;;
+        echo "b2b-backup: mariadb dump failed"
+        failed="$failed mariadb"
+    fi
+fi
+# grobase's dumper, the format its restore reads back (b2b-restore): for SQL
+# Server native .bak files WITH COPY_ONLY, for CockroachDB a BACKUP directory,
+# each tarred.
+# Caveat: "has no user database" is engine-backup.sh's wording (grobase
+# d180542..dca1de9); reworded, an empty engine reads as a failed dump.
+engine_dump() {
+    if eb_err=$(bash /opt/grobase/scripts/ops/engine-backup.sh dump "$1" "$DUMPS/$1-$stamp.tar" 2>&1 >/dev/null); then
+        n=$((n + 1))
+    else
+        case "$eb_err" in
+        *"has no user database"*) echo "b2b-backup: $1: no user database to back up" ;;
         *)
-            echo "b2b-backup: mssql dump failed: $ms_err"
-            failed="$failed mssql"
+            echo "b2b-backup: $1 dump failed: $eb_err"
+            failed="$failed $1"
             ;;
         esac
     fi
-fi
+}
+have mini-baas-mssql && engine_dump mssql
+have mini-baas-cockroach && engine_dump cockroach
 # Beside the dumps, as files: what a rebuilt guest cannot mint again, and the
 # volumes that have no dump. Only paths that exist: restic fails a run on one
 # it cannot find.
-# Ponytail: the volumes are copied live. MinIO is quiescent most of the hour;
-# DynamoDB-local is one SQLite file, and a write during the copy leaves that
-# snapshot's copy of it torn -- the next hour's is the clean one.
+# Caveat: the volumes are copied live. MinIO, the functions and Vault's file
+# backend are quiescent most of the hour; DynamoDB-local and the data plane's
+# SQLite are one file each, and a write during the copy leaves that snapshot's
+# copy torn -- the next hour's is the clean one.
 login=$(sed -n 's/^B2B_LOGIN=//p' /etc/b2b/build.conf 2>/dev/null | tr -d '"' | head -n1)
 home=""
 [ -n "$login" ] && home=$(getent passwd "$login" 2>/dev/null | cut -d: -f6)
@@ -131,7 +179,7 @@ for p in /opt/grobase/certs /opt/grobase/secrets/vault42-admin.env /opt/grobase/
     ${home:+"$home/.config/42ctl"}; do
     [ -e "$p" ] && extra="$extra $p"
 done
-for v in minio-data dynamodb-data; do
+for v in minio-data dynamodb-data functions-data sqlite-data vault-data; do
     vol=$(docker volume ls -q 2>/dev/null | grep -m1 -- "$v\$" || true)
     [ -n "$vol" ] && [ -d "/var/lib/docker/volumes/$vol/_data" ] && extra="$extra /var/lib/docker/volumes/$vol/_data"
 done
@@ -143,7 +191,6 @@ done
 for f in /opt/grobase/.env.secrets /opt/grobase/.env.local; do
     [ -s "$f" ] && cp -p "$f" "$DUMPS/grobase$(basename "$f")" && n=$((n + 1))
 done
-have mini-baas-cockroach && echo "b2b-backup: mini-baas-cockroach is running and not dumped here (see the header of install_backup.sh)"
 # Init only when the repository is absent. Any other snapshots failure (a wrong
 # password, a permission, a damaged repo) is reported as itself: masking it with
 # `restic init` made a wrong password read as "config file already exists".
@@ -169,12 +216,16 @@ restic backup --quiet --tag b2b "$DUMPS" $extra || {
     verdict failed " restic-backup"
     exit 1
 }
-restic forget --quiet --keep-hourly 24 --keep-daily 14 --keep-weekly 8 --prune >/dev/null 2>&1 || true
+# The dumps are plaintext (every row, and .env.secrets) and as large as the data:
+# in the repository now, so neither should wait an hour on /var.
+rm -f "$DUMPS"/*
+restic forget --quiet --keep-hourly 24 --keep-daily 14 --keep-weekly 8 --prune >/dev/null 2>&1 ||
+    echo "b2b-backup: WARN restic forget failed: this snapshot is safe, the repository will not shrink"
 echo "b2b-backup: $n dump(s) snapshotted into $REPO ($(restic snapshots --json 2>/dev/null | grep -o '"short_id"' | wc -l) snapshots kept)"
 if [ -n "$failed" ]; then
     echo "b2b-backup: FAILED:$failed -- running but not dumped, so not in this snapshot"
     verdict failed "$failed"
-    exit 1
+    exit 3
 fi
 verdict ok
 BKEOF
@@ -221,16 +272,47 @@ echo "restore-drill: OK -- $dbs database(s), $tables table(s) came back from sna
 DRILLEOF
 chmod 755 /usr/local/sbin/b2b-restore-drill
 
+# The drill above proves a backup once, when someone remembers. This runs it
+# weekly with a read of 5% of the pack files, the two things that notice a
+# repository going bad while every hourly run still says ok, and leaves the
+# verdict world-readable for verify_platform, as backup.last does.
+# Caveat: 5% a week reads most packs only over months, and the drill loads
+# Postgres alone: a damaged pack of another engine's dump can go unseen until a
+# restore. Raise the percentage, or run `make backup_verify`, before relying on one.
+cat >/usr/local/sbin/b2b-weekly-proof <<'PROOFEOF'
+#!/bin/sh
+# b2b-weekly-proof — check the repository, then prove a restore. Installed by
+# setup/install/dc/install_backup.sh (born2root).
+set -u
+STATUS=/var/lib/b2b/proof.last
+verdict() {
+    install -d -m 0755 "${STATUS%/*}"
+    printf '%s %s%s\n' "$1" "$(date +%s)" "${2:-}" >"$STATUS"
+    chmod 644 "$STATUS"
+}
+if ! RESTIC_PASSWORD_FILE=/etc/b2b/restic.pass RESTIC_REPOSITORY=/var/backups/b2b/repo \
+    restic check --read-data-subset=5%; then
+    verdict failed " restic-check"
+    exit 1
+fi
+/usr/local/sbin/b2b-restore-drill || {
+    verdict failed " restore-drill"
+    exit 1
+}
+verdict ok
+PROOFEOF
+chmod 755 /usr/local/sbin/b2b-weekly-proof
+
 # The restore itself: the newest snapshot loaded back, which is what brings
 # tenants, their keys and every row home on a rebuilt VM. Postgres and MySQL
 # into EMPTY volumes, never over populated ones -- the comment inside the
 # script says why, with the errors that taught it; the platform secrets are
 # put back first so both initialise with the dumps' own passwords. The certs,
 # vault42's admin env and the 42ctl files go back before `make certs`, the
-# MinIO and DynamoDB volumes while the stack is down, Mongo (mongorestore
-# --drop, admin left alone) and SQL Server (grobase's engine-backup.sh) once
-# it is up. Redis is a cache and is not restored; CockroachDB and MariaDB are
-# not dumped at all.
+# volumes with no dump (MinIO, DynamoDB, functions, SQLite, Vault) while the
+# stack is down, Mongo (mongorestore --drop, admin left alone), MariaDB (its
+# user databases only), SQL Server and CockroachDB (grobase's
+# engine-backup.sh) once it is up. Redis is a cache and is not restored.
 #
 # Except the secrets of an engine whose volume the restore does NOT replace:
 # it was initialised at first boot with THIS guest's value and still holds
@@ -305,6 +387,18 @@ ready() {
         sleep 2
     done
     return 1
+}
+# crdb_drop_user_databases: what `RESTORE DATABASE` would otherwise refuse. The
+# login is grobase's own (crdb_auth), the list of system databases its crdb_dump's.
+crdb_drop_user_databases() {
+    . /opt/grobase/scripts/lib/lib-crdb-client.sh || return 1
+    auth=$(crdb_auth mini-baas-cockroach)
+    crdb_names=$(docker exec mini-baas-cockroach cockroach sql "$auth" --format=tsv -e \
+        "SELECT database_name FROM [SHOW DATABASES] WHERE database_name NOT IN ('system','defaultdb','postgres')") || return 1
+    printf '%s\n' "$crdb_names" | tail -n +2 | while IFS= read -r db; do
+        [ -n "$db" ] || continue
+        docker exec mini-baas-cockroach cockroach sql "$auth" -e "DROP DATABASE \"$db\" CASCADE" || exit 1
+    done
 }
 load_failed=""
 PASS=/etc/b2b/restic.pass
@@ -411,8 +505,9 @@ if [ -n "$my" ]; then
         echo "restore: $myvol removed -- MySQL will start empty"
     fi
 fi
-put_volume minio-data
-put_volume dynamodb-data
+for v in minio-data dynamodb-data functions-data sqlite-data vault-data; do
+    put_volume "$v"
+done
 (cd /opt/grobase && docker compose up -d postgres >/dev/null 2>&1) || { echo "restore: could not start postgres alone"; exit 1; }
 for _ in $(seq 1 45); do
     docker exec mini-baas-postgres pg_isready -U postgres >/dev/null 2>&1 && break
@@ -473,6 +568,31 @@ if [ -n "$ms" ]; then
         load_failed="$load_failed mssql"
     fi
 fi
+# MariaDB's volume is this guest's as well (ENGINE_KEYS_KEPT): the dump names
+# its databases, and its DROP TABLEs replace them over the running engine.
+md=$(find "$work" -name 'mariadb-*.sql' | head -n1)
+if [ -n "$md" ]; then
+    if ready mini-baas-mariadb && docker exec -i mini-baas-mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"' <"$md" >"$work/mariadb.log" 2>&1; then
+        echo "restore: mariadb loaded"
+    else
+        echo "restore: mariadb load failed:"; tail -n3 "$work/mariadb.log"
+        load_failed="$load_failed mariadb"
+    fi
+fi
+# CockroachDB's RESTORE refuses a database that exists, and the stack's first
+# boot may have made the same ones: dropped first, by name, with the certs the
+# container uses. A failure here leaves the engine empty and the snapshot
+# intact, and is named below.
+ck=$(find "$work" -name 'cockroach-*.tar' | head -n1)
+if [ -n "$ck" ]; then
+    if ready mini-baas-cockroach && crdb_drop_user_databases >"$work/cockroach.log" 2>&1 &&
+        bash /opt/grobase/scripts/ops/engine-backup.sh restore cockroach "$ck" >>"$work/cockroach.log" 2>&1; then
+        echo "restore: cockroach loaded"
+    else
+        echo "restore: cockroach restore failed:"; tail -n3 "$work/cockroach.log"
+        load_failed="$load_failed cockroach"
+    fi
+fi
 [ -z "$load_failed" ] || echo "restore: ✗ not loaded:$load_failed (lines above)"
 [ "${tables:-0}" -gt 0 ] || exit 1
 if ! command -v b2b-stack-health >/dev/null 2>&1; then
@@ -509,8 +629,33 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 UNITEOF
+cat >/etc/systemd/system/b2b-weekly-proof.service <<'UNITEOF'
+[Unit]
+Description=born2root: restic check and a restore drill
+After=docker.service
+ConditionPathExists=/etc/b2b/restic.pass
+
+[Service]
+Type=oneshot
+Nice=15
+IOSchedulingClass=idle
+ExecStart=/usr/local/sbin/b2b-weekly-proof
+UNITEOF
+cat >/etc/systemd/system/b2b-weekly-proof.timer <<'UNITEOF'
+[Unit]
+Description=born2root: weekly proof that the backups restore
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNITEOF
 systemctl daemon-reload
 systemctl enable --now b2b-backup.timer >/dev/null 2>&1 || die "could not enable b2b-backup.timer"
+systemctl enable --now b2b-weekly-proof.timer >/dev/null 2>&1 || die "could not enable b2b-weekly-proof.timer"
 
 # The password, when the host sends one: BACKUP_PASS_FILE names a 600 file
 # the host uploaded over SSH's stdin (backup_pull.sh). Moved, not copied, so
@@ -540,6 +685,16 @@ if [ "${BACKUP_RESTORE:-0}" = 1 ]; then
     /usr/local/sbin/b2b-restore "${BACKUP_RESTORE_SNAPSHOT:-}" || die "the restore failed"
 fi
 
+# A rebuilt guest, before anyone ran `make restore`: the hourly pull reaches it
+# first, and a run here makes a fresh repository. The pull then refuses it for
+# being another repository, and `make restore` keeps it for having snapshots, so
+# the old copy could never come back. Asked as root: the login cannot read
+# /var/backups/b2b until the first run has opened it.
+if [ "${BACKUP_EXPECT_REPO:-0}" = 1 ] && [ "${BACKUP_RESTORE:-0}" != 1 ] && [ ! -e /var/backups/b2b/repo/config ]; then
+    log "the host holds this VM's repository and this guest has none: a rebuild. make restore first"
+    exit 4
+fi
+
 if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
     log "password present; timer armed and a run follows"
     # The verdict waits until the permissions below are set. The install -d
@@ -561,7 +716,11 @@ if [ -s /etc/b2b/restic.pass ] && [ "${BACKUP_RESTORE:-0}" != 1 ]; then
         chgrp "$BACKUP_PULL_USER" /var/backups/b2b 2>/dev/null || true
         chmod 710 /var/backups/b2b 2>/dev/null || true
     fi
-    [ "$run_rc" = 0 ] || die "the backup run failed"
+    case "$run_rc" in
+    0) ;;
+    3) exit 3 ;;
+    *) die "the backup run failed" ;;
+    esac
     if [ "${BACKUP_VERIFY:-0}" = 1 ]; then
         if RESTIC_PASSWORD_FILE=/etc/b2b/restic.pass RESTIC_REPOSITORY=/var/backups/b2b/repo \
             restic check --read-data-subset=10% >/dev/null 2>&1; then

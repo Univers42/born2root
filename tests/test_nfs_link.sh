@@ -66,6 +66,6 @@ check "B2B_DISK_MBPS=0: no cap even on NFS" "$(B2B_DISK_MBPS=0 nfs_disk_budget /
 check "qemu_vm.sh: hd0 (both paths) and hd1 carry the throttle" \
     "$(grep -c 'id=hd[01],format=qcow2,.*${throttle}"' setup/host/qemu_vm.sh)" 3
 # shellcheck disable=SC2016
-check "backup_pull.sh: the pull and the restore rsync carry the cap" \
-    "$(grep -c 'rsync -a .*"${RSYNC_CAP\[@\]}"' setup/host/backup_pull.sh)" 2
+check "backup_pull.sh: the pull, the restore and the mirror rsync carry the cap" \
+    "$(grep -c 'rsync -a .*"${RSYNC_CAP\[@\]}"' setup/host/backup_pull.sh)" 3
 exit "$fail"
