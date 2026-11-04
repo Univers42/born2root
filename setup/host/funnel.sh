@@ -29,6 +29,7 @@ set -u
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
+dc_tailnet_allowed
 
 dc_connect
 state=$(vm_ssh "tailscale status --json 2>/dev/null | sed -n 's/.*\"BackendState\": *\"\\([A-Za-z]*\\)\".*/\\1/p' | head -n1" 2>/dev/null || true)

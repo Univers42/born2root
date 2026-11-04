@@ -19,9 +19,8 @@
 #
 #   [disk]       120 GB, and / and /home give up share, /var takes it. / is
 #                charged 3120 MB with the editor (5.5 GiB here), /home
-#                1153 MB: the editor, the VS Code and Inception
-#                reservations (its volume says why the floor is 2 GB
-#                anyway). /var is the `rest`
+#                953 MB: the editor and the VS Code reservation (its volume
+#                says why the floor is 2 GB anyway). /var is the `rest`
 #                volume, so every point of share they release lands where
 #                Docker, the engines and their data live: 94 GiB of 120,
 #                for the 16417 MB the dc rows are charged. Measured, both
@@ -58,7 +57,7 @@
 #                and the motor refuses a render rather than crash
 #                (tests/test_graph_render.sh). qemu_vm.sh refuses a value
 #                above the host's RAM: a smaller seat lowers it here. A school
-#                seat's RAM is not measured yet (doc/rebuild-baas-at-school.md).
+#                seat's RAM is not measured yet (wiki/rebuild-baas-at-school.md).
 #
 #   [vm] ide_disk_gb 40, not 0: the osionos IDE sandbox's own disk. First
 #                boot makes it ide_crypt, XFS with prjquota at
@@ -75,14 +74,40 @@
 #                by hand, its tailnet name and Funnel, the secrets file and
 #                where backups land. With the carried restic repository,
 #                `make datacenter` brings baas's platform back from these
-#                (doc/rebuild-baas-at-school.md).
+#                (wiki/rebuild-baas-at-school.md).
 #
 #   [host]       autostart: `make all` makes the VM a user service of the
 #                host's login, with an hourly backup pull (make autostart).
 #
-# Everything else is born2root.toml's default, credentials included: the
-# temporary ones, changed in the guest (`passwd`) after the build. They
-# expire after [policy.password] max_days.
+#   [system] [users]  the three credentials are `secret:NAME`, not values:
+#                this repository is public, and tempencrypt123 guarded a disk
+#                that holds restic's password and every tenant's data. `make
+#                all` mints them into the secrets file (make secrets_mint) and
+#                `make backup` rotates the two passwords before max_days stops
+#                every key login (make rotate_password). The LUKS one is not
+#                rotated: losing that line loses the disk, so copy it to a
+#                password manager, or make secrets_push.
+#
+#   [policy.ssh] password_login false: baas is reachable over the tailnet, and
+#                the login has its keys here and from the machine that builds.
+#
+#   [packages]   unattended-upgrades: nothing else updates this machine. Debian's
+#                default turns it on at install (its debconf default is true,
+#                trixie's 2.12); it never reboots, because a reboot here waits
+#                on LUKS.
+#
+#   dc-netmesh   off: the datacenter stays off Tailscale, by decision
+#                (2026-11-04). This one row is the switch: no tailscaled in the
+#                guest, no Funnel, and `make tailscale`, `make tailnet` and
+#                `make funnel_up` refuse. The seat's own tailnet (make
+#                seat_tailnet) is a different machine and is not touched. The
+#                WAF is reached on the host's 8443, LAN and Wi-Fi included.
+#
+#   seeds        `make all` ends by loading the team's seeds from vault42 into
+#                the empty platform (make set_seeds), so a rebuild needs no
+#                carried disk. A backup copy at backup_dest is newer, and wins.
+#
+# Everything else is born2root.toml's default.
 
 [vm]
 name    = "baas"
@@ -124,11 +149,11 @@ locale          = "en_US.UTF-8"
 keymap          = "es"
 timezone        = "Europe/Madrid"
 mirror          = "deb.debian.org"
-root_password   = "temproot123"
-luks_passphrase = "tempencrypt123"
+root_password   = "secret:BAAS_ROOT_PASSWORD"
+luks_passphrase = "secret:BAAS_LUKS_PASSPHRASE"
 
 [users.dlesieur]
-password = "tempuser123"
+password = "secret:BAAS_LOGIN_PASSWORD"
 fullname = ""
 sudo     = true
 groups   = ["docker"]
@@ -142,7 +167,7 @@ ssh_keys = [
 nvim     = true
 
 [packages]
-apt = []
+apt = ["unattended-upgrades"]
 
 [features]
 # the editor, node, the extra dev tools and Claude Code
@@ -159,11 +184,12 @@ claude-code    = true
 playwright     = false
 # the machine
 docker         = true
-# Inception rides along (inception-data comes on with docker): its nginx
-# binds the guest's 443 on loopback and the NAT address only, beside the
-# tailnet's own 443 (deploy_inception.sh), and gets the inception-* forwards.
+# This datacenter is grobase alone: nothing else takes a port or a volume here.
+inception-data = false
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
+# Out of the bundle: this datacenter stays off Tailscale (header).
+dc-netmesh     = false
 # The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
 # observability: loki, prometheus, grafana). dc-full already holds all three;
 # they are named so the cost stays in sight: grobase measures max at 3128 MiB
@@ -192,7 +218,7 @@ badpass_message = "Wrong password. Access denied!"
 log_dir         = "/var/log/sudo"
 
 [policy.ssh]
-password_login = true
+password_login = false
 
 [policy.monitoring]
 interval_min = 10
@@ -205,26 +231,18 @@ interval_min = 10
 # 5432, 27017, ...), realtime and mailpit bind the guest's loopback, which a
 # hostfwd never reaches -- reach them over ssh. 5000, 3306, 6379, 5173, 3000
 # and 18200 were removed then: nothing answered them where a hostfwd arrives,
-# and each held a host port. Inception's 443, 8090 and 8080 came back with
-# `make inception` (2026-10-14); its FTP (21, 21000-21010) did not, twelve
-# host ports for the subject's bonus. groot's frontends (website 4322, osionos 3001-3003, the
+# and each held a host port.  groot's frontends (website 4322, osionos 3001-3003, the
 # bridges 4000/4100/4200, auth-gateway 8787) run on the HOST against this
 # guest's grobase (groot: make link, over ssh), so they get no forward
 # either.
 forwards = [
   { name = "ssh",   guest = 4242, host = 4242 },
   # grobase's WAF, on the guest's 10.0.2.15:8443. expose = true: the host binds
-  # it on every interface, so the LAN and Wi-Fi reach the WAF directly (the
-  # tailnet reaches it through tailscale serve); every other forward stays on
-  # 127.0.0.1. No `http`: with remote access on, grobase binds the WAF's
+  # it on every interface, so the LAN and Wi-Fi reach the WAF directly; every
+  # other forward stays on 127.0.0.1. No `http`: with remote access on, grobase binds the WAF's
   # plaintext 8880 to the guest's loopback (2026-10-19), so a forward to it
   # answered nothing and `make health` failed on it (2026-10-20).
   { name = "https", guest = 8443, host = 8443, expose = true },
-  # Inception (make inception): nginx, the static site, Adminer. https on
-  # 8445: groot's local-https-proxy owns 127.0.0.1:8444 (see born2root.toml).
-  { name = "inception-https",   guest = 443,  host = 8445 },
-  { name = "inception-static",  guest = 8090, host = 8090 },
-  { name = "inception-adminer", guest = 8080, host = 8081 },
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──
@@ -239,6 +257,11 @@ cors_origins = ["http://localhost:5180", "http://127.0.0.1:5180"]
 # it is sgoinfre, which survives the /goinfre wipes and follows the login;
 # carry an older repository in there before `make datacenter` restores.
 backup_dest = ["/mnt/storage/b2b-backups/baas", "/sgoinfre/students/$USER/b2b-backups/baas"]
+# backup_mirror: the second copy, on a different device. The VM and backup_dest
+# both sit on sgoinfre's NFS server at school; /goinfre is this seat's own disk.
+# It is wiped now and then and does not follow you to another seat, which is
+# fine for a spare the next hour's `make backup` rewrites.
+backup_mirror = "/goinfre/$USER/b2b-backups/baas"
 # secrets_file: baas's keys (RESTIC_PASSWORD, TS_AUTHKEY, ...), mode 600, never
 # in the repo: dc_lib.sh's own default, under $HOME so the wipes spare it.
 # Named rather than left empty: a set path that is missing makes `make
@@ -249,21 +272,18 @@ vault = "univers42/born2root/team"
 # the full backend: pro + analytics, observability, functions, engines.
 # Frontends and tenant apps stay out whatever the tier.
 package = "max"
-# Followed, not pinned: every install (first boot, each `make grobase`)
-# takes main's newest commit and records it in /etc/b2b/grobase.conf.
-# baas ran dab5f43060aab2914183173c91dc7a39a7aab9f6 on 2026-10-13; put a
-# full SHA back here to pin one.
-grobase_ref = "main"
-# The school's baas is baas.tail10f2ea.ts.net; dlesieur42-1 is the one at
-# home, a separate node since 2026-10-14 -- two machines asking for one name
-# leave the second with a suffix (make tailnet stops and says so). The name is
-# in REALTIME_ALLOWED_ORIGINS below; make tailnet puts it in kong.yml. A
-# rebuild must have the old node removed from the tailnet before it can take
-# the name back.
-tailnet_hostname = "baas"
-# baas serves its WAF on the open Internet through Tailscale Funnel; `make
-# datacenter` opens it again (funnel.sh: two console switches, once).
-funnel = true
+# Pinned, not followed: a data center runs the commit that was tested, and groot
+# pins this repository in turn. Measured on this commit (2026-11-04), in the VM: a
+# fresh clone with `make all` healthy with the seeds loaded, clean, re and fclean
+# each healthy with the data where it should be, and all 13 offers healthy. Move
+# it by repeating that, not by hand.
+grobase_ref = "29d36723dfdd62e4a88857ceab68358f1d30ae23"
+# No tailnet (dc-netmesh is off), so no node name and no Funnel.
+tailnet_hostname = ""
+funnel = false
+# The seeds a rebuild loads: this file's credentials, that vault42 project.
+seeds_env = "$HOME/.config/42ctl/secrets/42admin.env"
+seeds_project = "groot"
 
 # The grobase keys baas had set by hand (2026-10-13 audit), kept in
 # /opt/grobase/.env.local so `make env` and a restore keep them. This table
@@ -277,9 +297,8 @@ funnel = true
 # GROBASE_PUBLIC_ADDRESSES (the tailnet name and address; grobase's `make
 # expose` writes it) and every secret (the secrets file and the snapshot's
 # .env.local carry those; --check refuses a secret-looking name).
-# REALTIME_ALLOWED_ORIGINS also names the two origins groot's public osionos
-# app is served from (Funnel :8443, and its Cloudflare Pages project): a
-# browser handshake from any other origin is refused with 403, and the app
+# REALTIME_ALLOWED_ORIGINS also names the origin groot's public osionos app is
+# served from (its Cloudflare Pages project): a browser handshake from any other origin is refused with 403, and the app
 # fell back to polling in a reconnect loop (2026-10-21). A curl without an
 # Origin header still gets 101, so only a browser shows it.
 # REALTIME_NAMESPACE_FALLBACK=deny: under SECURITY_MODE=baseline a token with
@@ -292,7 +311,7 @@ DATA_PLANE_IMAGE_SUFFIX         = "-dynamodb"
 DYNAMODB_ENGINE_ENABLED         = "1"
 DATA_PLANE_PER_TABLE_ISOLATION  = "1"
 RUST_DATA_PLANE_FORWARD_ENGINES = "postgresql,cockroachdb,mongodb,mysql,mariadb,redis,sqlite,mssql,http,dynamodb"
-REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://baas.tail10f2ea.ts.net,https://baas.tail10f2ea.ts.net:8443,https://osionos.pages.dev"
+REALTIME_ALLOWED_ORIGINS        = "https://localhost:3000,https://localhost:3100,https://localhost:3001,http://localhost:5173,https://osionos.pages.dev"
 REALTIME_NAMESPACE_FALLBACK     = "deny"
 ORG_MODEL_ENABLED               = "true"
 RBAC_HIERARCHY_ENABLED          = "true"
@@ -313,7 +332,7 @@ swap_mb = "auto"
 volumes = [
   { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
   # 2048, not 1024: share = 0 means the floor is all /home ever gets. It is
-  # charged 1153 MB (make features), and baas, built with the editor on, used
+  # charged 953 MB (make features), and baas, built with the editor on, used
   # 687 MB of its 1.9 GiB (2026-10-13, df).
   { name = "home",    mount = "/home",    floor_mb = 2048, share = 0,      cap_mb = 102400 },
   { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },

@@ -3,10 +3,12 @@
 # the guest ports [network] forwards declares.
 #
 # The bug it pins: on baas (2026-10-16) the check allowed only 4242 and the
-# WAF, and failed on Inception's nginx (443), static site (8090) and Adminer
-# (8080) -- forwards profiles/server.toml declares, published on the NAT
-# address because that is the only place a forward lands. The FTP set beside
-# them (21, 21000-21010) was declared nowhere and must still fail it.
+# WAF, and failed on a project's nginx (443), static site (8090) and Adminer
+# (8080) -- forwards the profile declared, published on the NAT address because
+# that is the only place a forward lands. The FTP set beside them (21,
+# 21000-21010) was declared nowhere and must still fail it. server.toml no
+# longer declares those three, so this test adds them to a copy: the rule is
+# about declared forwards, not about any one profile's list.
 #
 # HOW: the block from "# ── the wall" to the next blank printf is cut out of
 # verify_platform.sh with the real hard(); vm_ssh runs its command here, with
@@ -17,7 +19,9 @@ cd "$(dirname "$0")/.." || exit 1
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP:?}"' EXIT
 SCRIPT=setup/host/verify_platform.sh
-export B2B_CONFIG=profiles/server.toml
+sed 's/^forwards = \[$/&\n    { name = "site", host = 18443, guest = 443 },\n    { name = "adminer", host = 18080, guest = 8080 },\n    { name = "static", host = 18090, guest = 8090 },/' \
+    profiles/server.toml >"$TMP/wall.toml"
+export B2B_CONFIG="$TMP/wall.toml"
 . utils/b2b_config.sh
 
 fail=0
@@ -68,8 +72,8 @@ BAAS=(0.0.0.0:4242 0.0.0.0:8443 0.0.0.0:8880 "[::]:4242" "[::]:8443" "[::]:8880"
     10.0.2.15:443 10.0.2.15:8080 10.0.2.15:8090 127.0.0.1:8000 127.0.0.1:5432
     100.119.10.117%tailscale0:443 100.119.10.117%tailscale0:51966
     "[fd7a:115c:a1e0::b937:a76]%tailscale0:443" "[::1]:631")
-check "baas: sshd, the WAF, Inception's declared three, the tailnet" "$(wall "${BAAS[@]}")" PASS
-check "... the label names Inception's doors" "$(grep -c '|8080|8090|' "$TMP/out")" 1
+check "baas: sshd, the WAF, a project's declared ports, the tailnet" "$(wall "${BAAS[@]}")" PASS
+check "... the label names those doors" "$(grep -c '|8080|8090|' "$TMP/out")" 1
 check "FTP on the NAT address, declared nowhere: refused" \
     "$(wall "${BAAS[@]}" 10.0.2.15:21 10.0.2.15:21000)" FAIL
 check "a database on every address: refused" "$(wall "${BAAS[@]}" 0.0.0.0:5432)" FAIL

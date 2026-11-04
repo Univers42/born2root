@@ -138,40 +138,46 @@ EOF
         fi
     done
 
-    section "the tailnet"
-    state=$(vm_ssh "tailscale status --json 2>/dev/null" 2>/dev/null | python3 -c 'import json, sys
+    if [ "$(b2b_get features.dc-netmesh)" = false ]; then
+        section "the tailnet"
+        pass "off by profile: features.dc-netmesh is false"
+    else
+        section "the tailnet"
+        state=$(vm_ssh "tailscale status --json 2>/dev/null" 2>/dev/null | python3 -c 'import json, sys
 try:
     j = json.load(sys.stdin)
     print(j.get("BackendState", ""), (j.get("Self") or {}).get("DNSName", "").rstrip("."))
 except Exception:
     print("")' 2>/dev/null)
-    dns=${state#* }
-    state=${state%% *}
-    if [ "$state" = Running ] && [ -n "$dns" ]; then
-        pass "the guest is on the tailnet as $dns"
-        proxy=$(tailnet_proxy)
-        via="through this host's tailscaled"
-        fix="tailscale status on this host: its own tailscaled is the way in"
-        if [ -n "$proxy" ]; then
-            via="through the seat's tailscaled ($SOCKS)"
-            fix="make seat_tailnet (this seat's userspace tailscaled; it mints a new key when the old one is revoked)"
-        fi
-        code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 ${proxy:+-x "$proxy"} "https://$dns/" 2>/dev/null)
-        if answered "${code:-000}"; then
-            pass "this host -> https://$dns/ $via (the WAF, through tailscale serve; HTTP $code)"
+        dns=${state#* }
+        state=${state%% *}
+        if [ "$state" = Running ] && [ -n "$dns" ]; then
+            pass "the guest is on the tailnet as $dns"
+            proxy=$(tailnet_proxy)
+            via="through this host's tailscaled"
+            fix="tailscale status on this host: its own tailscaled is the way in"
+            if [ -n "$proxy" ]; then
+                via="through the seat's tailscaled ($SOCKS)"
+                fix="make seat_tailnet (this seat's userspace tailscaled; it mints a new key when the old one is revoked)"
+            fi
+            code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 ${proxy:+-x "$proxy"} "https://$dns/" 2>/dev/null)
+            if answered "${code:-000}"; then
+                pass "this host -> https://$dns/ $via (the WAF, through tailscale serve; HTTP $code)"
+            else
+                flunk "this host cannot reach https://$dns/ $via" "$fix"
+            fi
+            if timeout 20 curl -s --max-time 15 ${proxy:+-x "$proxy"} "telnet://$dns:4242" </dev/null 2>/dev/null | head -c 7 | grep -q '^SSH-2.0'; then
+                pass "this host -> $dns:4242 $via (sshd over the tailnet)"
+            else
+                flunk "this host gets no SSH banner from $dns:4242 $via" "$fix"
+            fi
         else
-            flunk "this host cannot reach https://$dns/ $via" "$fix"
+            flunk "the guest is not on the tailnet (${state:-no answer})" "make tailnet"
         fi
-        if timeout 20 curl -s --max-time 15 ${proxy:+-x "$proxy"} "telnet://$dns:4242" </dev/null 2>/dev/null | head -c 7 | grep -q '^SSH-2.0'; then
-            pass "this host -> $dns:4242 $via (sshd over the tailnet)"
-        else
-            flunk "this host gets no SSH banner from $dns:4242 $via" "$fix"
-        fi
-    else
-        flunk "the guest is not on the tailnet (${state:-no answer})" "make tailnet"
+
+        printf '\n'
     fi
 
-    printf '\n'
     if [ "$fail" = 0 ]; then
         ok "healthy: the platform, the guest's reach and every network to the WAF"
     else

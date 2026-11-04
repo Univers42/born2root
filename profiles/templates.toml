@@ -19,9 +19,8 @@
 #
 #   [disk]       120 GB, and / and /home give up share, /var takes it. / is
 #                charged 3120 MB with the editor (5.5 GiB here), /home
-#                1153 MB: the editor, the VS Code and Inception
-#                reservations (its volume says why the floor is 2 GB
-#                anyway). /var is the `rest`
+#                953 MB: the editor and the VS Code reservation (its volume
+#                says why the floor is 2 GB anyway). /var is the `rest`
 #                volume, so every point of share they release lands where
 #                Docker, the engines and their data live: 94 GiB of 120,
 #                for the 16417 MB the dc rows are charged. Measured, both
@@ -58,7 +57,7 @@
 #                and the motor refuses a render rather than crash
 #                (tests/test_graph_render.sh). qemu_vm.sh refuses a value
 #                above the host's RAM: a smaller seat lowers it here. A school
-#                seat's RAM is not measured yet (doc/rebuild-baas-at-school.md).
+#                seat's RAM is not measured yet (wiki/rebuild-baas-at-school.md).
 #
 #   [vm] ide_disk_gb 40, not 0: the osionos IDE sandbox's own disk. First
 #                boot makes it ide_crypt, XFS with prjquota at
@@ -75,7 +74,7 @@
 #                by hand, its tailnet name and Funnel, the secrets file and
 #                where backups land. With the carried restic repository,
 #                `make datacenter` brings baas's platform back from these
-#                (doc/rebuild-baas-at-school.md).
+#                (wiki/rebuild-baas-at-school.md).
 #
 #   [host]       autostart: `make all` makes the VM a user service of the
 #                host's login, with an hourly backup pull (make autostart).
@@ -159,9 +158,8 @@ claude-code    = true
 playwright     = false
 # the machine
 docker         = true
-# Inception rides along (inception-data comes on with docker): its nginx
-# binds the guest's 443 on loopback and the NAT address only, beside the
-# tailnet's own 443 (deploy_inception.sh), and gets the inception-* forwards.
+# This datacenter is grobase alone: nothing else takes a port or a volume here.
+inception-data = false
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
 # The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
@@ -205,9 +203,7 @@ interval_min = 10
 # 5432, 27017, ...), realtime and mailpit bind the guest's loopback, which a
 # hostfwd never reaches -- reach them over ssh. 5000, 3306, 6379, 5173, 3000
 # and 18200 were removed then: nothing answered them where a hostfwd arrives,
-# and each held a host port. Inception's 443, 8090 and 8080 came back with
-# `make inception` (2026-10-14); its FTP (21, 21000-21010) did not, twelve
-# host ports for the subject's bonus. groot's frontends (website 4322, osionos 3001-3003, the
+# and each held a host port.  groot's frontends (website 4322, osionos 3001-3003, the
 # bridges 4000/4100/4200, auth-gateway 8787) run on the HOST against this
 # guest's grobase (groot: make link, over ssh), so they get no forward
 # either.
@@ -220,11 +216,6 @@ forwards = [
   # plaintext 8880 to the guest's loopback (2026-10-19), so a forward to it
   # answered nothing and `make health` failed on it (2026-10-20).
   { name = "https", guest = 8443, host = 8443, expose = true },
-  # Inception (make inception): nginx, the static site, Adminer. https on
-  # 8445: groot's local-https-proxy owns 127.0.0.1:8444 (see born2root.toml).
-  { name = "inception-https",   guest = 443,  host = 8445 },
-  { name = "inception-static",  guest = 8090, host = 8090 },
-  { name = "inception-adminer", guest = 8080, host = 8081 },
 ]
 
 # ── [dc]: what the platform provisioners get on top of the features ──
@@ -313,7 +304,7 @@ swap_mb = "auto"
 volumes = [
   { name = "root",    mount = "/",        floor_mb = 2816, share = 3,      cap_mb = 30720  },
   # 2048, not 1024: share = 0 means the floor is all /home ever gets. It is
-  # charged 1153 MB (make features), and baas, built with the editor on, used
+  # charged 953 MB (make features), and baas, built with the editor on, used
   # 687 MB of its 1.9 GiB (2026-10-13, df).
   { name = "home",    mount = "/home",    floor_mb = 2048, share = 0,      cap_mb = 102400 },
   { name = "opt",     mount = "/opt",     floor_mb = 512,  share = 1,      cap_mb = 20480  },

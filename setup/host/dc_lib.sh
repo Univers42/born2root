@@ -60,11 +60,23 @@ VM_NAME="${VM_NAME:-$(b2b_get B2B_VM_NAME)}"
 VM_USER="${VM_USER:-$(b2b_get B2B_LOGIN)}"
 [ -n "$VM_USER" ] || VM_USER=$(id -un)
 
+# dc_tailnet_allowed: stop here when the profile keeps this datacenter off
+# Tailscale. `features.dc-netmesh = false` is the one switch: a key still in the
+# secrets file, kept for the seat's own tailnet, must not put the guest on it.
+dc_tailnet_allowed() {
+    [ "$(b2b_get features.dc-netmesh)" != false ] ||
+        die "$VM_NAME stays off Tailscale: features.dc-netmesh is false in this profile"
+}
+
 # dc_connect: resolve the SSH port and prove the guest answers. Called by the
 # scripts, not at source time, so a script can print usage without a VM.
 dc_connect() {
     SSH_PORT=$(vm_forward_port ssh 2>/dev/null) || SSH_PORT=
     [ -n "$SSH_PORT" ] || die "VM \"$VM_NAME\" has no 'ssh' forward -- is it running? (make qemu_status)"
+    # ports.env outlives the VM, and host ports walk: a stopped guest's file
+    # names a port another guest may hold now. A stopped VM's hourly backup would
+    # have reached the running one on 4242 and pulled its repository over its own.
+    vm_stale_ports && die "VM \"$VM_NAME\" is not running: port $SSH_PORT in its ports.env belongs to nobody, or to another guest (make qemu_start)"
     # An array, as provision_vm.sh does: hellish does not word-split an
     # unquoted string, and a quoted one would be a single bogus argument.
     SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
@@ -72,7 +84,16 @@ dc_connect() {
     # The same options as one string, for rsync -e, which takes a command line.
     # shellcheck disable=SC2034 # backup_pull.sh reads it
     SSH_OPTS_STR="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=15 -p $SSH_PORT"
-    if ! ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${VM_USER}@127.0.0.1" true 2>/dev/null; then
+    local err
+    if ! err=$(ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${VM_USER}@127.0.0.1" true 2>&1); then
+        # Measured on trixie (2026-11-04): an expired password refuses even a
+        # key login that has no terminal, "Password change required but no
+        # TTY available", and with -tt the same login hangs on the prompt.
+        case "$err" in
+        *"password has expired"* | *"Password change required"*)
+            die "the password of ${VM_USER} in ${VM_NAME} expired, and that refuses every key login without a terminal. ssh -t -p ${SSH_PORT} ${VM_USER}@127.0.0.1 asks for the current one (make rotate_password keeps it in $SECRETS_FILE) and a new one; put the new one in that file, then make rotate_password"
+            ;;
+        esac
         die "cannot reach ${VM_USER}@127.0.0.1:${SSH_PORT} with key auth"
     fi
 }
@@ -92,6 +113,24 @@ secret_get() {
     case "$mode" in 600 | 400) ;; *) die "$SECRETS_FILE is mode $mode; make it 600 (chmod 600 $SECRETS_FILE)" ;; esac
     sed -n "s/^$1=//p" "$SECRETS_FILE" | head -n1
 }
+# mint_login_password: 24 characters for an account. Letters and digits, so no
+# shell, preseed or sudo prompt gets a special character. The three fixed ones
+# are the classes [policy.password] wants, whatever the random part rolled.
+mint_login_password() {
+    local pass
+    while :; do
+        pass=Bb7$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | cut -c1-21)
+        [ "${#pass}" -eq 24 ] || continue
+        printf '%s' "$pass" | grep -qE '(.)\1\1' || break
+    done
+    printf '%s' "$pass"
+}
+# mint_luks_passphrase: hex only. The passphrase is typed into the guest's
+# virtual keyboard key by key, under whatever keymap the initramfs has: a
+# digit and a-f sit on the same key in every layout we build, and 128 bits
+# need no shift.
+mint_luks_passphrase() { openssl rand -hex 16; }
+
 # secret_set KEY VALUE: replace or append one line, keeping the rest.
 secret_set() {
     local tmp

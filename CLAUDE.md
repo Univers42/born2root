@@ -46,6 +46,9 @@ dry run (the Makefile assigns `$(MAKE)` to `MAKE_BIN` so `-n` is honoured).
 | One verdict: platform, guest reach, every forward on every LAN/Wi-Fi address, tailnet both ways | `make health` |
 | This seat on the tailnet at every login (userspace tailscaled, no root) | `make seat_tailnet`, `make seat_tailnet_undo` |
 | The team's copy of the secrets in vault42 (`[dc] vault`) | `make secrets_push`, `make secrets_pull` (`APPLY=1`, `KEYS=`) |
+| A profile's `secret:NAME` credentials: mint them, rotate the two passwords | `make secrets_mint`, `make rotate_password` |
+| Load the team's seeds from vault42 into an empty datacenter (`FORCE=1` over data) | `make set_seeds` |
+| Carry the sealed keystore in the credentials file, so that file alone rebuilds | `make seeds_bundle` |
 | Tailscale login / backup / restore / load test | `make tailscale`, `make backup`, `make restore`, `make loadtest` |
 | The private plane: MagicDNS name + certificate + serve -> WAF + CORS origin | `make tailnet`, `make tailnet_status`, `make tailnet_down` (`setup/host/tailnet.sh`) |
 | Pipe a SQL file into the guest's Postgres | `make sql FILE=schema.sql` |
@@ -112,7 +115,7 @@ setting in `.editorconfig`, and any flag on the command line makes shfmt
 ignore that file's `-bn -ci -sr` too); the Makefile uses tabs. `.shellcheckrc`
 disables SC1008 because of the non-standard shebang. None of the linters parse
 with hellish, so also check an edited script with `hellish -n` as well as
-`bash -n` (`doc/HANDOFF_SPACE_AND_PROFILES.md` lists the known differences,
+`bash -n` (`wiki/HANDOFF_SPACE_AND_PROFILES.md` lists the known differences,
 e.g. a one-line `case … esac; }` that shfmt collapses into something hellish
 cannot parse).
 
@@ -137,6 +140,12 @@ credentials that must not enter the repo or the ISO:
   snapshot on sgoinfre is unreadable without it.
 - `BAAS_API_KEY` — grobase tenant key; written by `make tenant_key`.
 - `CF_TUNNEL_TOKEN` — cloudflared tunnel token, only once a domain exists.
+- `BAAS_LUKS_PASSPHRASE`, `BAAS_ROOT_PASSWORD`, `BAAS_LOGIN_PASSWORD` — what
+  `profiles/server.toml` names as `secret:NAME`, because this repository is
+  public. `make gen_iso` mints an absent one (never for a built VM: a new
+  passphrase would not open its disk) and `make backup` rotates the two
+  passwords with 10 days left. Lose the LUKS line and the disk is lost: copy it
+  to a password manager, or `make secrets_push`.
 - `INCEPTION_ADMIN_EMAIL`, `INCEPTION_ADMIN_PASSWORD` — the WordPress
   administrator of `make inception` (both or neither). `deploy_inception.sh`
   runs the guest's `make setup`, then writes them over ssh stdin into
@@ -171,7 +180,7 @@ schema as `born2root.toml`; read their headers before editing.
 
 A project's own VM (a large `/var`, a fixed feature set) is one more file of
 the same kind, passed with `B2B_CONFIG`; `born2root.toml` stays the general
-defaults. How: `doc/PROJECT_VM.md`.
+defaults. How: `wiki/PROJECT_VM.md`.
 
 ## born2root.toml: the one file people personalise
 
@@ -517,6 +526,31 @@ and login the way `provision_vm.sh` does and reads the secrets file.
   prompted for with the exact page to open; without a terminal it prints the
   instructions and exits 1. `TS_SERVE=tcp` serves the WAF without the
   certificate switch (self-signed). `make funnel_up` is the public twin.
+- `make backup` guards the copy by repository, not by count: `pull_refusal`
+  compares restic's `config` file, because retention moves the snapshot count
+  both ways and a count guard froze the copy from day 14. What the pull deletes
+  waits in `$DEST/attic` for 14 days (`BACKUP_ATTIC_DAYS`), `[dc] backup_mirror`
+  copies it to a second device, and `install_backup.sh` exits 3 for a snapshot
+  that lacks one engine: pulled anyway, then failed.
+  `tests/test_backup_pull_guard.sh` pins all of it.
+- `make set_seeds` (`setup/host/set_seeds.sh`, `set_seeds_guest.sh`) makes a
+  rebuild reproducible with nothing carried: `[dc] seeds_env` names the 42ctl
+  credentials, `[dc] seeds_project` the vault42 project, and `make all` ends with
+  it. The seeds stay in the guest at `/mnt/storage/seeds`, a bind mount of `/var`.
+  A restic copy at `backup_dest` is newer and wins, a platform with rows is left
+  alone, and the guest keeps its own engine passwords: only what the rows were
+  written under (`JWT_SECRET`, `VAULT_ENC_KEY`, API keys) comes from the vault.
+  That one credentials file is enough on a new machine: vault42 is zero-knowledge,
+  so it carries the sealed keystore too (`FT_KEYSTORE_B64`, `make seeds_bundle`),
+  a missing 42ctl is installed, a keys-only guest gets this machine a key, and a
+  guest that lost grobase gets it back. It fetches the shared environment
+  (`env pull --org univers42 --project groot --env prod --only ...`), never the
+  whole tree: `42ctl pull` is a personal tree, and the bundle holds other projects.
+  It runs grobase's `vault-restore.sh` with `SKIP_STACK_CYCLE=1`, because its own
+  restart is `EDITION=devlean` and drops containers from a `PACKAGE=max` stack.
+- `profiles/server.toml` keeps the datacenter off Tailscale: `features.dc-netmesh
+  = false` is the one switch (`dc_tailnet_allowed` in `dc_lib.sh`), and it does
+  not touch the seat's own tailnet.
 - `make verify_platform` is the session self-test — run it before and after
   touching anything in this layer. `make grobase_status` reads
   `/etc/b2b/grobase.conf` and `docker ps` straight from the guest.
@@ -605,8 +639,9 @@ and a test that executes one of those scripts exports it (see
   (`FORCE_INSTALL=1` to mean it).
 - `guard_host` refuses `rm_disk_image`, `fclean` and `re` when `.built-on` names
   another machine (`FORCE_HOST=1`).
-- `fclean` empties `VM_PATH` but keeps the directory and the `.vm_path.*`
-  registry.
+- `fclean` removes this VM and the shared ISOs from `VM_PATH`, and keeps the
+  directory, the `.vm_path.*` registry and any other VM there
+  (`utils/vm_path_clean.sh`): profiles share one `VM_PATH` on a seat.
 
 ## Conventions
 
@@ -628,14 +663,17 @@ and a test that executes one of those scripts exports it (see
   validated before any download or destructive step. A switch once named
   `NERD_FONT` read a shell prompt theme's exported `NERD_FONT=0` and stopped
   builds after `make re` had already deleted the VM (now `NVIM_NERD_FONT`).
+- `.gitignore` has `*secret*`: a source file with that word in its name needs its
+  own `!path` line, or it works here and is absent from every clone.
+  `tests/test_secret_refs.sh` asks git about every source file.
 - Credentials are the temporary defaults in `born2root.toml`. The LUKS
   passphrase is `VM_PASS`, else `system.luks_passphrase`, for the preseed and
   the unlock alike. Add no hardcoded secrets.
-- `doc/` holds deep dives (CI architecture, port forwarding, host domain
-  access, the VS Code SSH timeout fix). `doc/HANDOFF_SPACE_AND_PROFILES.md` is
+- `wiki/` holds deep dives (CI architecture, port forwarding, host domain
+  access, the VS Code SSH timeout fix). `wiki/HANDOFF_SPACE_AND_PROFILES.md` is
   the measured record behind the sizing model and the feature costs.
-  `doc/README.md` is a Born2beRoot command cheat sheet, not an index.
-  `doc/docker-field-manual.html` is a self-contained, searchable Docker
+  `wiki/README.md` is a Born2beRoot command cheat sheet, not an index.
+  `wiki/docker-field-manual.html` is a self-contained, searchable Docker
   debugging manual (recipes in its JSON block) meant to move to grobase's
   `wiki/guides/` as one file.
 

@@ -7,7 +7,7 @@
 # What each profile promises:
 #   school.toml   the Born2beRoot subject at 15 GB: nvim on, docker and the
 #                 bonus off, and it fits.
-#   server.toml   backend at 120 GB: nvim on, docker on, every dc-* row
+#   server.toml   backend at 120 GB: nvim on, docker on, every dc-* row but netmesh
 #                 on (the max tier's add-ons included), 14 GiB of RAM, a
 #                 40 GB IDE disk, both of baas's SSH keys, grobase
 #                 following main, hand-set grobase keys (none of them a
@@ -48,8 +48,14 @@ fits() {
     rc_of env B2B_CONFIG="$cfg" SIZE_B2B="$gb" FEATURES="$feats" bash generate/feature_profile.sh --check
 }
 
+# server.toml's credentials are `secret:NAME`: they validate against a file
+# holding those names, not against this machine's real one.
+FAKE_SECRETS=$(mktemp)
+trap 'rm -f "$FAKE_SECRETS"' EXIT
+printf 'BAAS_LUKS_PASSPHRASE=0123456789abcdef0123456789abcdef\nBAAS_ROOT_PASSWORD=Bb7rootrootroot123\nBAAS_LOGIN_PASSWORD=Bb7loginlogin12345\n' >"$FAKE_SECRETS"
+chmod 600 "$FAKE_SECRETS"
 for p in school server; do
-    check "$p.toml validates" "$(rc_of env B2B_CONFIG=profiles/$p.toml bash utils/b2b_config.sh --check)" 0
+    check "$p.toml validates" "$(rc_of env B2B_SECRETS="$FAKE_SECRETS" B2B_CONFIG=profiles/$p.toml bash utils/b2b_config.sh --check)" 0
     check "$p.toml: the layout is computable" "$(rc_of env B2B_CONFIG=profiles/$p.toml bash generate/partition_recipe.sh --sizes)" 0
     check "$p.toml: its feature set fits its disk" "$(fits $p)" 0
 done
@@ -65,20 +71,29 @@ v=$(resolve server)
 check "server: nvim on" "$(printf '%s\n' "$v" | grep -c '^feature=nvim$')" 1
 check "server: nvim-extras on" "$(printf '%s\n' "$v" | grep -c '^feature=nvim-extras$')" 1
 check "server: docker on" "$(printf '%s\n' "$v" | grep -c '^feature=docker$')" 1
-# inception-data comes on with docker; the ISO build then wants Inception's
-# three forwards, which baas opens (inception-https beside the WAF's https).
-check "server: inception-data on" "$(printf '%s\n' "$v" | grep -c '^feature=inception-data$')" 1
+check "server: the datacenter is grobase alone" "$(printf '%s
+' "$v" | grep -c '^feature=inception-data$')" 0
+check "server: nothing of Inception in its forwards" "$(grep -c 'name = "inception' profiles/server.toml)" 0
 # The max tier's add-ons are on: server.toml runs max (package = "max") on
 # the baas host with ram_mb = 10240. On a 7.6 GB seat they stay off, since max
 # crash-looped mssql there and grobase puts it at 3128 MiB idle (2026-10-08).
 max_addons="dc-db-cockroach dc-db-mssql dc-observability"
 dc_rows=$(awk "/^MANIFEST='/,/^'\$/" generate/feature_profile.sh | grep -c '^dc-')
-check "server: every dc-* row on, max add-ons included" \
-    "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" "$dc_rows"
+# All but one: the datacenter stays off Tailscale, by decision (2026-11-04).
+check "server: every dc-* row but dc-netmesh on, max add-ons included" \
+    "$(printf '%s\n' "$v" | grep -c '^feature=dc-')" "$((dc_rows - 1))"
+check "server: nothing on Tailscale" "$(printf '%s\n' "$v" | grep -c '^feature=dc-netmesh$')" 0
+check "server: no Funnel" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_FUNNEL)" false
+check "server: no ts.net origin left" "$(grep -c 'ts\.net' profiles/server.toml)" 0
+check "server: a rebuild knows where its seeds are" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_SEEDS_PROJECT)" groot
 for f in $max_addons; do
     check "server: $f on" "$(printf '%s\n' "$v" | grep -c "^feature=$f\$")" 1
 done
 check "server: var-gc on (base, every build)" "$(printf '%s\n' "$v" | grep -c '^feature=var-gc$')" 1
+check "server: no literal credential in a public repository" \
+    "$(grep -cE '^(root_password|luks_passphrase|password) *= *"[^s]' profiles/server.toml)" 0
+check "server: keys only over ssh" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_SSH_PASSWORD_LOGIN)" no
+check "server: security updates install themselves" "$(grep -c '^apt = \["unattended-upgrades"\]' profiles/server.toml)" 1
 check "server: the VM is not named debian" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_NAME)" baas
 check "server: ram_mb 10240" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_RAM_MB)" 10240
 check "server: 4 vCPUs" "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_VM_CPUS)" 4
@@ -89,19 +104,15 @@ check "server: the login is the editor user (the build has the editor)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_NVIM_USERS)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_LOGIN)"
 SERVER_GUEST=$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh --guest)
-check "server: grobase follows main, not a pin" \
-    "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_REF=//p')" main
+check "server: grobase is a pinned, tested commit" \
+    "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_REF=//p' | tr -d '"' | grep -cE '^[0-9a-f]{40}$')" 1
 check "server: baas's hand-set grobase keys, DynamoDB data plane included" \
     "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_ENV_DATA_PLANE_FEATURES=//p')" '"--features dynamodb"'
 check "server: REMOTE_ACCESS on (realtime and mailpit on the guest loopback, for tunnels)" \
     "$(printf '%s\n' "$SERVER_GUEST" | sed -n 's/^B2B_DC_GROBASE_ENV_REMOTE_ACCESS=//p')" '"1"'
-check "server: the guest's firewall opens exactly what baas serves (ssh, the WAF, Inception)" \
+check "server: the guest's firewall opens exactly what baas serves (ssh, the WAF)" \
     "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_FIREWALL)" \
-    "ssh:4242 https:8443 inception-https:443 inception-static:8090 inception-adminer:8080"
-check "server: the tailnet name baas has (kong.yml, cert SANs, origins name it)" \
-    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_TAILNET_HOSTNAME)" baas
-check "server: the funnel opened, as on baas" \
-    "$(env B2B_CONFIG=profiles/server.toml bash utils/b2b_config.sh get B2B_DC_FUNNEL)" true
+    "ssh:4242 https:8443"
 check "server: no CATALOG_MANAGEMENT (grobase main no longer reads it)" \
     "$(printf '%s\n' "$SERVER_GUEST" | grep -c 'CATALOG_MANAGEMENT' || true)" 0
 

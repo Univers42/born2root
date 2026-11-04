@@ -200,11 +200,21 @@ dc_plan() { # <profile> -> make -n datacenter's lines
     env B2B_SECRETS="$stub/secrets" make -n --no-print-directory datacenter B2B_CONFIG="$1" 2>/dev/null
 }
 line_of() { printf '%s\n' "$1" | grep -n -m1 -- "$2" | cut -d: -f1; }
-plan=$(dc_plan profiles/server.toml)
+# A profile on the tailnet, with its Funnel: server.toml is neither (below).
+sed -e 's/^dc-netmesh     = false$/dc-netmesh     = true/' -e 's/^funnel = false$/funnel = true/' \
+    profiles/server.toml >"$stub/on-tailnet.toml"
+plan=$(dc_plan "$stub/on-tailnet.toml")
 order=$(for step in 'no-print-directory restore ' 'no-print-directory tailnet ' 'no-print-directory realtime_token ' \
     'no-print-directory funnel_up ' 'no-print-directory backup '; do line_of "$plan" "$step"; done)
 check "datacenter: restore, tailnet, realtime_token, funnel_up, backup" \
     "$(printf '%s\n' "$order" | grep -c .) $(printf '%s\n' "$order" | sort -n -c && echo ascending)" "5 ascending"
+off=$(dc_plan profiles/server.toml)
+check "server.toml's datacenter stays off Tailscale" \
+    "$(printf '%s\n' "$off" | grep -cE 'no-print-directory (tailscale|tailnet|funnel_up) ')" 0
+check "... and still restores, keys and backs up" \
+    "$(printf '%s\n' "$off" | grep -cE 'no-print-directory (restore|tenant_key|backup) ')" 3
+check "... a Tailscale key left in the file cannot put the guest on it" \
+    "$(grep -c '^dc_tailnet_allowed$' setup/host/tailscale_up.sh setup/host/tailnet.sh setup/host/funnel.sh | grep -c ':1$')" 3
 check "datacenter: no funnel unless the profile asks" \
     "$(dc_plan tests/fixtures/default.toml | grep -c 'funnel_up' || true)" 0
 

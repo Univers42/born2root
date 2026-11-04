@@ -339,7 +339,7 @@ C_RED    := \033[31m
 C_CYAN   := \033[36m
 
 # =========@@ Main target @@===================================================
-.PHONY: all health autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help use \
+.PHONY: all health autostart autostart_handover seat_tailnet seat_tailnet_undo secrets_push secrets_pull secrets_mint rotate_password set_seeds seeds_bundle firewall prepare pull shell deps extpack check_system check_driver guard_config guard_host backend fix_hwe fix_app_ports gen_iso setup_vm start_vm status help use \
         clean fclean re poweroff list_vms prune_vms console serial_log \
         list_vms_iso extract_isos push_iso pop_iso rm_disk_image bstart_vm gui_vm \
         host_access host_access_undo inception inception_save inception_restore inception_docs verify_access verif_access fresh \
@@ -407,6 +407,7 @@ all: no_root prepare
 		sel="$(SIZE_B2B)"; \
 	fi; \
 	$(MAKE_BIN) --no-print-directory _build SIZE_B2B="$$sel" VM_SIZE= B2B_NO_SELECT=1
+	$(if $(call b2b_conf,B2B_DC_SEEDS_ENV),@$(MAKE_BIN) --no-print-directory set_seeds SEEDS_MODE=--auto || printf '  ! the seeds did not load -- the VM is built; rerun make set_seeds\n')
 	$(if $(filter true,$(call b2b_conf,B2B_HOST_AUTOSTART)),@$(MAKE_BIN) --no-print-directory autostart || printf '  ! autostart did not finish -- the VM is built; rerun make autostart\n')
 
 # The build proper. Never call this directly -- `make all` is the entry point;
@@ -443,13 +444,11 @@ _build:
 # Inception's host side edits the user's browsers, desktop proxy and
 # ~/.local/bin, so it is opt-in: only a profile that includes the Inception
 # feature gets it. A build of anything else (a project VM, a server) leaves the
-# host alone; `make host_access` is the explicit way in.
+# host alone, and says nothing about it.
 	@if SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
 		PROFILE="$(PROFILE)" FEATURES="$(FEATURES)" AI_MODE="$(AI_MODE)" \
 		$(SCRIPT_SH) generate/feature_profile.sh --has inception-data; then \
 		VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" $(SCRIPT_SH) setup/host/inception_host_access.sh; \
-	else \
-		printf "$(C_BLUE)>$(C_RESET) host access for $(DOMAIN) skipped: no Inception in this profile ($(C_BOLD)make host_access$(C_RESET) to opt in)\n"; \
 	fi
 	@VM_PATH="$(VM_PATH)" VM_NAME="$(VM_NAME)" $(SCRIPT_SH) setup/host/llm_host.sh build
 
@@ -858,7 +857,7 @@ fix_app_ports:
 
 
 # =========@@ Build preseeded ISO @@============================================
-gen_iso: shell
+gen_iso: shell secrets_mint
 	@FORCE_ISO="$(FORCE_ISO)" CUSTOM_SHELL_PATH="$(CUSTOM_SHELL_PATH)" \
 		AI_MODE="$(AI_MODE)" LUKS="$(LUKS)" \
 		SIZE_B2B="$(SIZE_B2B)" DISK_SIZE_MB="$(DISK_SIZE_MB)" VM_RAM_MB="$(VM_RAM_MB)" B2B_VM_CPUS="$(B2B_VM_CPUS)" \
@@ -1060,9 +1059,7 @@ slim:
 # send the next `make all` back to the repo -- which, on a quota'd filesystem,
 # is the whole problem this project just spent a day fixing.
 fclean: clean rm_disk_image
-	@[ -n "$(VM_PATH)" ] && [ -d "$(VM_PATH)" ] \
-		&& find "$(VM_PATH)" -mindepth 1 -maxdepth 1 \
-			! -name '.vm_path.*' -exec rm -rf -- {} + 2>/dev/null; true
+	@[ -z "$(VM_PATH)" ] || $(SCRIPT_SH) utils/vm_path_clean.sh "$(VM_PATH)" "$(VM_NAME)"
 
 re: fclean all
 
@@ -1130,6 +1127,9 @@ graph_render_undo:
 #   make inception                    clone github.com/Univers42/inception
 #   make inception SRC=/path/to/repo  push a local working tree up instead
 inception:
+	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
+		$(SCRIPT_SH) setup/host/deploy_inception.sh
+
 # Inception's volumes and secrets, as one raw archive on the host and never in
 # Git: they hold credentials, which the subject fails a project for.
 #   make inception_save
@@ -1146,9 +1146,6 @@ inception_docs:
 	@OSIONOS_EMAIL="$$(sed -n 's/^OSIONOS_EMAIL=//p' "$(B2B_SECRETS)")" \
 		OSIONOS_PASSWORD="$$(sed -n 's/^OSIONOS_PASSWORD=//p' "$(B2B_SECRETS)")" \
 		node setup/host/inception_docs.mjs
-
-	@VM_NAME="$(VM_NAME)" VM_PATH="$(VM_PATH)" INCEPTION_DOMAIN="$(DOMAIN)" INCEPTION_SRC="$(SRC)" \
-		$(SCRIPT_SH) setup/host/deploy_inception.sh
 
 # Prove it from the host: NAT rules, TLS/SNI, the WordPress redirect trap, and
 # a real headless browser load of the bare https://$(DOMAIN) URL.
@@ -1256,6 +1253,7 @@ ide_disk:
 #   make backup              password -> backup in the guest -> pull the repo to sgoinfre
 #   make backup_verify       ... and restic check the pulled copy
 #   make restore_drill       restore the newest snapshot into a scratch database and count what came back
+#   make set_seeds           the team's seeds from vault42 into the engines (FORCE=1 over data)
 #   make seed / loadtest     rows from grobase's own seeder; k6 against Kong, inside the guest
 # Secrets live under $HOME, not in the repo: the campus wipes /goinfre and
 # took the restic password with it once (see setup/host/dc_lib.sh, which
@@ -1325,6 +1323,26 @@ backup:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh
 backup_verify:
 	@$(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --verify
+# A profile's `secret:NAME` credentials (setup/host/mint_secrets.sh), minted
+# before the ISO is rendered with them, and the guest's account passwords
+# changed before they expire and stop every key login
+# (setup/host/rotate_password.sh; `make backup` does this when it is due).
+secrets_mint:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/mint_secrets.sh
+rotate_password:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/rotate_password.sh
+
+# The team's seeds from vault42 into the guest and its engines (read
+# setup/host/set_seeds.sh). A platform that holds data is left alone: FORCE=1
+# replaces it, asked for by name only. `make all` and `make datacenter` run the
+# --auto form, which ignores FORCE: make hands it to sub-makes, and `make all
+# FORCE=1`, meant for something else, would have replaced a live platform.
+set_seeds:
+	@$(DC_ENV) B2B_SEEDS_FORCE="$(if $(SEEDS_MODE),0,$(or $(FORCE),0))" $(SCRIPT_SH) setup/host/set_seeds.sh $(SEEDS_MODE)
+# Carry the sealed keystore in the credentials file, so that file alone rebuilds.
+seeds_bundle:
+	@$(DC_ENV) $(SCRIPT_SH) setup/host/set_seeds.sh --bundle
+
 restore_drill:
 	@VM_PATH="$(VM_PATH)" $(SCRIPT_SH) setup/host/provision_vm.sh "$(VM_NAME)" restore-drill
 # UFW on a running guest made to match [network] forwards as the profile says
@@ -1354,18 +1372,19 @@ restore:
 # console switch in any of the three warns and the rest continues.
 datacenter:
 	@$(MAKE_BIN) --no-print-directory verify_platform B2B_CONFIG="$(B2B_CONFIG)" || true
-	@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
+	$(if $(filter false,$(call b2b_conf,features.dc-netmesh)),,@if grep -q '^TS_AUTHKEY=.' "$(B2B_SECRETS)" 2>/dev/null; then \
 		$(MAKE_BIN) --no-print-directory tailscale B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! tailscale did not log in (a spent one-off key?) -- the rest continues; fix the key and rerun make tailscale\n'; \
-	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi
+	else printf '  ! no TS_AUTHKEY in $(B2B_SECRETS): skipping tailscale (see .b2b-secrets.example)\n'; fi)
 	@d=$$($(DC_ENV) BACKUP_DEST="$(BACKUP_DEST)" $(SCRIPT_SH) setup/host/backup_pull.sh --where); \
 	if [ -d "$$d/repo/snapshots" ]; then \
 		$(MAKE_BIN) --no-print-directory restore B2B_CONFIG="$(B2B_CONFIG)" BACKUP_DEST="$$d"; \
-	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; fi
+	else printf '  ! no backup copy at %s: nothing to restore (first build?)\n' "$$d"; \
+		$(MAKE_BIN) --no-print-directory set_seeds SEEDS_MODE=--auto B2B_CONFIG="$(B2B_CONFIG)"; fi
 	@$(MAKE_BIN) --no-print-directory osionos_models B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! osionos_models did not finish (no groot checkout? GROOT_DIR=) -- the rest continues; rerun make osionos_models\n'
-	@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
-		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n'
+	$(if $(filter false,$(call b2b_conf,features.dc-netmesh)),,@$(MAKE_BIN) --no-print-directory tailnet B2B_CONFIG="$(B2B_CONFIG)" || \
+		printf '  ! tailnet did not finish (not logged in, or a console switch is pending) -- the rest continues; rerun make tailnet\n')
 	@$(MAKE_BIN) --no-print-directory realtime_token B2B_CONFIG="$(B2B_CONFIG)" || \
 		printf '  ! realtime_token did not finish -- the rest continues; rerun make realtime_token\n'
 	$(if $(filter true,$(call b2b_conf,B2B_DC_FUNNEL)),@$(MAKE_BIN) --no-print-directory funnel_up B2B_CONFIG="$(B2B_CONFIG)" || printf '  ! funnel_up did not finish (a console switch is pending?) -- the rest continues; rerun make funnel_up\n')

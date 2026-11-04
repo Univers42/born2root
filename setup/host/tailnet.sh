@@ -58,6 +58,7 @@ esac
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
+dc_tailnet_allowed
 
 MODE="${1:-up}"
 SERVE="${TS_SERVE:-https}"

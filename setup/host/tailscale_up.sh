@@ -24,6 +24,7 @@ set -u
 
 # shellcheck source=setup/host/dc_lib.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/dc_lib.sh"
+dc_tailnet_allowed
 # shellcheck source=setup/host/ts_api.sh
 . "$DC_ROOT/setup/host/ts_api.sh"
 

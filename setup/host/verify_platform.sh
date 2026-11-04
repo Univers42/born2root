@@ -17,6 +17,9 @@
 #   no container unhealthy, crash-looping or exited non-zero
 #     (b2b-stack-health; it printed "verified" over a crash loop once)
 #   backup timer active, last backup run not failed
+#                                            weekly proof passed in 10 days
+#                                            the copy off the guest under 3 h
+#                                            login password over 7 days left
 #
 #   make verify_platform
 set -u
@@ -97,6 +100,25 @@ if on dc-backup; then
         "set -- \$(cat /var/lib/b2b/backup.last 2>/dev/null); [ \"\${1:-}\" = ok ] && [ \$(( \$(date +%s) - \${2:-0} )) -lt 7200 ] && echo fresh" fresh "no fresh snapshot (make backup)"
 fi
 
+# ── what the guest cannot see ───────────────────────────────
+# The checks above read the guest, and a guest with a fresh snapshot says
+# nothing about the pull that carries it off. Only the host knows that one.
+if on dc-backup; then
+    soft "the weekly proof passed in the last 10 days (restic check, restore drill)" \
+        "set -- \$(cat /var/lib/b2b/proof.last 2>/dev/null); [ \"\${1:-}\" = ok ] && [ \$(( \$(date +%s) - \${2:-0} )) -lt 864000 ] && echo proven" proven \
+        "no recent pass: sudo systemctl start b2b-weekly-proof in the guest, /var/lib/b2b/proof.last names what failed"
+    pull_dest=$("${SCRIPT_SH:-bash}" "$DC_ROOT/setup/host/backup_pull.sh" --where 2>/dev/null)
+    pulled=$(cat "$pull_dest/last-pull" 2>/dev/null)
+    if [ -n "$pulled" ] && [ "$(($(date +%s) - pulled))" -lt 10800 ]; then
+        ok "the copy off the guest is younger than 3 h ($pull_dest)"
+    else
+        warn "the copy off the guest is older than 3 h or missing -- make backup ($pull_dest/last-pull)"
+    fi
+fi
+soft "the login's password has more than 7 days left" \
+    "w=\$(LC_ALL=C chage -l \$(id -un) | sed -n 's/^Password expires[[:space:]]*: *//p'); [ \"\$w\" = never ] && echo far || { [ \$(( (\$(date -d \"\$w\" +%s) - \$(date +%s)) / 86400 )) -gt 7 ] && echo far; }" far \
+    "it stops every key login when it expires: make rotate_password"
+
 # ── the edge ────────────────────────────────────────────────────────────────
 if on dc-netmesh; then
     soft "tailscale logged in" \
@@ -112,7 +134,7 @@ fi
 # rerun found its own previous container holding 8443, so the new one took
 # 8444. A check that hardcoded 8443 would flag the door as an intruder.
 #
-# A guest port that [network] forwards declares is a door too: Inception's
+# A guest port that [network] forwards declares is a door too: a project's
 # nginx, static site and Adminer sit on the NAT address (10.0.2.15) because
 # that is the only place a forward lands, and on 2026-10-16 this check failed
 # on exactly those three. Anything else off loopback is still an intruder.
