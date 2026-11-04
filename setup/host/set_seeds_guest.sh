@@ -148,6 +148,10 @@ make --no-print-directory certs >/dev/null || die "make certs failed"
 sqlite_vol=$(docker volume ls -q | grep -m1 -- 'sqlite-data$')
 if [ -n "$sqlite_vol" ] && [ -f "$SEEDS/secrets/sqlite-data.tar.gz" ]; then
     tar -xzf "$SEEDS/secrets/sqlite-data.tar.gz" -C "/var/lib/docker/volumes/$sqlite_vol/_data" || die "could not unpack sqlite-data"
+    # tar keeps the seed's owner, and the router runs as a distroless `nonroot` with no name
+    # to chown to here: the file opened and every write failed "attempt to write a readonly
+    # database" (2026-11-04). The volume is mounted in that one container.
+    chmod -R a+rwX "/var/lib/docker/volumes/$sqlite_vol/_data" || die "could not open sqlite-data to the router"
 fi
 
 up SERVICE="$ENGINES_RUN" || die "the engines did not start"

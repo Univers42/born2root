@@ -52,7 +52,7 @@ cat >"$T/bin/42ctl" <<STUB
 printf '%s\n' "\$*" >>"$T/ctl.calls"
 case "\$*" in
 "auth status") cat "$T/session" 2>/dev/null ;;
-"auth login"*) echo "login FT_PASSWORD=\${FT_PASSWORD:-}" >>"$T/ctl.env"; rm -f "$T/unbound" ;;
+"auth login"*) echo "login FT_PASSWORD=\${FT_PASSWORD:-}" >>"$T/ctl.env"; rm -f "$T/unbound" "$T/session-expired" ;;
 "keys recover"*) echo recover >>"$T/ctl.env" ;;
 "env secret get"*) [ -e "$T/env-secret" ] || { echo "not in this environment" >&2; exit 1; }; echo s3-value ;;
 "vault get"*)
@@ -63,7 +63,9 @@ case "\$*" in
     [ ! -e "$T/vault-down" ] || { echo "error: the vault said no" >&2; exit 1; }
     echo s3-value
     ;;
-"env pull"*) [ ! -e "$T/pull-refused" ] || { echo "the vault said no" >&2; exit 1; }; cp -a "$T/seed/." "\$PWD/"; echo "pull passphrase=\${FT_PASSPHRASE:-} s3=\${FT_S3_KEY:-}" >>"$T/ctl.env" ;;
+"env pull"*)
+    [ ! -e "$T/session-expired" ] || { echo "error: /v1/orgs/univers42/projects failed: HTTP 401" >&2; exit 1; }
+    [ ! -e "$T/pull-refused" ] || { echo "the vault said no" >&2; exit 1; }; cp -a "$T/seed/." "\$PWD/"; echo "pull passphrase=\${FT_PASSPHRASE:-} s3=\${FT_S3_KEY:-}" >>"$T/ctl.env" ;;
 esac
 STUB
 cat >"$T/bin/ssh" <<STUB
@@ -245,6 +247,21 @@ seeds bash setup/host/set_seeds.sh >"$T/out" 2>&1
 check "a seed failing its checksum: refused" "$?" 1
 check "... before anything reached the guest" "$([ -e "$T/uploaded" ] && echo sent || echo held)" held
 (cd "$T/seed/secrets" && sha256sum MANIFEST.json >SHA256SUMS)
+
+# What `auth status` cannot see: the server expired the session, and local state still
+# says "session and contract". Measured on a real reseed, 2026-11-04.
+reset
+: >"$T/session-expired"
+seeds bash setup/host/set_seeds.sh >"$T/out" 2>&1
+check "an expired session: one sign-in, then the seeds load" "$?" 0
+check "... signed in once" "$(grep -c '^auth login' "$T/ctl.calls")" 1
+check "... retried once" "$(grep -c '^env pull' "$T/ctl.calls")" 2
+check "... with no password on a command line" "$(grep -c 'pw-value' "$T/ctl.calls")" 0
+reset
+: >"$T/pull-refused"
+seeds bash setup/host/set_seeds.sh >"$T/out" 2>&1
+check "any other pull failure is not a session: no sign-in" "$(grep -c '^auth login' "$T/ctl.calls")" 0
+rm -f "$T/pull-refused"
 
 reset
 sed -i '/OSIONOS_BAAS_API_KEY/d' "$T/seed/.env.local"

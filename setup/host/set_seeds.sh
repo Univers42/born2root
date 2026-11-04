@@ -186,8 +186,12 @@ vault_secret() {
 load_object_store_key() {
     FT_S3_KEY=$(vault_secret infra/S3_KEY) && FT_S3_SECRET=$(vault_secret infra/S3_SECRET)
 }
+# `auth status` above reads local state, so a session the server has expired still says
+# "session and contract": env pull came back HTTP 401 on a seat idle for an afternoon, and
+# stopped a reseed (2026-11-04). The same one sign-in and one retry as a stray contract.
+session_refused() { grep -qE 'contract not bound to this key|HTTP 401' "$1"; }
 if ! load_object_store_key; then
-    grep -q 'contract not bound to this key' "$work/secret.err" && sign_in
+    session_refused "$work/secret.err" && sign_in
     load_object_store_key || die "cannot read infra/S3_KEY and infra/S3_SECRET: $(tail -n2 "$work/secret.err" | tr '\n' ' ')"
 fi
 export FT_S3_KEY FT_S3_SECRET
@@ -198,9 +202,13 @@ for f in MANIFEST.json SHA256SUMS postgres-all.sql.gz mysql-all.sql.gz mongo.arc
     redis.rdb mssql-all.tar.gz dynamodb-all.tar.gz sqlite-data.tar.gz grobase-certs.tar.gz; do
     only+=(--only "secrets/$f")
 done
-if ! (cd "$work" && "$CTL" env pull --org univers42 --project "$PROJECT" --env prod "${only[@]}" --apply) >"$work/pull.log" 2>&1; then
-    tail -n3 "$work/pull.log" >&2
-    die "42ctl could not fetch the seeds"
+pull_seeds() { (cd "$work" && "$CTL" env pull --org univers42 --project "$PROJECT" --env prod "${only[@]}" --apply) >"$work/pull.log" 2>&1; }
+if ! pull_seeds; then
+    session_refused "$work/pull.log" && sign_in
+    if ! pull_seeds; then
+        tail -n3 "$work/pull.log" >&2
+        die "42ctl could not fetch the seeds"
+    fi
 fi
 unset FT_S3_KEY FT_S3_SECRET
 
