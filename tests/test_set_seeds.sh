@@ -42,6 +42,7 @@ sleeper=$!
 echo "$sleeper" >"$T/vms/vm1/qemu.pid"
 printf '{\n "created_utc": "2026-09-19T13:19:52Z",\n "captured": ["postgres"]\n}\n' >"$T/seed/secrets/MANIFEST.json"
 printf 'K=v\n' >"$T/seed/apps/grobase/.env.secrets"
+printf 'OTHER=x\nOSIONOS_BAAS_API_KEY="mbk_app-value"\n' >"$T/seed/.env.local"
 (cd "$T/seed/secrets" && sha256sum MANIFEST.json >SHA256SUMS)
 printf 'FT_PASSPHRASE=pp-value\nFT_EMAIL=e@x\nFT_PASSWORD=pw-value\nFT_TENANT=t\n' >"$T/cred"
 printf 'RESTIC_PASSWORD=x\n' >"$T/s"
@@ -76,6 +77,13 @@ STUB
 cat >"$T/bin/rsync" <<STUB
 #!/bin/bash
 echo rsync >>"$T/uploaded"
+printf '%s\n' "\$*" >>"$T/rsync.args"
+for a in "\$@"; do
+    [ -f "\${a}app.key" ] || continue
+    stat -c %a "\${a}app.key" >"$T/app.key.mode"
+    cat "\${a}app.key" >"$T/app.key.sent"
+    [ ! -e "\${a}.env.local" ] || echo sent >"$T/env.local.sent"
+done
 exit 0
 STUB
 cat >"$T/script_sh" <<STUB
@@ -118,6 +126,10 @@ check "... the shared environment, by name" "$(grep -c '^env pull --org univers4
 check "... only what this platform loads" "$(grep -c 'inception' "$T/ctl.calls")" 0
 check "... with the object store a fresh 42ctl does not know" "$(grep -c '^config endpoint --blobstore ' "$T/ctl.calls")" 1
 check "... it says how old the seeds are" "$(grep -c '2026-09-19' "$T/out")" 1
+check "... the app key goes up, its quotes gone" "$(cat "$T/app.key.sent")" mbk_app-value
+check "... readable by this login alone" "$(cat "$T/app.key.mode")" 600
+check "... and on no command line" "$(cat "$T/ctl.calls" "$T/rsync.args" "$T/out" | grep -c 'mbk_app-value')" 0
+check "... the rest of .env.local stays on the host" "$([ -e "$T/env.local.sent" ] && echo sent || echo kept)" kept
 check "... the decrypted copy is gone" "$(find "$T" -maxdepth 1 -name 'b2b-seeds.*' | wc -l)" 0
 
 reset
@@ -209,12 +221,12 @@ check "... and the seeds reached the guest" "$(cat "$T/uploaded" | wc -l)" 1
 cp "$T/cred.bare" "$T/cred"
 
 reset
-STUB_GUEST_RC=4 seeds bash setup/host/set_seeds.sh >"$T/out" 2>&1
+seeds env STUB_GUEST_RC=4 bash setup/host/set_seeds.sh >"$T/out" 2>&1
 check "a populated guest: a refusal by hand" "$?" 1
 check "... naming FORCE=1" "$(grep -c 'FORCE=1' "$T/out")" 1
-STUB_GUEST_RC=4 seeds bash setup/host/set_seeds.sh --auto >"$T/out" 2>&1
+seeds env STUB_GUEST_RC=4 bash setup/host/set_seeds.sh --auto >"$T/out" 2>&1
 check "... and a note from make all" "$?" 0
-STUB_GUEST_RC=1 seeds bash setup/host/set_seeds.sh --auto >"$T/out" 2>&1
+seeds env STUB_GUEST_RC=1 bash setup/host/set_seeds.sh --auto >"$T/out" 2>&1
 check "a real failure fails even from make all" "$?" 1
 
 reset
@@ -233,6 +245,14 @@ seeds bash setup/host/set_seeds.sh >"$T/out" 2>&1
 check "a seed failing its checksum: refused" "$?" 1
 check "... before anything reached the guest" "$([ -e "$T/uploaded" ] && echo sent || echo held)" held
 (cd "$T/seed/secrets" && sha256sum MANIFEST.json >SHA256SUMS)
+
+reset
+sed -i '/OSIONOS_BAAS_API_KEY/d' "$T/seed/.env.local"
+seeds bash setup/host/set_seeds.sh >"$T/out" 2>&1
+check "no app key: refused, the mounts could not be proved" "$?" 1
+check "... before the guest is touched" "$([ -e "$T/guest.args" ] && echo touched || echo untouched)" untouched
+check "... by name" "$(grep -c 'OSIONOS_BAAS_API_KEY' "$T/out")" 1
+printf 'OSIONOS_BAAS_API_KEY=mbk_app-value\n' >>"$T/seed/.env.local"
 
 reset
 rm "$T/seed/apps/grobase/.env.secrets"
@@ -266,5 +286,32 @@ check "... asked for by name it still works" \
     "$(env B2B_CONFIG=tests/fixtures/default.toml make --no-print-directory -n set_seeds FORCE=1 2>/dev/null | grep -c 'B2B_SEEDS_FORCE="1"')" 1
 check "a failed grobase install fails make grobase" \
     "$(awk '/^grobase\)$/{p=1} p&&/;;/{exit} p' setup/host/provision_vm.sh | grep -c '^    exit \$?$')" 1
+# The mounts step, cut out and run with runuser stubbed: under hellish too, because
+# first boot and the guest's seeds run there, and an assignment prefix on a command
+# has differed between the two shells before.
+mkdir -p "$T/mounts"
+printf 'mbk_app-value\n' >"$T/mounts/app.key"
+cat >"$T/bin/runuser" <<STUB
+#!/bin/bash
+printf 'key=%s after=%s args=%s\n' "\$BAAS_API_KEY" "\$AFTER_RESTORE" "\$*" >"$T/mounts/ran"
+exit "\${STUB_MOUNTS_RC:-0}"
+STUB
+chmod +x "$T/bin/runuser"
+awk '/^\[ -s "\$FROM\/app.key" \]/,/mounts do not all open/' "$g" >"$T/mounts/step.sh"
+for shell in bash dist/hellish; do
+    [ -x "$(command -v "$shell")" ] || continue
+    rm -f "$T/mounts/ran"
+    printf 'die() { printf "die: %%s\\n" "$*"; exit 1; }\nlog() { :; }\nFROM=%s owner=u\n. %s\n' \
+        "$T/mounts" "$T/mounts/step.sh" >"$T/mounts/run.sh"
+    env PATH="$T/bin:$PATH" "$shell" "$T/mounts/run.sh" >/dev/null 2>&1
+    check "$shell: the mounts step passes the key by environment" "$?" 0
+    check "... and runs grobase's script as the checkout's owner" \
+        "$(cat "$T/mounts/ran")" "key=mbk_app-value after=1 args=-u u -- bash scripts/seed/osionos-extra-engines.sh"
+    env PATH="$T/bin:$PATH" STUB_MOUNTS_RC=1 "$shell" "$T/mounts/run.sh" >/dev/null 2>&1
+    check "... a dead mount fails the seed" "$?" 1
+done
+# shellcheck disable=SC2016 # an awk program, not an expansion
+check "the mounts are proved before the seed is recorded" \
+    "$(awk '/AFTER_RESTORE=1/{m=NR} /^printf .seeded_at=/{r=NR} END{print (m && r && m<r) ? "yes" : "no"}' "$g")" yes
 check "the guest runs vault-restore without its edition restart" "$(grep -c 'SKIP_STACK_CYCLE=1' setup/host/set_seeds_guest.sh)" 2
 exit "$fail"

@@ -193,7 +193,7 @@ fi
 export FT_S3_KEY FT_S3_SECRET
 # The shared environment, by name, and only what this platform loads: the same tree holds other
 # projects' archives, and `42ctl pull` is a personal tree a fresh identity may not have.
-only=(--only apps/grobase/.env.secrets)
+only=(--only apps/grobase/.env.secrets --only .env.local)
 for f in MANIFEST.json SHA256SUMS postgres-all.sql.gz mysql-all.sql.gz mongo.archive.gz minio.tar.gz \
     redis.rdb mssql-all.tar.gz dynamodb-all.tar.gz sqlite-data.tar.gz grobase-certs.tar.gz; do
     only+=(--only "secrets/$f")
@@ -214,6 +214,13 @@ stage="$work/stage"
 mkdir -p "$stage" || die "could not stage the seeds"
 cp -a "$work/secrets" "$stage/secrets" || die "could not stage the seeds"
 cp -a "$work/apps/grobase/.env.secrets" "$stage/env.secrets" || die "could not stage the secrets"
+# Only the app key can reach a mount, so it is what proves the mounts open once the seed is
+# in, and the seed's sqlite file holds no tables for any restore to bring back. A tenant's
+# credential, not part of the seed: the guest uses it once and the upload goes with it.
+app_key=$(sed -n 's/^OSIONOS_BAAS_API_KEY=//p' "$work/.env.local" 2>/dev/null | head -n1 | tr -d "\"'\r")
+[ -n "$app_key" ] || not_now "project $PROJECT has no OSIONOS_BAAS_API_KEY in .env.local: its mounts could not be opened"
+printf '%s\n' "$app_key" >"$stage/app.key" || die "could not stage the app key"
+unset app_key
 remote="/tmp/.b2b-seeds.$$"
 info "uploading the seeds to the guest"
 rsync -a -e "ssh $SSH_OPTS_STR" "$stage/" "${VM_USER}@127.0.0.1:$remote/" || die "the upload failed"

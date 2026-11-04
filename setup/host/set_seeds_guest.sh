@@ -17,7 +17,9 @@
 #      data" (vault-restore.sh), so no volume is wiped, and no superuser password
 #      has to be rewritten by reconcile-credentials, which grobase keeps explicit.
 #      Doing the opposite failed: an emptied Postgres has no roles for the dump's
-#      DROP ROLE lines, and the replay stopped (2026-11-04).
+#      DROP ROLE lines, and the replay stopped (2026-11-04). The one place those
+#      passwords sit inside the rows is each mount's sealed DSN, and step 5
+#      rewrites those to this guest's logins.
 #   4. Engines alone. Their volumes hold a bootstrapped cluster, which is what the
 #      replay expects to clear.
 #   5. grobase's vault-restore with SKIP_STACK_CYCLE=1. Without that it ends on
@@ -25,6 +27,10 @@
 #      stack never gets back (vault-restore.sh's own warning).
 #   6. Full stack, then b2b-stack-health and row counts: the run fails if the
 #      platform is unhealthy or came back empty.
+#   7. Open the mounts, with the app key the host sent. A healthy stack says nothing
+#      about them: on 2026-11-04 all of the above passed with every mount on a platform
+#      engine answering 502. This also loads the sqlite demo, whose tables are in no
+#      seed: the vault's sqlite-data.tar.gz is a 4 KiB file with none.
 #
 # On success /etc/b2b/seeds.last, world-readable, holds seeded_at, vintage, project and rows:
 # the record that this platform's rows came from a seed.
@@ -159,6 +165,10 @@ rows=$(platform_rows)
 case "$rows" in
 '' | 0 | *[!0-9]*) die "the stack is healthy but the platform came back empty ($rows)" ;;
 esac
+[ -s "$FROM/app.key" ] || die "the host sent no app key"
+log "opening the seed's mounts"
+BAAS_API_KEY=$(cat "$FROM/app.key") AFTER_RESTORE=1 runuser -u "$owner" -- bash scripts/seed/osionos-extra-engines.sh ||
+    die "the seed loaded, but its mounts do not all open (lines above)"
 printf 'seeded_at=%s\nvintage=%s\nproject=%s\nrows=%s\n' "$(date -u +%FT%TZ)" "$vintage" "$PROJECT" "$rows" >"$STATUS"
 chmod 644 "$STATUS"
 rm -f "$PENDING"

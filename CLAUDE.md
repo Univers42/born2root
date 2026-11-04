@@ -543,7 +543,11 @@ and login the way `provision_vm.sh` does and reads the secrets file.
   it. The seeds stay in the guest at `/mnt/storage/seeds`, a bind mount of `/var`.
   A restic copy at `backup_dest` is newer and wins, a platform with rows is left
   alone, and the guest keeps its own engine passwords: only what the rows were
-  written under (`JWT_SECRET`, `VAULT_ENC_KEY`, API keys) comes from the vault.
+  written under (`JWT_SECRET`, `VAULT_ENC_KEY`, API keys) comes from the vault,
+  and grobase's `vault-restore.sh` rewrites each mount's sealed DSN to the guest's
+  logins (`cmd/mount-rebind`). The seed then ends by opening every mount with
+  `OSIONOS_BAAS_API_KEY` from the vault's `.env.local`, and loading the sqlite demo
+  no seed holds, so a dead mount fails `make set_seeds`.
   That one credentials file is enough on a new machine: vault42 is zero-knowledge,
   so it carries the sealed keystore too (`FT_KEYSTORE_B64`, `make seeds_bundle`),
   a missing 42ctl is installed, a keys-only guest gets this machine a key, and a
