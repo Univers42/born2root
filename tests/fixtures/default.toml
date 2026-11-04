@@ -118,6 +118,9 @@ forwards = [
 cors_origins = []
 package = "auto"
 backup_dest = ""
+backup_mirror = ""
+seeds_env = ""
+seeds_project = "groot"
 
 [disk]
 swap_mb = "auto"

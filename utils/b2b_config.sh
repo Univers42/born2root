@@ -66,6 +66,7 @@ b2b_get() { _b2b_py get "$1" 2>/dev/null || true; }
 b2b_luks_passphrase() { b2b_get B2B_LUKS_PASSPHRASE; }
 b2b_user_password() { b2b_get B2B_USER_PASSWORD; }
 b2b_root_password() { b2b_get B2B_ROOT_PASSWORD; }
+b2b_secret_refs() { _b2b_py --secret-refs; }
 
 # en_US.UTF-8 -> en / US, for d-i's kernel command line.
 b2b_locale_language() { b2b_get B2B_LOCALE_LANGUAGE; }
@@ -147,6 +148,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     --users) b2b_users ;;
     --shadow) b2b_shadow ;;
     --ssh-keys) b2b_ssh_keys ;;
+    --secret-refs) b2b_secret_refs ;;
     --render) b2b_render "${2:-}" ;;
     --set-ai) b2b_set_ai "${2:-}" "${3:-}" ;;
     --host-path)

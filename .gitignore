@@ -3,6 +3,8 @@ disk_images
 *.iso
 *.tar
 *secret*
+!setup/host/mint_secrets.sh
+!tests/test_secret_refs.sh
 !.b2b-secrets.example
 
 # Downloaded hellish release binary (setup/fetch_hellish.sh)

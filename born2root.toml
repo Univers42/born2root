@@ -314,6 +314,13 @@ package = "auto"
 # [ai] models_dir. Worth putting on a different physical disk from [vm] path
 # -- a copy beside the guest survives a rebuild, not a dead disk.
 backup_dest = ""
+# A second copy on another device than backup_dest, same rules: on a 42 seat the
+# VM and the first copy share one NFS server. Empty: none.
+backup_mirror = ""
+# The 42ctl credentials file `make set_seeds` reads to fetch this vault42 project's
+# seeds into the datacenter (setup/host/set_seeds.sh). Empty: a build stays empty.
+seeds_env = ""
+seeds_project = "groot"
 # The vault42 environment holding the team's copy of the secrets file: make
 # secrets_push seals it there, a teammate's make secrets_pull APPLY=1 gets it.
 # Readable by whoever the org admin grants born2root/team; "" turns it off.

@@ -39,6 +39,8 @@ function names):
   b2b_config.py --shadow         "name:$6$..." per extra account, "name:!"
                                  when it has no password
   b2b_config.py --ssh-keys       "name key..." lines, paths already read
+  b2b_config.py --secret-refs    "NAME kind" per `secret:NAME` credential
+                                 (kind: luks, root or login); names only
   b2b_config.py --render FILE     FILE with every @B2B_KEY@ filled in
 
 Env: B2B_CONFIG (born2root.toml at the repo root; the tests point it at
@@ -165,6 +167,10 @@ DEFAULTS = {
     # "" keeps that campus default; set it to a path on a disk that is not
     # the VM's own, which is the only thing that makes the copy worth taking.
     # A list is tried in order, like vm.path.
+    # backup_mirror: a second copy, on another device than backup_dest. Same
+    # path rules. Empty: none.
+    # seeds_env: the 42ctl credentials file `make set_seeds` reads to fetch
+    # seeds_project from vault42. Same path rules. Empty: no seeds.
     # secrets_file: the host's KEY=VALUE secrets (setup/host/dc_lib.sh), for a
     # profile whose keys live somewhere else than the defaults dc_lib.sh tries.
     # "" keeps those defaults; B2B_SECRETS= beats it.
@@ -191,6 +197,9 @@ DEFAULTS = {
         "cors_origins": [],
         "package": "auto",
         "backup_dest": "",
+        "backup_mirror": "",
+        "seeds_env": "",
+        "seeds_project": "groot",
         "secrets_file": "",
         "grobase_ref": "",
         "grobase_env": {"CATALOG_MANAGEMENT": "static", "REMOTE_ACCESS": "1"},
@@ -407,17 +416,59 @@ class Config:
         """
         return user.get("fullname") or user["name"]
 
+    def secrets_file(self):
+        """The file dc_lib.sh reads, in dc_lib.sh's order."""
+        named = os.environ.get("B2B_SECRETS") or _host_path(self.dc.get("secrets_file"))
+        if named:
+            return named
+        local = os.path.join(ROOT, ".b2b-secrets")
+        if os.path.isfile(local):
+            return local
+        return os.path.expanduser("~/.config/born2root/b2b-secrets")
+
+    def secret(self, value):
+        """A credential's real value: a `secret:NAME` is read from the secrets
+        file, anything else is the value itself. Never raises (`get` must not):
+        a key that is absent, or a file that cannot be read, answers empty, and
+        --check and --render are what refuse that."""
+        match = SECRET_REF_RE.match(value) if isinstance(value, str) else None
+        if not match:
+            return value
+        prefix = match.group(1) + "="
+        try:
+            with open(self.secrets_file(), encoding="utf-8") as handle:
+                for line in handle:
+                    if line.startswith(prefix):
+                        return line[len(prefix) :].rstrip("\r\n")
+        except OSError:
+            pass
+        return ""
+
+    def secret_refs(self):
+        """(NAME, kind) of every `secret:` this file holds, in file order."""
+        pairs = [
+            (self.system.get("luks_passphrase"), "luks"),
+            (self.system.get("root_password"), "root"),
+            (self.users[0].get("password") if self.users else None, "login"),
+        ]
+        refs = []
+        for value, kind in pairs:
+            match = SECRET_REF_RE.match(value) if isinstance(value, str) else None
+            if match:
+                refs.append((match.group(1), kind))
+        return refs
+
     @property
     def luks_passphrase(self):
         """VM_PASS first: the ISO and the unlock must agree."""
         env = os.environ.get("VM_PASS")
         if env:
             return env
-        return self.system.get("luks_passphrase") or ""
+        return self.secret(self.system.get("luks_passphrase")) or ""
 
     @property
     def user_password(self):
-        return (self.users[0].get("password") if self.users else "") or ""
+        return self.secret(self.users[0].get("password") if self.users else "") or ""
 
     def is_first(self, user):
         return bool(self.users) and user is self.users[0]
@@ -532,6 +583,11 @@ BIND_RE = re.compile(r"^([A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\]):([0-9]{1,5})$")
 PKG_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+$")
 FWNAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 PASSPHRASE_RE = re.compile(r"^[A-Za-z0-9._,/=+!@#$%&*?:;-]{8,}$")
+# "secret:NAME" in root_password, luks_passphrase or a user's password: the
+# value lives in the secrets file, because this repository is public and a
+# credential written in a tracked file is published. Mint with `make
+# secrets_mint` (setup/host/mint_secrets.sh).
+SECRET_REF_RE = re.compile(r"^secret:([A-Z][A-Z0-9_]*)$")
 KEY_TYPES = (
     "ssh-ed25519",
     "ssh-rsa",
@@ -582,6 +638,30 @@ class Validator:
             self.err(where, "%r is not a list (it looks like [ \"a\", \"b\" ])" % (value,))
             return None
         return value
+
+    def _check_secret_refs(self):
+        """Every `secret:NAME` has a value, in a file only its owner can read."""
+        refs = self.c.secret_refs()
+        if not refs:
+            return
+        path = self.c.secrets_file()
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except OSError:
+            mode = None
+        if mode is not None and mode & 0o077:
+            self.err(
+                "secrets file",
+                "%s is mode %o; a credential cannot live there: chmod 600 %s"
+                % (path, mode, path),
+            )
+        for name, kind in refs:
+            if not self.c.secret("secret:" + name):
+                self.err(
+                    "secret:" + name,
+                    "%s holds no %s (the %s credential): make secrets_mint"
+                    % (path, name, kind),
+                )
 
     def _bool(self, where, value):
         if not isinstance(value, bool):
@@ -686,6 +766,7 @@ class Validator:
                 continue
             if not value:
                 self.err("system." + key, "is empty")
+        self._check_secret_refs()
         passphrase = self.c.luks_passphrase
         if passphrase and not PASSPHRASE_RE.match(passphrase):
             source = "VM_PASS" if os.environ.get("VM_PASS") else "system.luks_passphrase"
@@ -1019,6 +1100,9 @@ class Validator:
                 "%r is not a grobase tier (one of: %s)" % (package, ", ".join(self.DC_PACKAGES)),
             )
         self._abs_path("dc.backup_dest", self.c.dc.get("backup_dest"))
+        self._abs_path("dc.backup_mirror", self.c.dc.get("backup_mirror"))
+        self._abs_path("dc.seeds_env", self.c.dc.get("seeds_env"))
+        self._str("dc.seeds_project", self.c.dc.get("seeds_project"))
         self._abs_path("dc.secrets_file", self.c.dc.get("secrets_file"))
         ref = self.c.dc.get("grobase_ref")
         if ref and not (
@@ -1331,7 +1415,7 @@ LEGACY = {
     "B2B_HOSTNAME": lambda c: c.hostname,
     "B2B_FULLNAME": lambda c: c.fullname,
     "B2B_USER_PASSWORD": lambda c: c.user_password,
-    "B2B_ROOT_PASSWORD": lambda c: c.system.get("root_password") or "",
+    "B2B_ROOT_PASSWORD": lambda c: c.secret(c.system.get("root_password")) or "",
     "B2B_LUKS_PASSPHRASE": lambda c: c.luks_passphrase,
     "B2B_LOCALE": lambda c: c.system.get("locale") or "",
     "B2B_LOCALE_LANGUAGE": lambda c: c.locale_language(),
@@ -1378,6 +1462,9 @@ LEGACY = {
     ),
     "B2B_DC_PACKAGE": lambda c: c.dc.get("package"),
     "B2B_DC_BACKUP_DEST": lambda c: _host_path(c.dc.get("backup_dest")),
+    "B2B_DC_BACKUP_MIRROR": lambda c: _host_path(c.dc.get("backup_mirror")),
+    "B2B_DC_SEEDS_ENV": lambda c: _host_path(c.dc.get("seeds_env")),
+    "B2B_DC_SEEDS_PROJECT": lambda c: c.dc.get("seeds_project") or "groot",
     "B2B_DC_SECRETS_FILE": lambda c: _host_path(c.dc.get("secrets_file")),
     "B2B_DC_GROBASE_REF": lambda c: c.dc.get("grobase_ref") or "",
     "B2B_DC_TAILNET_HOSTNAME": lambda c: c.dc.get("tailnet_hostname") or "",
@@ -1631,7 +1718,7 @@ def render(config, template):
         raise ConfigError("template not found: %s" % exc)
     values = dict(LEGACY)
     table = {
-        "@B2B_ROOT_PASSWORD_HASH@": sh_hash(config.system.get("root_password") or ""),
+        "@B2B_ROOT_PASSWORD_HASH@": sh_hash(config.secret(config.system.get("root_password")) or ""),
         "@B2B_USER_PASSWORD_HASH@": sh_hash(config.user_password),
     }
     for key in values:
@@ -1693,6 +1780,8 @@ def show(config):
     passphrase = config.luks_passphrase
     if os.environ.get("VM_PASS"):
         passphrase += "   (VM_PASS, overriding the file)"
+    else:
+        passphrase = config.system["luks_passphrase"]
     row("system.luks_passphrase", passphrase)
     out.append("")
     out.append(
@@ -1891,6 +1980,10 @@ def main(argv):
             set_ai(CONFIG, argv[1], value)
             return 0
         config = load()
+        if mode == "--secret-refs":
+            for name, kind in config.secret_refs():
+                sys.stdout.write("%s %s\n" % (name, kind))
+            return 0
         if mode == "--check":
             return check(config)
         if mode == "--show":
