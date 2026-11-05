@@ -279,7 +279,7 @@ package = "max"
 # on a9b0f6ca fclean then `make all` and three forced reseeds, all mounts open; on this
 # commit, which adds the Gourmand removal and the sqlite row check, a forced reseed with
 # 12 mounts, 7 of them opened by the seed. Move it by repeating that, not by hand.
-grobase_ref = "3db9dafbbd93c228f975bcb733f53023543ed69a"
+grobase_ref = "21c132b6bdbde9c0f71829a1266ee3ed25f54fa2"
 # No tailnet (dc-netmesh is off), so no node name and no Funnel.
 tailnet_hostname = ""
 funnel = false
