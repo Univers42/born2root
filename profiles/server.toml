@@ -188,6 +188,8 @@ docker         = true
 inception-data = false
 # the datacenter (a bundle: generate/feature_profile.sh expands it)
 dc-full        = true
+# No Cloudflare on a local data center: dc-full would pull the tunnel in.
+dc-tunnel      = false
 # Out of the bundle: this datacenter stays off Tailscale (header).
 dc-netmesh     = false
 # The max tier's heavy add-ons (engines: mssql with a 2 GB cap, cockroach;
@@ -279,7 +281,7 @@ package = "max"
 # on a9b0f6ca fclean then `make all` and three forced reseeds, all mounts open; on this
 # commit, which adds the Gourmand removal and the sqlite row check, a forced reseed with
 # 12 mounts, 7 of them opened by the seed. Move it by repeating that, not by hand.
-grobase_ref = "a773734413fec6f67ab207a6aef97ddd8fcc846b"
+grobase_ref = "d3d8ff728737cbd52a7bdab76ccf6d1e97723f9b"
 # No tailnet (dc-netmesh is off), so no node name and no Funnel.
 tailnet_hostname = ""
 funnel = false
