@@ -445,7 +445,9 @@ retire_units() {
 # tick or pull is skipped without a word.
 cron_block() {
     local cron_path
-    cron_path="$(dirname "$SH"):$(dirname "$MAKE_PATH"):/usr/local/bin:/usr/bin:/bin"
+    # sbin for ss: where it lives there, a tick without it would fall back to a
+    # coarser port probe than a start from a terminal (utils/host_ports.sh).
+    cron_path="$(dirname "$SH"):$(dirname "$MAKE_PATH"):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     printf '%s\n' "$CRON_BEGIN" \
         "* * * * * cd $ROOT && flock -n -o $LOCK env PATH=$cron_path $ARGS $SH setup/host/autostart.sh --tick >>$LOG 2>&1" \
         "15 * * * * cd $ROOT && flock -n -o $VM_DIR/.backup.lock timeout 3000 env PATH=$cron_path $MAKE_PATH backup $ARGS >$VM_DIR/backup.log 2>&1" \

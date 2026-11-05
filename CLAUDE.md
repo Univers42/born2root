@@ -578,6 +578,13 @@ back. `VM_PATH` comes from four places, most specific first: an explicit
 `disk_images/`. The registry beats the config file on purpose — it records
 where a guest actually is, so editing the file never orphans a built VM.
 Moving one therefore means moving the directory *and* rewriting that file.
+On QEMU every boot resolves the forwards again (`resolve_ports`), at most 50
+above each configured port, and fails naming the forward past that; a running
+VM keeps the ports on its command line. The result lands in `ports.env` and,
+for what runs outside this repo, in `~/.config/born2root/b2b-ports.env`
+(`SSH_HOST_PORT=`, `WAF_HOST_PORT=`, mode 600, replaced atomically). VirtualBox
+writes no such record. `tests/test_dynamic_host_ports.sh` pins all of it.
+
 Host ports (SSH from 4242, HTTP from 8082, HTTPS from 8443, and the app
 ports) are allocated by `utils/host_ports.sh`, walking past ports already in
 use, so never assume 4242: read the port back the way `orchestrate.sh` and

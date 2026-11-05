@@ -66,6 +66,10 @@ export VM_NAME VM_PATH PORTS_SPEC
 # with the 31 GB qcow2 sitting untouched in disk_images/. See utils/vm_path.sh.
 export VM_PATH_REGISTRY="$TMP/registry"
 
+# launch() publishes the ports under $HOME: a test must not overwrite the
+# developer's own ~/.config/born2root/b2b-ports.env with a recorder's numbers.
+export HOME="$TMP/home"
+
 . ./setup/host/qemu_vm.sh
 
 # TCG, so launch() skips the KVM availability check and emits no -cpu host.

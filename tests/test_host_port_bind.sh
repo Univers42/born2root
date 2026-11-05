@@ -65,7 +65,9 @@ same() { # same <label> <got> <expected>
 die() { echo "die: $*"; }
 # shellcheck disable=SC2317,SC2329
 warn() { printf '%s\n' "$*" >>"$stubs/warns"; }
-for fn in fwd_bind build_hostfwd resolve_ports; do
+# shellcheck disable=SC2317,SC2329
+qemu_pid() { return 1; }
+for fn in fwd_bind build_hostfwd running_spec resolve_ports; do
     eval "$(awk -v f="$fn" '$0 ~ "^" f "\\(\\) \\{" { on = 1 } on { print } on && /^}/ { exit }' setup/host/qemu_vm.sh)"
 done
 # shellcheck disable=SC2034 # used by eval-loaded functions from setup/host/qemu_vm.sh

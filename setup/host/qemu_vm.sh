@@ -65,6 +65,10 @@
 #   qemu_vm.sh ssh [CMD]   a shell (or one command) in the guest
 #   qemu_vm.sh ssh-config  write the ~/.ssh/config b2b block for these ports
 #
+#   Every boot resolves its host ports (resolve_ports) and publishes them in
+#   ~/.config/born2root/b2b-ports.env as SSH_HOST_PORT= and WAF_HOST_PORT=; the
+#   guest's own ports never move. A running VM keeps the ports it has.
+#
 #   stop, kill & co. act on the guest at $VM_PATH -- or, when nothing runs
 #   there and exactly one guest of this VM runs from another VM_PATH, on that
 #   one. A guest another user started (sudo make all) is named, with the sudo
@@ -429,20 +433,46 @@ need_control() {
 # picking another port the way the VirtualBox NAT rules already do.
 . "$REPO_ROOT/utils/host_ports.sh"
 
+# How far above its configured port a forward may land.
+PORT_WALK_MAX=50
+
+# The guest at $VM_DIR, if one runs: its forwards as "name:host:guest ...", read
+# off its own command line, the one place that cannot disagree with its sockets.
+# Its listeners are its own, so they are never a conflict.
+# Caveat: this is the launch-time list. A forward dropped at runtime with
+# hostfwd_remove (groot_host_access.sh does, for ports it tunnels) still shows.
+running_spec() {
+    local pid args spec gp hp out=""
+    pid=$(qemu_pid) || return 1
+    args=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null) || return 1
+    for spec in $PORTS_SPEC; do
+        gp="${spec##*:}"
+        hp=$(printf '%s\n' "$args" | tr ',' ' ' | tr ' ' '\n' |
+            awk -F: -v g="$gp" '$1 == "hostfwd=tcp" && $4 == g { sub(/-$/, "", $3); print $3; exit }')
+        [ -z "$hp" ] || out="${out} ${spec%%:*}:${hp}:${gp}"
+    done
+    [ -n "$out" ] || return 1
+    printf '%s' "${out# }"
+}
+
 # Walk PORTS_SPEC ("name:preferred_host:guest ...") to the host ports this run
-# will actually use, bumping past anything already listening. Sets
-# RESOLVED_SPEC as "name:actual_host:guest ..."; resolve_host_port reserves
-# each pick against the rest so two services in this spec can never collide
-# with EACH OTHER either.
+# will actually use, bumping past anything already listening, at most
+# PORT_WALK_MAX above each. Sets RESOLVED_SPEC as "name:actual_host:guest ...";
+# resolve_host_port reserves each pick against the rest so two services in this
+# spec can never collide with EACH OTHER either.
 RESOLVED_SPEC=""
 resolve_ports() {
-    local spec name hp gp actual bind out=""
+    local spec name hp gp actual bind running out=""
     # An unreadable born2root.toml answers an empty list, and a VM without
     # its ssh forward boots into a wait that can only time out.
     case " $PORTS_SPEC " in
     *" ssh:"*) ;;
     *) die "no ssh forward in [network] forwards -- run: utils/b2b_config.sh --check" ;;
     esac
+    if running=$(running_spec); then
+        RESOLVED_SPEC=$running
+        return 0
+    fi
     for spec in $PORTS_SPEC; do
         name="${spec%%:*}"
         hp="${spec#*:}"
@@ -454,7 +484,8 @@ resolve_ports() {
         # listener on ANY address is a conflict: HOST_PORT_BIND empty.
         bind=$(fwd_bind "$name")
         [ "$bind" = 0.0.0.0 ] && bind=
-        HOST_PORT_BIND="$bind" resolve_host_port actual "$hp" || die "no free host port near ${hp} for '${name}'"
+        HOST_PORT_BIND="$bind" resolve_host_port actual "$hp" "$PORT_WALK_MAX" ||
+            die "no free host port for '${name}': ${hp} to $((hp + PORT_WALK_MAX)) are all busy (${hp}: $(host_port_holder "$hp")). Free one of them, or give '${name}' another host port in [network] forwards"
         if [ "$actual" != "$hp" ] && [ -z "$bind" ]; then
             # The home LAN edge (a socat on 192.168.1.132:8443 to 127.0.0.1:8443)
             # keeps :8443 and forwards it to a port the guest no longer has.
@@ -479,6 +510,14 @@ host_port_of() {
     fi
     [ -n "$RESOLVED_SPEC" ] || resolve_ports
     printf '%s\n' "$RESOLVED_SPEC" | tr ' ' '\n' | awk -F: -v n="$name" '$1==n{print $2; exit}'
+}
+
+# Publish where this VM's ports landed. A failure stops the start: groot reads
+# this file, and an old number there is the wrong service answering.
+record_ports() {
+    local file="$HOME/.config/born2root/b2b-ports.env"
+    write_ports_record "$file" "$(host_port_of ssh)" "$(host_port_of https)" ||
+        die "cannot write $file: what reads it would keep the last boot's ports"
 }
 
 # ── The QEMU monitor ────────────────────────────────────────────────────────
@@ -586,10 +625,26 @@ build_hostfwd() {
     printf '%s' "$out"
 }
 
+# QEMU refused or died: show what it said, and when that was a host port, name
+# the port. The probe in resolve_ports is only a snapshot (see
+# is_host_port_free), so a process can take a port before QEMU binds it. Moving
+# to another one here would hide who took it; a new start resolves afresh.
+die_qemu_start() {
+    local err="$1" port holder
+    cat "$err" >&2 2>/dev/null
+    port=$(sed -n "s/.*host forwarding rule 'tcp:[^:]*:\([0-9]*\)-.*/\1/p" "$err" 2>/dev/null | head -n1)
+    if [ -n "$port" ]; then
+        holder=$(host_port_holder "$port")
+        die "host port ${port} was taken before QEMU could bind it (${holder:-holder unknown, it may be gone}). Start again to pick a free port: make qemu_start"
+    fi
+    die "QEMU did not start — see $err and $SERIAL"
+}
+
 # ── Launch ──────────────────────────────────────────────────────────────────
 # $1 = "cdrom" to boot the installer, "disk" to boot the installed system.
 launch() {
     local boot="$1" iso cd_args=() cpu_args=() hd_index=1 cd_index=2
+    local start_err="$VM_DIR/qemu-start.err"
     # Same array idiom as cd_args: an empty array expands to nothing, where an
     # empty string would hand QEMU a bogus "" argument under TCG.
     [ "$ACCEL" = kvm ] && cpu_args=(-cpu host)
@@ -761,12 +816,25 @@ launch() {
         -monitor "unix:${MONITOR},server=on,wait=off" \
         -display none \
         -daemonize \
-        -pidfile "$PIDFILE" ||
-        die "QEMU failed to start"
+        -pidfile "$PIDFILE" 2>"$start_err" ||
+        die_qemu_start "$start_err"
 
     sleep 1
-    is_running || die "QEMU exited immediately — see $SERIAL"
+    is_running || die_qemu_start "$start_err"
+    cat "$start_err" >&2
     ok "QEMU running (pid $(qemu_pid), accel=${ACCEL})"
+    record_ports
+}
+
+# The guest at $VM_DIR up, started here or already running. Either way the
+# record says where it is: a running VM keeps the ports it has.
+boot_guest() {
+    if is_running; then
+        ok "already running (pid $(qemu_pid))"
+        record_ports
+    else
+        launch disk
+    fi
 }
 
 # ── Watch the unattended install ────────────────────────────────────────────
@@ -1206,11 +1274,7 @@ if [ "${BASH_SOURCE[0]:-$0}" = "${0}" ]; then
             [ "$(stat -c %s "$DISK" 2>/dev/null || echo 0)" -le 1073741824 ]; then
             die "nothing is installed at $VM_DIR — run: $0 install   (built somewhere else? pass its VM_PATH)"
         fi
-        if is_running; then
-            ok "already running (pid $(qemu_pid))"
-        else
-            launch disk
-        fi
+        boot_guest
         rm -f "$HOLD"
         # The LUKS prompt is drawn by the guest's initramfs, long before any
         # network exists, so the keyboard is the only channel that can answer

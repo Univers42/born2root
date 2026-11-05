@@ -121,6 +121,8 @@ check "... the tick every minute, under a lock, logged beside the VM" \
 check "... make backup hourly at :15, under its own lock and a timeout" \
     "$(grep -c "^15 \* \* \* \* cd $ROOT && flock -n -o /vm/store/baas/.backup.lock timeout 3000 env PATH=[^ ]* [^ ]*/make backup $ARGS >" "$TMP/crontab")" 1
 check "... the user's own line kept" "$(grep -cx '0 4 \* \* \* echo mine' "$TMP/crontab")" 1
+check "... no port number in it: a tick resolves like any start" "$(grep -cE '4242|8443' "$TMP/crontab" || true)" 0
+check "... and its PATH reaches ss where it lives in sbin" "$(grep -c 'PATH=[^ ]*:/usr/sbin:/sbin ' "$TMP/crontab")" 2
 cp "$TMP/crontab" "$TMP/crontab.first"
 # The crontab is the seat's, the home is the user's: on 2026-10-16 c2r19s6
 # had no block (it was written on c2r19s5). The login entry reruns this at

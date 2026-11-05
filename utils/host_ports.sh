@@ -32,6 +32,12 @@ reserve_host_port() {
 # Unset keeps "any address conflicts" -- right for VirtualBox NAT rules, which bind all.
 # Ponytail: only the ss probe honours it; lsof/netstat/nc still count any address, which
 # over-reports (the VM takes the next port, the old behaviour) and never double-binds.
+#
+# Caveat: a snapshot of this network namespace, not a claim on the port. It misses a
+# process that binds after the probe (QEMU then fails at bind: qemu_vm.sh names the
+# port), and a port with no listening socket: Docker with userland-proxy off publishes
+# through DNAT alone, so the probe says free, the bind succeeds and the traffic still
+# goes to the container. With no ss, lsof, netstat or nc it reports every port free.
 is_host_port_free() {
     local port="$1"
     [ -n "$port" ] || return 1
@@ -89,10 +95,10 @@ host_port_holder() {
         END { if (out) print out }'
 }
 
-# resolve_host_port <varname> <preferred_port>
+# resolve_host_port <varname> <preferred_port> [max_offset]
 #
-# Assign the first free host port at or above <preferred_port> to <varname> and
-# reserve it for the rest of this run.
+# Assign the first free host port in <preferred_port>..<preferred_port>+<max_offset>
+# (99 by default) to <varname> and reserve it for the rest of this run.
 #
 # It assigns through a caller-named variable instead of echoing its result
 # because the reservation has to survive the call: `p=$(resolve_host_port ...)`
@@ -101,9 +107,9 @@ host_port_holder() {
 # VirtualBox then rejects the second rule claiming it, with
 # "A NAT rule for this host port and this host IP already exists".
 resolve_host_port() {
-    local __rhp_var="$1" port="$2" i=0
+    local __rhp_var="$1" port="$2" max_offset="${3:-99}" i=0
 
-    while [ "$i" -lt 100 ]; do
+    while [ "$i" -le "$max_offset" ]; do
         if ! is_host_port_reserved "$port" && is_host_port_free "$port"; then
             reserve_host_port "$port"
             printf -v "$__rhp_var" '%s' "$port"
@@ -113,6 +119,25 @@ resolve_host_port() {
         i=$((i + 1))
     done
 
-    echo "Error: no free host port in ${2}-$((${2} + 99))" >&2
+    echo "Error: no free host port in ${2}-$((${2} + max_offset))" >&2
+    return 1
+}
+
+# write_ports_record <file> <ssh_port> <waf_port>: publish the host ports a VM
+# landed on, for what runs outside the VM directory (groot). The rename means a
+# reader never sees half a file, and mktemp's 0600 survives it, over any older
+# mode. An empty waf_port is a profile with no https forward; no ssh_port is a
+# bug in the caller, and a stale record beats a wrong one.
+write_ports_record() {
+    local file="$1" ssh_port="$2" waf_port="$3" dir tmp
+    [ -n "$ssh_port" ] || return 1
+    dir=$(dirname "$file")
+    mkdir -p "$dir" && chmod 700 "$dir" || return 1
+    tmp=$(mktemp "$file.XXXXXX") || return 1
+    if printf 'SSH_HOST_PORT=%s\nWAF_HOST_PORT=%s\n' "$ssh_port" "$waf_port" >"$tmp" &&
+        mv -f "$tmp" "$file"; then
+        return 0
+    fi
+    rm -f "$tmp"
     return 1
 }
