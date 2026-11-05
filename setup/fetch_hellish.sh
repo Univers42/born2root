@@ -13,6 +13,9 @@
 #   auth, and it is the exact artifact upstream ships and tests. The sh42      #
 #   submodule was removed from this repo once this landed.                     #
 #                                                                             #
+# Caveat: --retry is five tries 5 s apart on a 5xx or a timeout (GitHub answered 504 on a build,
+# 2026-11-05). An outage longer than that still stops the build; make all again resumes it.
+#
 # Why this is safe:                                                           #
 #   Upstream publishes hellish-linux-<arch> alongside a .sha256. We verify     #
 #   that checksum before the binary is allowed anywhere near the ISO. The      #
@@ -95,7 +98,7 @@ fi
 # stops redirecting there, it finds nothing and the old error stands.
 resolve_latest() {
     local tag
-    tag=$(curl -fsSL --max-time 20 \
+    tag=$(curl -fsSL --retry 5 --retry-delay 5 --max-time 20 \
         -H 'Accept: application/vnd.github+json' \
         "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
         grep -m1 '"tag_name"' |
@@ -148,7 +151,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 info "Downloading ${ASSET} ${D}(${VERSION})${Z}"
-if ! curl -fsSL --max-time 180 -o "$TMP/$ASSET" "${BASE}/${ASSET}"; then
+if ! curl -fsSL --retry 5 --retry-delay 5 --max-time 180 -o "$TMP/$ASSET" "${BASE}/${ASSET}"; then
     err "Download failed: ${BASE}/${ASSET}"
     if [ -x "$OUT_BIN" ]; then
         warn "Keeping the cached binary already at ${OUT_BIN} (${CACHED:-unknown})."
@@ -161,7 +164,7 @@ fi
 # Fatal when the .sha256 exists and does not match: a truncated or tampered
 # binary must never reach the ISO. Only a MISSING .sha256 downgrades to a
 # warning, since older releases predate the checksum asset.
-if curl -fsSL --max-time 30 -o "$TMP/$ASSET.sha256" "${BASE}/${ASSET}.sha256" 2>/dev/null; then
+if curl -fsSL --retry 5 --retry-delay 5 --max-time 30 -o "$TMP/$ASSET.sha256" "${BASE}/${ASSET}.sha256" 2>/dev/null; then
     EXPECT="$(awk '{print $1; exit}' "$TMP/$ASSET.sha256")"
     ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
     if [ -z "$EXPECT" ] || [ "$EXPECT" != "$ACTUAL" ]; then

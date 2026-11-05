@@ -128,7 +128,7 @@ ISO_FILENAME=""
 BASE_URL=""
 for _mirror in "${_ISO_MIRRORS[@]}"; do
     echo "Querying $_mirror for the latest ISO filename..."
-    ISO_FILENAME=$(curl -fsSL --max-time 15 "$_mirror" 2>/dev/null |
+    ISO_FILENAME=$(curl -fsSL --retry 5 --retry-delay 5 --max-time 15 "$_mirror" 2>/dev/null |
         grep -oE 'debian-[0-9.]+-amd64-netinst\.iso' |
         head -n1)
     if [ -n "$ISO_FILENAME" ]; then
