@@ -113,13 +113,14 @@
 name    = "baas"
 backend = "qemu"
 # Tried in order, the first that exists and is writable wins (else the first
-# that can be created). /sgoinfre only: on the 42 Madrid seats home has
-# ~650 MB free and /goinfre is too small and wiped. A sibling of the repo,
+# that can be created). /sgoinfre first: on the 42 Madrid seats home has
+# ~650 MB free and /goinfre is too small and wiped. $HOME is for a machine with
+# no /sgoinfre, which would otherwise have nowhere to build. A sibling of the repo,
 # never the repo itself: fclean empties VM_PATH. Never disk_images/: a max-tier
 # datacenter is ~16 GB the moment it boots and grows as the engines fill /var.
 # An existing VM is NOT moved by editing this -- disk_images/.vm_path.baas
 # wins so a built guest is never orphaned; `make all VM_PATH=…` relocates.
-path    = ["/sgoinfre/students/$USER/virtual_machines"]
+path    = ["/sgoinfre/students/$USER/virtual_machines", "$HOME/virtual_machines"]
 # Editing disk_gb does not resize an existing VM (the header says what does).
 disk_gb = 120
 ide_disk_gb = 40
