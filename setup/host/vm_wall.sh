@@ -22,7 +22,8 @@
 #   this host, which are refused. Port 53 stays open (slirp's 10.0.2.3 is the
 #   host's resolver), and so do the ports given (osionos's Funnel in baas
 #   serves the host's groot through 10.0.2.2:3001, :8787 and :4000; qemu_vm.sh
-#   adds the VM's own ssh forward, which the unit's start script probes).
+#   adds the VM's own ssh forward, which the unit's start script probes), and
+#   UDP to the host's own tailscaled, so the guest node links to it directly.
 #   Connections the host opens towards the guest -- ssh b2b, the hostfwd
 #   ports, tunnels -- are accepted sockets on QEMU's side, never new, so they
 #   pass. The chain sits at priority -150, before NAT: hide's Tor redirect
@@ -54,20 +55,44 @@ wall_cgroup() {
     return 1
 }
 
-# wall_rules VM CGROUP [PORT...]: the nft script, atomic (delete + create).
+# wall_ts_ports: the UDP ports the host's own tailscaled listens on for every address. Only
+# the main process of its unit counts: osionos-apps runs a second, userspace tailscaled on
+# random ports, and a process name is no identity. With --port=N, exactly N, and only if that
+# process holds it. Walled, the guest's tailscaled cannot reach it, and the two nodes on
+# this one machine talk only through a DERP relay on the internet (2026-11-06: every DERP
+# stall cut the browser, the websockets and the bridge at once). Open, the guest reaches
+# nothing the tailnet did not already route to it: only the transport changes.
+# Caveat: read once, at apply time. A tailscaled that moves port, or starts after the VM,
+# stays walled until the VM's next start: DERP again, slower, not broken.
+wall_ts_ports() {
+    local pid pin
+    pid=$(systemctl show -p MainPID --value "${B2B_WALL_TS_UNIT:-tailscaled.service}" 2>/dev/null)
+    case "$pid" in '' | 0 | *[!0-9]*) return 0 ;; esac
+    pin=$(tr '\0' '\n' <"${B2B_PROC_ROOT:-/proc}/$pid/cmdline" 2>/dev/null |
+        awk 'p { print; exit } /^--port=/ { sub(/^--port=/, ""); print; exit } $0 == "--port" { p = 1 }')
+    case "$pin" in *[!0-9]*) pin=0 ;; esac
+    ss -Hulpn 2>/dev/null | awk -v pid="pid=$pid," -v pin="${pin:-0}" '
+        index($0, pid) && $4 ~ /^(0\.0\.0\.0|\[::\]|\*):[0-9]+$/ {
+            n = split($4, a, ":"); if (pin + 0 == 0 || a[n] + 0 == pin + 0) print a[n]
+        }' | sort -un
+}
+
+# wall_rules VM CGROUP [PORT...]: the nft script, atomic (delete + create). A port is TCP;
+# udp:PORT is UDP.
 wall_rules() {
-    local table cg="$2" level ports
+    local table cg="$2" level p tcp="" udp=""
     table=$(wall_table "$1")
     shift 2
+    for p in "$@"; do
+        case "$p" in udp:*) udp="$udp${p#udp:}, " ;; *) tcp="$tcp$p, " ;; esac
+    done
     level=$(printf '%s' "$cg" | awk -F/ '{print NF}')
     printf 'table inet %s\ndelete table inet %s\ntable inet %s {\n' "$table" "$table" "$table"
     printf '    chain out {\n        type filter hook output priority -150; policy accept;\n'
     printf '        socket cgroupv2 level %s "%s" ct state new jump wall\n    }\n' "$level" "$cg"
     printf '    chain wall {\n        meta l4proto { tcp, udp } th dport 53 fib daddr type local accept\n'
-    if [ "$#" -gt 0 ]; then
-        ports=$(printf '%s, ' "$@")
-        printf '        tcp dport { %s } fib daddr type local accept\n' "${ports%, }"
-    fi
+    [ -z "$tcp" ] || printf '        tcp dport { %s } fib daddr type local accept\n' "${tcp%, }"
+    [ -z "$udp" ] || printf '        udp dport { %s } fib daddr type local accept\n' "${udp%, }"
     printf '        fib daddr type local counter reject\n    }\n}\n'
 }
 
@@ -75,14 +100,15 @@ check_vm() {
     case "$1" in '' | *[!A-Za-z0-9_-]*) die "bad VM name '$1'" ;; esac
 }
 check_port() {
-    case "$1" in '' | *[!0-9]*) die "bad port '$1'" ;; esac
-    if [ "${#1}" -gt 5 ] || [ "$1" -lt 1 ] || [ "$1" -gt 65535 ]; then
+    local n=${1#udp:}
+    case "$n" in '' | *[!0-9]*) die "bad port '$1'" ;; esac
+    if [ "${#n}" -gt 5 ] || [ "$n" -lt 1 ] || [ "$n" -gt 65535 ]; then
         die "bad port '$1'"
     fi
 }
 
 wall_main() {
-    local action="${1:-}" vm="${2:-}" uid cg p user tmp
+    local action="${1:-}" vm="${2:-}" uid cg p user tmp udp
     case "$action" in
     install)
         [ "$(id -u)" = 0 ] || die "run it with sudo"
@@ -110,6 +136,13 @@ wall_main() {
         [ -n "$uid" ] || die "run it through sudo: the unit's cgroup is found from your uid"
         cg=$(wall_cgroup "$vm" "$uid") ||
             die "b2b-vm-$vm.service has no cgroup: the wall is loaded from inside the running unit"
+        udp=$(wall_ts_ports)
+        [ -n "$udp" ] ||
+            echo "b2b-vm-wall: no tailscaled UDP port found: $vm reaches this host's node through DERP only" >&2
+        for p in $udp; do
+            check_port "udp:$p"
+            set -- "$@" "udp:$p"
+        done
         wall_rules "$vm" "$cg" "$@" | nft -f - || die "nft refused the wall for $vm"
         echo "wall up for $vm (host ports open to it: ${*:-none but DNS})"
         ;;

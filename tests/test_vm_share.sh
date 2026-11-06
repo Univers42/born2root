@@ -50,6 +50,39 @@ check "rules open the listed ports only" "$(printf '%s\n' "$rules" | grep -c 'tc
 check "rules keep DNS" "$(printf '%s\n' "$rules" | grep -c 'th dport 53 fib daddr type local accept')" 1
 check "rules end on a reject" "$(printf '%s\n' "$rules" | grep -c 'fib daddr type local counter reject')" 1
 check "no ports, no port line" "$(wall_rules baas "$cg_rel" | grep -c 'tcp dport')" 0
+check "no udp: port, no udp line" "$(printf '%s\n' "$rules" | grep -c 'udp dport')" 0
+rules=$(wall_rules baas "$cg_rel" 3001 udp:41641 8787)
+check "udp: ports get their own line" "$(printf '%s\n' "$rules" | grep -c 'udp dport { 41641 } fib daddr type local accept')" 1
+check "udp: ports stay off the tcp line" "$(printf '%s\n' "$rules" | grep -c 'tcp dport { 3001, 8787 } fib daddr type local accept')" 1
+check "udp: alone gives no tcp line" "$(wall_rules baas "$cg_rel" udp:41641 | grep -c 'tcp dport')" 0
+# wall_ts_ports reads the unit's main pid, then only that pid's sockets: osionos-apps runs
+# a second, userspace tailscaled whose ports must stay walled.
+systemctl() { echo 3680; }
+ss() {
+    printf '%s\n' 'UNCONN 0 0 0.0.0.0:36853 0.0.0.0:* users:(("tailscaled",pid=74142,fd=12))' \
+        'UNCONN 0 0 0.0.0.0:41641 0.0.0.0:* users:(("tailscaled",pid=3680,fd=19))' \
+        'UNCONN 0 0 [::]:41641 [::]:* users:(("tailscaled",pid=3680,fd=18))' \
+        'UNCONN 0 0 100.94.109.44:40001 0.0.0.0:* users:(("tailscaled",pid=3680,fd=21))' \
+        'UNCONN 0 0 *:51820 *:* users:(("tailscaled",pid=3680,fd=22))' \
+        'UNCONN 0 0 0.0.0.0:5353 0.0.0.0:* users:(("avahi",pid=36801,fd=12))'
+}
+export B2B_PROC_ROOT="$TMP/proc"
+mkdir -p "$B2B_PROC_ROOT/3680"
+check "wall_ts_ports: unpinned, the pid's wildcard ports once" "$(wall_ts_ports | tr '\n' ' ')" "41641 51820 "
+printf '%s\0' /usr/sbin/tailscaled --state=x --port=41641 >"$B2B_PROC_ROOT/3680/cmdline"
+check "wall_ts_ports: --port=N gives exactly N" "$(wall_ts_ports | tr '\n' ' ')" "41641 "
+printf '%s\0' /usr/sbin/tailscaled --port 41641 >"$B2B_PROC_ROOT/3680/cmdline"
+check "wall_ts_ports: --port N gives exactly N" "$(wall_ts_ports | tr '\n' ' ')" "41641 "
+printf '%s\0' /usr/sbin/tailscaled --port=41700 >"$B2B_PROC_ROOT/3680/cmdline"
+check "wall_ts_ports: a pin it does not hold, no port" "$(wall_ts_ports | wc -l)" 0
+systemctl() { echo 0; }
+check "wall_ts_ports: no tailscaled, no port" "$(wall_ts_ports | wc -l)" 0
+unset -f systemctl ss
+unset B2B_PROC_ROOT
+(check_port 'udp:41641') 2>/dev/null
+check "a udp:PORT is accepted" "$?" 0
+(check_port 'udp:1,2') 2>/dev/null
+check "a udp: list in one word is refused" "$?" 1
 (check_vm 'baas;drop') 2>/dev/null
 check "a VM name with nft syntax is refused" "$?" 1
 (check_port '22,80') 2>/dev/null
