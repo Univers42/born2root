@@ -289,6 +289,11 @@ GROUPS_ENABLED                  = "true"
 INVITES_ENABLED                 = "true"
 USER_PUBKEYS_ENABLED            = "true"
 REMOTE_ACCESS                   = "1"
+# QEMU_GUEST=1: the WAF's TLS port on the guest loopback and the guest's own address (grobase
+# finds it from the default route), not on every interface. `make expose` serves :8443 on the
+# tailnet address through `tailscale serve`, so a wildcard publish cannot bind next to it, and
+# after a reboot grobase moved the WAF to 8444: baas answered 502 (2026-11-06).
+QEMU_GUEST                      = "1"
 
 # baas was a user service of the seat's login: up at boot, stopped gracefully
 # at shutdown, its backup pulled hourly. `make all` sets that up again (make
