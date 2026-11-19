@@ -11,6 +11,10 @@
 #      does not parse locks sudo for every account.
 #   3. build.conf carries every policy value, and a message with a character
 #      that could break the file is refused on the host, before any download.
+#   4. The core install names cracklib-runtime and the build fails without its
+#      dictionary. libcrack2 only Recommends it and the preseed installs no
+#      Recommends: on baas (2026-11-19) every passwd failed "error loading
+#      dictionary", and the 30-day expiry then locked every key login out.
 #
 # write_sudo_policy is lifted out of b2b-setup.sh by name, so renaming it or
 # indenting its closing brace breaks the extraction, not the behaviour.
@@ -82,5 +86,11 @@ done
 sed 's/^max_days    = 30/max_days    = 60/' "$DEFAULTS" >"$TMP/weak.toml"
 check "a weaker ageing is refused naming the rule" \
     "$(env B2B_CONFIG="$TMP/weak.toml" "${CFG[@]}" --check 2>&1 | grep -c 'every 30 days at most')" 1
+
+# ── 4. pwquality's dictionary is installed, and its absence fails the build ─
+check "the core install names cracklib-runtime" \
+    "$(awk '/^# Core Born2beRoot mandatory/,/Core packages/' preseeds/b2b-setup.sh | grep -v '^#' | grep -c 'cracklib-runtime')" 1
+check "a missing dictionary is a feature_fail" \
+    "$(grep -A1 '/var/cache/cracklib/cracklib_dict.pwd' preseeds/b2b-setup.sh | grep -c 'feature_fail pwquality')" 1
 
 exit "$fail"

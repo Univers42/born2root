@@ -118,8 +118,12 @@ echo "[OK] APT sources configured for $RELEASE"
 APT="apt-get install -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 
 # Core Born2beRoot mandatory requirements (MUST succeed — small footprint)
+# cracklib-runtime by name: libcrack2 only Recommends it, and the preseed sets
+# install-recommends false, so it never came. Without it pwquality's dictcheck
+# fails every new password ("error loading dictionary"), and on baas
+# (2026-11-19) the 30-day expiry then locked every key login out.
 $APT sudo ufw openssh-server \
-    libpam-pwquality apparmor apparmor-utils \
+    libpam-pwquality cracklib-runtime apparmor apparmor-utils \
     cron haveged || true
 echo "[OK] Core packages"
 
@@ -732,6 +736,10 @@ for setting in \
         echo "$setting" >>/etc/security/pwquality.conf
     fi
 done
+# The install above ends in `|| true`, so a missing dictionary would surface
+# 30 days later as a password nobody can change. Fail the build here instead.
+[ -s /var/cache/cracklib/cracklib_dict.pwd ] ||
+    feature_fail pwquality "no cracklib dictionary in /var/cache/cracklib: every passwd would fail (apt-get install cracklib-runtime)"
 # login.defs only reaches accounts created AFTER it says so. root and the login
 # user were created by d-i before this script ran, and the extra users by
 # section 4 above, so every one of them kept 99999 days -- on every build until
